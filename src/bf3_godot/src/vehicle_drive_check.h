@@ -60,6 +60,7 @@ private:
 		TankDrive,
 		TankTurn,
 		TurretTurn,
+		TankChase,
 		Done
 	};
 

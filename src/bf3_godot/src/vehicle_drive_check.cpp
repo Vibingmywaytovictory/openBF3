@@ -638,6 +638,14 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			}
 			turret_rows(r_session, p_in);
 			shoot(p_in, "turret_turn");
+			mapper.script_press(InputMapper::VehicleAction::Camera);
+			enter(Phase::TankChase);
+			return false;
+		case Phase::TankChase:
+			if (t_ < kSettle) {
+				return false;
+			}
+			shoot(p_in, "tank_3p");
 			phase_ = Phase::Done;
 			return true;
 		case Phase::Done:

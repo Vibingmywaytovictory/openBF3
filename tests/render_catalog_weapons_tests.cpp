@@ -1802,6 +1802,60 @@ TEST_SUITE("render-vehicle-meshes") {
 				CHECK(riding >= 10);
 				CHECK(pivoted.size() >= 3);
 			}
+			std::string unheld;
+			for (size_t p = 0; p < mk->parts.size(); ++p) {
+				if (mk->part_mesh[p] == 0 &&
+						std::find(k.unheld_parts.begin(), k.unheld_parts.end(), mk->parts[p].part) !=
+								k.unheld_parts.end()) {
+					unheld += " " + std::to_string(mk->parts[p].part);
+				}
+			}
+			std::printf(
+					"vehicle meshes: %s: parts of unheld unlocks not drawn:%s\n", k.blueprint.c_str(), unheld.c_str());
+			const core::gameplay::VehicleCameraDef *gunner = nullptr;
+			for (size_t c = 0; !k.seat_defs.empty() && c < k.seat_defs[0].cameras.size(); ++c) {
+				const core::gameplay::VehicleCameraDef &camera = k.seat_defs[0].cameras[c];
+				gunner = gunner == nullptr && camera.first_person && camera.turret >= 0 ? &camera : gunner;
+			}
+			if (k.blueprint == "vehicles/m1a2/m1abrams") {
+				REQUIRE(gunner != nullptr);
+				const core::Vec3 eye = gunner->transform.trans;
+				std::vector<unsigned> blocking;
+				for (size_t p = 0; p < mk->parts.size(); ++p) {
+					const render::VehicleMeshPart &part = mk->parts[p];
+					if (mk->part_mesh[p] == 0 &&
+							std::find(k.unheld_parts.begin(), k.unheld_parts.end(), part.part) !=
+									k.unheld_parts.end()) {
+						continue;
+					}
+					core::Vec3 lo{ 1e9f, 1e9f, 1e9f }, hi{ -1e9f, -1e9f, -1e9f };
+					for (int corner = 0; corner < 8; ++corner) {
+						const core::Vec3 q{ (corner & 1) != 0 ? part.bounds_max[0] : part.bounds_min[0],
+							(corner & 2) != 0 ? part.bounds_max[1] : part.bounds_min[1],
+							(corner & 4) != 0 ? part.bounds_max[2] : part.bounds_min[2] };
+						const core::Vec3 w = part.rest.transform_point(part.part_transform.transform_point(q));
+						for (size_t a = 0; a < 3; ++a) {
+							lo[a] = std::min(lo[a], w[a]);
+							hi[a] = std::max(hi[a], w[a]);
+						}
+					}
+					const auto inside = [&](const core::Vec3 &p_at) {
+						return p_at[0] >= lo[0] && p_at[0] <= hi[0] && p_at[1] >= lo[1] && p_at[1] <= hi[1] &&
+								p_at[2] >= lo[2] && p_at[2] <= hi[2];
+					};
+					bool ahead = false;
+					for (int step = 1; step <= 60 && !inside(eye); ++step) {
+						ahead = ahead || inside(core::Vec3{ eye[0], eye[1], eye[2] + 0.05f * float(step) });
+					}
+					if (ahead) {
+						blocking.push_back(part.part);
+					}
+				}
+				std::printf("vehicle meshes: %zu drawn parts lie within 3 m ahead of the M1A2 gunner's first-person "
+							"camera at (%.3f %.3f %.3f)\n",
+						blocking.size(), double(eye[0]), double(eye[1]), double(eye[2]));
+				CHECK(blocking.empty());
+			}
 			REQUIRE(mk->looks.size() == mk->materials.size());
 			size_t glass = 0, blended = 0;
 			for (size_t m = 0; m < mk->materials.size(); ++m) {

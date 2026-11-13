@@ -160,9 +160,14 @@ private:
 	std::vector<int> first_turret_;
 };
 
+struct PartRiders {
+	std::vector<VehiclePartTurretDef> turrets;
+	std::vector<uint16_t> held;
+	std::vector<uint16_t> unheld;
+};
+
 void ride_turrets(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_container, int p_turret,
-		size_t p_depth, std::span<const std::pair<EbxInstance, int>> p_turrets,
-		std::vector<VehiclePartTurretDef> &r_out) {
+		bool p_held, size_t p_depth, std::span<const std::pair<EbxInstance, int>> p_turrets, PartRiders &r_out) {
 	if (p_depth > kMaxVehicleComponentDepth) {
 		return;
 	}
@@ -170,21 +175,28 @@ void ride_turrets(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstan
 		if (!component.is_a("ComponentData") || boolean(component.data(), "Excluded").value_or(false)) {
 			continue;
 		}
+		const bool held = p_held && active_component(component);
 		int turret = p_turret;
 		for (const auto &[node, index] : p_turrets) {
 			turret = node == component ? index : turret;
 		}
-		for (const EbxInstance &state : turret >= 0 ? follow_all(r_budget, p_db, component.data(), "HealthStates")
-													: std::vector<EbxInstance>{}) {
-			const std::optional<double> part = number(state.data(), "PartIndex");
-			if (!part || *part < 0 || *part > double(std::numeric_limits<uint16_t>::max()) ||
-					std::any_of(r_out.begin(), r_out.end(),
-							[&](const VehiclePartTurretDef &p_p) { return p_p.part == uint16_t(*part); })) {
+		for (const EbxInstance &state : follow_all(r_budget, p_db, component.data(), "HealthStates")) {
+			const std::optional<double> index = number(state.data(), "PartIndex");
+			if (!index || *index < 0 || *index > double(std::numeric_limits<uint16_t>::max())) {
 				continue;
 			}
-			r_out.push_back(VehiclePartTurretDef{ uint16_t(*part), turret });
+			const uint16_t part = uint16_t(*index);
+			std::vector<uint16_t> &named = held ? r_out.held : r_out.unheld;
+			if (std::find(named.begin(), named.end(), part) == named.end()) {
+				named.push_back(part);
+			}
+			if (turret >= 0 &&
+					std::none_of(r_out.turrets.begin(), r_out.turrets.end(),
+							[&](const VehiclePartTurretDef &p_p) { return p_p.part == part; })) {
+				r_out.turrets.push_back(VehiclePartTurretDef{ part, turret });
+			}
 		}
-		ride_turrets(r_budget, p_db, component, turret, p_depth + 1, p_turrets, r_out);
+		ride_turrets(r_budget, p_db, component, turret, held, p_depth + 1, p_turrets, r_out);
 	}
 }
 
@@ -523,7 +535,14 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	for (size_t i = 0; i < turret_nodes.size(); ++i) {
 		active_turrets.emplace_back(layout.nodes[static_cast<size_t>(turret_nodes[i])].data, static_cast<int>(i));
 	}
-	ride_turrets(budget, p_db, *entity, -1, 0, active_turrets, out.part_turrets);
+	PartRiders riders;
+	ride_turrets(budget, p_db, *entity, -1, true, 0, active_turrets, riders);
+	out.part_turrets = std::move(riders.turrets);
+	for (const uint16_t part : riders.unheld) {
+		if (std::find(riders.held.begin(), riders.held.end(), part) == riders.held.end()) {
+			out.unheld_parts.push_back(part);
+		}
+	}
 	if (const Status spent = budget.status(); !spent) {
 		return error_at("vehicle " + name, spent.error());
 	}

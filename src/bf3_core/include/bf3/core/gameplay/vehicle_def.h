@@ -174,6 +174,7 @@ struct VehicleDef {
 	std::vector<int> component_mesh_turrets;
 	std::vector<VehicleTurretDef> turrets;
 	std::vector<VehiclePartTurretDef> part_turrets;
+	std::vector<uint16_t> unheld_parts;
 	std::vector<VehicleWeaponDef> weapons;
 	size_t components = 0;
 

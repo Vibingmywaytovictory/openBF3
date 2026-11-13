@@ -191,6 +191,7 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 			k.component_meshes = def->component_meshes;
 			k.component_mesh_turrets = def->component_mesh_turrets;
 			k.part_turrets = def->part_turrets;
+			k.unheld_parts = def->unheld_parts;
 			for (size_t seat = 0; seat < k.seats; ++seat) {
 				k.exposed[seat] = def->seats[seat].shows_soldier;
 			}

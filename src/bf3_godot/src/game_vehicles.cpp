@@ -175,7 +175,11 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 					: -1;
 			const int8_t rides =
 					turret >= 0 && size_t(turret) < p_kind->armament->turrets.size() ? int8_t(turret) : int8_t(-1);
-			if (drawn.surfaces.empty()) {
+			const bool unheld = p_kind != nullptr && mk->part_mesh[p] == 0 &&
+					std::find(p_kind->unheld_parts.begin(), p_kind->unheld_parts.end(), part.part) !=
+							p_kind->unheld_parts.end();
+			stats_.unheld_parts += unheld ? 1u : 0u;
+			if (drawn.surfaces.empty() || unheld) {
 				r_parts.push_back(Part{ Ref<ArrayMesh>(), wheel, Transform3D(), rides });
 				continue;
 			}
@@ -449,8 +453,9 @@ std::optional<GameVehicleView> GameVehicles::view(uint16_t p_spawner) const {
 	const std::vector<Part> &parts = kinds_[it->second.kind].parts;
 	for (size_t p = 0; p < parts.size() && p < it->second.part_ids.size(); ++p) {
 		if (parts[p].turret >= 0) {
-			if (const MeshInstance3D *mi =
-							Object::cast_to<MeshInstance3D>(ObjectDB::get_instance(it->second.part_ids[p]))) {
+			if (const MeshInstance3D *mi = parts[p].mesh.is_valid()
+							? Object::cast_to<MeshInstance3D>(ObjectDB::get_instance(it->second.part_ids[p]))
+							: nullptr) {
 				v.turret_parts.push_back(GameVehicleTurretPart{ parts[p].turret, parts[p].rest, mi->get_transform() });
 			}
 			continue;

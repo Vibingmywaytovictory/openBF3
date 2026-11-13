@@ -2494,6 +2494,14 @@ TEST_SUITE("tables") {
 		CHECK(rides(27) == -2);
 		CHECK(rides(29) == -2);
 		CHECK(m1.part_turrets.size() >= 20);
+		const auto unheld = [&](uint16_t p_part) {
+			return std::find(m1.unheld_parts.begin(), m1.unheld_parts.end(), p_part) != m1.unheld_parts.end();
+		};
+		CHECK(unheld(13));
+		CHECK(unheld(14));
+		CHECK_FALSE(unheld(59));
+		CHECK_FALSE(unheld(26));
+		CHECK_FALSE(unheld(27));
 		CHECK(m1.component_mesh_turrets.size() == m1.component_meshes.size());
 
 		WorkBudget budget;

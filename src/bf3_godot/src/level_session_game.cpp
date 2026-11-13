@@ -1364,7 +1364,8 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			const GameVehiclesStats &vs = g.vehicles->stats();
 			UtilityFunctions::print(to_godot("[game] vehicles built: " + std::to_string(vs.kinds) + " kinds, " +
 					std::to_string(vs.parts) + " mesh parts, " + std::to_string(vs.wheel_parts) + " of them wheels, " +
-					std::to_string(vs.turret_parts) + " on turrets"));
+					std::to_string(vs.turret_parts) + " on turrets, " + std::to_string(vs.unheld_parts) +
+					" of unheld unlocks not drawn"));
 		}
 	}
 	if (g.vehicles != nullptr && g.vehicles->built()) {
