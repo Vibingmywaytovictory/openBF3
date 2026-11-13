@@ -147,6 +147,8 @@ WeaponCommand BotWeapons::input(TdmShared &r_shared, uint8_t p_slot, const BotAr
 				} else {
 					tapped_ = false;
 				}
+			} else if (trigger == Trigger::Repair) {
+				fire = in_hand && q.aligned && !busy;
 			} else if (trigger == Trigger::Knife) {
 				if (in_hand && q.aligned && phase == sw::WeaponPhase::Ready && !tapped_) {
 					fire = true;

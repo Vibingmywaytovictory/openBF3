@@ -1,5 +1,6 @@
 #include "tdm_bot_weapons_vehicles.h"
 
+#include "bf3/ai/behaviour/curves.h"
 #include "bf3/core/math.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
@@ -180,6 +181,7 @@ std::optional<uint8_t> defib_slot(const Gunplay &p_gunplay, const BotArms &p_arm
 
 void BotVehicleWeapons::new_life() {
 	enemy_ = {};
+	repair_ = {};
 	phase_ = ExplosivePhase::Approach;
 	rounds_before_ = 0;
 	detonate_at_ = 0;
@@ -269,8 +271,68 @@ bool BotVehicleWeapons::sense(TdmShared &r_shared, const BotArms &p_arms, const 
 	return true;
 }
 
-bool BotVehicleWeapons::track(TdmShared &r_shared, const sim::Vec3 &p_eye) {
-	VehicleAim &a = enemy_;
+bool BotVehicleWeapons::sense_repair(TdmShared &r_shared, const BotArms &p_arms, const VehicleCheck &p_check) {
+	TdmShared &sh = r_shared;
+	const Gunplay *g = sh.host.gunplay;
+	const ServerView &view = *sh.host.view;
+	const std::span<const sim::vehicles::VehicleTarget> vehicles = view.vehicle_targets();
+	const uint8_t team = p_check.slot < sh.teams.size() ? sh.teams[p_check.slot] : 0;
+	const VehicleAim previous = repair_;
+	repair_ = {};
+	if (g == nullptr || vehicles.empty() || p_arms.weapons() == nullptr || p_check.self == nullptr || team == 0) {
+		return false;
+	}
+	uint8_t tool = 0xFF;
+	for (uint8_t s = 0; s < sw::kMaxWeaponSlots && tool == 0xFF; ++s) {
+		const uint16_t def = slot_def(p_arms, s);
+		if (p_arms.def(s) != nullptr && def < g->table().defs.size() &&
+				g->table().defs[def].weapon_class == kRepairToolClass) {
+			tool = s;
+		}
+	}
+	if (tool == 0xFF) {
+		return false;
+	}
+	VehicleAim best;
+	float best_score = 0.0f;
+	for (const sim::vehicles::VehicleTarget &v : vehicles) {
+		if ((v.target.team != 0 && v.target.team != team) || enemy_crew(sh, v, team)) {
+			continue;
+		}
+		bool own = false;
+		bool human = false;
+		for (uint8_t k = 0; k < v.crew_count; ++k) {
+			own = own || v.crew[k] == p_check.slot;
+			human = human || (v.crew[k] < 0xFF && !view.bot(uint8_t(v.crew[k])));
+		}
+		const float threshold = human ? kAssistHumanHealth : kAssistHealth;
+		if (own || !(v.health > 0.0f && v.health < threshold)) {
+			continue;
+		}
+		const float d = distance(p_check.self->position, v.target.bound_center);
+		if (!(d <= kFriendlyAssistMetres)) {
+			continue;
+		}
+		const float score = 1.0f / (ai::DecliningSlopeCurve::calculate(1.0f - v.health) * std::max(d, 1.0f));
+		if (score > best_score) {
+			best_score = score;
+			best.id = v.target.id;
+			best.centre = v.target.bound_center;
+			best.weapon_slot = tool;
+			best.type = ai::WeaponType::Heal;
+			best.surface = hull_surface(v, p_check.eye, best.near_point);
+		}
+	}
+	if (!best.held()) {
+		return false;
+	}
+	best.since = best.id == previous.id ? previous.since : p_check.tick;
+	repair_ = best;
+	return true;
+}
+
+bool BotVehicleWeapons::track(TdmShared &r_shared, const sim::Vec3 &p_eye, bool p_repair) {
+	VehicleAim &a = p_repair ? repair_ : enemy_;
 	if (!a.held()) {
 		return false;
 	}

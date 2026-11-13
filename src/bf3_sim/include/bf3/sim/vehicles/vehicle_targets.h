@@ -20,6 +20,7 @@ struct VehicleTarget {
 	weapons::HitTarget target;
 	std::array<uint32_t, kMaxVehicleTargetCrew> crew{};
 	uint8_t crew_count = 0;
+	float health = 1.0f;
 };
 
 HullBox chassis_box(const VehicleModel &p_model);

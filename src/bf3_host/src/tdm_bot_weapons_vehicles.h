@@ -20,6 +20,9 @@ class Gunplay;
 
 namespace bf3::host::tdm_bot {
 
+inline constexpr float kFriendlyAssistMetres = 75.0f;
+inline constexpr float kAssistHealth = 0.75f;
+inline constexpr float kAssistHumanHealth = 0.99f;
 inline constexpr float kBackOffMetres = 9.0f;
 inline constexpr float kBackOffGoalMetres = 30.0f;
 inline constexpr float kDetonateDelayS = 0.7f;
@@ -62,11 +65,13 @@ public:
 	void new_life();
 
 	bool sense(TdmShared &r_shared, const BotArms &p_arms, const VehicleCheck &p_check);
+	bool sense_repair(TdmShared &r_shared, const BotArms &p_arms, const VehicleCheck &p_check);
 
 	const VehicleAim &enemy() const { return enemy_; }
+	const VehicleAim &repair() const { return repair_; }
 	ExplosivePhase phase() const { return phase_; }
 
-	bool track(TdmShared &r_shared, const sim::Vec3 &p_eye);
+	bool track(TdmShared &r_shared, const sim::Vec3 &p_eye, bool p_repair);
 	void explosive_step(TdmShared &r_shared, const BotArms &p_arms, uint8_t p_slot, sim::Tick p_tick);
 	bool detonate_due(sim::Tick p_tick) const { return phase_ == ExplosivePhase::Detonate && p_tick >= detonate_at_; }
 	sim::Vec3 back_off_goal(const sim::Vec3 &p_from, float p_turn) const;
@@ -77,6 +82,7 @@ private:
 	VehicleDamageSource source_;
 	bool configured_ = false;
 	VehicleAim enemy_;
+	VehicleAim repair_;
 	sim::Tick seen_tick_ = 0;
 	ExplosivePhase phase_ = ExplosivePhase::Approach;
 	int32_t rounds_before_ = 0;

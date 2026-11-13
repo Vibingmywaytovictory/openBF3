@@ -548,10 +548,14 @@ bool BotBody::sense_vehicle(const BotFrame &p_frame) {
 	return vehicles.sense(*shared, p_frame.arms, vehicle_check(p_frame));
 }
 
+bool BotBody::sense_repair(const BotFrame &p_frame) {
+	return vehicles.sense_repair(*shared, p_frame.arms, vehicle_check(p_frame));
+}
+
 void BotBody::vehicle_aim(const BotFrame &p_frame, BotIntent &r_intent) {
 	const BotFrame &f = p_frame;
 	BotIntent &i = r_intent;
-	if (!vehicles.track(*shared, f.eye)) {
+	if (!vehicles.track(*shared, f.eye, false)) {
 		return;
 	}
 	const VehicleAim &a = vehicles.enemy();
@@ -650,4 +654,39 @@ void BotBody::vehicle_move(const BotFrame &p_frame, BotIntent &r_intent) {
 	}
 }
 
+void BotBody::repair_move(const BotFrame &p_frame, BotIntent &r_intent) {
+	const BotFrame &f = p_frame;
+	if (!vehicles.track(*shared, f.eye, true) || shared->host.gunplay == nullptr) {
+		return;
+	}
+	const VehicleAim &a = vehicles.repair();
+	const uint16_t tool = f.arms.weapons()->slots[a.weapon_slot].def;
+	if (a.surface <= 0.5f * weapon_range(*shared->host.gunplay, tool)) {
+		return;
+	}
+	navigation.set_goal(*shared, f.tick,
+			beside_hull_point(a, f.eye, f.self.position, 0.25f * weapon_range(*shared->host.gunplay, tool)), 0.5f, true,
+			kSquadGoalMoveMetres);
+	walk_facing(f, r_intent);
+}
+
+void BotBody::repair_aim(const BotFrame &p_frame, BotIntent &r_intent) {
+	const VehicleAim &a = vehicles.repair();
+	if (a.held() && shared->host.gunplay != nullptr &&
+			a.surface <= weapon_range(*shared->host.gunplay, p_frame.arms.weapons()->slots[a.weapon_slot].def)) {
+		r_intent.target_distance = r_intent.aim_at(p_frame.eye, a.near_point);
+		r_intent.sprint = false;
+	}
+}
+
+void BotBody::repair_trigger(const BotFrame &p_frame, BotIntent &r_intent) {
+	const VehicleAim &a = vehicles.repair();
+	if (!a.held() || shared->host.gunplay == nullptr) {
+		return;
+	}
+	r_intent.want_slot = a.weapon_slot;
+	if (a.surface <= weapon_range(*shared->host.gunplay, p_frame.arms.weapons()->slots[a.weapon_slot].def)) {
+		r_intent.trigger = Trigger::Repair;
+	}
+}
 }

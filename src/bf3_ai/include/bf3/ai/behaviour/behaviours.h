@@ -206,9 +206,14 @@ public:
 	BBMedicAssist(const UrgeCurve &p_curve, InfantryBody &r_body) :
 			BotBehaviour(InfantryBehaviour::MedicAssist, p_curve, r_body) {}
 	bool plan(BotPlan &r_script, bool p_was_active) override;
+	bool repairing() const { return repair_; }
 
 protected:
 	float situation() override;
+	int target() const override { return repair_ ? 1 : 0; }
+
+private:
+	bool repair_ = false;
 };
 
 class BBCallForMedic final : public BotBehaviour {

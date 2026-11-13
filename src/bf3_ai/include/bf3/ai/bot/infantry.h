@@ -37,15 +37,16 @@ struct InfantrySenses {
 	bool supply_target = false;
 	bool call_medic = false;
 	bool vehicle_visible = false;
+	bool repair_target = false;
 
 	bool operator==(const InfantrySenses &) const = default;
 };
 
 enum class MoveGoal : uint8_t { Roam, Hunt, Cover, Squad, Medkit };
-enum class ObjectGoal : uint8_t { Target, Corpse, Patient, SupplyMate, Vehicle };
+enum class ObjectGoal : uint8_t { Target, Corpse, Patient, SupplyMate, Vehicle, Repair };
 enum class PoseRequest : uint8_t { Crouch, NearCorpse };
-enum class TriggerKind : uint8_t { Aimed, Blind, Grenade, Defib, Medkit, AmmoBag, CallMedic, VehicleWeapon };
-enum class SenseFocus : uint8_t { Target, BlindPoint, Threat, ShotOrigin, Around, Vehicle };
+enum class TriggerKind : uint8_t { Aimed, Blind, Grenade, Defib, Medkit, AmmoBag, CallMedic, VehicleWeapon, Repair };
+enum class SenseFocus : uint8_t { Target, BlindPoint, Threat, ShotOrigin, Around, Vehicle, Repair };
 
 class InfantryBody {
 public:

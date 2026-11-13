@@ -389,11 +389,19 @@ bool BBIdle::plan(BotPlan &r_script, bool) {
 }
 
 float BBMedicAssist::situation() {
-	return body_.senses().heal_target ? 1.0f : 0.0f;
+	const InfantrySenses &s = body_.senses();
+	repair_ = !s.heal_target && s.repair_target;
+	return s.heal_target || s.repair_target ? 1.0f : 0.0f;
 }
 
 bool BBMedicAssist::plan(BotPlan &r_script, bool) {
 	r_script.clear(InfantryActivity::Support);
+	if (repair_) {
+		r_script.add(BAPStatementType::MoveToObject, object_args(ObjectGoal::Repair));
+		r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::Repair));
+		r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::Repair));
+		return true;
+	}
 	r_script.add(BAPStatementType::MoveToObject, object_args(ObjectGoal::Patient));
 	r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::Medkit));
 	return true;

@@ -11,7 +11,7 @@
 
 namespace bf3::host::tdm_bot {
 
-enum class Trigger : uint8_t { None, Aimed, Blind, Defib, Grenade, Knife, Supply, Launcher, Place, Detonate };
+enum class Trigger : uint8_t { None, Aimed, Blind, Defib, Grenade, Knife, Supply, Launcher, Place, Detonate, Repair };
 
 class BotArms {
 public:

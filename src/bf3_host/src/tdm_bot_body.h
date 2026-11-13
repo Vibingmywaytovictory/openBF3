@@ -161,9 +161,13 @@ struct BotBody {
 	VehicleCheck vehicle_check(const BotFrame &p_frame) const;
 	bool target_seated(const BotFrame &p_frame) const;
 	bool sense_vehicle(const BotFrame &p_frame);
+	bool sense_repair(const BotFrame &p_frame);
 	void vehicle_aim(const BotFrame &p_frame, BotIntent &r_intent);
 	void vehicle_trigger(const BotFrame &p_frame, BotIntent &r_intent);
 	void vehicle_move(const BotFrame &p_frame, BotIntent &r_intent);
+	void repair_move(const BotFrame &p_frame, BotIntent &r_intent);
+	void repair_aim(const BotFrame &p_frame, BotIntent &r_intent);
+	void repair_trigger(const BotFrame &p_frame, BotIntent &r_intent);
 };
 
 }

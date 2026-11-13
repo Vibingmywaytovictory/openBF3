@@ -121,6 +121,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		sensed.supply_target = support.supply;
 		sensed.call_medic = support.call;
 		sensed.vehicle_visible = (!fr.visible || seated) && body.sense_vehicle(fr);
+		sensed.repair_target = body.sense_repair(fr);
 	}
 
 	const ai::InfantrySenses &senses() const override { return sensed; }
@@ -216,6 +217,10 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 			body.vehicle_move(f(), intent);
 			return false;
 		}
+		if (p_object == ai::ObjectGoal::Repair) {
+			body.repair_move(f(), intent);
+			return false;
+		}
 		if (p_object == ai::ObjectGoal::Patient || p_object == ai::ObjectGoal::SupplyMate) {
 			return body.support_approach(
 					f(), p_object == ai::ObjectGoal::Patient ? SupplyNeed::Health : SupplyNeed::Ammo, intent);
@@ -263,6 +268,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 			case ai::TriggerKind::VehicleWeapon:
 				body.vehicle_trigger(f(), intent);
 				return true;
+			case ai::TriggerKind::Repair:
+				body.repair_trigger(f(), intent);
+				return true;
 		}
 		return intent.trigger != Trigger::None;
 	}
@@ -288,6 +296,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 				break;
 			case ai::SenseFocus::Vehicle:
 				body.vehicle_aim(f(), intent);
+				break;
+			case ai::SenseFocus::Repair:
+				body.repair_aim(f(), intent);
 				break;
 		}
 		return true;

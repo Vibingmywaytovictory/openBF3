@@ -7191,6 +7191,10 @@ std::optional<sim::Vec3> stand_in_view(const Match &p_match, const sim::Vec3 &p_
 	return std::nullopt;
 }
 
+uint16_t facing(const sim::Vec3 &p_from, const sim::Vec3 &p_to) {
+	return sim::quantize_yaw(std::atan2(p_to[0] - p_from[0], p_to[2] - p_from[2]));
+}
+
 size_t enemy_script(const Match &p_match, int p_bot) {
 	const uint8_t team = p_match.rules().team_of(uint8_t(p_bot));
 	for (size_t i = 0; i < p_match.peers.size(); ++i) {
@@ -7280,6 +7284,75 @@ TEST_SUITE("host-bots-gadgets") {
 		CHECK(damaged);
 		CHECK(after < full);
 		CHECK(slot_rounds(*m, g.bot, launcher_slot) < rounds);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+
+	TEST_CASE("bot gadgets: MP_007 ConquestSmall0: an engineer bot repairs his team's MBT that a human mate drives "
+			  "after an enemy's rockets took it under 99 % (BBMedicAssist's engineer path)") {
+		tdm::TdmLevel *level = tdm::load_conquest_bots_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		auto stats = std::make_shared<host::TdmBotStats>();
+		std::unique_ptr<Match> m = start_match(
+				*level, true, 117u, 0, 1, gadget_bot_server(*level, uint8_t(host::KitRole::Engineer), stats, false));
+		const GadgetBotMatch g = gadget_bot_match(*m);
+		REQUIRE(g.mate != nullptr);
+		const size_t enemy = enemy_script(*m, g.bot);
+		REQUIRE(enemy < m->peers.size());
+		tdm::ScriptedPeer &gunner = *m->peers[enemy];
+		gunner.spawn_request(uint8_t(host::KitRole::Engineer));
+		REQUIRE(m->until([&] { return is_alive(m->state(gunner.slot())); }, 900));
+		const uint8_t team = m->rules().team_of(uint8_t(g.bot));
+		VehicleWatch watch;
+		const uint32_t watcher = g.mate->peer();
+		const std::optional<TankStand> tank =
+				tank_with_stand(*m, watch, watcher, [team](uint8_t p_team) { return p_team == team; });
+		REQUIRE(tank.has_value());
+		const sim::Vec3 hull = watch.of(tank->spawner)->state.body.com_position;
+		std::optional<sim::Vec3> far;
+		for (const sim::SpawnPoint &sp : m->level->spawns) {
+			if (!far || horizontal(sp.position, hull) > horizontal(*far, hull)) {
+				far = sp.position;
+			}
+		}
+		REQUIRE(far.has_value());
+		REQUIRE(horizontal(*far, hull) > 150.0f);
+		m->place(g.bot, add(*far, 0.0f, 0.05f, 0.0f));
+		REQUIRE(seat_driver(*m, watch, watcher, g.mate_script, tank->spawner));
+		const float full = m->server.vehicle_health(tank->spawner).value_or(0.0f);
+		REQUIRE(full > 0.0f);
+		const uint8_t launcher_slot = uint8_t(core::gameplay::WeaponSlot::Gadget1);
+		m->teleport(gunner, tank->stand);
+		bool fire = false;
+		m->scripts[enemy] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(*m, p_tick, p_state, tank->centre, sim::Pose::Stand,
+					select_and_fire(launcher_slot, fire && (p_tick % 30u) < 10u) | sim::buttons::kZoom);
+		};
+		m->ticks(90);
+		fire = true;
+		REQUIRE(m->until([&] { return m->server.vehicle_health(tank->spawner).value_or(full) < 0.99f * full; }, 1200));
+		fire = false;
+		m->scripts[enemy] = {};
+		m->teleport(gunner, add(*far, 0.0f, 0.05f, 0.0f));
+		m->ticks(30);
+		const float damaged = m->server.vehicle_health(tank->spawner).value_or(-1.0f);
+		const uint64_t repairs = m->server.stats().vehicle_repairs;
+		const sim::Vec3 near = beside_hull(*m, *watch.of(tank->spawner), 15.0f);
+		m->place(g.bot, near, facing(near, tank->centre));
+		const sim::Tick from = m->now();
+		const bool repaired =
+				m->until([&] { return m->server.vehicle_health(tank->spawner).value_or(0.0f) >= 0.99f * full; }, 1800);
+		const float after = m->server.vehicle_health(tank->spawner).value_or(-1.0f);
+		std::printf("bot gadgets: the engineer bot from 15 m beside his team's %s of spawner %u (a human driver): "
+					"health %.0f of %.0f -> %.0f in %.1f s, %llu repair hits\n",
+				blueprint_of(*m, tank->spawner).c_str(), unsigned(tank->spawner), double(damaged), double(full),
+				double(after), double(m->now() - from) / double(sim::kSimHz),
+				(unsigned long long)(m->server.stats().vehicle_repairs - repairs));
+		CHECK(damaged < 0.99f * full);
+		CHECK(repaired);
+		CHECK(after > damaged);
+		CHECK(m->server.stats().vehicle_repairs > repairs);
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }

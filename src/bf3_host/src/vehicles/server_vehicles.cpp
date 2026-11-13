@@ -333,6 +333,8 @@ void ServerVehicles::refresh_targets() {
 		t.target = sim::vehicles::hull_target(level_->kinds[level_->spawners[i].kind].box, hull(i),
 				sim::vehicles::kVehicleTargetIdBase + uint32_t(i), hull_property(i));
 		t.target.team = v.team;
+		t.health = sim::vehicles::vehicle_health(level_->kinds[level_->spawners[i].kind].damage, v.health) /
+				sim::vehicles::full_vehicle_health(level_->kinds[level_->spawners[i].kind].damage);
 		for (const uint8_t o : v.occupants) {
 			if (o != net::kNoVehicleOccupant && t.crew_count < t.crew.size()) {
 				t.crew[t.crew_count++] = o;
