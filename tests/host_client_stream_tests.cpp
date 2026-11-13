@@ -1118,235 +1118,265 @@ TEST_SUITE("host-client-stream") {
 	}
 }
 
+namespace {
+
+uint32_t drive_predicted(tt::TdmLevel &r_level, const char *p_blueprint, const char *p_name, const char *p_row,
+		const std::function<float(uint32_t)> &p_steer, float p_least_travel_m) {
+	const host::LevelVehicles &lv = *r_level.shared->vehicles;
+	host::GameServerConfig cfg;
+	cfg.level = r_level.shared;
+	cfg.max_slots = 8;
+	cfg.game_build = kStreamGameBuild;
+	cfg.dev_commands = true;
+	cfg.seed = 65;
+	cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+	cfg.rules.mode = host::MatchRulesConfig::Mode::Tdm;
+	cfg.rules.deploy_screen = false;
+	cfg.rules.revive = true;
+	cfg.rules.preround_override_s = 0.0f;
+	cfg.rules.min_players_override = 1;
+	host::GameServer server;
+	const core::Status st = server.init(cfg);
+	REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+	core::Result<std::unique_ptr<sim::CollisionWorld>> world =
+			sim::CollisionWorld::create(r_level.shared->static_world);
+	REQUIRE(world.ok());
+	{
+		const auto start = std::chrono::steady_clock::now();
+		host::ClientVehiclePrediction built;
+		REQUIRE(built.init(*r_level.shared).ok());
+		std::printf("%s: a client's vehicle world over MP_007's static shapes builds in %.1f ms\n", p_row,
+				core::ms_since(start));
+	}
+
+	uint64_t now = 1'000'000'000'000ull;
+	const host::MonotonicClock clock = [&] { return now; };
+	std::vector<std::unique_ptr<StreamClient>> clients;
+	const auto add = [&](const char *p_name, uint32_t p_peer, const char *p_netsim) -> StreamClient & {
+		auto c = std::make_unique<StreamClient>();
+		c->name = p_name;
+		c->peer = p_peer;
+		c->scripted = false;
+		host::ClientSessionConfig cc;
+		core::Result<net::NetSimConfig> ns = net::parse_netsim(p_netsim);
+		REQUIRE(ns.ok());
+		cc.netsim = *ns;
+		cc.port = 1;
+		cc.name = p_name;
+		cc.game_build = kStreamGameBuild;
+		cc.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+		cc.request_dev_commands = true;
+		const core::Status init = c->loop.init(cc, r_level.shared);
+		REQUIRE_MESSAGE(init.ok(), (init.ok() ? std::string() : init.error().message));
+		server.on_connect(p_peer);
+		c->loop.begin(std::make_unique<ServerTransport>(server, *c), clock);
+		clients.push_back(std::move(c));
+		return *clients.back();
+	};
+	StreamClient &driver = add("driver", 1u, "lat=40-60,loss=2,seed=3");
+	StreamClient &watcher = add("watcher", 2u, "lat=20,seed=4");
+
+	std::optional<uint16_t> spawner;
+	std::map<sim::Tick, sim::Vec3> server_at;
+	uint64_t others = 0, step = 0;
+	uint32_t steered = 0;
+	std::vector<host::OutDatagram> out;
+	const auto tick = [&] {
+		for (uint32_t k = 0; k < kStepsPerTick; ++k, ++step) {
+			now += kStepNs;
+			for (const std::unique_ptr<StreamClient> &c : clients) {
+				drive(*c, uint32_t(step), now);
+			}
+		}
+		out.clear();
+		server.tick(out);
+		deliver(out, clients, {}, others);
+		for (const host::OutDatagram &d : out) {
+			if (d.peer != driver.peer || net::peek_type(d.bytes) != net::MessageType::VehicleStates) {
+				continue;
+			}
+			core::Result<net::VehicleStates> m = net::decode_vehicle_states(d.bytes);
+			REQUIRE(m.ok());
+			for (const net::VehicleWire &w : m->vehicles) {
+				if (spawner && w.spawner == *spawner) {
+					server_at[m->server_tick] = w.state.body.com_position;
+					steered += w.state.driver.track_steer[0] != 0.0f || w.state.driver.track_steer[1] != 0.0f ? 1u : 0u;
+				}
+			}
+		}
+		for (const std::unique_ptr<StreamClient> &c : clients) {
+			const host::PresentationFrame &f = *c->frame;
+			if (!(f.valid && (f.own_curr.flags & sim::soldier_flags::kAlive) != 0) &&
+					server.current_tick() % 30u == 0u) {
+				c->loop.send_spawn_request(0);
+			}
+		}
+	};
+	const auto alive = [](const StreamClient &p_c) {
+		return p_c.frame->valid && (p_c.frame->own_curr.flags & sim::soldier_flags::kAlive) != 0;
+	};
+	for (uint32_t t = 0; t < sim::seconds_to_ticks(tt::latest_initial_delay(lv)) + 300u; ++t) {
+		tick();
+	}
+	REQUIRE(alive(driver));
+	REQUIRE(alive(watcher));
+	const host::PresentationFrame &df = *driver.frame;
+	const host::PresentedVehicle *parked = nullptr;
+	for (uint8_t i = 0; i < df.vehicle_count; ++i) {
+		const host::PresentedVehicle &v = df.vehicles[i];
+		if (v.spawner < lv.spawners.size() && lv.kinds[lv.spawners[v.spawner].kind].blueprint == p_blueprint &&
+				tt::up_y_of(v.rotation) > 0.95f && (parked == nullptr || v.spawner < parked->spawner)) {
+			parked = &v;
+		}
+	}
+	REQUIRE(parked != nullptr);
+	spawner = parked->spawner;
+	const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[*spawner].kind];
+	const sim::Vec3 com = parked->com_position;
+	std::optional<sim::Vec3> beside;
+	for (int k = 0; k < 16 && !beside; ++k) {
+		const float a = 0.3926991f * float(k);
+		sim::StaticHit ground;
+		if ((*world)->ground_below({ com[0] + 0.5f * kind.entry_radius * std::cos(a), com[1] + 5.0f,
+										   com[2] + 0.5f * kind.entry_radius * std::sin(a) },
+					12.0f, sim::query_mask::kMovement, &ground) &&
+				!(*world)->overlap_capsule({ ground.position[0], ground.position[1] + 0.05f, ground.position[2] }, 0.4f,
+						1.8f, sim::query_mask::kMovement)) {
+			beside = ground.position;
+		}
+	}
+	REQUIRE(beside.has_value());
+	net::DebugRequest teleport;
+	teleport.kind = net::DebugKind::Teleport;
+	teleport.id = 1;
+	teleport.position = *beside;
+	driver.loop.send_debug(teleport);
+	const uint8_t slot = df.stats.slot;
+	const auto own_vehicle = [&](const host::PresentationFrame &p_f) -> const host::PresentedVehicle * {
+		for (uint8_t i = 0; i < p_f.vehicle_count; ++i) {
+			if (p_f.vehicles[i].spawner == *spawner) {
+				return &p_f.vehicles[i];
+			}
+		}
+		return nullptr;
+	};
+	for (uint32_t t = 0; t < 30; ++t) {
+		tick();
+	}
+	const uint64_t entry_before = df.stats.reconciliations;
+	uint32_t waited = 0;
+	for (; waited < 240; ++waited) {
+		driver.input.held_buttons = (waited / 8u) % 2u == 0u ? sim::buttons::kUse : 0u;
+		tick();
+		const host::PresentedVehicle *v = own_vehicle(df);
+		if (v != nullptr && v->occupants[0] == slot) {
+			break;
+		}
+	}
+	driver.input.held_buttons = 0;
+	REQUIRE(waited < 240);
+	for (uint32_t t = 0; t < 30; ++t) {
+		tick();
+	}
+	const uint64_t reconciled_before = df.stats.reconciliations;
+	const uint64_t entry_reconciled = reconciled_before - entry_before;
+	std::map<sim::Tick, sim::Vec3> drawn_at;
+	const uint32_t drive_ticks = 480;
+	for (uint32_t t = 0; t < drive_ticks; ++t) {
+		driver.input.move_forward = 1.0f;
+		driver.input.move_right = p_steer(t);
+		tick();
+		const host::PresentedVehicle *v = own_vehicle(df);
+		REQUIRE(v != nullptr);
+		if (df.valid) {
+			drawn_at[df.tick] = host::vehicle_pose_at(*v, double(df.tick)).com_position;
+		}
+		const host::PresentedVehicle *seen = own_vehicle(*watcher.frame);
+		REQUIRE(seen != nullptr);
+		CHECK(seen->occupants[0] == slot);
+	}
+	driver.input.move_forward = 0.0f;
+	driver.input.move_right = 0.0f;
+	for (uint32_t t = 0; t < 30; ++t) {
+		tick();
+	}
+	const uint64_t reconciled = df.stats.reconciliations - reconciled_before;
+	std::vector<float> errors;
+	float travelled = 0.0f;
+	std::optional<sim::Vec3> first;
+	for (const auto &[at, drawn] : drawn_at) {
+		const auto s = server_at.find(at);
+		if (s == server_at.end()) {
+			continue;
+		}
+		if (!first) {
+			first = s->second;
+		}
+		errors.push_back(core::vec::length(core::vec::sub(drawn, s->second)));
+		travelled = std::max(travelled, core::vec::horizontal_distance(s->second, *first));
+	}
+	REQUIRE(errors.size() > 100u);
+	float mean = 0.0f;
+	for (const float e : errors) {
+		mean += e / float(errors.size());
+	}
+	const float p95 = core::nearest_rank(errors, 0.95);
+	const float largest = *std::max_element(errors.begin(), errors.end());
+	const host::ClientStats &s = df.stats;
+	std::printf("%s: the driver's %s (spawner %u) went %.1f m; at %zu predicted ticks the drawn own vehicle was "
+				"%.3f m (mean), %.3f m (p95), %.3f m (max) from the server's state at that tick; %u of the server's "
+				"states had a track steer term; %llu soldier reconciliations while entering, %llu while seated; "
+				"vehicle prediction: %llu starts, %llu predicted ticks, %llu replayed, %llu matches, %llu "
+				"corrections (largest %.3f m), %llu failures\n",
+			p_row, p_name, unsigned(*spawner), double(travelled), errors.size(), double(mean), double(p95),
+			double(largest), unsigned(steered), (unsigned long long)entry_reconciled, (unsigned long long)reconciled,
+			(unsigned long long)s.vehicle_prediction_starts, (unsigned long long)s.vehicle_predicted_ticks,
+			(unsigned long long)s.vehicle_replayed_ticks, (unsigned long long)s.vehicle_prediction_matches,
+			(unsigned long long)s.vehicle_corrections, double(s.vehicle_max_correction_m),
+			(unsigned long long)s.vehicle_prediction_failures);
+	CHECK(travelled > p_least_travel_m);
+	CHECK(mean < 0.05f);
+	CHECK(p95 < 0.15f);
+	CHECK(reconciled <= 4u);
+	CHECK(s.vehicle_prediction_failures == 0u);
+	const host::PresentedVehicle *seen = own_vehicle(*watcher.frame);
+	REQUIRE(seen != nullptr);
+	CHECK(seen->predicted == 0);
+	for (const std::unique_ptr<StreamClient> &c : clients) {
+		c->loop.shutdown();
+		c->loop.close();
+	}
+	return steered;
+}
+
+}
+
 TEST_SUITE("host-vehicles-predict") {
 	TEST_CASE("vehicles: a client 100 ms from the server drives a Growler on MP_007 ConquestSmall0; the drawn own "
-			  "vehicle "
-			  "at the predicted tick is where the server puts it, the seated soldier is not reconciled, and a second "
-			  "client sees the vehicle unpredicted") {
+			  "vehicle at the predicted tick is where the server puts it, the seated soldier is not reconciled, and a "
+			  "second client sees the vehicle unpredicted") {
 		tt::TdmLevel *level = tt::load_conquest_level_once();
 		if (level == nullptr) {
 			return;
 		}
-		const host::LevelVehicles &lv = *level->shared->vehicles;
-		host::GameServerConfig cfg;
-		cfg.level = level->shared;
-		cfg.max_slots = 8;
-		cfg.game_build = kStreamGameBuild;
-		cfg.dev_commands = true;
-		cfg.seed = 65;
-		cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
-		cfg.rules.mode = host::MatchRulesConfig::Mode::Tdm;
-		cfg.rules.deploy_screen = false;
-		cfg.rules.revive = true;
-		cfg.rules.preround_override_s = 0.0f;
-		cfg.rules.min_players_override = 1;
-		host::GameServer server;
-		const core::Status st = server.init(cfg);
-		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
-		core::Result<std::unique_ptr<sim::CollisionWorld>> world =
-				sim::CollisionWorld::create(level->shared->static_world);
-		REQUIRE(world.ok());
-		{
-			const auto start = std::chrono::steady_clock::now();
-			host::ClientVehiclePrediction built;
-			REQUIRE(built.init(*level->shared).ok());
-			std::printf(
-					"host.vehicles.predict: a client's vehicle world over MP_007's static shapes builds in %.1f ms\n",
-					core::ms_since(start));
-		}
+		drive_predicted(
+				*level, "vehicles/growleritv/growleritv", "Growler", "host.vehicles.predict",
+				[](uint32_t p_t) { return p_t < 60u ? 0.0f : ((p_t / 90u) % 2u == 0u ? 1.0f : -1.0f); }, 20.0f);
+	}
+}
 
-		uint64_t now = 1'000'000'000'000ull;
-		const host::MonotonicClock clock = [&] { return now; };
-		std::vector<std::unique_ptr<StreamClient>> clients;
-		const auto add = [&](const char *p_name, uint32_t p_peer, const char *p_netsim) -> StreamClient & {
-			auto c = std::make_unique<StreamClient>();
-			c->name = p_name;
-			c->peer = p_peer;
-			c->scripted = false;
-			host::ClientSessionConfig cc;
-			core::Result<net::NetSimConfig> ns = net::parse_netsim(p_netsim);
-			REQUIRE(ns.ok());
-			cc.netsim = *ns;
-			cc.port = 1;
-			cc.name = p_name;
-			cc.game_build = kStreamGameBuild;
-			cc.mechanics_cfg = OPENBF3_MECHANICS_CFG;
-			cc.request_dev_commands = true;
-			const core::Status init = c->loop.init(cc, level->shared);
-			REQUIRE_MESSAGE(init.ok(), (init.ok() ? std::string() : init.error().message));
-			server.on_connect(p_peer);
-			c->loop.begin(std::make_unique<ServerTransport>(server, *c), clock);
-			clients.push_back(std::move(c));
-			return *clients.back();
-		};
-		StreamClient &driver = add("driver", 1u, "lat=40-60,loss=2,seed=3");
-		StreamClient &watcher = add("watcher", 2u, "lat=20,seed=4");
-
-		std::optional<uint16_t> spawner;
-		std::map<sim::Tick, sim::Vec3> server_at;
-		uint64_t others = 0, step = 0;
-		std::vector<host::OutDatagram> out;
-		const auto tick = [&] {
-			for (uint32_t k = 0; k < kStepsPerTick; ++k, ++step) {
-				now += kStepNs;
-				for (const std::unique_ptr<StreamClient> &c : clients) {
-					drive(*c, uint32_t(step), now);
-				}
-			}
-			out.clear();
-			server.tick(out);
-			deliver(out, clients, {}, others);
-			for (const host::OutDatagram &d : out) {
-				if (d.peer != driver.peer || net::peek_type(d.bytes) != net::MessageType::VehicleStates) {
-					continue;
-				}
-				core::Result<net::VehicleStates> m = net::decode_vehicle_states(d.bytes);
-				REQUIRE(m.ok());
-				for (const net::VehicleWire &w : m->vehicles) {
-					if (spawner && w.spawner == *spawner) {
-						server_at[m->server_tick] = w.state.body.com_position;
-					}
-				}
-			}
-			for (const std::unique_ptr<StreamClient> &c : clients) {
-				const host::PresentationFrame &f = *c->frame;
-				if (!(f.valid && (f.own_curr.flags & sim::soldier_flags::kAlive) != 0) &&
-						server.current_tick() % 30u == 0u) {
-					c->loop.send_spawn_request(0);
-				}
-			}
-		};
-		const auto alive = [](const StreamClient &p_c) {
-			return p_c.frame->valid && (p_c.frame->own_curr.flags & sim::soldier_flags::kAlive) != 0;
-		};
-		for (uint32_t t = 0; t < sim::seconds_to_ticks(tt::latest_initial_delay(lv)) + 300u; ++t) {
-			tick();
+TEST_SUITE("host-vehicles-predict-tank") {
+	TEST_CASE("vehicles: a client 100 ms from the server drives an M1A2 on MP_007 ConquestSmall0 through left and "
+			  "right turns; with each track side's steer term on the wire the drawn own tank at the predicted tick "
+			  "is where the server puts it") {
+		tt::TdmLevel *level = tt::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
 		}
-		REQUIRE(alive(driver));
-		REQUIRE(alive(watcher));
-		const host::PresentationFrame &df = *driver.frame;
-		const host::PresentedVehicle *parked = nullptr;
-		for (uint8_t i = 0; i < df.vehicle_count; ++i) {
-			const host::PresentedVehicle &v = df.vehicles[i];
-			if (v.spawner < lv.spawners.size() &&
-					lv.kinds[lv.spawners[v.spawner].kind].blueprint == "vehicles/growleritv/growleritv" &&
-					tt::up_y_of(v.rotation) > 0.95f && (parked == nullptr || v.spawner < parked->spawner)) {
-				parked = &v;
-			}
-		}
-		REQUIRE(parked != nullptr);
-		spawner = parked->spawner;
-		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[*spawner].kind];
-		const sim::Vec3 com = parked->com_position;
-		std::optional<sim::Vec3> beside;
-		for (int k = 0; k < 16 && !beside; ++k) {
-			const float a = 0.3926991f * float(k);
-			sim::StaticHit ground;
-			if ((*world)->ground_below({ com[0] + 0.5f * kind.entry_radius * std::cos(a), com[1] + 5.0f,
-											   com[2] + 0.5f * kind.entry_radius * std::sin(a) },
-						12.0f, sim::query_mask::kMovement, &ground) &&
-					!(*world)->overlap_capsule({ ground.position[0], ground.position[1] + 0.05f, ground.position[2] },
-							0.4f, 1.8f, sim::query_mask::kMovement)) {
-				beside = ground.position;
-			}
-		}
-		REQUIRE(beside.has_value());
-		net::DebugRequest teleport;
-		teleport.kind = net::DebugKind::Teleport;
-		teleport.id = 1;
-		teleport.position = *beside;
-		driver.loop.send_debug(teleport);
-		const uint8_t slot = df.stats.slot;
-		const auto own_vehicle = [&](const host::PresentationFrame &p_f) -> const host::PresentedVehicle * {
-			for (uint8_t i = 0; i < p_f.vehicle_count; ++i) {
-				if (p_f.vehicles[i].spawner == *spawner) {
-					return &p_f.vehicles[i];
-				}
-			}
-			return nullptr;
-		};
-		for (uint32_t t = 0; t < 30; ++t) {
-			tick();
-		}
-		uint32_t waited = 0;
-		for (; waited < 240; ++waited) {
-			driver.input.held_buttons = (waited / 8u) % 2u == 0u ? sim::buttons::kUse : 0u;
-			tick();
-			const host::PresentedVehicle *v = own_vehicle(df);
-			if (v != nullptr && v->occupants[0] == slot) {
-				break;
-			}
-		}
-		driver.input.held_buttons = 0;
-		REQUIRE(waited < 240);
-		for (uint32_t t = 0; t < 30; ++t) {
-			tick();
-		}
-		const uint64_t reconciled_before = df.stats.reconciliations;
-		std::map<sim::Tick, sim::Vec3> drawn_at;
-		const uint32_t drive_ticks = 480;
-		for (uint32_t t = 0; t < drive_ticks; ++t) {
-			driver.input.move_forward = 1.0f;
-			driver.input.move_right = t < 60u ? 0.0f : ((t / 90u) % 2u == 0u ? 1.0f : -1.0f);
-			tick();
-			const host::PresentedVehicle *v = own_vehicle(df);
-			REQUIRE(v != nullptr);
-			if (df.valid) {
-				drawn_at[df.tick] = host::vehicle_pose_at(*v, double(df.tick)).com_position;
-			}
-			const host::PresentedVehicle *seen = own_vehicle(*watcher.frame);
-			REQUIRE(seen != nullptr);
-			CHECK(seen->occupants[0] == slot);
-		}
-		driver.input.move_forward = 0.0f;
-		driver.input.move_right = 0.0f;
-		for (uint32_t t = 0; t < 30; ++t) {
-			tick();
-		}
-		const uint64_t reconciled = df.stats.reconciliations - reconciled_before;
-		std::vector<float> errors;
-		float travelled = 0.0f;
-		std::optional<sim::Vec3> first;
-		for (const auto &[at, drawn] : drawn_at) {
-			const auto s = server_at.find(at);
-			if (s == server_at.end()) {
-				continue;
-			}
-			if (!first) {
-				first = s->second;
-			}
-			errors.push_back(core::vec::length(core::vec::sub(drawn, s->second)));
-			travelled = std::max(travelled, core::vec::horizontal_distance(s->second, *first));
-		}
-		REQUIRE(errors.size() > 100u);
-		float mean = 0.0f;
-		for (const float e : errors) {
-			mean += e / float(errors.size());
-		}
-		const float p95 = core::nearest_rank(errors, 0.95);
-		const float largest = *std::max_element(errors.begin(), errors.end());
-		const host::ClientStats &s = df.stats;
-		std::printf("host.vehicles.predict: the driver's Growler (spawner %u) went %.1f m; at %zu predicted ticks the "
-					"drawn own vehicle was %.3f m (mean), %.3f m (p95), %.3f m (max) from the server's state at that "
-					"tick; %llu soldier reconciliations while seated; vehicle prediction: %llu starts, %llu predicted "
-					"ticks, %llu replayed, %llu matches, %llu corrections (largest %.3f m), %llu failures\n",
-				unsigned(*spawner), double(travelled), errors.size(), double(mean), double(p95), double(largest),
-				(unsigned long long)reconciled, (unsigned long long)s.vehicle_prediction_starts,
-				(unsigned long long)s.vehicle_predicted_ticks, (unsigned long long)s.vehicle_replayed_ticks,
-				(unsigned long long)s.vehicle_prediction_matches, (unsigned long long)s.vehicle_corrections,
-				double(s.vehicle_max_correction_m), (unsigned long long)s.vehicle_prediction_failures);
-		CHECK(travelled > 20.0f);
-		CHECK(mean < 0.05f);
-		CHECK(p95 < 0.15f);
-		CHECK(reconciled <= 4u);
-		CHECK(s.vehicle_prediction_failures == 0u);
-		const host::PresentedVehicle *seen = own_vehicle(*watcher.frame);
-		REQUIRE(seen != nullptr);
-		CHECK(seen->predicted == 0);
-		for (const std::unique_ptr<StreamClient> &c : clients) {
-			c->loop.shutdown();
-			c->loop.close();
-		}
+		CHECK(drive_predicted(
+					  *level, "vehicles/m1a2/m1abrams", "M1A2", "host.vehicles.predict.tank",
+					  [](uint32_t p_t) { return p_t < 240u ? ((p_t / 60u) % 2u == 0u ? 1.0f : -1.0f) : 0.0f; },
+					  10.0f) > 0u);
 	}
 }
 
