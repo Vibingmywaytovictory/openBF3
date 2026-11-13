@@ -6896,6 +6896,44 @@ TEST_SUITE("host-vehicles-damage-team") {
 	}
 }
 
+namespace {
+
+struct FiringLane {
+	sim::Vec3 from{}, to{}, aside{};
+};
+
+std::optional<FiringLane> find_firing_lane(const Match &p_match) {
+	std::optional<std::pair<sim::Vec3, sim::Vec3>> lane;
+	std::vector<sim::Vec3> floors;
+	for (const sim::SpawnPoint &sp : p_match.level->spawns) {
+		if (const std::optional<sim::Vec3> f = floor_at(*p_match.world, sp.position);
+				f && p_match.motor.fits_standing(add(*f, 0.0f, 0.05f, 0.0f))) {
+			floors.push_back(*f);
+		}
+	}
+	for (size_t a = 0; a < floors.size() && !lane; ++a) {
+		for (size_t b = 0; b < floors.size() && !lane; ++b) {
+			const float d = horizontal(floors[a], floors[b]);
+			if (d >= 26.0f && d <= 40.0f && std::fabs(floors[a][1] - floors[b][1]) < 1.0f &&
+					clear(*p_match.world, add(floors[a], 0.0f, 1.6f, 0.0f), add(floors[b], 0.0f, 1.2f, 0.0f)) &&
+					clear(*p_match.world, add(floors[a], 0.0f, 1.6f, 0.0f), add(floors[b], 0.0f, 0.1f, 0.0f))) {
+				lane = std::pair<sim::Vec3, sim::Vec3>{ floors[a], floors[b] };
+			}
+		}
+	}
+	if (!lane) {
+		return std::nullopt;
+	}
+	for (const sim::Vec3 &f : floors) {
+		if (horizontal(f, lane->first) > 30.0f && horizontal(f, lane->second) > 30.0f) {
+			return FiringLane{ lane->first, lane->second, f };
+		}
+	}
+	return std::nullopt;
+}
+
+}
+
 TEST_SUITE("host-gunplay-gadgets") {
 	TEST_CASE("gadgets: an assault's slot 2 M320 picked in CUSTOMIZE fires each of its rounds in a Metro match: HE a "
 			  "dud before TimeToArm and a direct hit after, buckshot 12 pellets of falloff damage, smoke a 0-damage "
@@ -6956,35 +6994,12 @@ TEST_SUITE("host-gunplay-gadgets") {
 			CHECK(m->server.gunplay()->weapons(uint8_t(by_team[team][r]->slot())).slots[gadget1].def == defs[r]);
 		}
 		const sw::WeaponTable &table = m->server.gunplay()->table();
-		std::optional<std::pair<sim::Vec3, sim::Vec3>> lane;
-		std::vector<sim::Vec3> floors;
-		for (const sim::SpawnPoint &sp : m->level->spawns) {
-			if (const std::optional<sim::Vec3> f = floor_at(*m->world, sp.position);
-					f && m->motor.fits_standing(add(*f, 0.0f, 0.05f, 0.0f))) {
-				floors.push_back(*f);
-			}
-		}
-		for (size_t a = 0; a < floors.size() && !lane; ++a) {
-			for (size_t b = 0; b < floors.size() && !lane; ++b) {
-				const float d = horizontal(floors[a], floors[b]);
-				if (d >= 26.0f && d <= 40.0f && std::fabs(floors[a][1] - floors[b][1]) < 1.0f &&
-						clear(*m->world, add(floors[a], 0.0f, 1.6f, 0.0f), add(floors[b], 0.0f, 1.2f, 0.0f)) &&
-						clear(*m->world, add(floors[a], 0.0f, 1.6f, 0.0f), add(floors[b], 0.0f, 0.1f, 0.0f))) {
-					lane = std::pair<sim::Vec3, sim::Vec3>{ floors[a], floors[b] };
-				}
-			}
-		}
+		const std::optional<FiringLane> lane = find_firing_lane(*m);
 		REQUIRE(lane.has_value());
-		const sim::Vec3 from = lane->first, to = lane->second;
+		const sim::Vec3 from = lane->from, to = lane->to;
 		const float run = horizontal(from, to);
 		const sim::Vec3 toward{ (from[0] - to[0]) / run, 0.0f, (from[2] - to[2]) / run };
-		std::optional<sim::Vec3> aside;
-		for (const sim::Vec3 &f : floors) {
-			if (!aside && horizontal(f, from) > 30.0f && horizontal(f, to) > 30.0f) {
-				aside = f;
-			}
-		}
-		REQUIRE(aside.has_value());
+		const std::optional<sim::Vec3> aside = lane->aside;
 		for (tdm::ScriptedPeer *p : peers) {
 			m->teleport(*p, add(*aside, 0.0f, 0.05f, 0.0f));
 		}
@@ -8394,6 +8409,154 @@ TEST_SUITE("host-gadgets-sweep") {
 		std::printf("t-ugs: the spot ended %u ticks after he stopped\n", unsigned(m->now() - stopped));
 		m->ticks(150);
 		CHECK(m->server.spot_row(es).state == sim::spotting::SpotState::None);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}
+
+TEST_SUITE("host-gunplay-m26") {
+	TEST_CASE("gadgets: an assault's slot 2 M26 MASS picked in CUSTOMIZE fires each of its rounds in a Metro match: "
+			  "buckshot and flechette 12 pellets of falloff damage, the frag round one pellet that detonates its "
+			  "explosion where it lands, the slug one pellet of falloff damage") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		auto watch = std::make_shared<LauncherWatch>();
+		std::unique_ptr<Match> m = start_match(
+				*level, true, 97u, 0, 1, [&](host::GameServerConfig &r_config) { r_config.gunplay.observer = watch; });
+		std::vector<tdm::ScriptedPeer *> peers;
+		for (const char *name : { "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8" }) {
+			peers.push_back(&m->join(name));
+			peers.back()->ready();
+		}
+		REQUIRE(wait_in_round(*m));
+		std::array<std::vector<tdm::ScriptedPeer *>, 3> by_team;
+		for (tdm::ScriptedPeer *p : peers) {
+			const uint8_t t = m->rules().team_of(uint8_t(p->slot()));
+			REQUIRE((t == 1 || t == 2));
+			by_team[t].push_back(p);
+		}
+		REQUIRE(by_team[1].size() == 4u);
+		REQUIRE(by_team[2].size() == 4u);
+		const uint8_t team = 1;
+		const uint8_t assault = uint8_t(host::KitRole::Assault);
+		const size_t gadget1 = size_t(core::gameplay::WeaponSlot::Gadget1);
+		const host::LoadoutKit *kit = gl.loadouts.kit(team, assault);
+		REQUIRE(kit != nullptr);
+		const char *const rounds[] = { "weapons/gadgets/m26mass/u_m26mass",
+			"weapons/gadgets/m26mass/u_m26mass_flechette", "weapons/gadgets/m26mass/u_m26mass_frag",
+			"weapons/gadgets/m26mass/u_m26mass_slug" };
+		std::array<uint16_t, 4> defs{};
+		for (size_t r = 0; r < 4; ++r) {
+			const auto item = std::find_if(kit->slots[gadget1].begin(), kit->slots[gadget1].end(),
+					[&](const host::LoadoutItem &i) { return i.unlock == rounds[r]; });
+			REQUIRE(item != kit->slots[gadget1].end());
+			REQUIRE(item->def < gl.defs.size());
+			defs[r] = item->def;
+			net::LoadoutRequest request;
+			request.kit = assault;
+			request.items[gadget1] = item->identifier;
+			m->server.on_receive(by_team[team][r]->peer(), net::kChannelReliable, net::encode_loadout_request(request));
+		}
+		m->ticks(1);
+		for (tdm::ScriptedPeer *p : peers) {
+			p->spawn_request(assault);
+		}
+		REQUIRE(m->until(
+				[&] {
+					return std::all_of(peers.begin(), peers.end(),
+							[&](tdm::ScriptedPeer *p) { return is_alive(m->state(p->slot())); });
+				},
+				900));
+		for (size_t r = 0; r < 4; ++r) {
+			CHECK(m->server.gunplay()->weapons(uint8_t(by_team[team][r]->slot())).slots[gadget1].def == defs[r]);
+		}
+		const sw::WeaponTable &table = m->server.gunplay()->table();
+		const std::optional<FiringLane> lane = find_firing_lane(*m);
+		REQUIRE(lane.has_value());
+		const sim::Vec3 from = lane->from, to = lane->to, aside = lane->aside;
+		const float run = horizontal(from, to);
+		for (tdm::ScriptedPeer *p : peers) {
+			m->teleport(*p, add(aside, 0.0f, 0.05f, 0.0f));
+		}
+		m->ticks(10);
+		bool fire = false;
+		sim::Vec3 aim{};
+		size_t shooter = 0;
+		for (size_t r = 0; r < 4; ++r) {
+			const size_t i = size_t(std::find(peers.begin(), peers.end(), by_team[team][r]) - peers.begin());
+			m->scripts[i] = [&, r](sim::Tick p_tick, const sim::SoldierState &p_state) {
+				return aim_command(*m, p_tick, p_state, aim, sim::Pose::Stand,
+						select_and_fire(uint8_t(gadget1), shooter == r && fire && (p_tick % 30u) < 10u) |
+								(shooter == r ? sim::buttons::kZoom : 0u));
+			};
+		}
+		const auto shoot = [&](size_t p_round, tdm::ScriptedPeer &r_victim, const sim::Vec3 &p_aim) {
+			shooter = p_round;
+			m->teleport(*by_team[team][p_round], add(from, 0.0f, 0.05f, 0.0f));
+			m->teleport(r_victim, add(to, 0.0f, 0.05f, 0.0f));
+			aim = p_aim;
+			m->ticks(90);
+			watch->hits.clear();
+			watch->detonations.clear();
+			watch->shots.clear();
+			fire = true;
+			const bool fired = m->until([&] { return !watch->shots.empty(); }, 120);
+			fire = false;
+			m->ticks(30);
+			m->teleport(*by_team[team][p_round], add(aside, 0.0f, 0.05f, 0.0f));
+			if (is_alive(m->state(r_victim.slot()))) {
+				m->teleport(r_victim, add(aside, 1.0f, 0.05f, 0.0f));
+			}
+			m->ticks(5);
+			return fired;
+		};
+		const auto victim_hits = [&](const tdm::ScriptedPeer &p_victim, sw::DamageKind p_kind) {
+			std::vector<sw::DamageEvent> out;
+			for (const sw::DamageEvent &e : watch->hits) {
+				if (int(e.target) == p_victim.slot() && e.kind == p_kind) {
+					out.push_back(e);
+				}
+			}
+			return out;
+		};
+		const sim::Vec3 chest = add(to, 0.0f, 1.2f, 0.0f);
+		for (size_t r = 0; r < 4; ++r) {
+			const sw::WeaponSimDef &d = table.defs[defs[r]];
+			tdm::ScriptedPeer &victim = *by_team[3 - team][r];
+			const float flight = run / d.projectile.launch_velocity[2];
+			const float lead =
+					-0.5f * d.projectile.gravity * flight * flight - d.projectile.launch_velocity[1] * flight;
+			REQUIRE(shoot(r, victim, add(chest, 0.0f, lead, 0.0f)));
+			REQUIRE(watch->shots.size() == 1u);
+			const uint8_t pellets = watch->shots[0].pellets;
+			const std::vector<sw::DamageEvent> hits = victim_hits(victim, sw::DamageKind::Bullet);
+			const std::vector<sw::DamageEvent> blasts = victim_hits(victim, sw::DamageKind::Blast);
+			const std::vector<sw::DamageEvent> direct = victim_hits(victim, sw::DamageKind::Direct);
+			std::printf("M26 %s from %.1f m: %u pellets, %zu hit, first base %.2f (%.1f -> %.1f over %.0f..%.0f m), "
+						"%zu detonations, %zu blast and %zu direct hits\n",
+					rounds[r], double(run), unsigned(pellets), hits.size(), hits.empty() ? 0.0 : double(hits[0].base),
+					double(d.projectile.start_damage), double(d.projectile.end_damage),
+					double(d.projectile.falloff_start), double(d.projectile.falloff_end), watch->detonations.size(),
+					blasts.size(), direct.size());
+			CHECK(pellets == uint8_t(d.pellets));
+			CHECK(pellets == (r < 2 ? 12u : 1u));
+			for (const sw::DamageEvent &e : hits) {
+				CHECK(e.def == defs[r]);
+				CHECK(e.base == doctest::Approx(sw::falloff_damage(d.projectile, e.distance)));
+			}
+			if (r == 2) {
+				CHECK(d.projectile.explosion.blast_damage == 25.0f);
+				REQUIRE(watch->detonations.size() == 1u);
+				CHECK(watch->detonations[0].def == defs[r]);
+				CHECK_FALSE(watch->detonations[0].dud);
+				CHECK(blasts.size() + direct.size() > 0u);
+			} else {
+				CHECK_FALSE(hits.empty());
+				CHECK(watch->detonations.empty());
+			}
+		}
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }
