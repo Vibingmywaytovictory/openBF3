@@ -14,6 +14,7 @@
 #include "bf3/sim/vehicles/run_over_rules.h"
 #include "bf3/sim/vehicles/vehicle_obstacles.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -175,6 +176,65 @@ TEST_SUITE("host-vehicles-phys-unit") {
 		REQUIRE(w->obstacles.place(4, box, b).ok());
 		walk_west(beyond);
 		CHECK(w->motor.obstacle_contacts().empty());
+	}
+
+	TEST_CASE("vehicles: a soldier left inside a parked hull comes out at its nearest face and is not launched") {
+		std::unique_ptr<Walker> w = walker_on_floor();
+		const float radius = w->motor.params().radius;
+		const std::shared_ptr<const sim::VehicleModel> box = box_model(1.0f, 1.5f, 2.5f);
+		for (const bool airborne : { false, true }) {
+			for (const float inside : { 0.1f, 0.5f, 0.9f, 1.3f }) {
+				w->obstacles.clear();
+				sim::SoldierState s = airborne
+						? w->motor.spawn_state({ 11.0f + radius - inside, 0.02f, 20.0f }, 0, 1, 1000, false)
+						: standing(w->motor, 11.0f + radius - inside, 20.0f, sim::Pose::Stand);
+				REQUIRE(w->obstacles.place(0, box, body_at({ 10.0f, 0.85f, 20.0f })).ok());
+				float fastest = 0.0f, highest = s.position[1];
+				for (int t = 0; t < 90; ++t) {
+					w->motor.step(s, sim::idle_command(s.tick + 1, 0, 0, sim::Pose::Stand));
+					const sim::Vec3 &v = s.velocity;
+					fastest = std::max(fastest, std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]));
+					highest = std::max(highest, s.position[1]);
+				}
+				std::printf(
+						"inside hull: %s, %.1f m in, after 90 ticks at (%.2f, %.2f, %.2f), fastest %.2f m/s, highest "
+						"%.2f m, alive %d\n",
+						airborne ? "spawned" : "standing", double(inside), double(s.position[0]), double(s.position[1]),
+						double(s.position[2]), double(fastest), double(highest),
+						int((s.flags & sim::soldier_flags::kAlive) != 0));
+				CHECK(s.position[0] >= 11.0f + radius - 0.05f);
+				CHECK(s.position[0] <= 11.0f + radius + 0.3f);
+				CHECK(std::fabs(s.position[2] - 20.0f) < 0.05f);
+				CHECK(highest < 0.3f);
+				CHECK(fastest < 1.0f);
+			}
+		}
+	}
+
+	TEST_CASE("vehicles: a hull pushing a soldier below its kill speed for 2 s carries him ahead of its face at its "
+			  "own speed") {
+		std::unique_ptr<Walker> w = walker_on_floor();
+		const float radius = w->motor.params().radius;
+		const std::shared_ptr<const sim::VehicleModel> box = box_model(1.0f, 1.5f, 2.5f);
+		const float speed = 4.5f;
+		sim::SoldierState s = standing(w->motor, 0.0f, 0.0f, sim::Pose::Stand);
+		sim::VehicleBodyState b = body_at({ -(1.0f + radius + 0.5f), 0.85f, 0.0f });
+		b.linear_velocity = { speed, 0.0f, 0.0f };
+		float fastest = 0.0f;
+		for (int t = 0; t < 60; ++t) {
+			REQUIRE(w->obstacles.place(0, box, b).ok());
+			w->motor.step(s, sim::idle_command(s.tick + 1, 0, 0, sim::Pose::Stand));
+			fastest = std::max(fastest, std::hypot(s.velocity[0], s.velocity[2]));
+			b.com_position[0] += speed * sim::kTickSeconds;
+		}
+		const float face = b.com_position[0] - speed * sim::kTickSeconds + 1.0f;
+		std::printf("hull push: a %.1f m/s hull pushed the soldier to %.2f m, %.2f m ahead of its face, fastest "
+					"%.2f m/s\n",
+				double(speed), double(s.position[0]), double(s.position[0] - face), double(fastest));
+		CHECK(s.position[0] > face + radius - 0.1f);
+		CHECK(s.position[0] < face + radius + 0.5f);
+		CHECK(std::fabs(s.position[2]) < 0.05f);
+		CHECK(fastest < speed + 0.5f);
 	}
 
 	TEST_CASE("vehicles: a hull driven at a soldier at a constant speed runs him over at every start gap within one "

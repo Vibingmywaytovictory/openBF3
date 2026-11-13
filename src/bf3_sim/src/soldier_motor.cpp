@@ -116,6 +116,28 @@ float directional_speed(const StateSpeed &p_speed, float p_forward, float p_righ
 	return p_speed.velocity * (w_forward * along + (1.0f - w_forward) * side);
 }
 
+JPH::Vec3 hull_recovery(const JPH::CharacterVirtual &p_character) {
+	JPH::Vec3 deepest = JPH::Vec3::sZero();
+	for (const JPH::CharacterContact &c : p_character.GetActiveContacts()) {
+		if (c.mCharacterIDB.IsInvalid() || !(c.mDistance < 0.0f)) {
+			continue;
+		}
+		const JPH::Vec3 push = c.mContactNormal * -c.mDistance;
+		if (push.LengthSq() > deepest.LengthSq()) {
+			deepest = push;
+		}
+	}
+	return deepest;
+}
+
+JPH::Vec3 without_recovery(const JPH::Vec3 &p_moved, const JPH::Vec3 &p_recovery) {
+	const float depth = p_recovery.Length();
+	if (!(depth > 0.0f)) {
+		return p_moved;
+	}
+	const JPH::Vec3 out = p_recovery / depth;
+	return p_moved - out * std::clamp(p_moved.Dot(out), 0.0f, depth);
+}
 }
 
 float walk_speed(const MotorParams &p_params, const SoldierState &p_state) {
@@ -500,6 +522,7 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 	ch.SetRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), yaw));
 	ch.SetLinearVelocity(to_jolt(s.velocity));
 	ch.RefreshContacts(w.broadphase_filter(mask), w.object_filter(mask), w.body_filter, w.shape_filter, *w.temp);
+	const JPH::Vec3 recovery = hull_recovery(ch);
 	JPH::Vec3 ground_plane = JPH::Vec3::sAxisY();
 	if (ch.IsSupported()) {
 		const JPH::Vec3 n = ch.GetGroundNormal();
@@ -594,7 +617,7 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 	}
 
 	const JPH::Vec3 p1 = JPH::Vec3(ch.GetPosition());
-	const JPH::Vec3 disp = p1 - p0;
+	const JPH::Vec3 disp = without_recovery(p1 - p0, recovery);
 	const JPH::CharacterBase::EGroundState ground_state = ch.GetGroundState();
 	const bool grounded1 = ground_state == JPH::CharacterBase::EGroundState::OnGround && !jumped;
 	const bool steep = ground_state == JPH::CharacterBase::EGroundState::OnSteepGround;
