@@ -1481,6 +1481,8 @@ TEST_SUITE("host-vehicles-reconcile") {
 		std::map<sim::Tick, sim::Command> sent;
 		std::map<sim::Tick, sim::VehicleState> states;
 		std::map<sim::Tick, sim::Vec3> drawn_at;
+		float throttle_off = 0.0f, rising_throttle = 0.0f;
+		uint32_t contact_off = 0;
 		bool seated_before_entry = true, seated_at_entry = false;
 		const host::CommandAt command_at = [&](sim::Tick p_tick) -> const sim::Command * {
 			const auto c = sent.find(p_tick);
@@ -1526,6 +1528,17 @@ TEST_SUITE("host-vehicles-reconcile") {
 				const host::PresentedVehicle &v = frame->vehicles[i];
 				if (v.spawner == *spawner && v.predicted == 1 && v.tick == c) {
 					drawn_at[c] = v.com_position;
+					if (c < kShove) {
+						const sim::VehicleState &at = states.at(c);
+						throttle_off = std::max(throttle_off, std::fabs(v.throttle - at.driver.throttle_filter));
+						rising_throttle = std::max(rising_throttle,
+								std::fabs(at.driver.throttle_filter - states.at(c - kLag).driver.throttle_filter));
+						uint8_t contact = 0;
+						for (size_t w = 0; w < at.wheel_count && w < sim::kMaxVehicleWheels; ++w) {
+							contact |= uint8_t((at.wheels[w].in_contact != 0 ? 1u : 0u) << w);
+						}
+						contact_off += v.wheel_contact != contact ? 1u : 0u;
+					}
 				}
 			}
 		}
@@ -1560,8 +1573,15 @@ TEST_SUITE("host-vehicles-reconcile") {
 				double(before), unsigned(kLag), double(jump), double(moved), double(fade[0]), double(fade[5]),
 				double(fade[10]), double(fade[15]), double(snapped), (unsigned long long)stats.vehicle_corrections,
 				double(stats.vehicle_max_correction_m), (unsigned long long)stats.vehicle_prediction_failures);
+		std::printf(
+				"host.vehicles.reconcile: the drawn Growler's throttle filter was at most %.4f from the server's "
+				"at its tick (it rose by up to %.4f over the %u-tick lag), its wheel contacts differed on %u ticks\n",
+				double(throttle_off), double(rising_throttle), unsigned(kLag), unsigned(contact_off));
 		CHECK_FALSE(seated_before_entry);
 		CHECK(seated_at_entry);
+		CHECK(rising_throttle > 0.1f);
+		CHECK(throttle_off < 1e-6f);
+		CHECK(contact_off == 0u);
 		CHECK(before < 0.01f);
 		CHECK(fade[0] > 0.4f);
 		CHECK(fade[0] < 0.5f);

@@ -324,12 +324,15 @@ void ClientVehiclePrediction::publish(PresentationFrame &r_frame) const {
 		v.linear_velocity = s.body.linear_velocity;
 		v.angular_velocity = s.body.angular_velocity;
 		v.wheel_count = std::min<uint8_t>(s.wheel_count, uint8_t(sim::kMaxVehicleWheels));
+		v.wheel_contact = 0;
 		for (size_t w = 0; w < v.wheel_count; ++w) {
+			v.wheel_contact |= uint8_t((s.wheels[w].in_contact != 0 ? 1u : 0u) << w);
 			v.wheel_spin[w] = s.wheels[w].angular_velocity;
 			v.wheel_angle[w] = s.wheels[w].angle;
 			v.wheel_steer[w] = s.wheels[w].steer_angle;
 			v.suspension_length[w] = s.wheels[w].suspension_length;
 		}
+		v.throttle = s.driver.throttle_filter;
 		v.engine_rpm = s.driver.engine_rpm;
 		v.gear = int8_t(s.driver.gearbox.gear);
 		v.window_count = 0;
