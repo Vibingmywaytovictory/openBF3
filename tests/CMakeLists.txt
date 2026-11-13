@@ -1255,6 +1255,7 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_godot_row(godot.vehicle_drive.audio godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DAUDIO=1)
     set_tests_properties(godot.gadgets_draw godot.vehicle_drive godot.vehicle_drive.lag godot.vehicle_drive.audio PROPERTIES RUN_SERIAL TRUE)
     openbf3_cost(godot.gadgets_draw 1 30)
+    openbf3_cost(godot.vehicle_drive 1 34)
     openbf3_cost(godot.vehicle_drive.lag 1 23)
     set_tests_properties(godot.m2b.play godot.m2b_load godot.native_hud godot.native_screens godot.crosshair_walk PROPERTIES RUN_SERIAL TRUE)
     openbf3_cost(godot.m2b.play 1 67)
