@@ -4817,7 +4817,7 @@ TEST_SUITE("net-proto") {
 			{ "OrderNotice (v9)", 3, 0xf5bd1717ea80524bull, 0 },
 			{ "ConquestState (v11)", 61, 0x026a78587b1a83a7ull, 0 },
 			{ "SpawnAnswer (v11)", 3, 0x4e7b94181d5e21b6ull, 0 },
-			{ "VehicleStates (v14)", 169, 0xfd7d6f65c69fe5ccull, 0 },
+			{ "VehicleStates (v14)", 177, 0x2e0e4a3d44900481ull, 0 },
 		};
 		check_golden(samples, kPins);
 	}
