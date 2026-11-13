@@ -107,6 +107,25 @@ bool apply_passive(SpotTarget &r_target, const TargetDef &p_def, uint8_t p_spott
 	return changed;
 }
 
+bool apply_radar(SpotTarget &r_target, const TargetDef &p_def, uint8_t p_spotter, float p_radar_time) {
+	switch (r_target.state) {
+		case SpotState::Unspottable:
+			return false;
+		case SpotState::Active:
+			r_target.remaining = p_def.active_time * p_def.active_multiplier;
+			return false;
+		case SpotState::None:
+		case SpotState::Passive:
+		case SpotState::Radar:
+			break;
+	}
+	const bool changed = r_target.state != SpotState::Radar || r_target.spotter != p_spotter;
+	r_target.remaining = p_radar_time;
+	r_target.spotter = p_spotter;
+	r_target.state = SpotState::Radar;
+	return changed;
+}
+
 bool step_target(SpotTarget &r_target, float p_dt) {
 	if (r_target.state == SpotState::None) {
 		return false;

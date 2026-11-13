@@ -23,6 +23,7 @@ inline constexpr size_t kMaxSpotTargets = 8;
 inline constexpr size_t kRayHits = 5;
 inline constexpr float kSeatedConeWidening = 1.5f;
 inline constexpr float kLowAmmoCheckSeconds = 2.0f;
+inline constexpr float kRadarSweepSpottedTime = 1.0f;
 inline constexpr uint8_t kNoSpotter = 0xFF;
 
 struct SpotterDef {
@@ -71,6 +72,7 @@ static_assert(std::is_trivially_copyable_v<SpotTarget>);
 
 bool apply_active(SpotTarget &r_target, const TargetDef &p_def, uint8_t p_spotter);
 bool apply_passive(SpotTarget &r_target, const TargetDef &p_def, uint8_t p_spotter, bool p_firing);
+bool apply_radar(SpotTarget &r_target, const TargetDef &p_def, uint8_t p_spotter, float p_radar_time);
 bool step_target(SpotTarget &r_target, float p_dt);
 
 bool in_spot_cone(

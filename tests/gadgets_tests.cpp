@@ -1109,3 +1109,61 @@ TEST_SUITE("gadgets-unit") {
 		CHECK(painters.lock_of(11) == nullptr);
 	}
 }
+
+TEST_SUITE("gadgets-unit") {
+	TEST_CASE("sweep: R2-E1 E radar sweep: every ControllableSweepInterval a placed T-UGS lists each controllable "
+			  "within ControllableSweepRadius of another team than its own and not team 0 moving at least "
+			  "ControllableSpeedThreshold, with the sensor's owner as the spotter") {
+		GadgetDef g;
+		g.weapon = "t-ugs";
+		g.kind = GadgetKind::RadarSweep;
+		g.def = 7;
+		g.sweep = RadarSweepDef{ 30.0f, seconds_to_units(2.0), 2.05f };
+		const std::vector<GadgetDef> defs{ g };
+		Deployable d;
+		d.id = 21;
+		d.def = 7;
+		d.team = 1;
+		d.owner = 4;
+		d.resting = true;
+		const std::vector<SweepSubject> subjects{ { 1, 2, Vec3{ 10.0f, 0.0f, 0.0f }, 3.0f },
+			{ 2, 2, Vec3{ 29.0f, 0.0f, 5.0f }, 2.05f }, { 3, 2, Vec3{ 31.0f, 0.0f, 0.0f }, 5.0f },
+			{ 5, 1, Vec3{ 5.0f, 0.0f, 0.0f }, 5.0f }, { 6, 0, Vec3{ 5.0f, 0.0f, 0.0f }, 5.0f },
+			{ 7, 2, Vec3{ 5.0f, 0.0f, 0.0f }, 2.0f } };
+		CHECK(sweeps(g.sweep, d, subjects[0]));
+		CHECK(sweeps(g.sweep, d, subjects[1]));
+		CHECK_FALSE(sweeps(g.sweep, d, subjects[2]));
+		CHECK_FALSE(sweeps(g.sweep, d, subjects[3]));
+		CHECK_FALSE(sweeps(g.sweep, d, subjects[4]));
+		CHECK_FALSE(sweeps(g.sweep, d, subjects[5]));
+		Deployable neutral = d;
+		neutral.team = 0;
+		CHECK_FALSE(sweeps(g.sweep, neutral, subjects[0]));
+		Deployable thrown = d;
+		thrown.id = 22;
+		thrown.resting = false;
+		const std::vector<Deployable> live{ d, thrown };
+		RadarSweeps r;
+		std::vector<SweepHit> hits;
+		std::vector<Tick> swept;
+		for (Tick t = 1; t <= 240; ++t) {
+			r.step(defs, live, subjects, hits);
+			if (!hits.empty()) {
+				swept.push_back(t);
+				REQUIRE(hits.size() == 2u);
+				CHECK(hits[0].target == 1u);
+				CHECK(hits[1].target == 2u);
+				CHECK(hits[0].owner == 4u);
+				CHECK(hits[0].sensor == 21u);
+			}
+		}
+		CHECK(swept == std::vector<Tick>{ 120, 240 });
+		CHECK(r.sweep_count() == 2u);
+		r.step(defs, std::vector<Deployable>{}, subjects, hits);
+		CHECK(hits.empty());
+		for (Tick t = 1; t < 120; ++t) {
+			r.step(defs, live, subjects, hits);
+			CHECK(hits.empty());
+		}
+	}
+}

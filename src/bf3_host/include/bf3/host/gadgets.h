@@ -30,6 +30,8 @@ struct GadgetStats {
 	uint64_t guided_launches = 0;
 	uint64_t paint_samples = 0;
 	uint64_t painted_candidates = 0;
+	uint64_t radar_sweeps = 0;
+	uint64_t sweep_hits = 0;
 	sim::weapons::GadgetFieldStats field;
 };
 

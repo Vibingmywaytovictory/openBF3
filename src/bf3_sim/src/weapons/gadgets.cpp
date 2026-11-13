@@ -965,6 +965,42 @@ void LaserPainters::clear() {
 	painted_.clear();
 }
 
+bool sweeps(const RadarSweepDef &p_sweep, const Deployable &p_sensor, const SweepSubject &p_subject) {
+	return p_sensor.team != 0 && p_subject.team != 0 && p_subject.team != p_sensor.team &&
+			p_subject.speed >= p_sweep.speed_threshold &&
+			core::vec::length(core::vec::sub(p_subject.position, p_sensor.position)) <= p_sweep.radius;
+}
+
+void RadarSweeps::step(std::span<const GadgetDef> p_defs, std::span<const Deployable> p_live,
+		std::span<const SweepSubject> p_subjects, std::vector<SweepHit> &r_hits) {
+	r_hits.clear();
+	std::erase_if(sensors_, [&](const Sensor &p_s) {
+		return std::none_of(p_live.begin(), p_live.end(), [&](const Deployable &p_l) { return p_l.id == p_s.id; });
+	});
+	for (const Deployable &d : p_live) {
+		if (d.gadget >= p_defs.size() || p_defs[d.gadget].kind != GadgetKind::RadarSweep || !d.resting) {
+			continue;
+		}
+		const RadarSweepDef &sweep = p_defs[d.gadget].sweep;
+		auto it = std::find_if(sensors_.begin(), sensors_.end(), [&](const Sensor &p_s) { return p_s.id == d.id; });
+		if (it == sensors_.end()) {
+			sensors_.push_back(Sensor{ d.id, 0 });
+			it = sensors_.end() - 1;
+		}
+		it->timer += kTimeUnitsPerTick;
+		if (sweep.interval <= 0 || it->timer < sweep.interval) {
+			continue;
+		}
+		it->timer -= sweep.interval;
+		++sweeps_;
+		for (const SweepSubject &s : p_subjects) {
+			if (sweeps(sweep, d, s)) {
+				r_hits.push_back(SweepHit{ s.slot, d.owner, d.id });
+			}
+		}
+	}
+}
+
 void arm_ammo_refill(AmmoRefillState &r_state, const SoldierWeaponsState &p_weapons) {
 	r_state = AmmoRefillState();
 	for (size_t s = 0; s < kMaxWeaponSlots; ++s) {

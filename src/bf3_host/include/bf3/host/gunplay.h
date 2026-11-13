@@ -240,6 +240,7 @@ public:
 	std::span<const sim::weapons::Deployable> deployables() const;
 	uint64_t deployables_revision() const;
 	const GadgetStats &gadget_stats() const;
+	std::vector<sim::weapons::SweepHit> take_sweep_hits();
 	std::optional<sim::Vec3> squad_beacon(uint8_t p_slot, uint8_t p_team) const;
 	uint8_t team(uint8_t p_slot) const;
 	uint8_t kit(uint8_t p_slot) const;

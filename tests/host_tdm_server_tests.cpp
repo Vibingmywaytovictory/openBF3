@@ -8282,3 +8282,118 @@ TEST_SUITE("host-gadgets-soflam") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }
+
+TEST_SUITE("host-gadgets-sweep") {
+	TEST_CASE("gadgets: Metro TDM: a recon's T-UGS placed on a clear lane radar-spots (R2-E1 E) the enemy who walks "
+			  "past it within 30 m, not while he stands still; the spot names the recon and ends after he stops") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		std::unique_ptr<Match> m = start_match(*level, true, 139u, 0, 1);
+		tdm::ScriptedPeer &recon = m->join("recon");
+		tdm::ScriptedPeer &enemy = m->join("walker");
+		recon.ready();
+		enemy.ready();
+		REQUIRE(wait_in_round(*m));
+		const uint8_t rs = uint8_t(recon.slot()), es = uint8_t(enemy.slot());
+		const uint8_t team = m->rules().team_of(rs);
+		REQUIRE(m->rules().team_of(es) != team);
+		const uint8_t gadget1 = uint8_t(core::gameplay::WeaponSlot::Gadget1);
+		const host::LoadoutKit *kit = gl.loadouts.kit(team, uint8_t(host::KitRole::Recon));
+		REQUIRE(kit != nullptr);
+		const auto tugs = std::find_if(kit->slots[gadget1].begin(), kit->slots[gadget1].end(),
+				[](const host::LoadoutItem &i) { return i.unlock == "weapons/gadgets/t-ugs/u_ugs"; });
+		REQUIRE(tugs != kit->slots[gadget1].end());
+		REQUIRE(tugs->def < gl.defs.size());
+		net::LoadoutRequest request;
+		request.kit = uint8_t(host::KitRole::Recon);
+		request.items[gadget1] = tugs->identifier;
+		m->server.on_receive(recon.peer(), net::kChannelReliable, net::encode_loadout_request(request));
+		m->ticks(1);
+		recon.spawn_request(uint8_t(host::KitRole::Recon));
+		enemy.spawn_request(0);
+		REQUIRE(m->until([&] { return is_alive(m->state(rs)) && is_alive(m->state(es)); }, 900));
+		REQUIRE(m->server.gunplay()->weapons(rs).slots[gadget1].def == tugs->def);
+		const sim::CollisionWorld &w = *m->world;
+		std::optional<std::array<sim::Vec3, 3>> lane;
+		for (const sim::SpawnPoint &sp : m->level->spawns) {
+			const std::optional<sim::Vec3> centre = floor_at(w, sp.position);
+			for (int k = 0; centre && k < 8 && !lane; ++k) {
+				const float a = float(k) * 0.785398f;
+				const sim::Vec3 dir{ std::sin(a), 0.0f, std::cos(a) };
+				const std::optional<sim::Vec3> from = floor_at(w, add(*centre, dir[0] * 8.0f, 0.0f, dir[2] * 8.0f));
+				const std::optional<sim::Vec3> to = floor_at(w, add(*centre, -dir[0] * 8.0f, 0.0f, -dir[2] * 8.0f));
+				const std::optional<sim::Vec3> back = floor_at(w, add(*centre, dir[0] * 1.5f, 0.0f, dir[2] * 1.5f));
+				if (from && to && back && std::abs((*from)[1] - (*centre)[1]) < 0.3f &&
+						std::abs((*to)[1] - (*centre)[1]) < 0.3f &&
+						clear(w, add(*from, 0, 1.2f, 0), add(*to, 0, 1.2f, 0)) &&
+						clear(w, add(*from, 0, 0.3f, 0), add(*to, 0, 0.3f, 0))) {
+					lane = std::array<sim::Vec3, 3>{ *centre, *from, *to };
+				}
+			}
+			if (lane) {
+				break;
+			}
+		}
+		REQUIRE(lane.has_value());
+		const sim::Vec3 centre = (*lane)[0], from = (*lane)[1], to = (*lane)[2];
+		const sim::Vec3 dir = core::vec::normalize(core::vec::sub(from, centre));
+		m->teleport(recon, add(centre, -dir[0] * 1.5f, 0.05f, -dir[2] * 1.5f));
+		m->teleport(enemy, add(from, 0.0f, 0.05f, 0.0f));
+		m->ticks(20);
+		bool fire = false, walk = false;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(*m, p_tick, p_state, centre, sim::Pose::Stand, select_and_fire(gadget1, fire));
+		};
+		m->scripts[1] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = aim_command(*m, p_tick, p_state, add(to, 0.0f, 1.6f, 0.0f), sim::Pose::Stand, 0u);
+			c.move_forward = walk && horizontal(p_state.position, to) > 1.0f ? int8_t(127) : int8_t(0);
+			return c;
+		};
+		m->ticks(90);
+		const uint64_t deploys = m->server.gunplay()->gadget_stats().deploys;
+		fire = true;
+		REQUIRE(m->until([&] { return m->server.gunplay()->gadget_stats().deploys > deploys; }, 120));
+		fire = false;
+		const auto placed =
+				std::find_if(m->server.gunplay()->deployables().begin(), m->server.gunplay()->deployables().end(),
+						[&](const sw::Deployable &d) { return d.def == tugs->def && d.owner == rs; });
+		REQUIRE(placed != m->server.gunplay()->deployables().end());
+		REQUIRE(placed->resting);
+		const sim::Vec3 sensor = placed->position;
+		const uint64_t sweeps0 = m->server.gunplay()->gadget_stats().radar_sweeps;
+		for (int i = 0; i < 150; ++i) {
+			m->ticks(1);
+			CHECK(m->server.spot_row(es).state == sim::spotting::SpotState::None);
+		}
+		CHECK(m->server.gunplay()->gadget_stats().radar_sweeps > sweeps0);
+		walk = true;
+		const sim::Tick started = m->now();
+		float fastest = 0.0f;
+		REQUIRE(m->until(
+				[&] {
+					fastest = std::max(fastest, core::vec::length(m->state(es)->velocity));
+					return m->server.spot_row(es).state == sim::spotting::SpotState::Radar;
+				},
+				300));
+		const sim::Tick spotted = m->now() - started;
+		const float range = core::vec::length(core::vec::sub(m->state(es)->position, sensor));
+		std::printf("t-ugs: the walker was radar-spotted %u ticks after he set off, %.1f m from the sensor at up to "
+					"%.2f m/s\n",
+				unsigned(spotted), double(range), double(fastest));
+		CHECK(m->server.spot_row(es).spotter == rs);
+		CHECK(range <= 30.0f);
+		CHECK(m->server.spot_row(rs).state == sim::spotting::SpotState::None);
+		CHECK(m->server.stats().spotting.radar_spots > 0u);
+		REQUIRE(m->until([&] { return horizontal(m->state(es)->position, to) <= 1.0f; }, 600));
+		walk = false;
+		const sim::Tick stopped = m->now();
+		REQUIRE(m->until([&] { return m->server.spot_row(es).state == sim::spotting::SpotState::None; }, 300));
+		std::printf("t-ugs: the spot ended %u ticks after he stopped\n", unsigned(m->now() - stopped));
+		m->ticks(150);
+		CHECK(m->server.spot_row(es).state == sim::spotting::SpotState::None);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}

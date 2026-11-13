@@ -141,6 +141,7 @@ struct SpottingStats {
 	uint64_t orders_stored = 0;
 	uint64_t orders_refused = 0;
 	uint64_t state_messages = 0;
+	uint64_t radar_spots = 0;
 };
 
 struct GameServerStats {

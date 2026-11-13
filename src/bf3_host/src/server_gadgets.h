@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace bf3::host {
@@ -58,6 +59,7 @@ public:
 	const sim::weapons::WeaponLockState &lock(uint8_t p_slot) const;
 	const sim::weapons::GuidanceTargets &guidance() const { return guidance_; }
 	const sim::weapons::LaserPainters &painters() const { return painters_; }
+	std::vector<sim::weapons::SweepHit> take_sweep_hits() { return std::exchange(sweep_hits_, {}); }
 
 	std::optional<sim::Vec3> squad_beacon(uint8_t p_slot, uint8_t p_team, const SquadTable *p_squads) const;
 	std::span<const sim::weapons::Deployable> live() const { return field_.live(); }
@@ -89,6 +91,9 @@ private:
 	LockGuidance guidance_;
 	sim::weapons::LaserPainters painters_;
 	std::vector<sim::weapons::LockCandidate> marked_;
+	sim::weapons::RadarSweeps sweeps_;
+	std::vector<sim::weapons::SweepSubject> sweep_subjects_;
+	std::vector<sim::weapons::SweepHit> sweep_hits_;
 	mutable GadgetStats stats_;
 	sim::Tick tick_ = 0;
 };

@@ -269,6 +269,37 @@ private:
 	std::vector<PaintedTarget> painted_;
 };
 
+struct SweepSubject {
+	uint8_t slot = 0;
+	uint8_t team = 0;
+	Vec3 position{};
+	float speed = 0;
+};
+
+struct SweepHit {
+	uint8_t target = 0;
+	uint8_t owner = 0;
+	uint16_t sensor = 0;
+};
+
+bool sweeps(const RadarSweepDef &p_sweep, const Deployable &p_sensor, const SweepSubject &p_subject);
+
+class RadarSweeps {
+public:
+	void step(std::span<const GadgetDef> p_defs, std::span<const Deployable> p_live,
+			std::span<const SweepSubject> p_subjects, std::vector<SweepHit> &r_hits);
+	uint64_t sweep_count() const { return sweeps_; }
+	void clear() { sensors_.clear(); }
+
+private:
+	struct Sensor {
+		uint16_t id = 0;
+		SimTime timer = 0;
+	};
+	std::vector<Sensor> sensors_;
+	uint64_t sweeps_ = 0;
+};
+
 struct AmmoRefillState {
 	std::array<float, kMaxWeaponSlots> progress{};
 	std::array<Tick, kMaxWeaponSlots> low_since{};

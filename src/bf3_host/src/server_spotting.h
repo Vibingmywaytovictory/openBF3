@@ -38,6 +38,7 @@ public:
 	void reset(size_t p_slot);
 
 	void spot(uint8_t p_spotter, const net::SpotRequest &p_request, std::span<const uint8_t> p_alive);
+	void radar(uint8_t p_target, uint8_t p_spotter, std::span<const uint8_t> p_alive);
 	std::optional<OrderDelivery> order(
 			uint8_t p_issuer, const net::OrderRequest &p_request, std::span<const uint8_t> p_alive);
 	void step(float p_dt, std::span<const uint8_t> p_alive);

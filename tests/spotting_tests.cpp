@@ -224,3 +224,37 @@ TEST_SUITE("spotting-unit") {
 		CHECK_FALSE(timer.scan_due(1.0f, false, true, retail));
 	}
 }
+
+TEST_SUITE("spotting-unit") {
+	TEST_CASE("spotting R2-E1 E: a radar sweep spot sets Radar for Spotting.RadarSweepSpottedTime with the sweeper's "
+			  "owner as the spotter; an Active target only gets its active time back, an Unspottable one nothing") {
+		const sp::TargetDef def = target_def(7.0f, 1.5f);
+		sp::SpotTarget t;
+		CHECK(sp::apply_radar(t, def, 4, sp::kRadarSweepSpottedTime));
+		CHECK(t.state == sp::SpotState::Radar);
+		CHECK(t.remaining == 1.0f);
+		CHECK(t.spotter == 4);
+		t.remaining = 0.25f;
+		CHECK_FALSE(sp::apply_radar(t, def, 4, sp::kRadarSweepSpottedTime));
+		CHECK(t.remaining == 1.0f);
+		sp::SpotTarget passive{ sp::SpotState::Passive, 0.5f, 6 };
+		CHECK(sp::apply_radar(passive, def, 4, sp::kRadarSweepSpottedTime));
+		CHECK(passive.state == sp::SpotState::Radar);
+		CHECK(passive.spotter == 4);
+		sp::SpotTarget active{ sp::SpotState::Active, 2.0f, 6 };
+		CHECK_FALSE(sp::apply_radar(active, def, 4, sp::kRadarSweepSpottedTime));
+		CHECK(active.state == sp::SpotState::Active);
+		CHECK(active.remaining == 7.0f);
+		CHECK(active.spotter == 6);
+		sp::SpotTarget u{ sp::SpotState::Unspottable, 0.0f, sp::kNoSpotter };
+		CHECK_FALSE(sp::apply_radar(u, def, 4, sp::kRadarSweepSpottedTime));
+		CHECK(u.state == sp::SpotState::Unspottable);
+		sp::SpotTarget r;
+		REQUIRE(sp::apply_radar(r, def, 4, sp::kRadarSweepSpottedTime));
+		uint32_t updates = 0;
+		for (uint32_t u30 = 1; u30 < 100 && updates == 0; ++u30) {
+			updates = sp::step_target(r, 1.0f / 30.0f) ? u30 : 0u;
+		}
+		CHECK(updates == 31u);
+	}
+}

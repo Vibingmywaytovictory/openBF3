@@ -127,6 +127,18 @@ void ServerGadgets::step(sim::Tick p_tick, const sim::CollisionWorld *p_world,
 	}
 	field_.expire(p_tick);
 	paint(p_world);
+	sweep_subjects_.clear();
+	for (size_t i = 0; i < p_soldiers.size(); ++i) {
+		const GadgetSoldier &s = p_soldiers[i];
+		if (s.state != nullptr && (s.state->flags & sim::soldier_flags::kAlive) != 0 &&
+				s.state->mode != sim::MoveMode::Dead) {
+			sweep_subjects_.push_back(
+					sw::SweepSubject{ uint8_t(i), s.team, s.state->position, core::vec::length(s.state->velocity) });
+		}
+	}
+	sweeps_.step(field_.defs(), field_.live(), sweep_subjects_, sweep_hits_);
+	stats_.radar_sweeps = sweeps_.sweep_count();
+	stats_.sweep_hits += sweep_hits_.size();
 	receivers_.clear();
 	receiver_slots_.clear();
 	for (size_t i = 0; i < p_soldiers.size() && i < refill_.size(); ++i) {
@@ -272,6 +284,8 @@ void ServerGadgets::owner_died(uint8_t p_slot, sim::Tick p_tick) {
 void ServerGadgets::clear() {
 	field_.clear();
 	painters_.clear();
+	sweeps_.clear();
+	sweep_hits_.clear();
 	pending_.clear();
 	ownerless_.clear();
 }

@@ -1166,6 +1166,10 @@ const GadgetStats &Gunplay::gadget_stats() const {
 	return impl_->gadgets->stats();
 }
 
+std::vector<sw::SweepHit> Gunplay::take_sweep_hits() {
+	return impl_->gadgets->take_sweep_hits();
+}
+
 std::optional<sim::Vec3> Gunplay::squad_beacon(uint8_t p_slot, uint8_t p_team) const {
 	return impl_->gadgets->squad_beacon(p_slot, p_team, impl_->squads);
 }

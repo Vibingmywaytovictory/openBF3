@@ -532,6 +532,9 @@ struct GameServer::Impl {
 			return;
 		}
 		spotting.step(sim::kTickSeconds, alive());
+		for (const sim::weapons::SweepHit &h : combat.gunplay()->take_sweep_hits()) {
+			spotting.radar(h.target, h.owner, alive_mask);
+		}
 		step_bot_spotters(g->level().soldier);
 		for (const auto &[slot, request] : spotting.take_queued_orders()) {
 			order(slot, request);

@@ -99,6 +99,14 @@ void ServerSpotting::spot(uint8_t p_spotter, const net::SpotRequest &p_request, 
 	}
 }
 
+void ServerSpotting::radar(uint8_t p_target, uint8_t p_spotter, std::span<const uint8_t> p_alive) {
+	if (!def_.target_present || p_target >= targets_.size() || !alive_at(p_alive, p_target)) {
+		return;
+	}
+	stats_.radar_spots +=
+			sp::apply_radar(targets_[p_target], def_.target, p_spotter, sp::kRadarSweepSpottedTime) ? 1u : 0u;
+}
+
 std::optional<OrderDelivery> ServerSpotting::order(
 		uint8_t p_issuer, const net::OrderRequest &p_request, std::span<const uint8_t> p_alive) {
 	++stats_.order_requests;
