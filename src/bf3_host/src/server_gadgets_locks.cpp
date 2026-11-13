@@ -104,6 +104,13 @@ std::optional<net::OwnLock> own_lock_wire(const sw::WeaponLockState &p_lock) {
 	return w;
 }
 
+void ServerGadgets::reset_lock(uint8_t p_slot) {
+	if (p_slot < locks_.size()) {
+		locks_[p_slot] = sw::WeaponLockState();
+		lock_defs_[p_slot] = sw::kNoWeapon;
+	}
+}
+
 const sw::WeaponLockState &ServerGadgets::lock(uint8_t p_slot) const {
 	return p_slot < locks_.size() ? locks_[p_slot] : kNoLock;
 }

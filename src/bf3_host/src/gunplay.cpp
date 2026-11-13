@@ -522,6 +522,9 @@ struct Gunplay::Impl {
 		s.weapons.next_shot_index = old.next_shot_index;
 		s.weapons.tick = old.tick;
 		s.shot_last_tick = false;
+		if (gadgets != nullptr) {
+			gadgets->reset_lock(p_slot);
+		}
 	}
 };
 

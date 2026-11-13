@@ -8088,6 +8088,16 @@ TEST_SUITE("host-gadgets-guided") {
 		CHECK(first == doctest::Approx(full));
 		CHECK(second < first);
 		CHECK(m->server.gunplay()->gadget_stats().guided_launches == launches + 2u);
+		REQUIRE(m->until([&] { return m->server.gunplay()->lock_state(uint8_t(gunner.slot())).locked(); }, 600));
+		m->server.on_receive(gunner.peer(), net::kChannelReliable, net::encode_suicide_request());
+		REQUIRE(m->until([&] { return !is_alive(m->state(gunner.slot())); }, 60));
+		m->ticks(2);
+		const sw::WeaponLockState dead = m->server.gunplay()->lock_state(uint8_t(gunner.slot()));
+		CHECK_FALSE(dead.locked());
+		CHECK(dead.primary.target == sw::kNoLockTarget);
+		CHECK(dead.secondary.target == sw::kNoLockTarget);
+		REQUIRE(gunner.last_snapshot.has_value());
+		CHECK_FALSE(gunner.last_snapshot->own_lock.has_value());
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }

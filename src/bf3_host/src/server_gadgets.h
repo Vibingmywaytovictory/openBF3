@@ -54,6 +54,7 @@ public:
 	bool aim_lock(uint8_t p_slot, uint8_t p_team, uint16_t p_def, uint8_t p_variant, const sim::Vec3 &p_eye,
 			const sim::Vec3 &p_forward, bool p_zoom, const sim::CollisionWorld *p_world);
 	uint32_t launch_target(uint8_t p_slot, uint16_t p_def, uint8_t p_variant);
+	void reset_lock(uint8_t p_slot);
 	const sim::weapons::WeaponLockState &lock(uint8_t p_slot) const;
 	const sim::weapons::GuidanceTargets &guidance() const { return guidance_; }
 

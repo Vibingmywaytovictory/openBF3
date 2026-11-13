@@ -230,10 +230,7 @@ void ServerGadgets::forget(uint8_t p_slot) {
 	if (p_slot < refill_.size()) {
 		refill_[p_slot] = sw::AmmoRefillState();
 	}
-	if (p_slot < locks_.size()) {
-		locks_[p_slot] = sw::WeaponLockState();
-		lock_defs_[p_slot] = sw::kNoWeapon;
-	}
+	reset_lock(p_slot);
 }
 
 void ServerGadgets::owner_left(uint8_t p_slot) {
