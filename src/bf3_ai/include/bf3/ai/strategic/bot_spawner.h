@@ -85,8 +85,6 @@ public:
 	int find_suitable_kit(const SpawnObjective *p_object, int p_side, SpawnBot &r_bot);
 	int random_kit();
 	const SquadMember *squad_leader_to_follow(const SquadMember *p_member);
-	bool follows_squad(const SquadMember *p_member) const;
-	const SquadMember *squad_mate_to_follow(const SquadMember *p_member) const;
 
 	const std::vector<SpawnChoice> &point_weights() const { return point_weights_; }
 

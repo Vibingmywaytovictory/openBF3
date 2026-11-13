@@ -100,31 +100,6 @@ const SquadMember *BotSpawner::squad_leader_to_follow(const SquadMember *p_membe
 	return nullptr;
 }
 
-bool BotSpawner::follows_squad(const SquadMember *p_member) const {
-	return p_member != nullptr && p_member->squad().number_of_squad_members() > 1;
-}
-
-const SquadMember *BotSpawner::squad_mate_to_follow(const SquadMember *p_member) const {
-	if (p_member == nullptr) {
-		return nullptr;
-	}
-	const SquadCoordinator &squad = p_member->squad();
-	const SquadMember *const leader = squad.squad_leader();
-	const auto ready = [&](const SquadMember *p_mate) {
-		return p_mate != nullptr && p_mate != p_member && p_mate->player().is_alive() &&
-				!p_mate->player().is_man_down();
-	};
-	if (ready(leader)) {
-		return leader;
-	}
-	for (int i = 0; i < squad.number_of_squad_members(); ++i) {
-		if (ready(squad.squad_member(i))) {
-			return squad.squad_member(i);
-		}
-	}
-	return nullptr;
-}
-
 bool BotSpawner::find_suitable_spawn_group(int p_strategic_object_id, SpawnBot &r_bot) {
 	SpawnGame &game = *services_.game;
 	const int side = r_bot.side();

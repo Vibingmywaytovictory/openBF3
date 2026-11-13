@@ -39,6 +39,7 @@ constexpr uint32_t kPaceTicks = 1200 * 60;
 constexpr uint32_t kPaceFullTicks = 60 * 60;
 constexpr int kCohesionKills = 50;
 constexpr int kSquadsOffKills = 25;
+constexpr float kOnMateMetres = 2.0f;
 
 struct ActivityLog final : host::TdmBotObserver {
 	std::array<host::TdmBotActivity, kSlots> activity{};
@@ -70,7 +71,7 @@ struct Cohesion {
 	std::vector<float> distances;
 	uint64_t samples = 0, near = 0;
 	uint32_t bots = 0, unsquadded = 0, oversized = 0;
-	uint64_t squad_spawns = 0, spawns = 0;
+	uint64_t squad_spawns = 0, spawns = 0, on_leader = 0, on_member = 0;
 	tt::TdmRunResult result;
 	std::string error;
 };
@@ -87,12 +88,39 @@ Cohesion run_cohesion(const tt::TdmLevel &p_level, uint64_t p_seed, bool p_squad
 	std::array<uint8_t, kSlots> seen{};
 	std::array<uint32_t, kSlots> origin_life{};
 	std::array<sim::Vec3, kSlots> origin{};
+	std::array<uint32_t, kSlots> spawned_life{};
+	uint64_t squad_spawns_seen = 0;
 	c.on_tick = [&](sim::Tick, host::GameServer &r_server, tt::ScriptedPeer *) {
 		const host::TdmRules *rules = r_server.rules();
 		if (rules == nullptr || rules->phase() != net::MatchPhase::InRound) {
 			return;
 		}
 		const host::SquadTable &squads = rules->squads();
+		const bool one_squad_spawn = rules->stats().squad_spawns == squad_spawns_seen + 1u;
+		squad_spawns_seen = rules->stats().squad_spawns;
+		std::vector<uint8_t> fresh;
+		for (const net::PlayerRow &row : rules->players()) {
+			const sim::SoldierState *self = row.slot < kSlots ? r_server.soldier(row.slot) : nullptr;
+			if (row.bot && tt::is_alive(self) && spawned_life[row.slot] != self->life + 1u) {
+				spawned_life[row.slot] = self->life + 1u;
+				fresh.push_back(row.slot);
+			}
+		}
+		if (one_squad_spawn && fresh.size() == 1u) {
+			const uint8_t slot = fresh.front();
+			const sim::SoldierState *self = r_server.soldier(slot);
+			const std::span<const uint8_t> members = squads.members(squads.team_of(slot), squads.squad_of(slot));
+			const auto beside = [&](uint8_t p_mate) {
+				const sim::SoldierState *mate = r_server.soldier(p_mate);
+				return p_mate != slot && tt::is_alive(mate) &&
+						tt::distance(mate->position, self->position) <= kOnMateMetres;
+			};
+			if (!members.empty() && beside(members.front())) {
+				++out.on_leader;
+			} else if (members.size() > 1u && std::any_of(members.begin() + 1, members.end(), beside)) {
+				++out.on_member;
+			}
+		}
 		for (const net::PlayerRow &row : rules->players()) {
 			if (!row.bot || row.slot >= kSlots || seen[row.slot] != 0) {
 				continue;
@@ -360,11 +388,12 @@ TEST_SUITE("host-tdm-squads") {
 			const double near = run.samples > 0 ? double(run.near) / double(run.samples) : 0.0;
 			std::printf("host.tdm.squads seed %zu: %u bots, %u without a squad, %u in an oversized squad; %llu member "
 						"ticks outside a fight with the leader away from where it deployed, "
-						"median %.1f m to the leader, %.1f %% within %.0f m; spawns %llu, on a squad mate %llu; kills "
-						"%d / %d in %u ticks\n",
+						"median %.1f m to the leader, %.1f %% within %.0f m; spawns %llu, on a squad mate %llu (beside "
+						"the leader %llu, beside another member %llu); kills %d / %d in %u ticks\n",
 					i + 1, run.bots, run.unsquadded, run.oversized, (unsigned long long)run.samples, median,
 					100.0 * near, host::kSquadNearMetres, (unsigned long long)run.spawns,
-					(unsigned long long)run.squad_spawns, run.result.kills[1], run.result.kills[2], run.result.ticks);
+					(unsigned long long)run.squad_spawns, (unsigned long long)run.on_leader,
+					(unsigned long long)run.on_member, run.result.kills[1], run.result.kills[2], run.result.ticks);
 			CHECK(run.result.failure.empty());
 			CHECK(run.result.round_over);
 			CHECK(run.bots == 32u);
@@ -374,6 +403,8 @@ TEST_SUITE("host-tdm-squads") {
 			CHECK(median <= kMedianMetres);
 			CHECK(near >= kNearShare);
 			CHECK(run.squad_spawns > 0u);
+			CHECK(run.on_leader > 0u);
+			CHECK(run.on_member == 0u);
 		}
 	}
 	TEST_CASE("host-tdm-squads: install unchanged") {
