@@ -41,6 +41,13 @@ constexpr float kOffLine = 1.5f;
 constexpr const char *kJeep = "vehicles/growleritv/growleritv";
 constexpr const char *kTank = "vehicles/m1a2/m1abrams";
 constexpr double kZoomSettle = 0.5;
+constexpr double kTankThrottle = 3.0;
+constexpr double kTankSteer = 2.0;
+constexpr float kTankTurnDegrees = 10.0f;
+
+float heading(const std::array<float, 4> &p_q) {
+	return std::atan2(2.0f * (p_q[0] * p_q[2] + p_q[3] * p_q[1]), 1.0f - 2.0f * (p_q[0] * p_q[0] + p_q[1] * p_q[1]));
+}
 
 float speed(const sim::Vec3 &p_v) {
 	return std::sqrt(p_v[0] * p_v[0] + p_v[1] * p_v[1] + p_v[2] * p_v[2]);
@@ -476,6 +483,54 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			row("unzoom", seat.has_value() && std::fabs(fov - regular_fov_) < 0.01f,
 					fmt("camera FOV %.2f deg %.1f s after the zoom key's release, regular %.2f deg", double(fov),
 							kZoomSettle, double(regular_fov_)));
+			const host::PresentedVehicle *v = presented(f, spawner_);
+			if (v == nullptr) {
+				return fail("tank_drive", "the M1A2 went away");
+			}
+			start_x_ = v->com_position[0];
+			start_z_ = v->com_position[2];
+			start_heading_ = heading(v->rotation);
+			heading_x_ = std::sin(start_heading_);
+			heading_z_ = std::cos(start_heading_);
+			mapper.script_hold(InputMapper::VehicleAction::Throttle, true);
+			enter(Phase::TankDrive);
+			return false;
+		}
+		case Phase::TankDrive: {
+			if (t_ < kTankThrottle) {
+				return false;
+			}
+			const host::PresentedVehicle *v = presented(f, spawner_);
+			if (v == nullptr) {
+				return fail("tank_drive", "the M1A2 went away");
+			}
+			const float dx = v->com_position[0] - start_x_, dz = v->com_position[2] - start_z_;
+			const float along = dx * heading_x_ + dz * heading_z_;
+			const float off = std::fabs(dx * heading_z_ - dz * heading_x_);
+			row("tank_drive", seat.has_value() && seat->seat == 0 && along > kDriveMetres && off < kOffLine,
+					fmt("%.1f m along its heading, %.2f m off it, %.1f km/h, gear %d after %.1f s of throttle",
+							double(along), double(off), double(3.6f * speed(v->linear_velocity)), int(v->gear),
+							kTankThrottle));
+			shoot(p_in, "tank_drive");
+			start_heading_ = heading(v->rotation);
+			mapper.script_hold(InputMapper::VehicleAction::SteerRight, true);
+			enter(Phase::TankTurn);
+			return false;
+		}
+		case Phase::TankTurn: {
+			if (t_ < kTankSteer) {
+				return false;
+			}
+			const host::PresentedVehicle *v = presented(f, spawner_);
+			if (v == nullptr) {
+				return fail("tank_turn", "the M1A2 went away");
+			}
+			const float turned = std::remainder(heading(v->rotation) - start_heading_, sim::kTwoPi) / sim::kPi * 180.0f;
+			row("tank_turn", seat.has_value() && turned < -kTankTurnDegrees,
+					fmt("heading %+.1f deg after %.1f s of throttle and the right steer key, %.1f km/h", double(turned),
+							kTankSteer, double(3.6f * speed(v->linear_velocity))));
+			shoot(p_in, "tank_turn");
+			mapper.release_all();
 			phase_ = Phase::Done;
 			return true;
 		}
