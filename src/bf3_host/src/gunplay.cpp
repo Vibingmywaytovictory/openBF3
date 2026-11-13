@@ -1033,7 +1033,7 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 					d.time = e.time;
 					++m.stats.deaths;
 					m.clear(uint8_t(victim));
-					m.gadgets->owner_died(uint8_t(victim));
+					m.gadgets->owner_died(uint8_t(victim), p_tick);
 					m.tick_deaths.push_back(d);
 					r_sink.death(d);
 				}
@@ -1051,7 +1051,7 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 		d.time = sw::tick_end(p_tick);
 		++m.stats.deaths;
 		m.clear(slot);
-		m.gadgets->owner_died(slot);
+		m.gadgets->owner_died(slot, p_tick);
 		m.tick_deaths.push_back(d);
 		r_sink.death(d);
 	}

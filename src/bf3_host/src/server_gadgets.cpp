@@ -237,8 +237,8 @@ void ServerGadgets::owner_left(uint8_t p_slot) {
 	}
 }
 
-void ServerGadgets::owner_died(uint8_t p_slot) {
-	field_.orphan_packs(p_slot, tick_);
+void ServerGadgets::owner_died(uint8_t p_slot, sim::Tick p_tick) {
+	field_.orphan_packs(p_slot, p_tick);
 }
 
 void ServerGadgets::clear() {

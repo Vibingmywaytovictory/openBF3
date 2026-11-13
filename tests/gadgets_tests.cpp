@@ -621,3 +621,41 @@ TEST_SUITE("gadgets-unit") {
 		CHECK(field.live()[0].owner_left);
 	}
 }
+
+TEST_SUITE("gadgets-unit") {
+	TEST_CASE("life: an owner's packs left behind by his death still count toward MaxCount, the oldest replaced, and "
+			  "are marked left when he then leaves") {
+		GadgetDef mine = medkit_def();
+		mine.weapon = "mine";
+		mine.kind = GadgetKind::ExplosionPack;
+		mine.def = 8;
+		mine.max_count = 2;
+		mine.max_attach_inclination_deg = 180.0f;
+		std::unique_ptr<CollisionWorld> w = floor_and_wall();
+		GadgetField field({ mine });
+		GadgetThrow t;
+		t.def = 8;
+		t.owner = 4;
+		t.team = 2;
+		t.origin = Vec3{ 0.0f, 0.5f, 0.0f };
+		t.direction = Vec3{ 0.0f, -1.0f, 0.0f };
+		uint16_t first = 0, second = 0, third = 0;
+		REQUIRE(field.deploy(t, w.get(), &first) == DeployOutcome::Thrown);
+		REQUIRE(field.deploy(t, w.get(), &second) == DeployOutcome::Thrown);
+		CHECK(field.orphan_packs(4, 50) == 2u);
+		REQUIRE(field.deploy(t, w.get(), &third) == DeployOutcome::Thrown);
+		CHECK(field.find(first) == nullptr);
+		CHECK(field.find(second) != nullptr);
+		CHECK(field.stats().replaced == 1u);
+		CHECK(field.live().size() == 2u);
+		field.owner_gone(4, 60);
+		for (const Deployable &d : field.live()) {
+			CHECK(d.owner_gone);
+			CHECK(d.owner_left);
+		}
+		t.owner = 4;
+		uint16_t fresh = 0;
+		REQUIRE(field.deploy(t, w.get(), &fresh) == DeployOutcome::Thrown);
+		CHECK(field.live().size() == 3u);
+	}
+}

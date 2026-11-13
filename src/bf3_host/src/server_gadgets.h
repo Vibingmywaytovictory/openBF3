@@ -44,7 +44,7 @@ public:
 			const sim::weapons::HitTargetProvider &p_targets, sim::weapons::ProjectileStepOutput &r_out);
 	void forget(uint8_t p_slot);
 	void owner_left(uint8_t p_slot);
-	void owner_died(uint8_t p_slot);
+	void owner_died(uint8_t p_slot, sim::Tick p_tick);
 	bool ownerless(uint32_t p_shot_index) const;
 	void clear();
 

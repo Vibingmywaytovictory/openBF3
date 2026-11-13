@@ -402,10 +402,10 @@ DeployOutcome GadgetField::deploy(const GadgetThrow &p_throw, const CollisionWor
 	}
 	size_t owned = 0;
 	for (const Deployable &o : live_) {
-		owned += o.owner == d.owner && o.def == d.def && !o.owner_gone ? 1u : 0u;
+		owned += o.owner == d.owner && o.def == d.def && !o.owner_left ? 1u : 0u;
 	}
 	for (size_t i = 0; owned >= g->max_count && i < live_.size();) {
-		if (live_[i].owner == d.owner && live_[i].def == d.def && !live_[i].owner_gone) {
+		if (live_[i].owner == d.owner && live_[i].def == d.def && !live_[i].owner_left) {
 			erase_at(i);
 			--owned;
 			++stats_.replaced;
@@ -553,7 +553,10 @@ size_t GadgetField::owner_gone(uint8_t p_owner, Tick p_tick) {
 	size_t removed = 0;
 	for (size_t i = 0; i < live_.size();) {
 		Deployable &d = live_[i];
-		if (d.owner != p_owner || d.owner_gone) {
+		if (d.owner != p_owner) {
+			++i;
+		} else if (d.owner_gone) {
+			d.owner_left = true;
 			++i;
 		} else if (defs_[d.gadget].kind == GadgetKind::SpawnBeacon) {
 			erase_at(i);

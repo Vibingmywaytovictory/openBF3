@@ -6963,8 +6963,8 @@ TEST_SUITE("host-gunplay-gadgets") {
 		const float lived = float(m->now() - died) * sim::kTickSeconds;
 		std::printf("C4: its owner died at tick %u; it stayed %.2f s and went without a blast\n", unsigned(died),
 				double(lived));
-		CHECK(lived > 4.95f);
-		CHECK(lived < 5.05f);
+		CHECK(lived >= 5.0f);
+		CHECK(lived < 5.0f + 1.5f * sim::kTickSeconds);
 		CHECK(m->server.gunplay()->gadget_stats().pack_detonations == 0u);
 	}
 
