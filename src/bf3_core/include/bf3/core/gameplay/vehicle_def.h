@@ -39,6 +39,7 @@ struct VehicleCameraDef {
 	float field_of_view = 0;
 	bool first_person = false;
 	core::Transform transform;
+	int turret = -1;
 
 	float left_yaw = 0, right_yaw = 0, up_pitch = 0, down_pitch = 0;
 	std::optional<ChaseCameraDef> chase;

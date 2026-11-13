@@ -2365,6 +2365,39 @@ TEST_SUITE("tables") {
 		CHECK(mi28_gunner->zoom_fade_out == Approx(0.05));
 		CHECK(mi28_gunner->zoom_black == Approx(0.05));
 		CHECK(mi28_gunner->zoom_fade_in == Approx(0.05));
+		REQUIRE(m1.seats.size() == 2);
+		CHECK(m1.seats[0].cameras.size() == 2);
+		const VehicleCameraDef *m1_gunner = alternate(m1, 0);
+		REQUIRE(m1_gunner != nullptr);
+		CHECK(m1_gunner->camera == "vehicles/common/1ptank_cameraconfig");
+		CHECK(m1_gunner->first_person);
+		CHECK(*m1_gunner->zoom_field_of_view == Approx(20));
+		CHECK(m1_gunner->zoom_fov_transition_time == Approx(0));
+		CHECK(m1_gunner->zoom_fade_to_black);
+		CHECK(m1_gunner->zoom_fade_out == Approx(0.1));
+		CHECK(m1_gunner->zoom_black == Approx(0.03));
+		CHECK(m1_gunner->zoom_fade_in == Approx(0.03));
+		REQUIRE(m1_gunner->turret >= 0);
+		CHECK(m1.turrets[size_t(m1_gunner->turret)].seat == 0);
+		for (const VehicleCameraDef &c : driver.cameras) {
+			CHECK(c.turret == -1);
+		}
+		const VehicleCameraDef *m1_remote = alternate(m1, 1);
+		REQUIRE(m1_remote != nullptr);
+		CHECK(m1_remote->field_of_view == Approx(37.5));
+		CHECK(*m1_remote->zoom_field_of_view == Approx(20));
+		CHECK_FALSE(m1_remote->zoom_fade_to_black);
+		const VehicleCameraDef *growler_gunner = alternate(growler, 1);
+		REQUIRE(growler_gunner != nullptr);
+		CHECK(*growler_gunner->zoom_field_of_view == Approx(22));
+		CHECK(growler_gunner->zoom_fov_transition_time == Approx(0.1));
+		const VehicleDef pantsir = vehicle(*lib, "vehicles/pantsir/pantsir-s1");
+		const VehicleCameraDef *pantsir_gunner = alternate(pantsir, 0);
+		REQUIRE(pantsir_gunner != nullptr);
+		CHECK(pantsir_gunner->zoom_fade_to_black);
+		CHECK(pantsir_gunner->zoom_fade_out == Approx(0.05));
+		CHECK(pantsir_gunner->zoom_black == Approx(0.1));
+		CHECK(pantsir_gunner->zoom_fade_in == Approx(0.05));
 		for (const char *aa : { "vehicles/centurion_c-ram/centurion_c-ram", "vehicles/pantsir/pantsir-s1" }) {
 			CAPTURE(aa);
 			const VehicleDef v = vehicle(*lib, aa);

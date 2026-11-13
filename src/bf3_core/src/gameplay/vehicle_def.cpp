@@ -147,6 +147,14 @@ public:
 		return -1;
 	}
 
+	int camera_seat(int p_at) const {
+		if (const int seat = enclosing(p_at, Role::Seat); seat >= 0) {
+			return seat;
+		}
+		const int turret = enclosing(p_at, Role::Turret);
+		return turret >= 0 ? seat_of(turret) : -1;
+	}
+
 private:
 	std::vector<int> first_seat_;
 	std::vector<int> first_turret_;
@@ -464,13 +472,14 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 				out.component_meshes.emplace_back(mesh, model_transform(node.frame));
 			}
 		} else if (node.role == Role::Camera) {
-			const int seat = seat_index(layout.enclosing(at, Role::Seat));
+			const int seat = seat_index(layout.camera_seat(at));
 			if (seat >= 0) {
 				Result<VehicleCameraDef> camera = read_camera(budget, p_db, node.data);
 				if (!camera) {
 					return error_at("vehicle " + name, camera.error());
 				}
 				camera->transform = model_transform(node.frame);
+				camera->turret = turret_index(layout.enclosing(at, Role::Turret));
 				out.seats[static_cast<size_t>(seat)].cameras.push_back(std::move(*camera));
 			}
 		}

@@ -505,11 +505,11 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 		return out;
 	}
 	chase_key_.reset();
-	if (c.left_yaw > 0.0f || c.right_yaw > 0.0f) {
+	if (c.turret < 0 && (c.left_yaw > 0.0f || c.right_yaw > 0.0f)) {
 		out.left_yaw = c.left_yaw * core::kDegToRadF;
 		out.right_yaw = c.right_yaw * core::kDegToRadF;
 	}
-	if (c.up_pitch > 0.0f || c.down_pitch > 0.0f) {
+	if (c.turret < 0 && (c.up_pitch > 0.0f || c.down_pitch > 0.0f)) {
 		out.up_pitch = c.up_pitch * core::kDegToRadF;
 		out.down_pitch = c.down_pitch * core::kDegToRadF;
 	}
