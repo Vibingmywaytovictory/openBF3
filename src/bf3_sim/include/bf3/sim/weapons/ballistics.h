@@ -5,6 +5,7 @@
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/damage.h"
+#include "bf3/sim/weapons/guidance.h"
 #include "bf3/sim/weapons/hit_target.h"
 #include "bf3/sim/weapons/sim_time.h"
 #include "bf3/sim/weapons/weapon_sim.h"
@@ -49,6 +50,7 @@ struct Projectile {
 	uint8_t passes = 0;
 	uint8_t variant = 0;
 	uint8_t reserved = 0;
+	MissileGuide guide{};
 };
 static_assert(std::is_trivially_copyable_v<Projectile>);
 
@@ -128,6 +130,8 @@ public:
 
 	void step(Tick p_tick, const CollisionWorld &p_world, const HitTargetProvider &p_targets, ProjectileStepOutput &r_out);
 
+	void set_guidance(const GuidanceTargets *p_targets) { guidance_ = p_targets; }
+
 	std::span<const Projectile> live() const { return live_; }
 	size_t refused() const { return refused_; }
 	const WeaponTable &table() const { return *table_; }
@@ -137,6 +141,7 @@ private:
 	BallisticsLimits limits_;
 	std::vector<Projectile> live_;
 	size_t refused_ = 0;
+	const GuidanceTargets *guidance_ = nullptr;
 };
 
 void explode(const WeaponTable &p_table, const CollisionWorld &p_world, const HitTargetProvider &p_targets,

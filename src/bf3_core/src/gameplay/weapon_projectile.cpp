@@ -1,5 +1,9 @@
 #include "weapon_readers.h"
 
+#include <array>
+#include <string_view>
+#include <utility>
+
 namespace bf3::core::gameplay::detail {
 
 void read_explosion(Fields &r_f, const EbxInstance &p_e, Explosion &r_out) {
@@ -22,6 +26,56 @@ void read_explosion(Fields &r_f, const EbxInstance &p_e, Explosion &r_out) {
 
 	if (p_e.get("MaterialPair")) {
 		r_out.material = r_f.material_pair(e, "MaterialPair");
+	}
+}
+
+LockType lock_type_from(std::string_view p_name) {
+	static constexpr std::array<std::pair<std::string_view, LockType>, 6> kNames{ {
+			{ "LockAlways", LockType::Always },
+			{ "LockOnRadar", LockType::Radar },
+			{ "LockOnHeat", LockType::Heat },
+			{ "LockOnLaserPainted", LockType::LaserPainted },
+			{ "LockNever", LockType::Never },
+			{ "LockTypeCount", LockType::Count },
+	} };
+	for (const auto &[name, type] : kNames) {
+		if (name == p_name) {
+			return type;
+		}
+	}
+	return LockType::Count;
+}
+
+void read_locking_controller(Fields &r_f, const EbxInstance &p_controller, LockingController &r_out) {
+	const EbxStruct c = p_controller.data();
+	r_out.present = true;
+	r_out.lock_time = r_f.f32(c, "LockTime");
+	r_out.release_time = r_f.f32(c, "ReleaseTime");
+	r_out.release_on_new_target_time = r_f.f32(c, "ReleaseOnNewTargetTime");
+	r_out.sample_rate = r_f.f32(c, "SampleRate");
+	r_out.minimum_lock_time = r_f.f32(c, "MinimumLockTime");
+	r_out.ray_length = r_f.f32(c, "RayLength");
+	r_out.acceptance_angle = r_f.f32(c, "AcceptanceAngle");
+	r_out.angle_constant = r_f.f32(c, "AngleConstant");
+	r_out.distance_constant = r_f.f32(c, "DistanceConstant");
+	r_out.sensitivity = r_f.f32(c, "Sensitivity");
+	r_out.hold_still_threshold = r_f.f32(c, "HoldStillThreshold");
+	r_out.lock_on_empty_vehicles = r_f.flag(c, "LockOnEmptyVehicles");
+	r_out.lock_on_visible_targets_only = r_f.flag(c, "LockOnVisibleTargetsOnly");
+	r_out.ignore_height_lock_distance = r_f.flag(c, "IgnoreHeigthLockDistance");
+	r_out.position_only = r_f.flag(c, "PositionOnly");
+	r_out.zoom_locks.clear();
+	const OptionalEbxArray levels = r_f.array(c, "ZoomLevelLock");
+	if (!levels) {
+		return;
+	}
+	for (const EbxValue element : *levels) {
+		const std::optional<EbxStruct> level = element.as_struct();
+		if (!level) {
+			r_f.fail(r_f.where(c, "ZoomLevelLock") + ": element is not a struct");
+			return;
+		}
+		r_out.zoom_locks.push_back(lock_type_from(r_f.enum_text(*level, "LockType")));
 	}
 }
 
@@ -93,6 +147,28 @@ void read_projectile(Fields &r_f, const EbxInstance &p_projectile, ProjectileDef
 			r_projectile.max_turn_angle = r_f.f32_or(p, "MaxTurnAngle", 0);
 			r_projectile.time_to_activate_guiding = r_f.f32_or(p, "TimeToActivateGuidingSystem", 0);
 			r_projectile.apply_gravity_when_guided = r_f.flag(p, "ApplyGravityWhenGuided");
+			if (const std::optional<EbxStruct> u = r_f.sub(p, "UnguidedData")) {
+				MissileGuidance &g = r_projectile.guidance;
+				if (const std::optional<EbxStruct> at = r_f.sub(*u, "StaticPosition")) {
+					g.static_position = { r_f.f32(*at, "x"), r_f.f32(*at, "y") };
+				}
+				if (const std::optional<EbxStruct> offset = r_f.sub(*u, "TargetPositionOffset")) {
+					g.target_position_offset = { r_f.f32(*offset, "x"), r_f.f32(*offset, "y") };
+				}
+				g.use_static_position = r_f.flag(*u, "UseStaticPosition");
+				g.use_target_position = r_f.flag(*u, "UseTargetPosition");
+			}
+			if (const std::optional<EbxStruct> n = r_f.sub(p, "NearTargetDetonation")) {
+				MissileGuidance &g = r_projectile.guidance;
+				g.detonate_near_target = r_f.flag(*n, "DetonateNearTarget");
+				g.detonation_radius = r_f.f32(*n, "DetonationRadius");
+				g.min_detonation_delay = r_f.f32(*n, "MinDetonationDelay");
+				g.max_detonation_delay = r_f.f32(*n, "MaxDetonationDelay");
+			}
+			if (const std::optional<EbxInstance> c =
+							r_f.follow(p, "LockingController", "LockingControllerData", false)) {
+				read_locking_controller(r_f, *c, r_projectile.guidance.controller);
+			}
 			if (const std::optional<EbxInstance> e = r_f.follow(p, "DudExplosion", "ExplosionEntityData", false)) {
 				read_explosion(r_f, *e, r_projectile.dud_explosion);
 			}

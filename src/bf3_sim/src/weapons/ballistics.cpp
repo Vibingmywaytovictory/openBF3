@@ -23,7 +23,6 @@ constexpr int kMaxSegmentsPerStep = 64;
 constexpr double kRecastSkip = 1e-3;
 constexpr double kBounceLift = 1e-2;
 constexpr float kRaycastBehind = 0.1f;
-constexpr double kMissileDirectionFloor = 1e-6;
 
 struct Env {
 	const WeaponTable &table;
@@ -33,6 +32,7 @@ struct Env {
 	TargetQueryKind kind;
 	WorkBudget &budget;
 	ProjectileStepOutput &out;
+	const GuidanceTargets *guidance = nullptr;
 	DVec3 lo{};
 	DVec3 hi{};
 	bool exhausted = false;
@@ -70,11 +70,34 @@ struct SegmentEnd {
 	DVec3 velocity{};
 	bool rebase = false;
 	bool engine = false;
+	MissileGuide guide{};
+	bool detonate = false;
 };
 
-DVec3 with_speed(const DVec3 &p_v, double p_speed) {
-	const double l = length(p_v);
-	return l > kMissileDirectionFloor ? scale(p_v, p_speed / l) : p_v;
+bool guided(const Projectile &p_p, const ProjectileSimDef &p_d) {
+	return p_d.kind == ProjectileKind::Missile && p_d.guidance.present &&
+			(p_p.guide.target != kNoLockTarget || p_p.guide.has_static);
+}
+
+SegmentEnd guided_update(
+		const Projectile &p_p, const ProjectileSimDef &p_d, SimTime p_until, const GuidanceTargets *p_targets) {
+	SegmentEnd e;
+	e.time = p_until;
+	e.rebase = true;
+	const double dt = units_to_seconds(p_until - p_p.time);
+	const double flight = units_to_seconds(p_until - p_p.spawn_time);
+	std::optional<GuidanceTarget> target;
+	if (p_p.guide.target != kNoLockTarget && p_targets != nullptr) {
+		target = p_targets->guidance_target(p_p.guide.target);
+	}
+	const MissileStep s =
+			step_guided_missile(p_d, p_p.guide, p_p.position, p_p.velocity, flight, dt, p_until, target, p_p.seed);
+	e.velocity = s.velocity;
+	e.position = add(p_p.position, scale(s.velocity, dt));
+	e.engine = s.engine;
+	e.guide = s.guide;
+	e.detonate = s.detonate;
+	return e;
 }
 
 SegmentEnd missile_update(const Projectile &p_p, const ProjectileSimDef &p_d, SimTime p_until) {
@@ -107,7 +130,11 @@ SegmentEnd missile_update(const Projectile &p_p, const ProjectileSimDef &p_d, Si
 	return e;
 }
 
-SegmentEnd next_segment(const Projectile &p_p, const ProjectileSimDef &p_d, SimTime p_limit) {
+SegmentEnd next_segment(const Projectile &p_p, const ProjectileSimDef &p_d, SimTime p_limit,
+		const GuidanceTargets *p_targets = nullptr) {
+	if (guided(p_p, p_d)) {
+		return guided_update(p_p, p_d, p_limit, p_targets);
+	}
 	if (p_d.kind == ProjectileKind::Missile) {
 		return missile_update(p_p, p_d, p_limit);
 	}
@@ -474,7 +501,7 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 				break;
 			}
 		}
-		const SegmentEnd e = next_segment(r_p, d, segment_end);
+		const SegmentEnd e = next_segment(r_p, d, segment_end, r_env.guidance);
 		if (!r_env.charge(1)) {
 			return true;
 		}
@@ -498,6 +525,13 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 				r_p.time = e.time;
 				r_p.position = e.position;
 				r_p.velocity = e.velocity;
+			}
+			if (guided(r_p, d)) {
+				r_p.guide = e.guide;
+			}
+			if (e.detonate) {
+				detonate(r_env, r_p, d, r_p.position, { 0, 1, 0 }, r_p.time, false);
+				return false;
 			}
 			if (r_p.time - r_p.spawn_time >= d.time_to_arm) {
 				r_p.flags = uint8_t(r_p.flags | projectile_flags::kArmed);
@@ -596,6 +630,14 @@ Projectile make_projectile(const WeaponTable &p_table, const ShotEvent &p_shot, 
 	if (wd.projectile.time_to_arm <= 0) {
 		p.flags = projectile_flags::kArmed;
 	}
+	const GuidanceSimDef &g = wd.projectile.guidance;
+	if (wd.projectile.kind == ProjectileKind::Missile && g.present) {
+		p.guide.target = p_shot.lock_target;
+		p.guide.has_static = g.use_static;
+		if (g.use_static) {
+			p.guide.static_point = missile_static_point(p.origin, to_d(p_shot.direction), g.static_position);
+		}
+	}
 	return p;
 }
 
@@ -643,6 +685,7 @@ core::Status ProjectileWorld::spawn(const ShotEvent &p_shot) {
 void ProjectileWorld::step(Tick p_tick, const CollisionWorld &p_world, const HitTargetProvider &p_targets, ProjectileStepOutput &r_out) {
 	WorkBudget budget(limits_.budget_per_step);
 	Env env = make_env(*table_, limits_, p_world, p_targets, TargetQueryKind::Flight, budget, r_out);
+	env.guidance = guidance_;
 	const SimTime t_end = tick_end(p_tick);
 	size_t w = 0;
 	for (size_t i = 0; i < live_.size(); ++i) {

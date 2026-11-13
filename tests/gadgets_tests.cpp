@@ -3,12 +3,18 @@
 #include "bf3/core/math.h"
 #include "bf3/sim/weapons/damage.h"
 #include "bf3/sim/weapons/gadgets.h"
+#include "bf3/sim/weapons/guidance.h"
+#include "bf3/sim/weapons/locking.h"
 #include "bf3/sim/weapons/spread_recoil.h"
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
+#include <optional>
+#include <span>
 #include <vector>
 
 namespace {
@@ -657,5 +663,338 @@ TEST_SUITE("gadgets-unit") {
 		uint16_t fresh = 0;
 		REQUIRE(field.deploy(t, w.get(), &fresh) == DeployOutcome::Thrown);
 		CHECK(field.live().size() == 3u);
+	}
+}
+
+namespace {
+
+constexpr SimTime kUpdate = 2 * kTimeUnitsPerTick;
+
+LockingControllerSimDef lock_controller(double p_lock_s, double p_release_s, double p_new_target_s, double p_sample_s) {
+	LockingControllerSimDef c;
+	c.present = true;
+	c.lock_time = seconds_to_units(p_lock_s);
+	c.release_time = seconds_to_units(p_release_s);
+	c.release_on_new_target_time = seconds_to_units(p_new_target_s);
+	c.sample_rate = seconds_to_units(p_sample_s);
+	c.ray_length = 500.0f;
+	c.acceptance_angle_deg = 10.0f;
+	c.angle_constant = 5.0f;
+	c.distance_constant = 0.1f;
+	c.lock_on_empty_vehicles = true;
+	c.zoom_locks[0] = LockType::Always;
+	c.zoom_lock_count = 1;
+	return c;
+}
+
+LockCandidate candidate_at(uint32_t p_id, const Vec3 &p_position) {
+	LockCandidate c;
+	c.id = p_id;
+	c.team = 2;
+	c.position = p_position;
+	c.aim = core::vec::add(p_position, Vec3{ 0.0f, 1.0f, 0.0f });
+	c.radar = 10.0f;
+	c.heat = -1.0f;
+	return c;
+}
+
+Vec3 off_axis(float p_degrees, float p_distance) {
+	const float r = p_degrees * 3.14159265f / 180.0f;
+	return Vec3{ std::sin(r) * p_distance, 0.0f, std::cos(r) * p_distance };
+}
+
+uint32_t updates_until(const LockingControllerSimDef &p_def, LockState &r_state, const LockAim &p_aim,
+		std::span<const LockCandidate> p_candidates, const std::function<bool(const LockState &)> &p_done,
+		uint32_t p_max) {
+	for (uint32_t i = 1; i <= p_max; ++i) {
+		step_lock(p_def, r_state, p_aim, kUpdate, p_candidates, nullptr);
+		if (p_done(r_state)) {
+			return i;
+		}
+	}
+	return 0;
+}
+
+ProjectileSimDef missile(float p_engine, float p_max_speed, double p_ignition_s, double p_engine_s) {
+	ProjectileSimDef d;
+	d.kind = ProjectileKind::Missile;
+	d.engine_acceleration = p_engine;
+	d.max_speed = p_max_speed;
+	d.engine_ignition = seconds_to_units(p_ignition_s);
+	d.engine_time_to_live = seconds_to_units(p_engine_s);
+	d.guidance.present = true;
+	d.guidance.max_turn_deg_per_s = 30.0f;
+	return d;
+}
+
+double degrees_between(const DVec3 &p_a, const DVec3 &p_b) {
+	const double la = std::sqrt(p_a[0] * p_a[0] + p_a[1] * p_a[1] + p_a[2] * p_a[2]);
+	const double lb = std::sqrt(p_b[0] * p_b[0] + p_b[1] * p_b[1] + p_b[2] * p_b[2]);
+	const double c = (p_a[0] * p_b[0] + p_a[1] * p_b[1] + p_a[2] * p_b[2]) / (la * lb);
+	return std::acos(std::clamp(c, -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
+}
+
+double speed_of(const DVec3 &p_v) {
+	return std::sqrt(p_v[0] * p_v[0] + p_v[1] * p_v[1] + p_v[2] * p_v[2]);
+}
+
+constexpr double kUpdateSeconds = 1.0 / 30.0;
+
+double at_update(int p_n) {
+	return units_to_seconds(p_n * kUpdate);
+}
+
+}
+
+TEST_SUITE("gadgets-unit") {
+	TEST_CASE(
+			"lock: R2-G5 B timing: a held target fills LockTime 2 s at SampleRate 0.1 s (amount 0.5 after 1 s, locked "
+			"at 2 s), is kept ReleaseTime 1 s after it leaves and then falls 1 per LockTime; a better target takes "
+			"over once the release timer is below ReleaseTime - ReleaseOnNewTargetTime") {
+		const LockingControllerSimDef def = lock_controller(2.0, 1.0, 0.5, 0.1);
+		LockAim aim;
+		aim.team = 1;
+		const std::vector<LockCandidate> one{ candidate_at(7, off_axis(4.0f, 100.0f)) };
+		LockState s;
+		CHECK(updates_until(def, s, aim, one, [](const LockState &p_s) { return p_s.samples == 1; }, 10) == 3u);
+		CHECK(s.target == 7u);
+		CHECK(s.timer == 0);
+		CHECK_FALSE(s.locked);
+		CHECK(updates_until(def, s, aim, one, [](const LockState &p_s) { return p_s.samples == 11; }, 100) == 30u);
+		CHECK(s.amount == doctest::Approx(0.5f));
+		CHECK_FALSE(s.locked);
+		CHECK(updates_until(def, s, aim, one, [](const LockState &p_s) { return p_s.locked; }, 100) == 30u);
+		CHECK(s.amount == 1.0f);
+		CHECK(s.release < 0);
+		CHECK(updates_until(def, s, aim, one, [](const LockState &p_s) { return p_s.samples == 22; }, 10) == 3u);
+		CHECK(s.release == def.release_time);
+		const std::vector<LockCandidate> none;
+		CHECK(updates_until(def, s, aim, none, [](const LockState &p_s) { return !p_s.locked; }, 100) == 33u);
+		CHECK(s.amount == doctest::Approx(0.95f));
+		CHECK(s.target == 7u);
+		CHECK(updates_until(
+					  def, s, aim, none, [](const LockState &p_s) { return p_s.target == kNoLockTarget; }, 200) == 60u);
+
+		LockState t;
+		updates_until(def, t, aim, one, [](const LockState &p_s) { return p_s.samples == 22; }, 200);
+		REQUIRE(t.locked);
+		REQUIRE(t.release == def.release_time);
+		const std::vector<LockCandidate> two{ one[0], candidate_at(9, off_axis(0.5f, 100.0f)) };
+		CHECK(updates_until(def, t, aim, two, [](const LockState &p_s) { return p_s.target == 9u; }, 100) == 18u);
+		CHECK(t.timer == 0);
+		CHECK_FALSE(t.locked);
+	}
+
+	TEST_CASE(
+			"lock: R-G5 and R3-G5 E candidates: inside AcceptanceAngle and RayLength, beyond 10 m, in front, of "
+			"another team, occupied or LockOnEmptyVehicles, a signature above 1e-6 for the zoom level's LockType; the "
+			"score weighs angle by AngleConstant and range by DistanceConstant, AcceptanceAngle 0 takes the nearest") {
+		LockingControllerSimDef def = lock_controller(1.5, 1.0, 0.5, 0.06);
+		LockAim aim;
+		aim.team = 1;
+		const auto pick = [&](const std::vector<LockCandidate> &p_c, LockType p_type) -> uint32_t {
+			const LockCandidate *c = pick_lock_candidate(def, p_type, aim, p_c, nullptr);
+			return c == nullptr ? kNoLockTarget : c->id;
+		};
+		CHECK(pick({ candidate_at(1, off_axis(8.0f, 100.0f)) }, LockType::Radar) == 1u);
+		CHECK(pick({ candidate_at(1, off_axis(12.0f, 100.0f)) }, LockType::Radar) == kNoLockTarget);
+		CHECK(pick({ candidate_at(1, off_axis(1.0f, 9.0f)) }, LockType::Radar) == kNoLockTarget);
+		CHECK(pick({ candidate_at(1, off_axis(1.0f, 501.0f)) }, LockType::Radar) == kNoLockTarget);
+		CHECK(pick({ candidate_at(1, off_axis(180.0f, 100.0f)) }, LockType::Always) == kNoLockTarget);
+		LockCandidate mate = candidate_at(1, off_axis(1.0f, 100.0f));
+		mate.team = 1;
+		CHECK(pick({ mate }, LockType::Radar) == kNoLockTarget);
+		CHECK(pick({ candidate_at(1, off_axis(1.0f, 100.0f)) }, LockType::Heat) == kNoLockTarget);
+		CHECK(pick({ candidate_at(1, off_axis(1.0f, 100.0f)) }, LockType::LaserPainted) == kNoLockTarget);
+		LockCandidate painted = candidate_at(1, off_axis(1.0f, 100.0f));
+		painted.painted = true;
+		CHECK(pick({ painted }, LockType::LaserPainted) == 1u);
+		LockCandidate locked_out = candidate_at(1, off_axis(1.0f, 100.0f));
+		locked_out.lockable = false;
+		CHECK(pick({ locked_out }, LockType::Always) == kNoLockTarget);
+		def.lock_on_empty_vehicles = false;
+		CHECK(pick({ candidate_at(1, off_axis(1.0f, 100.0f)) }, LockType::Radar) == kNoLockTarget);
+		LockCandidate crewed = candidate_at(1, off_axis(1.0f, 100.0f));
+		crewed.occupied = true;
+		CHECK(pick({ crewed }, LockType::Radar) == 1u);
+		def.lock_on_empty_vehicles = true;
+		CHECK(pick({ candidate_at(1, off_axis(2.0f, 200.0f)), candidate_at(2, off_axis(4.0f, 50.0f)) },
+					  LockType::Radar) == 1u);
+		def.angle_constant = 0.0f;
+		CHECK(pick({ candidate_at(1, off_axis(2.0f, 200.0f)), candidate_at(2, off_axis(4.0f, 50.0f)) },
+					  LockType::Radar) == 2u);
+		def.acceptance_angle_deg = 0.0f;
+		CHECK(pick({ candidate_at(1, off_axis(60.0f, 200.0f)), candidate_at(2, off_axis(80.0f, 50.0f)) },
+					  LockType::Radar) == 2u);
+
+		LockingControllerSimDef stinger = lock_controller(1.25, 0.5, 1.5, 0.06);
+		stinger.zoom_locks = { LockType::Count, LockType::Heat };
+		stinger.zoom_lock_count = 2;
+		const std::vector<LockCandidate> tank{ candidate_at(3, off_axis(1.0f, 100.0f)) };
+		for (uint8_t zoom = 0; zoom < 2; ++zoom) {
+			aim.zoom = zoom;
+			LockState s;
+			CHECK(updates_until(
+						  stinger, s, aim, tank, [](const LockState &p_s) { return p_s.target != kNoLockTarget; },
+						  300) == 0u);
+		}
+		LockingControllerSimDef javelin = lock_controller(1.5, 1.0, 0.5, 0.06);
+		javelin.zoom_locks = { LockType::Never, LockType::Radar };
+		javelin.zoom_lock_count = 2;
+		LockState j;
+		aim.zoom = 1;
+		CHECK(updates_until(javelin, j, aim, tank, [](const LockState &p_s) { return p_s.locked; }, 300) > 0u);
+		aim.zoom = 0;
+		step_lock(javelin, j, aim, kUpdate, tank, nullptr);
+		CHECK(j.target == kNoLockTarget);
+		CHECK_FALSE(j.locked);
+	}
+
+	TEST_CASE("lock: LockOnVisibleTargetsOnly casts a ray 3 m beyond the target's centre; a wall before the centre "
+			  "hides it, one in the last 3 m does not") {
+		std::unique_ptr<CollisionWorld> w = floor_and_wall();
+		LockingControllerSimDef def = lock_controller(1.5, 1.0, 0.5, 0.06);
+		def.visible_only = true;
+		LockAim aim;
+		aim.team = 1;
+		aim.origin = Vec3{ 16.0f, 1.0f, 0.0f };
+		aim.forward = Vec3{ -1.0f, 0.0f, 0.0f };
+		const std::vector<LockCandidate> front{ candidate_at(1, Vec3{ 4.0f, 0.0f, 0.0f }) };
+		const std::vector<LockCandidate> behind{ candidate_at(2, Vec3{ -5.0f, 0.0f, 0.0f }) };
+		LockStepStats stats;
+		const LockCandidate *a = pick_lock_candidate(def, LockType::Radar, aim, front, w.get(), &stats);
+		CHECK((a != nullptr && a->id == 1u));
+		CHECK(stats.rays == 1u);
+		CHECK(pick_lock_candidate(def, LockType::Radar, aim, behind, w.get()) == nullptr);
+		def.visible_only = false;
+		const LockCandidate *b = pick_lock_candidate(def, LockType::Radar, aim, behind, w.get());
+		CHECK((b != nullptr && b->id == 2u));
+	}
+
+	TEST_CASE("guidance: R2-G4 A test vectors: thrust to MaxSpeed, MaxTurnAngle degrees per second of pure pursuit at "
+			  "constant speed, burnout drag and gravity, the engine timeline, the proximity fuse") {
+		const DVec3 at{ 0.0, 0.0, 0.0 };
+		ProjectileSimDef d = missile(100.0f, 200.0f, 0.0, 10.0);
+		MissileGuide powered;
+		powered.state = MissileState::Powered;
+		const MissileStep a =
+				step_guided_missile(d, powered, at, DVec3{ 0.0, 0.0, 50.0 }, 1.0, kUpdateSeconds, 0, std::nullopt, 1);
+		CHECK(speed_of(a.velocity) == doctest::Approx(53.33333));
+		CHECK(a.engine);
+		const MissileStep b =
+				step_guided_missile(d, powered, at, DVec3{ 0.0, 0.0, 199.0 }, 1.0, kUpdateSeconds, 0, std::nullopt, 1);
+		CHECK(speed_of(b.velocity) == doctest::Approx(200.0));
+
+		d.engine_acceleration = 0.0f;
+		MissileGuide homing;
+		homing.state = MissileState::Homing;
+		homing.target = 5;
+		const std::optional<GuidanceTarget> side =
+				GuidanceTarget{ Vec3{ 1000.0f, 0.0f, 0.0f }, Vec3{ 1000.0f, 0.0f, 0.0f } };
+		const MissileStep c =
+				step_guided_missile(d, homing, at, DVec3{ 0.0, 0.0, 100.0 }, 1.0, kUpdateSeconds, 0, side, 1);
+		CHECK(c.guide.state == MissileState::Homing);
+		CHECK(degrees_between(c.velocity, DVec3{ 0.0, 0.0, 1.0 }) == doctest::Approx(1.0));
+		CHECK(speed_of(c.velocity) == doctest::Approx(100.0));
+		const std::optional<GuidanceTarget> close =
+				GuidanceTarget{ Vec3{ 8.7265f, 0.0f, 1000.0f }, Vec3{ 8.7265f, 0.0f, 1000.0f } };
+		const MissileStep e =
+				step_guided_missile(d, homing, at, DVec3{ 0.0, 0.0, 100.0 }, 1.0, kUpdateSeconds, 0, close, 1);
+		CHECK(degrees_between(e.velocity, DVec3{ 8.7265, 0.0, 1000.0 }) < 1e-4);
+		const MissileStep lost =
+				step_guided_missile(d, homing, at, DVec3{ 0.0, 0.0, 100.0 }, 1.0, kUpdateSeconds, 0, std::nullopt, 1);
+		CHECK(lost.guide.target == kNoLockTarget);
+		CHECK(lost.guide.state == MissileState::Powered);
+
+		ProjectileSimDef spent = missile(100.0f, 200.0f, 0.0, 1.0);
+		spent.drag = 0.5f;
+		spent.gravity = -9.81f;
+		MissileGuide burnt;
+		burnt.state = MissileState::BurntOut;
+		const MissileStep f = step_guided_missile(
+				spent, burnt, at, DVec3{ 0.0, 0.0, 100.0 }, 5.0, kUpdateSeconds, 0, std::nullopt, 1);
+		CHECK(f.velocity[2] == doctest::Approx(99.5));
+		CHECK(f.velocity[1] == doctest::Approx(-0.327));
+		CHECK_FALSE(f.engine);
+
+		const ProjectileSimDef timeline = missile(100.0f, 200.0f, 0.1, 2.0);
+		const MissileGuide g;
+		MissileStep h = step_guided_missile(
+				timeline, g, at, DVec3{ 0.0, 0.0, 10.0 }, at_update(2), kUpdateSeconds, 0, std::nullopt, 1);
+		CHECK(h.guide.state == MissileState::PreIgnition);
+		CHECK_FALSE(h.engine);
+		h = step_guided_missile(timeline, h.guide, at, h.velocity, at_update(3), kUpdateSeconds, 0, std::nullopt, 1);
+		CHECK(h.guide.state == MissileState::Powered);
+		CHECK(h.engine);
+		h = step_guided_missile(timeline, h.guide, at, h.velocity, at_update(63), kUpdateSeconds, 0, std::nullopt, 1);
+		CHECK(h.guide.state == MissileState::Powered);
+		CHECK(h.engine);
+		h = step_guided_missile(timeline, h.guide, at, h.velocity, at_update(64), kUpdateSeconds, 0, std::nullopt, 1);
+		CHECK(h.guide.state == MissileState::BurntOut);
+		CHECK_FALSE(h.engine);
+
+		ProjectileSimDef fused = missile(0.0f, 200.0f, 0.0, 10.0);
+		fused.guidance.near_target = true;
+		fused.guidance.near_radius = 5.0f;
+		fused.guidance.near_min_delay = seconds_to_units(0.1);
+		fused.guidance.near_max_delay = seconds_to_units(0.2);
+		MissileGuide near;
+		near.state = MissileState::Powered;
+		near.target = 5;
+		const std::optional<GuidanceTarget> by = GuidanceTarget{ Vec3{ 0.0f, 0.0f, 4.9f }, Vec3{ 0.0f, 0.0f, 4.9f } };
+		const SimTime now = 1000 * kTimeUnitsPerTick;
+		const MissileStep i =
+				step_guided_missile(fused, near, at, DVec3{ 0.0, 0.0, 10.0 }, 1.0, kUpdateSeconds, now, by, 99);
+		CHECK(i.guide.state == MissileState::Proximity);
+		CHECK(i.guide.detonate_at >= now + seconds_to_units(0.1));
+		CHECK(i.guide.detonate_at <= now + seconds_to_units(0.2));
+		CHECK_FALSE(i.detonate);
+		const MissileStep j =
+				step_guided_missile(fused, i.guide, at, i.velocity, 1.0, kUpdateSeconds, i.guide.detonate_at, by, 99);
+		CHECK_FALSE(j.detonate);
+		const MissileStep k = step_guided_missile(
+				fused, i.guide, at, i.velocity, 1.0, kUpdateSeconds, i.guide.detonate_at + 1, by, 99);
+		CHECK(k.detonate);
+		const std::optional<GuidanceTarget> far = GuidanceTarget{ Vec3{ 0.0f, 0.0f, 5.1f }, Vec3{ 0.0f, 0.0f, 5.1f } };
+		CHECK(step_guided_missile(fused, near, at, DVec3{ 0.0, 0.0, 10.0 }, 1.0, kUpdateSeconds, now, far, 99)
+						.guide.state != MissileState::Proximity);
+	}
+
+	TEST_CASE("guidance: the static point is StaticPosition.x ahead along the level launch direction and .y up, (0, "
+			  "100, 0) for a vertical launch; a top attack steers to the static point, to the target + "
+			  "TargetPositionOffset.y after TimeToActivateGuidingSystem, and homes inside TargetPositionOffset.x") {
+		const DVec3 p = missile_static_point(DVec3{ 10.0, 2.0, 0.0 }, DVec3{ 0.0, -0.5, 2.0 }, { 50.0f, 50.0f });
+		CHECK(p[0] == doctest::Approx(10.0));
+		CHECK(p[1] == doctest::Approx(52.0));
+		CHECK(p[2] == doctest::Approx(50.0));
+		const DVec3 up = missile_static_point(DVec3{ 10.0, 2.0, 0.0 }, DVec3{ 0.0, 1.0, 0.0 }, { 50.0f, 50.0f });
+		CHECK(up == kVerticalStaticPoint);
+
+		ProjectileSimDef d = missile(0.0f, 250.0f, 0.0, 40.0);
+		d.guidance.max_turn_deg_per_s = 360.0f;
+		d.guidance.activate = seconds_to_units(1.75);
+		d.guidance.use_static = true;
+		d.guidance.use_target = true;
+		d.guidance.static_position = { 50.0f, 50.0f };
+		d.guidance.target_offset = { 15.0f, 35.0f };
+		MissileGuide g;
+		g.state = MissileState::Powered;
+		g.target = 3;
+		g.has_static = true;
+		g.static_point = DVec3{ 0.0, 50.0, 50.0 };
+		const std::optional<GuidanceTarget> tank =
+				GuidanceTarget{ Vec3{ 0.0f, 0.0f, 200.0f }, Vec3{ 0.0f, 1.0f, 200.0f } };
+		const MissileStep a =
+				step_guided_missile(d, g, DVec3{}, DVec3{ 0.0, 0.0, 20.0 }, 1.0, kUpdateSeconds, 0, tank, 1);
+		CHECK(a.guide.state == MissileState::StaticPoint);
+		CHECK(degrees_between(a.velocity, DVec3{ 0.0, 0.0, 1.0 }) == doctest::Approx(12.0));
+		const MissileStep b = step_guided_missile(d, a.guide, DVec3{}, a.velocity, 1.8, kUpdateSeconds, 0, tank, 1);
+		CHECK(b.guide.state == MissileState::TargetOffset);
+		const MissileStep c =
+				step_guided_missile(d, b.guide, DVec3{ 0.0, 30.0, 150.0 }, b.velocity, 2.0, kUpdateSeconds, 0, tank, 1);
+		CHECK(c.guide.state == MissileState::TargetOffset);
+		const MissileStep e =
+				step_guided_missile(d, c.guide, DVec3{ 0.0, 30.0, 186.0 }, c.velocity, 2.5, kUpdateSeconds, 0, tank, 1);
+		CHECK(e.guide.state == MissileState::Homing);
 	}
 }

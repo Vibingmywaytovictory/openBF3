@@ -305,6 +305,11 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	out.kill_soldier_collision_speed_threshold = static_cast<float>(number_or(e, "KillSoldierCollisionSpeedThreshold", 0));
 	out.ignore_soldier_collision_normal = boolean(e, "IgnoreSoldierCollisionNormal").value_or(false);
 	out.min_speed_for_mine_activation = static_cast<float>(number_or(e, "MinSpeedForMineActivation", 0));
+	out.lockable = boolean(e, "IsLockable").value_or(false);
+	out.radar_signature = static_cast<float>(number_or(e, "VehicleLockableInfo.RadarSignature", 0));
+	out.heat_signature = static_cast<float>(number_or(e, "VehicleLockableInfo.HeatSignature", 0));
+	out.locking_time_multiplier = static_cast<float>(number_or(e, "LockingTimeMultiplier", 1));
+	out.never_report_empty = boolean(e, "NeverReportVehicleAsEmpty").value_or(false);
 	out.use_prediction = boolean(e, "UsePrediction").value_or(false);
 	Result<std::vector<VehicleInputModifierDef>> disabled = read_disabled_input(p_db, blueprint, *entity, budget);
 	if (!disabled) {

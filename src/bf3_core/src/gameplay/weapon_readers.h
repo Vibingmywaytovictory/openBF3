@@ -25,4 +25,6 @@ void read_fire_function(Fields &r_f, const EbxInstance &p_ffd, FireFunction &r_f
 void read_projectile(Fields &r_f, const EbxInstance &p_projectile, ProjectileDef &r_projectile);
 
 void read_explosion(Fields &r_f, const EbxInstance &p_e, Explosion &r_out);
+
+void read_locking_controller(Fields &r_f, const EbxInstance &p_controller, LockingController &r_out);
 }

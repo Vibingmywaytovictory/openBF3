@@ -4,6 +4,7 @@
 #include "bf3/core/result.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/weapons/hit_target.h"
+#include "bf3/sim/weapons/locking.h"
 #include "bf3/sim/weapons/mechanics.h"
 #include "bf3/sim/weapons/sim_time.h"
 
@@ -106,6 +107,8 @@ struct ProjectileSimDef {
 	float suppression_max = 0;
 	float suppression_min_distance = 0;
 	float suppression_max_distance = 0;
+
+	GuidanceSimDef guidance;
 };
 
 struct FireModeDef {
@@ -182,6 +185,7 @@ struct WeaponSimDef {
 	std::array<Dispersion, 3> pellet_cone{};
 
 	ProjectileSimDef projectile;
+	LockingSimDef locking;
 };
 
 inline constexpr size_t kMaxWeaponVariants = 255;

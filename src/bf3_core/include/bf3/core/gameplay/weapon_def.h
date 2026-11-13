@@ -214,6 +214,52 @@ struct Suppression {
 	float max_distance = 0;
 };
 
+enum class LockType : uint8_t { Always = 0, Radar = 1, Heat = 2, LaserPainted = 3, Never = 4, Count = 5 };
+
+struct LockingController {
+	bool present = false;
+	float lock_time = 0;
+	float release_time = 0;
+	float release_on_new_target_time = 0;
+	float sample_rate = 0;
+	float minimum_lock_time = 0;
+	float ray_length = 0;
+	float acceptance_angle = 0;
+	float angle_constant = 0;
+	float distance_constant = 0;
+	float sensitivity = 0;
+	float hold_still_threshold = 0;
+	bool lock_on_empty_vehicles = false;
+	bool lock_on_visible_targets_only = false;
+	bool ignore_height_lock_distance = false;
+	bool position_only = false;
+	std::vector<LockType> zoom_locks;
+};
+
+struct LockingWeapon {
+	bool present = false;
+	bool fire_only_when_locked = false;
+	bool is_guided = false;
+	bool is_guided_when_zoomed = false;
+	bool is_homing = false;
+	bool laser_painter = false;
+	float time_object_is_painted = 0;
+	LockingController primary;
+	LockingController secondary;
+};
+
+struct MissileGuidance {
+	std::array<float, 2> static_position{};
+	std::array<float, 2> target_position_offset{};
+	bool use_static_position = false;
+	bool use_target_position = false;
+	bool detonate_near_target = false;
+	float detonation_radius = 0;
+	float min_detonation_delay = 0;
+	float max_detonation_delay = 0;
+	LockingController controller;
+};
+
 struct ProjectileDef {
 	ProjectileKind kind = ProjectileKind::None;
 	std::string type;
@@ -248,6 +294,7 @@ struct ProjectileDef {
 	float max_turn_angle = 0;
 	float time_to_activate_guiding = 0;
 	bool apply_gravity_when_guided = false;
+	MissileGuidance guidance;
 
 	float collision_speed_multiplier = 0;
 	float min_bounce_speed = 0;
@@ -312,6 +359,7 @@ struct WeaponDef {
 	ProjectileDef projectile;
 	GunSway sway;
 	WeaponAiming aiming;
+	LockingWeapon locking;
 };
 
 const char *fire_logic_name(FireLogic p_logic);

@@ -151,6 +151,11 @@ struct VehicleDef {
 	float kill_soldier_collision_speed_threshold = 0;
 	bool ignore_soldier_collision_normal = false;
 	float min_speed_for_mine_activation = 0;
+	bool lockable = false;
+	float radar_signature = 0;
+	float heat_signature = 0;
+	float locking_time_multiplier = 1;
+	bool never_report_empty = false;
 	bool use_prediction = false;
 	Explosion explosion;
 	std::string explosion_effect;

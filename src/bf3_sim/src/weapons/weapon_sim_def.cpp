@@ -145,6 +145,84 @@ ExplosionSimDef make_explosion(Checker &r_c, const core::gameplay::Explosion &p_
 	return x;
 }
 
+LockingControllerSimDef make_lock_controller(
+		Checker &r_c, const core::gameplay::LockingController &p_controller, const std::string &p_what) {
+	LockingControllerSimDef o;
+	if (!p_controller.present) {
+		return o;
+	}
+	o.present = true;
+	o.lock_time = r_c.time(p_controller.lock_time, p_what + ".LockTime");
+	o.release_time = r_c.time(p_controller.release_time, p_what + ".ReleaseTime");
+	o.release_on_new_target_time =
+			r_c.time(p_controller.release_on_new_target_time, p_what + ".ReleaseOnNewTargetTime");
+	o.sample_rate = r_c.time(p_controller.sample_rate, p_what + ".SampleRate");
+	o.minimum_lock_time = r_c.time(p_controller.minimum_lock_time, p_what + ".MinimumLockTime");
+	o.ray_length = r_c.range(p_controller.ray_length, 0.0f, kMaxDistance, p_what + ".RayLength");
+	if (!(o.ray_length > 0.0f)) {
+		r_c.fail(p_what + ".RayLength", "is not above 0");
+	}
+	o.acceptance_angle_deg = r_c.range(p_controller.acceptance_angle, 0.0f, 180.0f, p_what + ".AcceptanceAngle");
+	o.angle_constant = r_c.range(p_controller.angle_constant, 0.0f, kMaxFactor, p_what + ".AngleConstant");
+	o.distance_constant = r_c.range(p_controller.distance_constant, 0.0f, kMaxFactor, p_what + ".DistanceConstant");
+	o.lock_on_empty_vehicles = p_controller.lock_on_empty_vehicles;
+	o.visible_only = p_controller.lock_on_visible_targets_only;
+	o.ignore_height = p_controller.ignore_height_lock_distance;
+	o.position_only = p_controller.position_only;
+	if (p_controller.zoom_locks.size() > kMaxZoomLocks) {
+		r_c.fail(p_what + ".ZoomLevelLock",
+				"has " + std::to_string(p_controller.zoom_locks.size()) + " levels (limit " +
+						std::to_string(kMaxZoomLocks) + ")");
+	}
+	o.zoom_lock_count = uint8_t(std::min(p_controller.zoom_locks.size(), kMaxZoomLocks));
+	std::copy_n(p_controller.zoom_locks.begin(), o.zoom_lock_count, o.zoom_locks.begin());
+	return o;
+}
+
+LockingSimDef make_locking(Checker &r_c, const core::gameplay::LockingWeapon &p_locking) {
+	LockingSimDef o;
+	if (!p_locking.present) {
+		return o;
+	}
+	o.present = true;
+	o.fire_only_when_locked = p_locking.fire_only_when_locked;
+	o.guided = p_locking.is_guided;
+	o.guided_when_zoomed = p_locking.is_guided_when_zoomed;
+	o.homing = p_locking.is_homing;
+	o.painter = p_locking.laser_painter;
+	o.painted_time = r_c.time(p_locking.time_object_is_painted, "LaserPainterData.TimeObjectIsPainted");
+	o.primary = make_lock_controller(r_c, p_locking.primary, "LockingController");
+	o.secondary = make_lock_controller(r_c, p_locking.secondary, "SecondaryLockingController");
+	return o;
+}
+
+GuidanceSimDef make_guidance(Checker &r_c, const ProjectileDef &p_projectile) {
+	GuidanceSimDef o;
+	if (p_projectile.kind != ProjectileKind::Missile) {
+		return o;
+	}
+	const core::gameplay::MissileGuidance &g = p_projectile.guidance;
+	o.present = g.use_static_position || g.use_target_position || g.detonate_near_target;
+	o.max_turn_deg_per_s = r_c.range(p_projectile.max_turn_angle, 0.0f, kMaxRate, "MissileEntityData.MaxTurnAngle");
+	o.activate = r_c.time(p_projectile.time_to_activate_guiding, "MissileEntityData.TimeToActivateGuidingSystem");
+	for (size_t i = 0; i < 2; ++i) {
+		o.static_position[i] =
+				r_c.range(g.static_position[i], -kMaxDistance, kMaxDistance, "MissileUnguidedData.StaticPosition");
+		o.target_offset[i] = r_c.range(
+				g.target_position_offset[i], -kMaxDistance, kMaxDistance, "MissileUnguidedData.TargetPositionOffset");
+	}
+	o.use_static = g.use_static_position;
+	o.use_target = g.use_target_position;
+	o.near_target = g.detonate_near_target;
+	o.near_radius = r_c.range(g.detonation_radius, 0.0f, kMaxDistance, "NearTargetDetonationData.DetonationRadius");
+	o.near_min_delay = r_c.time(g.min_detonation_delay, "NearTargetDetonationData.MinDetonationDelay");
+	o.near_max_delay = r_c.time(g.max_detonation_delay, "NearTargetDetonationData.MaxDetonationDelay");
+	if (o.near_min_delay > o.near_max_delay) {
+		r_c.fail("NearTargetDetonationData.MinDetonationDelay", "is above MaxDetonationDelay");
+	}
+	return o;
+}
+
 ProjectileSimDef make_projectile(Checker &r_c, const WeaponDef &p_def, const SurfaceMaterialTable &p_materials) {
 	const FireFunction &f = p_def.fire;
 	const ProjectileDef &p = p_def.projectile;
@@ -438,6 +516,52 @@ template <class G> void def_groups(const WeaponSimDef &p_d, G &&r_group) {
 		r_h.add(p.suppression_min_distance);
 		r_h.add(p.suppression_max_distance);
 	});
+	r_group("projectile guidance", [&](detail::Fnv64 &r_h) {
+		if (!p.guidance.present) {
+			return;
+		}
+		const GuidanceSimDef &g = p.guidance;
+		r_h.add(g.max_turn_deg_per_s);
+		r_h.add(g.activate);
+		r_h.add(g.static_position);
+		r_h.add(g.target_offset);
+		r_h.add(g.use_static);
+		r_h.add(g.use_target);
+		r_h.add(g.near_target);
+		r_h.add(g.near_radius);
+		r_h.add(g.near_min_delay);
+		r_h.add(g.near_max_delay);
+	});
+	r_group("locking", [&](detail::Fnv64 &r_h) {
+		if (!p_d.locking.present) {
+			return;
+		}
+		const LockingSimDef &l = p_d.locking;
+		r_h.add(l.fire_only_when_locked);
+		r_h.add(l.guided);
+		r_h.add(l.guided_when_zoomed);
+		r_h.add(l.homing);
+		r_h.add(l.painter);
+		r_h.add(l.painted_time);
+		for (const LockingControllerSimDef *c : { &l.primary, &l.secondary }) {
+			r_h.add(c->present);
+			r_h.add(c->lock_time);
+			r_h.add(c->release_time);
+			r_h.add(c->release_on_new_target_time);
+			r_h.add(c->sample_rate);
+			r_h.add(c->minimum_lock_time);
+			r_h.add(c->ray_length);
+			r_h.add(c->acceptance_angle_deg);
+			r_h.add(c->angle_constant);
+			r_h.add(c->distance_constant);
+			r_h.add(c->lock_on_empty_vehicles);
+			r_h.add(c->visible_only);
+			r_h.add(c->ignore_height);
+			r_h.add(c->position_only);
+			r_h.add(c->zoom_locks);
+			r_h.add(c->zoom_lock_count);
+		}
+	});
 }
 
 void hash_def(detail::Fnv64 &r_h, const WeaponSimDef &p_d) {
@@ -652,6 +776,10 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 	}
 
 	d.projectile = make_projectile(c, p_def, p_materials);
+	d.projectile.guidance = make_guidance(c, p_def.projectile);
+	d.locking = make_locking(c, p_def.locking);
+	d.projectile.guidance.present =
+			d.projectile.guidance.present || (d.locking.present && d.projectile.kind == ProjectileKind::Missile);
 	if (!c.ok()) {
 		return c.error();
 	}

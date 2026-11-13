@@ -19,6 +19,7 @@ enum class RngPurpose : uint8_t {
 	PelletAngle = 3,
 	RecoilHorizontal = 4,
 	FuseVariation = 5,
+	NearTargetDelay = 6,
 };
 
 constexpr uint64_t shot_random(uint64_t p_shot_seed, RngPurpose p_purpose, uint32_t p_lane = 0) {

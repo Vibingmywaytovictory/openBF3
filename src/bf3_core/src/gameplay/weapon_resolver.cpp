@@ -101,6 +101,24 @@ std::vector<ModifierEntry> active_modifiers(Fields &r_f, const EbxStruct &p_swd,
 	return out;
 }
 
+void read_locking_weapon(Fields &r_f, const EbxInstance &p_locking, LockingWeapon &r_out) {
+	const EbxStruct l = p_locking.data();
+	r_out.present = true;
+	r_out.fire_only_when_locked = r_f.flag(l, "FireOnlyWhenLockedOn");
+	r_out.is_guided = r_f.flag(l, "IsGuided");
+	r_out.is_guided_when_zoomed = r_f.flag(l, "IsGuidedWhenZoomed");
+	r_out.is_homing = r_f.flag(l, "IsHoming");
+	r_out.laser_painter = p_locking.is_a("LaserPainterData");
+	r_out.time_object_is_painted = r_out.laser_painter ? r_f.f32(l, "TimeObjectIsPainted") : 0.0f;
+	if (const std::optional<EbxInstance> c = r_f.follow(l, "LockingController", "LockingControllerData", false)) {
+		detail::read_locking_controller(r_f, *c, r_out.primary);
+	}
+	if (const std::optional<EbxInstance> c =
+					r_f.follow(l, "SecondaryLockingController", "LockingControllerData", false)) {
+		detail::read_locking_controller(r_f, *c, r_out.secondary);
+	}
+}
+
 void read_firing_data(Fields &r_f, const EbxInstance &p_wfd, WeaponDef &r_w) {
 	const EbxStruct w = p_wfd.data();
 	r_w.firing_data = r_f.partition_name(p_wfd.partition()) + "#" + p_wfd.guid().to_string();
@@ -268,6 +286,10 @@ Result<WeaponDef> resolve_weapon(const EbxResolver &p_db, std::string_view p_par
 	w.can_be_in_supported_shooting = f.flag_or(s, "CanBeInSupportedShooting", false);
 	w.allow_switching_out_of_ammo = f.flag_or(s, "AllowSwitchingToWeaponOutOfAmmo", true);
 	w.aiming_controller = ref_partition(f, s, "AimingController");
+	if (const std::optional<EbxInstance> lw = p_db.follow(swd->data(), "CustomWeaponType");
+			lw && lw->is_a("LockingWeaponData")) {
+		read_locking_weapon(f, *lw, w.locking);
+	}
 
 	const std::vector<ModifierEntry> mods = active_modifiers(f, s, active);
 	std::optional<EbxInstance> wfd = f.follow(s, "WeaponFiring", "WeaponFiringData", true);

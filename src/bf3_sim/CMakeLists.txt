@@ -180,6 +180,10 @@ target_sources(bf3_sim PRIVATE
 target_sources(bf3_sim PRIVATE
     include/bf3/sim/weapons/gadgets.h
     src/weapons/gadgets.cpp
+    include/bf3/sim/weapons/locking.h
+    src/weapons/locking.cpp
+    include/bf3/sim/weapons/guidance.h
+    src/weapons/guidance.cpp
 )
 
 target_sources(bf3_sim PRIVATE

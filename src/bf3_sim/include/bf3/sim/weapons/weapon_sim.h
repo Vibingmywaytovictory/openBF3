@@ -105,6 +105,7 @@ struct WeaponContext {
 	SwayContext sway;
 	bool alive = true;
 	bool sprinting = false;
+	bool locked = false;
 };
 
 struct ShotEvent {
@@ -126,6 +127,7 @@ struct ShotEvent {
 	RecoilOffset recoil{};
 	bool tracer = false;
 	float power = 1;
+	uint32_t lock_target = kNoLockTarget;
 };
 static_assert(std::is_trivially_copyable_v<ShotEvent>);
 

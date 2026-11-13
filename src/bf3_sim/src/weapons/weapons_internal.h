@@ -77,6 +77,11 @@ inline DVec3 normalize(const DVec3 &p_a, const DVec3 &p_fallback = { 0, 0, 1 }) 
 	return l > 1e-300 && std::isfinite(l) ? scale(p_a, 1.0 / l) : p_fallback;
 }
 using core::finite;
+inline constexpr double kMissileDirectionFloor = 1e-6;
+inline DVec3 with_speed(const DVec3 &p_v, double p_speed) {
+	const double l = length(p_v);
+	return l > kMissileDirectionFloor ? scale(p_v, p_speed / l) : p_v;
+}
 inline void poly_sincos(double p_x, double &r_sin, double &r_cos) {
 	if (!std::isfinite(p_x)) {
 		r_sin = 0;

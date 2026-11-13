@@ -271,6 +271,26 @@ void io_explosion(IO &io, Explosion &e) {
 	io.v(e.material.physics_property_index);
 }
 
+template <class IO> void io_locking_controller(IO &io, LockingController &c) {
+	io.v(c.present);
+	io.v(c.lock_time);
+	io.v(c.release_time);
+	io.v(c.release_on_new_target_time);
+	io.v(c.sample_rate);
+	io.v(c.minimum_lock_time);
+	io.v(c.ray_length);
+	io.v(c.acceptance_angle);
+	io.v(c.angle_constant);
+	io.v(c.distance_constant);
+	io.v(c.sensitivity);
+	io.v(c.hold_still_threshold);
+	io.v(c.lock_on_empty_vehicles);
+	io.v(c.lock_on_visible_targets_only);
+	io.v(c.ignore_height_lock_distance);
+	io.v(c.position_only);
+	io.vec(c.zoom_locks, 1, [](IO &p_io, LockType &p_t) { p_io.v(p_t); });
+}
+
 template <class IO>
 void io_projectile(IO &io, ProjectileDef &p) {
 	io.v(p.kind);
@@ -304,6 +324,19 @@ void io_projectile(IO &io, ProjectileDef &p) {
 	io.v(p.max_turn_angle);
 	io.v(p.time_to_activate_guiding);
 	io.v(p.apply_gravity_when_guided);
+	for (float &v : p.guidance.static_position) {
+		io.v(v);
+	}
+	for (float &v : p.guidance.target_position_offset) {
+		io.v(v);
+	}
+	io.v(p.guidance.use_static_position);
+	io.v(p.guidance.use_target_position);
+	io.v(p.guidance.detonate_near_target);
+	io.v(p.guidance.detonation_radius);
+	io.v(p.guidance.min_detonation_delay);
+	io.v(p.guidance.max_detonation_delay);
+	io_locking_controller(io, p.guidance.controller);
 	io.v(p.collision_speed_multiplier);
 	io.v(p.min_bounce_speed);
 	io.v(p.grenade_type);
@@ -365,6 +398,15 @@ void io_def(IO &io, WeaponDef &d) {
 		p_io.v(p_z.look_speed);
 		p_io.v(p_z.sprint_look_speed);
 	});
+	io.v(d.locking.present);
+	io.v(d.locking.fire_only_when_locked);
+	io.v(d.locking.is_guided);
+	io.v(d.locking.is_guided_when_zoomed);
+	io.v(d.locking.is_homing);
+	io.v(d.locking.laser_painter);
+	io.v(d.locking.time_object_is_painted);
+	io_locking_controller(io, d.locking.primary);
+	io_locking_controller(io, d.locking.secondary);
 }
 
 class RecordingResolver final : public EbxResolver {
