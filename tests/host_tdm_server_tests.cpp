@@ -5342,10 +5342,117 @@ struct WreckRun {
 	bool mate_placed = false;
 	float mate_before = 0;
 	float mate_after = 0;
+	uint64_t unlocated = 0;
+	bool neighbour_placed = false;
+	float neighbour_gap = 0;
+	uint16_t neighbour_before = 0;
+	uint16_t neighbour_after = 0;
+	sim::Tick neighbour_before_tick = 0;
+	sim::Tick neighbour_after_tick = 0;
+	uint16_t tank_before = 0;
+	uint16_t tank_after = 0;
+	sim::Tick tank_after_tick = 0;
 };
 
+struct BlastSides {
+	uint16_t before = 0;
+	uint16_t after = 0;
+	sim::Tick before_tick = 0;
+	sim::Tick after_tick = 0;
+};
+
+void watch_sides(
+		BlastSides &r_sides, const VehicleSight &p_seen, sim::Tick p_now, uint32_t p_blasts, sim::Tick p_blast) {
+	if (!p_seen.present) {
+		return;
+	}
+	if (p_blasts == 0) {
+		r_sides.before = p_seen.health;
+		r_sides.before_tick = p_now;
+	} else if (p_now > p_blast && r_sides.after_tick == 0) {
+		r_sides.after = p_seen.health;
+		r_sides.after_tick = p_now;
+	}
+}
+
+struct NeighbourLevel {
+	tdm::TdmLevel level;
+	uint16_t target = 0;
+	uint16_t neighbour = 0;
+	float gap = 0;
+};
+
+NeighbourLevel with_vehicle_beside(
+		const tdm::TdmLevel &p_level, const std::function<bool(const host::LevelVehicleKind &)> &p_target) {
+	const host::LevelVehicles &lv = *p_level.shared->vehicles;
+	std::optional<uint16_t> cannon_def;
+	for (size_t i = 0; i < lv.weapons.size(); ++i) {
+		cannon_def = lv.weapons[i].variant == "vehicles/common/weapondata/mbt_cannon_firing" ? uint16_t(i) : cannon_def;
+	}
+	REQUIRE(cannon_def.has_value());
+	const auto tank = [&](const host::LevelVehicleSpawner &p_s) {
+		const std::vector<uint16_t> &defs = lv.kinds[p_s.kind].weapon_defs;
+		return std::find(defs.begin(), defs.end(), *cannon_def) != defs.end();
+	};
+	std::optional<uint16_t> target, gunner;
+	float best = INFINITY;
+	for (size_t t = 0; t < lv.spawners.size(); ++t) {
+		if (!p_target(lv.kinds[lv.spawners[t].kind])) {
+			continue;
+		}
+		for (size_t k = 0; k < lv.spawners.size(); ++k) {
+			const float range = horizontal(lv.spawners[t].placement.position, lv.spawners[k].placement.position);
+			if (tank(lv.spawners[k]) && range >= 15.0f && range <= 120.0f && range < best) {
+				best = range;
+				target = uint16_t(t);
+				gunner = uint16_t(k);
+			}
+		}
+	}
+	REQUIRE(target.has_value());
+	const sim::Vec3 at = lv.spawners[*target].placement.position;
+	std::optional<uint16_t> neighbour;
+	float nearest = INFINITY;
+	for (size_t n = 0; n < lv.spawners.size(); ++n) {
+		const float d = horizontal(lv.spawners[n].placement.position, at);
+		if (n != *target && !tank(lv.spawners[n]) && d < nearest) {
+			nearest = d;
+			neighbour = uint16_t(n);
+		}
+	}
+	REQUIRE(neighbour.has_value());
+	const core::gameplay::Explosion &x = lv.kinds[lv.spawners[*target].kind].explosion;
+	REQUIRE(x.present);
+	const float gap = 0.5f * (x.inner_blast_radius + x.blast_radius) + 1.0f;
+	const sim::Vec3 from = lv.spawners[*gunner].placement.position;
+	const float dx = at[0] - from[0], dz = at[2] - from[2], len = std::sqrt(dx * dx + dz * dz);
+	core::Result<std::unique_ptr<sim::CollisionWorld>> w = sim::CollisionWorld::create(p_level.shared->static_world);
+	REQUIRE(w.ok());
+	const sim::Vec3 old = lv.spawners[*neighbour].placement.position;
+	const float clearance = old[1] - ground_at(**w, old[0], old[2], old[1] + 5.0f)[1];
+	const float nx = at[0] - dz / len * gap, nz = at[2] + dx / len * gap;
+	auto vehicles = std::make_shared<host::LevelVehicles>(lv);
+	host::LevelVehicleSpawner &moved = vehicles->spawners[*neighbour];
+	moved.placement.position = { nx, ground_at(**w, nx, nz, at[1] + 5.0f)[1] + clearance, nz };
+	moved.placement.rotation = lv.spawners[*target].placement.rotation;
+	auto shared = std::make_shared<host::SharedLevel>(*p_level.shared);
+	shared->vehicles = vehicles;
+	NeighbourLevel out;
+	out.level.shared = shared;
+	out.level.bots = p_level.bots;
+	out.level.cache_root = p_level.cache_root;
+	out.target = *target;
+	out.neighbour = *neighbour;
+	out.gap = gap;
+	std::printf("damage: the %s of spawner %u moved %.1f m beside the %s of spawner %u, off the line from the tank "
+				"of spawner %u\n",
+			lv.kinds[moved.kind].blueprint.c_str(), unsigned(*neighbour), double(gap),
+			lv.kinds[lv.spawners[*target].kind].blueprint.c_str(), unsigned(*target), unsigned(*gunner));
+	return out;
+}
+
 WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(const host::LevelVehicleKind &)> &p_target,
-		bool p_teammate_driver = false) {
+		bool p_teammate_driver = false, std::optional<uint16_t> p_neighbour = std::nullopt) {
 	WreckRun run;
 	const host::LevelVehicles &lv = *r_level.shared->vehicles;
 	std::optional<uint16_t> cannon_def;
@@ -5504,6 +5611,17 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 		m->place(mate->slot, beside(-1.5f));
 		run.mate_placed = true;
 	}
+	if (p_neighbour) {
+		const net::VehicleWire *n = watch.of(*p_neighbour);
+		REQUIRE(n != nullptr);
+		run.neighbour_gap = horizontal(n->state.body.com_position, target_at);
+		run.neighbour_placed = parked_upright(n->state.body.rotation, n->state.body.linear_velocity) &&
+				run.neighbour_gap < target_kind.explosion.blast_radius;
+		std::printf("damage: the neighbour of spawner %u stands %.2f m from the target, upright %d\n",
+				unsigned(*p_neighbour), double(run.neighbour_gap),
+				int(parked_upright(n->state.body.rotation, n->state.body.linear_velocity)));
+		REQUIRE(run.neighbour_placed);
+	}
 	std::printf("damage: the %s's explosion: BlastDamage %.0f, %.1f..%.1f m, PreExplosionTime %.2f s, "
 				"CriticalDamageTime %.2f s; bystanders %.1f m behind it\n",
 			target_kind.blueprint.c_str(), double(target_kind.explosion.blast_damage),
@@ -5517,6 +5635,8 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 	const uint64_t hits_before = m->server.stats().vehicle_hits;
 	const uint64_t shots_before = m->server.stats().vehicle_shots;
 	const uint64_t crew_before = m->server.stats().vehicle_crew_kills;
+	const uint64_t unlocated_before = m->server.stats().vehicle_unlocated_hits;
+	BlastSides neighbour_sides, tank_sides;
 	REQUIRE(is_alive(m->state(enemy->slot)));
 	const float driver_health = m->state(enemy->slot)->health;
 
@@ -5533,6 +5653,11 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 			run.mate_before = mt_before;
 			run.mate_after = mate != nullptr ? soldier_health(m->state(mate->slot)) : 0.0f;
 		}
+		if (p_neighbour) {
+			watch_sides(neighbour_sides, sighted(m->out, p.peer(), *p_neighbour), m->now(), run.blast_ticks,
+					run.blast_tick);
+		}
+		watch_sides(tank_sides, sighted(m->out, p.peer(), tank_spawner), m->now(), run.blast_ticks, run.blast_tick);
 	};
 	std::optional<sim::Tick> gone;
 	for (int shell = 0; shell < 10 && !gone; ++shell) {
@@ -5605,6 +5730,20 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 	run.wreck_blasts = m->server.stats().vehicle_wreck_blasts;
 	run.wreck_soldier_hits = m->server.stats().vehicle_wreck_blast_soldier_hits;
 	run.wreck_vehicle_hits = m->server.stats().vehicle_wreck_blast_vehicle_hits;
+	run.unlocated = m->server.stats().vehicle_unlocated_hits - unlocated_before;
+	run.neighbour_before = neighbour_sides.before;
+	run.neighbour_after = neighbour_sides.after;
+	run.neighbour_before_tick = neighbour_sides.before_tick;
+	run.neighbour_after_tick = neighbour_sides.after_tick;
+	run.tank_before = tank_sides.before;
+	run.tank_after = tank_sides.after;
+	run.tank_after_tick = tank_sides.after_tick;
+	std::printf("damage: around the blast at tick %u: the gunner's tank %u -> %u (tick %u), the neighbour %u (tick "
+				"%u) -> %u (tick %u); %llu unlocated vehicle hits\n",
+			unsigned(run.blast_tick), unsigned(run.tank_before), unsigned(run.tank_after),
+			unsigned(run.tank_after_tick), unsigned(run.neighbour_before), unsigned(run.neighbour_before_tick),
+			unsigned(run.neighbour_after), unsigned(run.neighbour_after_tick),
+			static_cast<unsigned long long>(run.unlocated));
 	run.respawn_offset = horizontal(seen.at, target_at);
 	std::printf("damage: the %s left the wire at tick %u and came back at tick %u (%u ticks, SpawnDelay %u ticks), "
 				"generation %u -> %u, %.2f m from its first spawn\n",
@@ -5669,11 +5808,10 @@ void check_blast_relation(const tdm::TdmLevel &p_level) {
 					doctest::Approx(expected));
 			CHECK(host::wreck_blast_amount(nullptr, wreck_blast.property, hull, 100.0f) == 100.0f);
 			wreck_relations += rel.present ? 1u : 0u;
+			std::printf("damage: the %s's explosion on the %s: 100 -> %.2f\n", wreck.blueprint.c_str(),
+					kind.blueprint.c_str(),
+					double(host::wreck_blast_amount(&materials, wreck_blast.property, hull, 100.0f)));
 		}
-		std::printf("damage: the %s's explosion on the %s: %.2f\n", wreck.blueprint.c_str(),
-				lv.kinds.front().blueprint.c_str(),
-				double(host::wreck_blast_amount(&materials, wreck_blast.property,
-						materials.pair_of(lv.kinds.front().material).property, 100.0f)));
 	}
 	CHECK(wreck_relations > 0u);
 }
@@ -5715,8 +5853,18 @@ void check_respawn(const WreckRun &p_run) {
 	CHECK(p_run.bystander_after < p_run.bystander_before);
 	CHECK(p_run.bystander_after > 0.0f);
 	if (p_run.mate_placed) {
+		CHECK(p_run.wreck_soldier_hits >= 2u);
 		CHECK(p_run.mate_before == doctest::Approx(100.0f));
 		CHECK(p_run.mate_after == p_run.mate_before);
+	}
+	CHECK(p_run.unlocated == 0u);
+	CHECK(p_run.tank_after_tick > p_run.blast_tick);
+	CHECK(p_run.tank_after == p_run.tank_before);
+	if (p_run.neighbour_placed) {
+		CHECK(p_run.wreck_vehicle_hits >= 1u);
+		CHECK(p_run.neighbour_before_tick < p_run.blast_tick);
+		CHECK(p_run.neighbour_after_tick > p_run.blast_tick);
+		CHECK(p_run.neighbour_after < p_run.neighbour_before);
 	}
 }
 }
@@ -5860,10 +6008,13 @@ TEST_SUITE("host-vehicles-damage") {
 		}
 		check_blast_relation(*level);
 
-		const WreckRun run = wreck_and_respawn(*level, [](const host::LevelVehicleKind &p_kind) {
+		const auto growler_target = [](const host::LevelVehicleKind &p_kind) {
 			return p_kind.blueprint == "vehicles/growleritv/growleritv";
-		});
+		};
+		NeighbourLevel beside = with_vehicle_beside(*level, growler_target);
+		const WreckRun run = wreck_and_respawn(beside.level, growler_target, false, beside.neighbour);
 		REQUIRE(run.ran);
+		CHECK(run.neighbour_placed);
 		CHECK(run.shells >= 2u);
 		CHECK(run.hits >= run.shells);
 		CHECK(run.driver_dead);

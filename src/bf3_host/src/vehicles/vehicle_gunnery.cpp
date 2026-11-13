@@ -133,8 +133,12 @@ VehicleBlastHits VehicleGunnery::explode(const sw::ExplosionSimDef &p_explosion,
 	}
 	hits.ran = true;
 	const size_t first = out_.damage.size();
+	const size_t detonation = out_.detonations.size();
 	core::gameplay::WorkBudget budget(sw::BallisticsLimits{}.budget_per_step);
 	sw::explode(*table_, p_explosion, p_world, p_targets, p_source, budget, out_);
+	if (out_.detonations.size() > detonation) {
+		out_.detonations[detonation].player_slot = p_credit;
+	}
 	++stats_.blasts;
 	for (size_t i = first; i < out_.damage.size(); ++i) {
 		sw::DamageEvent e = out_.damage[i];

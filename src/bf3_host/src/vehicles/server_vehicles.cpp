@@ -506,6 +506,7 @@ void ServerVehicles::gather(std::span<const sim::weapons::DamageEvent> p_events,
 		s.amount = !p_soldier_weapon && e.shot_index >= kWreckShotIndexBase ? wreck_amount(e, hull_property(index))
 																			: p_source.amount(e, hull_property(index));
 		locate_strike(s, p_out, hull_centre(index));
+		stats_.unlocated += s.located ? 0u : 1u;
 		strikes_.push_back(s);
 	}
 }

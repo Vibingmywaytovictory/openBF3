@@ -50,6 +50,7 @@ struct ServerVehicleStats {
 	uint64_t wreck_blasts = 0;
 	uint64_t wreck_blast_soldier_hits = 0;
 	uint64_t wreck_blast_vehicle_hits = 0;
+	uint64_t unlocated = 0;
 };
 
 inline constexpr sim::Tick kWreckWireTicks = 6;
