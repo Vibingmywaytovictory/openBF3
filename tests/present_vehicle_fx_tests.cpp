@@ -2,6 +2,7 @@
 
 #include "bf3/core/gameplay/vehicle_damage_visuals.h"
 #include "bf3/present/vehicle_damage_fx.h"
+#include "bf3/present/vehicle_zoom.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -133,5 +134,44 @@ TEST_SUITE("present-vehicle-fx-unit") {
 		CHECK(health_compare(HealthCompare::NotEqual, 0.4f, 0.5f));
 	}
 
-	
+	TEST_CASE("vehicle zoom: a fade-to-black alternate view switches the FOV at the black, and back on release") {
+		present::VehicleZoom zoom;
+		const present::VehicleZoomDef gunner{ 20.0f, 0.0f, true, 0.1f, 0.03f, 0.03f };
+		present::VehicleZoomView v = zoom.step(gunner, false, 70.0f, 1.0 / 60.0);
+		CHECK(v.fov == doctest::Approx(70));
+		CHECK(v.black == doctest::Approx(0));
+		v = zoom.step(gunner, true, 70.0f, 0.05);
+		CHECK(v.fov == doctest::Approx(70));
+		CHECK(v.black == doctest::Approx(0.5));
+		CHECK_FALSE(v.zoomed);
+		v = zoom.step(gunner, true, 70.0f, 0.05);
+		CHECK(v.fov == doctest::Approx(20));
+		CHECK(v.black == doctest::Approx(1));
+		CHECK(v.zoomed);
+		v = zoom.step(gunner, true, 70.0f, 0.045);
+		CHECK(v.black == doctest::Approx(0.5));
+		v = zoom.step(gunner, true, 70.0f, 0.03);
+		CHECK(v.fov == doctest::Approx(20));
+		CHECK(v.black == doctest::Approx(0));
+		v = zoom.step(gunner, false, 70.0f, 0.1);
+		CHECK(v.fov == doctest::Approx(70));
+		CHECK(v.black == doctest::Approx(1));
+		CHECK_FALSE(v.zoomed);
+		v = zoom.step(std::nullopt, true, 70.0f, 0.1);
+		CHECK(v.fov == doctest::Approx(70));
+		CHECK_FALSE(v.zoomed);
+	}
+
+	TEST_CASE("vehicle zoom: an alternate view without the fade moves the FOV linearly over FovTransitionTime") {
+		present::VehicleZoom zoom;
+		const present::VehicleZoomDef driver{ 50.0f, 0.1f, false, 0.1f, 0.1f, 0.1f };
+		CHECK(zoom.step(driver, false, 70.0f, 0.016).fov == doctest::Approx(70));
+		CHECK(zoom.step(driver, true, 70.0f, 0.05).fov == doctest::Approx(60));
+		CHECK(zoom.step(driver, true, 70.0f, 0.05).fov == doctest::Approx(50));
+		CHECK(zoom.step(driver, true, 70.0f, 0.05).fov == doctest::Approx(50));
+		CHECK(zoom.step(driver, false, 70.0f, 0.025).fov == doctest::Approx(55));
+		const present::VehicleZoomDef instant{ 20.0f, 0.0f, false, 0.0f, 0.0f, 0.0f };
+		CHECK(zoom.step(instant, true, 70.0f, 0.016).fov == doctest::Approx(20));
+		CHECK(zoom.step(instant, false, 70.0f, 0.016).fov == doctest::Approx(70));
+	}
 }

@@ -43,6 +43,9 @@ struct VehicleCameraDef {
 	float left_yaw = 0, right_yaw = 0, up_pitch = 0, down_pitch = 0;
 	std::optional<ChaseCameraDef> chase;
 	std::optional<float> zoom_field_of_view;
+	float zoom_fov_transition_time = 0;
+	bool zoom_fade_to_black = false;
+	float zoom_fade_out = 0, zoom_black = 0, zoom_fade_in = 0;
 };
 
 struct VehicleTurretDef {

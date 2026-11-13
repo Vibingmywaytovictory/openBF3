@@ -213,6 +213,11 @@ Result<VehicleCameraDef> read_camera(WorkBudget &r_budget, const EbxResolver &p_
 		if (const std::optional<double> fov = number(alternate->data(), "FieldOfView")) {
 			out.zoom_field_of_view = static_cast<float>(*fov);
 		}
+		out.zoom_fov_transition_time = static_cast<float>(number_or(alternate->data(), "FovTransitionTime", 0));
+		out.zoom_fade_to_black = boolean(alternate->data(), "FadeToBlack").value_or(false);
+		out.zoom_fade_out = static_cast<float>(number_or(alternate->data(), "FadeOutDuration", 0));
+		out.zoom_black = static_cast<float>(number_or(alternate->data(), "BlackDuration", 0));
+		out.zoom_fade_in = static_cast<float>(number_or(alternate->data(), "FadeInDuration", 0));
 	}
 	return out;
 }

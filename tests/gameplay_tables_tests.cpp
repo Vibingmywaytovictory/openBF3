@@ -2342,6 +2342,29 @@ TEST_SUITE("tables") {
 		CHECK(driver.transform.trans[1] == Approx(0.87).epsilon(0.01));
 		CHECK(driver.transform.trans[2] == Approx(0.25).epsilon(0.01));
 		CHECK(growler.exit_points.size() == 5);
+		const auto alternate = [](const VehicleDef &p_def, size_t p_seat) -> const VehicleCameraDef * {
+			REQUIRE(p_seat < p_def.seats.size());
+			for (const VehicleCameraDef &c : p_def.seats[p_seat].cameras) {
+				if (c.zoom_field_of_view) {
+					return &c;
+				}
+			}
+			return nullptr;
+		};
+		const VehicleCameraDef *ah1z_pilot = alternate(ah1z, 0);
+		REQUIRE(ah1z_pilot != nullptr);
+		CHECK(*ah1z_pilot->zoom_field_of_view == Approx(55));
+		CHECK(ah1z_pilot->zoom_fov_transition_time == Approx(0.1));
+		CHECK_FALSE(ah1z_pilot->zoom_fade_to_black);
+		const VehicleDef mi28 = vehicle(*lib, "vehicles/mi28/mi28");
+		const VehicleCameraDef *mi28_gunner = alternate(mi28, 1);
+		REQUIRE(mi28_gunner != nullptr);
+		CHECK(*mi28_gunner->zoom_field_of_view == Approx(15));
+		CHECK(mi28_gunner->zoom_fov_transition_time == Approx(0));
+		CHECK(mi28_gunner->zoom_fade_to_black);
+		CHECK(mi28_gunner->zoom_fade_out == Approx(0.05));
+		CHECK(mi28_gunner->zoom_black == Approx(0.05));
+		CHECK(mi28_gunner->zoom_fade_in == Approx(0.05));
 		for (const char *aa : { "vehicles/centurion_c-ram/centurion_c-ram", "vehicles/pantsir/pantsir-s1" }) {
 			CAPTURE(aa);
 			const VehicleDef v = vehicle(*lib, aa);

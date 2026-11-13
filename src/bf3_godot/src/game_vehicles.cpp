@@ -441,7 +441,7 @@ std::optional<GameVehicleView> GameVehicles::view(uint16_t p_spawner) const {
 namespace bf3::godot_side {
 
 VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p_camera, float p_yaw, float p_pitch,
-		float p_fov_deg, double p_dt, const sim::CollisionWorld *p_world) {
+		float p_fov_deg, bool p_zoom, double p_dt, const sim::CollisionWorld *p_world) {
 	VehicleSeatView out;
 	out.fov_deg = p_fov_deg;
 	out.left_yaw = out.right_yaw = sim::kPi;
@@ -475,6 +475,20 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 	const uint32_t index = p_camera % uint32_t(cameras.size());
 	const core::gameplay::VehicleCameraDef &c = *cameras[index];
 	out.first_person = c.first_person;
+	const std::array<uint32_t, 3> view_key{ p_seat.spawner, p_seat.seat, index };
+	if (zoom_key_ != view_key) {
+		zoom_.reset();
+		zoom_key_ = view_key;
+	}
+	std::optional<present::VehicleZoomDef> alternate;
+	if (c.zoom_field_of_view) {
+		alternate = present::VehicleZoomDef{ *c.zoom_field_of_view, c.zoom_fov_transition_time, c.zoom_fade_to_black,
+			c.zoom_fade_out, c.zoom_black, c.zoom_fade_in };
+	}
+	const present::VehicleZoomView zoomed = zoom_.step(alternate, p_zoom, p_fov_deg, p_dt);
+	out.fov_deg = zoomed.fov;
+	out.zoomed = zoomed.zoomed;
+	out.black = zoomed.black;
 	if (!c.first_person && c.chase) {
 		const Vector3 pivot = p_seat.body.xform(to_vector(c.transform.trans));
 		ChaseTarget target;
@@ -482,11 +496,10 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 		target.yaw_rad = p_yaw;
 		target.pitch_rad = p_pitch;
 		target.velocity = fx::Vec3{ p_seat.velocity.x, p_seat.velocity.y, p_seat.velocity.z };
-		const std::array<uint32_t, 3> key{ p_seat.spawner, p_seat.seat, index };
-		if (chase_key_ != key) {
+		if (chase_key_ != view_key) {
 			chase_ = ChaseCamera(*c.chase);
 			chase_.activate(target, p_world);
-			chase_key_ = key;
+			chase_key_ = view_key;
 		}
 		out.camera = camera_transform(chase_.step(p_dt, target, p_world));
 		return out;

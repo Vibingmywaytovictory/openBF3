@@ -5,6 +5,7 @@
 #include "bf3/host/client_session.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/present/vehicle_damage_fx.h"
+#include "bf3/present/vehicle_zoom.h"
 #include "bf3/render/vehicle_meshes.h"
 #include "death_camera.h"
 #include "game_frame.h"
@@ -60,6 +61,8 @@ struct OwnVehicleSeat {
 struct VehicleSeatView {
 	godot::Transform3D camera;
 	float fov_deg = 0.0f;
+	bool zoomed = false;
+	float black = 0.0f;
 	bool first_person = true;
 	float left_yaw = 0.0f, right_yaw = 0.0f, up_pitch = 0.0f, down_pitch = 0.0f;
 };
@@ -88,7 +91,7 @@ public:
 	const GameVehiclesStats &stats() const { return stats_; }
 	std::optional<GameVehicleView> view(uint16_t p_spawner) const;
 	VehicleSeatView seat_view(const OwnVehicleSeat &p_seat, uint32_t p_camera, float p_yaw, float p_pitch,
-			float p_fov_deg, double p_dt, const sim::CollisionWorld *p_world);
+			float p_fov_deg, bool p_zoom, double p_dt, const sim::CollisionWorld *p_world);
 
 private:
 	void present_damage(std::span<const present::VehicleFxSight> p_sights,
@@ -133,6 +136,8 @@ private:
 	std::optional<OwnVehicleSeat> own_;
 	ChaseCamera chase_;
 	std::optional<std::array<uint32_t, 3>> chase_key_;
+	present::VehicleZoom zoom_;
+	std::optional<std::array<uint32_t, 3>> zoom_key_;
 	godot::Node3D *root_ = nullptr;
 	uint64_t root_id_ = 0;
 	GameVehiclesStats stats_;
