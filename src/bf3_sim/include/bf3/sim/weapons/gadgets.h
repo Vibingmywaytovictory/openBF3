@@ -78,6 +78,7 @@ struct GadgetDef {
 	bool receives_explosion_damage = false;
 	float time_to_live_s = 0;
 	float time_to_live_on_owner_gone_s = 0;
+	bool fire_only_when_locked = false;
 	ExplosionPackDef pack;
 
 	bool operator==(const GadgetDef &) const = default;

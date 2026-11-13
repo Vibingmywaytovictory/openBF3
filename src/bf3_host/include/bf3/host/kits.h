@@ -18,8 +18,8 @@ namespace bf3::host {
 inline constexpr uint8_t kKitCount = 4;
 inline constexpr uint8_t kKitTeams = 2;
 inline constexpr std::array<uint8_t, 4> kKitSlots{ 0, 1, 6, 7 };
-inline constexpr std::array<uint8_t, 2> kGadgetSlots{ uint8_t(core::gameplay::WeaponSlot::KitItem),
-	uint8_t(core::gameplay::WeaponSlot::Gadget2) };
+inline constexpr std::array<uint8_t, 3> kGadgetSlots{ uint8_t(core::gameplay::WeaponSlot::KitItem),
+	uint8_t(core::gameplay::WeaponSlot::Gadget2), uint8_t(core::gameplay::WeaponSlot::Gadget1) };
 inline constexpr uint8_t kNoTeamChange = 0;
 inline constexpr uint8_t kKitGadgetSlot = 2;
 

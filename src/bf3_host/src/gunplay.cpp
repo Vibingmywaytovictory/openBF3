@@ -296,6 +296,10 @@ core::Result<std::shared_ptr<const GunplayLevel>> load_gunplay_level(std::shared
 			if (variants.contains(u.unlock)) {
 				continue;
 			}
+			if (g->fire_only_when_locked) {
+				level->notes.push_back("gadget " + u.unlock + ": FireOnlyWhenLockedOn, and no lock-on is simulated");
+				continue;
+			}
 			const bool deployable = g->kind != sw::GadgetKind::None;
 			core::Result<gp::WeaponDef> def = w->catalog->resolve(u.unlock);
 			const core::Status simulated = sim_def_status(def, *level->materials);

@@ -1432,7 +1432,7 @@ TEST_CASE("the loadout screens: kit and customization from the catalog and the o
 	pick.specialization = 302;
 	in.loadout_choices[0] = pick;
 	host::fill_hud_tdm(in, {}, st, state, m);
-	CHECK(m.spawn_screen.kit_items[0] == std::array<uint32_t, 5>{ 1001, 1002, 1005, 1003, 1004 });
+	CHECK(m.spawn_screen.kit_items[0] == std::array<uint32_t, 5>{ 1001, 1002, 0, 1003, 1004 });
 	CHECK(c.kits_data[0].items[0].item_id == 1001);
 	CHECK(c.kits_data[0].items[2].item_id == 402);
 	CHECK(c.kit_primary_weapon.item_id == 1001);

@@ -65,13 +65,18 @@ const std::set<std::string> kCurveFireWeapons{ "weapons/gadgets/defibrillator/u_
 
 const std::set<std::string> kGadgetItems{ "weapons/gadgets/ammobag/u_ammobag", "weapons/gadgets/c4/u_c4",
 	"weapons/gadgets/claymore/u_claymore", "weapons/gadgets/defibrillator/u_defib", "weapons/gadgets/eodbot/u_eodbot",
-	"weapons/gadgets/m15/u_m15", "weapons/gadgets/m224/u_m224", "weapons/gadgets/medicbag/u_medkit",
-	"weapons/gadgets/radiobeacon/u_radiobeacon", "weapons/gadgets/repairtool/u_repairtool" };
+	"weapons/gadgets/m15/u_m15", "weapons/gadgets/m224/u_m224", "weapons/gadgets/mav/u_mav",
+	"weapons/gadgets/medicbag/u_medkit", "weapons/gadgets/radiobeacon/u_radiobeacon",
+	"weapons/gadgets/repairtool/u_repairtool", "weapons/gadgets/soflam/u_soflam", "weapons/gadgets/t-ugs/u_ugs" };
 
 std::set<std::string> gadget_slot_weapons() {
 	std::set<std::string> out = kGadgetItems;
 	out.insert({ "weapons/xp4_crossbow_prototype/u_crossbow_scoped_cobra",
-			"weapons/xp4_crossbow_prototype/u_crossbow_scoped_riflescope" });
+			"weapons/xp4_crossbow_prototype/u_crossbow_scoped_riflescope", "weapons/gadgets/m26mass/u_m26mass",
+			"weapons/gadgets/m26mass/u_m26mass_flechette", "weapons/gadgets/m26mass/u_m26mass_frag",
+			"weapons/gadgets/m26mass/u_m26mass_slug", "weapons/gadgets/m320/u_m320_he",
+			"weapons/gadgets/m320/u_m320_lvg", "weapons/gadgets/m320/u_m320_shg", "weapons/gadgets/m320/u_m320_smk",
+			"weapons/rpg7/u_rpg7", "weapons/smaw/u_smaw" });
 	return out;
 }
 

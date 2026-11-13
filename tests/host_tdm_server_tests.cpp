@@ -6546,3 +6546,347 @@ TEST_SUITE("host-vehicles-damage-team") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }
+
+namespace {
+
+struct LauncherWatch final : host::GunplayObserver {
+	std::vector<sw::DamageEvent> hits;
+	std::vector<sw::DetonationEvent> detonations;
+	std::vector<sw::ShotEvent> shots;
+
+	void weapon_tick(uint8_t p_slot, const sim::Command &p_command, const sw::SoldierWeaponsState &p_after,
+			const sw::WeaponTickOutput &p_out) override {
+		(void)p_slot, (void)p_command, (void)p_after;
+		shots.insert(shots.end(), p_out.shots.begin(), p_out.shots.begin() + p_out.shot_count);
+	}
+	void projectiles(
+			uint32_t p_tick, const sw::ProjectileStepOutput &p_out, std::span<const sw::Projectile> p_live) override {
+		(void)p_tick, (void)p_live;
+		detonations.insert(detonations.end(), p_out.detonations.begin(), p_out.detonations.end());
+	}
+	void damage(uint32_t p_tick, const sw::DamageEvent &p_event, bool p_applied, float p_health_after) override {
+		(void)p_tick, (void)p_health_after;
+		if (p_applied) {
+			hits.push_back(p_event);
+		}
+	}
+};
+
+}
+
+TEST_SUITE("host-vehicles-damage-team") {
+	TEST_CASE(
+			"gadgets: MP_007 ConquestSmall0: an engineer's kit-default launcher in slot 2 fires in a match; of two "
+			"rockets into an enemy MBT's rear the first is spent on the full rear shield and the second takes 20.25 % "
+			"of its health (R-G3, R-G4)") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::unique_ptr<Match> m = start_match(*level, true, 113u, 0, 1);
+		tdm::ScriptedPeer &gunner = m->join("gunner");
+		gunner.ready();
+		REQUIRE(wait_in_round(*m));
+		gunner.spawn_request(uint8_t(host::KitRole::Engineer));
+		REQUIRE(m->until([&] { return is_alive(m->state(gunner.slot())); }, 900));
+		const uint8_t team = m->rules().team_of(uint8_t(gunner.slot()));
+		const uint8_t launcher_slot = uint8_t(core::gameplay::WeaponSlot::Gadget1);
+		const uint16_t launcher = m->server.gunplay()->weapons(uint8_t(gunner.slot())).slots[launcher_slot].def;
+		REQUIRE(launcher < gl.defs.size());
+		CHECK(gl.defs[launcher].variant == (team == 1 ? "weapons/smaw/u_smaw" : "weapons/rpg7/u_rpg7"));
+		const auto mbt = [&](const net::VehicleWire &p_w) {
+			const std::string &b = lv.kinds[lv.spawners[p_w.spawner].kind].blueprint;
+			return b == "vehicles/t90/t90" || b == "vehicles/m1a2/m1abrams";
+		};
+		VehicleWatch watch;
+		std::optional<uint16_t> tank;
+		sim::Vec3 stand{}, aim{};
+		REQUIRE(m->until(
+				[&] {
+					watch.take(m->out, gunner.peer());
+					for (const net::VehicleWire &w : watch.latest) {
+						if (tank || w.team == team || w.team == 0 || !mbt(w) ||
+								!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+							continue;
+						}
+						const std::array<float, 2> f = heading_of(w.state.body.rotation);
+						const sim::Vec3 &c = w.state.body.com_position;
+						for (float d = 40.0f; !tank && d >= 30.0f; d -= 2.0f) {
+							const sim::Vec3 at = ground_at(*m->world, c[0] - d * f[0], c[2] - d * f[1], c[1] + 5.0f);
+							const host::LevelVehicleKind &k = lv.kinds[lv.spawners[w.spawner].kind];
+							const core::Transform turn = sim::vehicles::hull_transform(w.state.body.rotation, {});
+							const sim::Vec3 origin = core::vec::sub(c, turn.transform_vector(k.model->center_of_mass));
+							const sim::Vec3 centre = sim::vehicles::hull_transform(w.state.body.rotation, origin)
+															 .transform_point(k.box.centre);
+							if (std::fabs(at[1] - c[1]) < 3.0f && m->motor.fits_standing(at) &&
+									clear(*m->world, add(at, 0.0f, 1.6f, 0.0f), centre)) {
+								tank = w.spawner;
+								stand = at;
+								aim = centre;
+							}
+						}
+					}
+					return tank.has_value();
+				},
+				sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 600u));
+		const float full = sim::vehicles::full_vehicle_health(lv.kinds[lv.spawners[*tank].kind].damage);
+		REQUIRE(m->server.vehicle_health(*tank) == full);
+		m->teleport(gunner, stand);
+		m->ticks(20);
+		bool fire = false;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(*m, p_tick, p_state, aim, sim::Pose::Stand,
+					select_and_fire(launcher_slot, fire && (p_tick % 30u) < 10u) | sim::buttons::kZoom);
+		};
+		m->ticks(90);
+		const auto rocket = [&] {
+			const uint64_t shots = m->server.gunplay()->stats().shots, hits = m->server.stats().vehicle_hits;
+			fire = true;
+			const bool fired = m->until([&] { return m->server.gunplay()->stats().shots > shots; }, 600);
+			fire = false;
+			const bool hit = m->until([&] { return m->server.stats().vehicle_hits > hits; }, 120);
+			m->ticks(1);
+			return std::pair<bool, float>{ fired && hit, m->server.vehicle_health(*tank).value_or(-1.0f) };
+		};
+		const std::pair<bool, float> first = rocket();
+		const std::pair<bool, float> second = rocket();
+		std::printf("launcher: %s from %.1f m behind the %s of spawner %u (health %.0f): after the first rocket %.2f, "
+					"after the second %.2f (%.2f %% of its health)\n",
+				gl.defs[launcher].variant.c_str(), double(horizontal(stand, aim)),
+				lv.kinds[lv.spawners[*tank].kind].blueprint.c_str(), unsigned(*tank), double(full),
+				double(first.second), double(second.second), double(100.0f * (first.second - second.second) / full));
+		const sim::vehicles::HealthZoneRule &rear =
+				lv.kinds[lv.spawners[*tank].kind].damage.zones[size_t(sim::vehicles::HullZone::Rear)];
+		const float square = sim::vehicles::zone_angle_factor(rear, 0.0f);
+		std::printf("launcher: the rear zone's MinDamageAngle %.1f and DamageAngleMultiplier %.2f give a straight hit "
+					"x%.3f on the rule row's 20.25 %%\n",
+				double(rear.min_damage_angle), double(rear.damage_angle_multiplier), double(square));
+		CHECK(first.first);
+		CHECK(second.first);
+		CHECK(first.second == doctest::Approx(full));
+		CHECK(100.0f * (first.second - second.second) / full == doctest::Approx(20.25f * square));
+		CHECK(100.0f * (first.second - second.second) / full == doctest::Approx(22.275f));
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}
+
+TEST_SUITE("host-gunplay-gadgets") {
+	TEST_CASE("gadgets: an assault's slot 2 M320 picked in CUSTOMIZE fires each of its rounds in a Metro match: HE a "
+			  "dud before TimeToArm and a direct hit after, buckshot 12 pellets of falloff damage, smoke a 0-damage "
+			  "blast whose ShockwaveDamage floor the soldier zones' thresholds cut, the low-velocity grenade bouncing "
+			  "to its TimeToLive") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		auto watch = std::make_shared<LauncherWatch>();
+		std::unique_ptr<Match> m = start_match(
+				*level, true, 91u, 0, 1, [&](host::GameServerConfig &r_config) { r_config.gunplay.observer = watch; });
+		std::vector<tdm::ScriptedPeer *> peers;
+		for (const char *name : { "p1", "p2", "p3", "p4", "p5", "p6", "p7" }) {
+			peers.push_back(&m->join(name));
+			peers.back()->ready();
+		}
+		REQUIRE(wait_in_round(*m));
+		std::array<std::vector<tdm::ScriptedPeer *>, 3> by_team;
+		for (tdm::ScriptedPeer *p : peers) {
+			const uint8_t t = m->rules().team_of(uint8_t(p->slot()));
+			REQUIRE((t == 1 || t == 2));
+			by_team[t].push_back(p);
+		}
+		const uint8_t team = by_team[1].size() >= 4 ? 1 : 2;
+		REQUIRE(by_team[team].size() >= 4u);
+		REQUIRE(by_team[3 - team].size() >= 3u);
+		const uint8_t assault = uint8_t(host::KitRole::Assault);
+		const size_t gadget1 = size_t(core::gameplay::WeaponSlot::Gadget1);
+		const host::LoadoutKit *kit = gl.loadouts.kit(team, assault);
+		REQUIRE(kit != nullptr);
+		const char *const rounds[] = { "weapons/gadgets/m320/u_m320_he", "weapons/gadgets/m320/u_m320_shg",
+			"weapons/gadgets/m320/u_m320_smk", "weapons/gadgets/m320/u_m320_lvg" };
+		std::array<uint16_t, 4> defs{};
+		for (size_t r = 0; r < 4; ++r) {
+			const auto item = std::find_if(kit->slots[gadget1].begin(), kit->slots[gadget1].end(),
+					[&](const host::LoadoutItem &i) { return i.unlock == rounds[r]; });
+			REQUIRE(item != kit->slots[gadget1].end());
+			REQUIRE(item->def < gl.defs.size());
+			defs[r] = item->def;
+			net::LoadoutRequest request;
+			request.kit = assault;
+			request.items[gadget1] = item->identifier;
+			m->server.on_receive(by_team[team][r]->peer(), net::kChannelReliable, net::encode_loadout_request(request));
+		}
+		m->ticks(1);
+		for (tdm::ScriptedPeer *p : peers) {
+			p->spawn_request(assault);
+		}
+		REQUIRE(m->until(
+				[&] {
+					return std::all_of(peers.begin(), peers.end(),
+							[&](tdm::ScriptedPeer *p) { return is_alive(m->state(p->slot())); });
+				},
+				900));
+		for (size_t r = 0; r < 4; ++r) {
+			CHECK(m->server.gunplay()->weapons(uint8_t(by_team[team][r]->slot())).slots[gadget1].def == defs[r]);
+		}
+		const sw::WeaponTable &table = m->server.gunplay()->table();
+		std::optional<std::pair<sim::Vec3, sim::Vec3>> lane;
+		std::vector<sim::Vec3> floors;
+		for (const sim::SpawnPoint &sp : m->level->spawns) {
+			if (const std::optional<sim::Vec3> f = floor_at(*m->world, sp.position);
+					f && m->motor.fits_standing(add(*f, 0.0f, 0.05f, 0.0f))) {
+				floors.push_back(*f);
+			}
+		}
+		for (size_t a = 0; a < floors.size() && !lane; ++a) {
+			for (size_t b = 0; b < floors.size() && !lane; ++b) {
+				const float d = horizontal(floors[a], floors[b]);
+				if (d >= 26.0f && d <= 40.0f && std::fabs(floors[a][1] - floors[b][1]) < 1.0f &&
+						clear(*m->world, add(floors[a], 0.0f, 1.6f, 0.0f), add(floors[b], 0.0f, 1.2f, 0.0f)) &&
+						clear(*m->world, add(floors[a], 0.0f, 1.6f, 0.0f), add(floors[b], 0.0f, 0.1f, 0.0f))) {
+					lane = std::pair<sim::Vec3, sim::Vec3>{ floors[a], floors[b] };
+				}
+			}
+		}
+		REQUIRE(lane.has_value());
+		const sim::Vec3 from = lane->first, to = lane->second;
+		const float run = horizontal(from, to);
+		const sim::Vec3 toward{ (from[0] - to[0]) / run, 0.0f, (from[2] - to[2]) / run };
+		std::optional<sim::Vec3> aside;
+		for (const sim::Vec3 &f : floors) {
+			if (!aside && horizontal(f, from) > 30.0f && horizontal(f, to) > 30.0f) {
+				aside = f;
+			}
+		}
+		REQUIRE(aside.has_value());
+		for (tdm::ScriptedPeer *p : peers) {
+			m->teleport(*p, add(*aside, 0.0f, 0.05f, 0.0f));
+		}
+		m->ticks(10);
+		bool fire = false;
+		sim::Vec3 aim{};
+		size_t shooter = 0;
+		for (size_t r = 0; r < 4; ++r) {
+			const size_t i = size_t(std::find(peers.begin(), peers.end(), by_team[team][r]) - peers.begin());
+			m->scripts[i] = [&, r](sim::Tick p_tick, const sim::SoldierState &p_state) {
+				return aim_command(*m, p_tick, p_state, aim, sim::Pose::Stand,
+						select_and_fire(uint8_t(gadget1), shooter == r && fire && (p_tick % 30u) < 10u) |
+								(shooter == r ? sim::buttons::kZoom : 0u));
+			};
+		}
+		const auto shoot = [&](size_t p_round, tdm::ScriptedPeer &r_victim, const sim::Vec3 &p_at,
+								   const sim::Vec3 &p_aim, uint32_t p_after) {
+			shooter = p_round;
+			m->teleport(*by_team[team][p_round], add(p_at, 0.0f, 0.05f, 0.0f));
+			m->teleport(r_victim, add(to, 0.0f, 0.05f, 0.0f));
+			aim = p_aim;
+			m->ticks(90);
+			watch->hits.clear();
+			watch->detonations.clear();
+			watch->shots.clear();
+			fire = true;
+			const bool fired = m->until([&] { return !watch->shots.empty(); }, 120);
+			fire = false;
+			m->ticks(p_after);
+			m->teleport(*by_team[team][p_round], add(*aside, 0.0f, 0.05f, 0.0f));
+			if (is_alive(m->state(r_victim.slot()))) {
+				m->teleport(r_victim, add(*aside, 1.0f, 0.05f, 0.0f));
+			}
+			m->ticks(5);
+			return fired;
+		};
+		const auto victim_hits = [&](const tdm::ScriptedPeer &p_victim, sw::DamageKind p_kind) {
+			std::vector<sw::DamageEvent> out;
+			for (const sw::DamageEvent &e : watch->hits) {
+				if (int(e.target) == p_victim.slot() && e.kind == p_kind) {
+					out.push_back(e);
+				}
+			}
+			return out;
+		};
+		tdm::ScriptedPeer &v_ground = *by_team[3 - team][0];
+		tdm::ScriptedPeer &v_buck = *by_team[3 - team][1];
+		tdm::ScriptedPeer &v_direct = *by_team[3 - team][2];
+		const sim::Vec3 chest = add(to, 0.0f, 1.2f, 0.0f);
+
+		const sw::ProjectileSimDef &he = table.defs[defs[0]].projectile;
+		const sim::Vec3 near = add(to, 5.0f * toward[0], 0.0f, 5.0f * toward[2]);
+		REQUIRE(shoot(0, v_ground, near, add(to, 1.5f * toward[0], 0.05f, 1.5f * toward[2]), 60));
+		REQUIRE(watch->detonations.size() == 1u);
+		CHECK(watch->detonations[0].def == defs[0]);
+		CHECK(watch->detonations[0].dud);
+		const std::vector<sw::DamageEvent> dud = victim_hits(v_ground, sw::DamageKind::DudBlast);
+		REQUIRE(dud.size() == 1u);
+		CHECK(dud[0].base == doctest::Approx(sw::blast_damage(he.dud, dud[0].distance, table.mechanics.blast_falloff)));
+		std::printf("M320 HE from 5 m: a dud, %.1f damage at %.2f m (dud BlastDamage %.0f, inner %.2f m)\n",
+				double(dud[0].amount), double(dud[0].distance), double(he.dud.blast_damage),
+				double(he.dud.inner_radius));
+
+		const int deaths_direct = int(m->row(v_direct.slot())->deaths);
+		const float flight = run / he.launch_velocity[2];
+		const float lead = -0.5f * he.gravity * flight * flight - he.launch_velocity[1] * flight;
+		REQUIRE(shoot(0, v_direct, from, add(chest, 0.0f, lead, 0.0f), 90));
+		REQUIRE(watch->detonations.size() == 1u);
+		CHECK_FALSE(watch->detonations[0].dud);
+		const std::vector<sw::DamageEvent> direct = victim_hits(v_direct, sw::DamageKind::Direct);
+		REQUIRE(direct.size() == 1u);
+		CHECK(direct[0].def == defs[0]);
+		CHECK(direct[0].base == doctest::Approx(sw::falloff_damage(he, direct[0].distance)));
+		CHECK(int(m->row(v_direct.slot())->deaths) == deaths_direct + 1);
+		std::printf("M320 HE from %.1f m: armed, a direct hit of %.1f (StartDamage %.0f x %.2f)\n", double(run),
+				double(direct[0].amount), double(direct[0].base), double(direct[0].multiplier));
+
+		const sw::WeaponSimDef &shg = table.defs[defs[1]];
+		REQUIRE(shoot(1, v_buck, from, chest, 30));
+		REQUIRE(watch->shots.size() == 1u);
+		CHECK(watch->shots[0].pellets == 12u);
+		CHECK(shg.pellets == 12);
+		CHECK(watch->detonations.empty());
+		const std::vector<sw::DamageEvent> pellets = victim_hits(v_buck, sw::DamageKind::Bullet);
+		REQUIRE_FALSE(pellets.empty());
+		for (const sw::DamageEvent &e : pellets) {
+			CHECK(e.def == defs[1]);
+			CHECK(e.base == doctest::Approx(sw::falloff_damage(shg.projectile, e.distance)));
+		}
+		std::printf(
+				"M320 buckshot from %.1f m: %zu of 12 pellets hit, %.2f base each (%.0f -> %.1f over %.0f..%.0f m)\n",
+				double(run), pellets.size(), double(pellets[0].base), double(shg.projectile.start_damage),
+				double(shg.projectile.end_damage), double(shg.projectile.falloff_start),
+				double(shg.projectile.falloff_end));
+
+		const sw::ProjectileSimDef &smk = table.defs[defs[2]].projectile;
+		REQUIRE(shoot(2, v_ground, from, add(to, 2.0f * toward[0], 0.05f, 2.0f * toward[2]), 90));
+		REQUIRE(watch->detonations.size() == 1u);
+		CHECK(watch->detonations[0].def == defs[2]);
+		CHECK_FALSE(watch->detonations[0].dud);
+		CHECK(smk.explosion.blast_damage == 0.0f);
+		bool spared = true;
+		for (size_t z = 0; z < sw::kHitZoneCount; ++z) {
+			spared = spared &&
+					sim::vehicles::material_relation_damage(smk.explosion.shockwave_damage,
+							smk.explosion.zone_multiplier[z], smk.explosion.zone_threshold[z]) == 0.0f;
+		}
+		CHECK(spared);
+		CHECK(victim_hits(v_ground, sw::DamageKind::Blast).empty());
+		CHECK(victim_hits(v_ground, sw::DamageKind::Direct).empty());
+		std::printf("M320 smoke: detonated, ShockwaveDamage %.0f out to %.0f m is under the soldier zones' "
+					"thresholds (%.0f body, %.0f legs): no damage\n",
+				double(smk.explosion.shockwave_damage), double(smk.explosion.gather_radius()),
+				double(smk.explosion.zone_threshold[size_t(sw::HitZone::Body)]),
+				double(smk.explosion.zone_threshold[size_t(sw::HitZone::Legs)]));
+
+		const sw::ProjectileSimDef &lvg = table.defs[defs[3]].projectile;
+		CHECK(lvg.kind == core::gameplay::ProjectileKind::Grenade);
+		REQUIRE(shoot(3, v_ground, from, add(from, -8.0f * toward[0], -1.0f, -8.0f * toward[2]),
+				uint32_t(sim::seconds_to_ticks(float(sw::units_to_seconds(lvg.time_to_live)))) + 30u));
+		REQUIRE(watch->detonations.size() == 1u);
+		CHECK(watch->detonations[0].def == defs[3]);
+		CHECK(watch->detonations[0].timeout);
+		CHECK(watch->detonations[0].time - watch->shots[0].spawn_time == lvg.time_to_live);
+		std::printf("M320 low-velocity grenade: bounced, went off at its TimeToLive %.2f s\n",
+				sw::units_to_seconds(lvg.time_to_live));
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}

@@ -239,7 +239,7 @@ std::vector<std::string> loadout_variants(std::span<const gp::KitDef> p_kits) {
 }
 
 std::vector<KitGadgetUnlock> loadout_gadget_unlocks(std::span<const gp::KitDef> p_kits) {
-	std::map<std::string, KitGadgetUnlock> out;
+	std::map<std::string, std::pair<bool, KitGadgetUnlock>> out;
 	for (const gp::KitDef &k : p_kits) {
 		for (const uint8_t s : kGadgetSlots) {
 			const gp::KitSlot *slot = k.slot(gp::WeaponSlot(s));
@@ -251,13 +251,20 @@ std::vector<KitGadgetUnlock> loadout_gadget_unlocks(std::span<const gp::KitDef> 
 					continue;
 				}
 				const std::string unlock = to_lower_ascii(u.unlock);
-				out.emplace(unlock, KitGadgetUnlock{ unlock, to_lower_ascii(u.weapon), u.type });
+				const bool gadget1 = s == kKitGadgetSlot;
+				auto it = out.try_emplace(unlock, gadget1, KitGadgetUnlock{ unlock, to_lower_ascii(u.weapon), u.type })
+								  .first;
+				it->second.first = it->second.first && gadget1;
 			}
 		}
 	}
 	std::vector<KitGadgetUnlock> list;
-	for (auto &[unlock, u] : out) {
-		list.push_back(std::move(u));
+	for (const bool gadget1_only : { false, true }) {
+		for (auto &[unlock, u] : out) {
+			if (u.first == gadget1_only) {
+				list.push_back(u.second);
+			}
+		}
 	}
 	return list;
 }
