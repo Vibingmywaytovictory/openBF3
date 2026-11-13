@@ -59,7 +59,7 @@ SightPixels sight_pixels(const godot::Image &p_frame, std::span<const SightMark>
 			out.surround_colour_inner = m.colour_inner;
 			out.surround_colour_outer = m.colour_outer;
 			ring = m;
-			out.band = out.band_dark = out.ring = out.ring_dark = out.inside = out.inside_dark = 0;
+			out.band = out.band_dark = out.ring = out.ring_dark = out.ring_black = out.inside = out.inside_dark = 0;
 			visit(m, m.outer_px + kDeployFireRingPx, 2, [&](float p_d, const godot::Color &p_c) {
 				if (p_d < m.inner_px - kDeployFireEdgePx) {
 					++out.inside;
@@ -71,6 +71,7 @@ SightPixels sight_pixels(const godot::Image &p_frame, std::span<const SightMark>
 				} else if (p_d > m.outer_px + kDeployFireEdgePx && p_d < m.outer_px + kDeployFireRingPx) {
 					++out.ring;
 					out.ring_dark += dark(p_c) ? 1u : 0u;
+					out.ring_black += std::max({ p_c.r, p_c.g, p_c.b }) <= kDeployFireBlackMax ? 1u : 0u;
 				}
 			});
 			continue;
@@ -362,7 +363,7 @@ void DeployCheck::fire(
 			} else if (fire_step_ == 12 && in >= kDeployFireAfterSeconds) {
 				fire_rows(p_st);
 				++fire_class_;
-				if (fire_class_ >= kDeployFireClassNames.size()) {
+				if (fire_class_ >= fire_classes()) {
 					enter(Phase::Done, p_now_s, p_st);
 				} else {
 					fire_next(1, p_now_s);
@@ -398,6 +399,10 @@ void DeployCheck::fire_accessories(
 			p_io.extra_spawn(p_st.extra_pick.kit);
 			fire_extra_spawn_s_ = p_now_s;
 		}
+	}
+	if (kind_ == DeployCheckPhase::Optic && (fire_step_ == 33 || fire_step_ == 44 || fire_step_ == 45)) {
+		pick_named_optic(r_screens, p_now_s, p_io, p_st);
+		return;
 	}
 	switch (fire_step_) {
 		case 30:
@@ -517,7 +522,7 @@ void DeployCheck::fire_accessories(
 				fire_rows(p_st);
 				fire_accessory_rows(p_st);
 				++fire_class_;
-				if (fire_class_ >= kDeployFireClassNames.size()) {
+				if (fire_class_ >= fire_classes()) {
 					enter(Phase::Done, p_now_s, p_st);
 				} else {
 					fire_next(1, p_now_s);
@@ -577,9 +582,14 @@ void DeployCheck::fire_accessory_rows(const DeployCheckState &p_st) {
 	const SightPixels &px = fire_sight_pixels_;
 	const auto share = [](size_t p_n, size_t p_of) { return p_of == 0 ? 0.0f : float(p_n) / float(p_of); };
 	const bool reticle_drawn = px.reticle_mesh.empty() || px.tinted >= kDeployFireReticlePixels;
+	const bool housing = px.surround && !fire_ads_.vm_optic_hides_weapon;
+	const bool housing_lit = share(px.ring_black, px.ring) < kDeployFireHousingBlackShare;
+	const bool faded_out_on_ring =
+			px.shade_r10 >= (px.inner_px + px.outer_px) * 0.5f && px.shade_r10 <= px.outer_px + kDeployFireEdgePx;
+	const bool fade_placed = housing ? px.shade_r10 < 0.0f || faded_out_on_ring : faded_out_on_ring;
 	const bool surround_drawn = !px.surround ||
-			(px.shade_r10 >= (px.inner_px + px.outer_px) * 0.5f && px.shade_r10 <= px.outer_px + kDeployFireEdgePx &&
-					share(px.ring_dark, px.ring) >= kDeployFireDarkShare && share(px.inside_dark, px.inside) < 0.5f);
+			(fade_placed && (housing ? housing_lit : share(px.ring_dark, px.ring) >= kDeployFireDarkShare) &&
+					share(px.inside_dark, px.inside) < 0.5f);
 	char drawn_px[512];
 	std::snprintf(drawn_px, sizeof(drawn_px),
 			"; drawn (%s): reticle %s %zu tinted of %zu px within its %.1f px disc; surround %s r %.1f..%.1f px: "
@@ -623,7 +633,15 @@ void DeployCheck::fire_accessory_rows(const DeployCheckState &p_st) {
 						double(kDeployFireShadeBinPx), double(px.outer_px - kDeployFireShadeInsidePx),
 						profile.c_str()));
 	}
-	if (fire_class_ == size_t(DeployFireClass::Assault)) {
+	if (housing) {
+		row(name + ".housing_lit", housing_lit,
+				bf3::core::fmt(
+						"the optic keeps the rifle drawn, so outside its multiply surface (r %.1f..%.1f px) is its "
+						"housing: %zu of %zu px black (a multiplied-out surround from %.2f), %zu dark",
+						double(px.outer_px + kDeployFireEdgePx), double(px.outer_px + kDeployFireRingPx), px.ring_black,
+						px.ring, double(kDeployFireHousingBlackShare), px.ring_dark));
+	}
+	if (fire_class_ == size_t(DeployFireClass::Assault) && kind_ != DeployCheckPhase::Optic) {
 		const uint64_t sounds = fire_hip_.audio_accessory_sounds - fire_mark_.audio_accessory_sounds;
 		const uint64_t effects = fire_hip_.fx_accessory_effects - fire_mark_.fx_accessory_effects;
 		row(name + ".suppressed", sounds > 0 && effects > 0,
@@ -729,6 +747,7 @@ void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const 
 			}
 		}
 	}
+	fill_deploy_optic_state(r_state, catalog, team);
 	if (catalog != nullptr && team_ok && r_game.own_slot < p_frame.gear.size()) {
 		const bf3::net::SoldierGear &gear = p_frame.gear[r_game.own_slot];
 		r_state.own_picks = gear.accessories;

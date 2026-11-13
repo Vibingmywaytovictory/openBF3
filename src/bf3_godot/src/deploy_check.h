@@ -69,8 +69,9 @@ inline constexpr size_t kDeployCheckCustomizeTab = 0;
 inline constexpr size_t kDeployCheckSquadTab = 1;
 inline constexpr uint32_t kDeployCheckBaseSpawns = 3;
 
-enum class DeployCheckPhase : uint8_t { Loadout, Gadget, Squad, Scope };
-inline constexpr std::array<std::string_view, 4> kDeployCheckPhaseNames{ "loadout", "gadget", "squad", "scope" };
+enum class DeployCheckPhase : uint8_t { Loadout, Gadget, Squad, Scope, Optic };
+inline constexpr std::array<std::string_view, 5> kDeployCheckPhaseNames{ "loadout", "gadget", "squad", "scope",
+	"optic" };
 
 bool parse_deploy_check_phase(std::string_view p_text, DeployCheckPhase &r_phase);
 
@@ -95,6 +96,8 @@ inline constexpr size_t kDeployFireReticlePixels = 3;
 inline constexpr float kDeployFireTintFloor = 0.25f;
 inline constexpr float kDeployFireTintDominance = 1.5f;
 inline constexpr float kDeployFireDarkMax = 0.1f;
+inline constexpr float kDeployFireBlackMax = 1.5f / 255.0f;
+inline constexpr float kDeployFireHousingBlackShare = 0.5f;
 inline constexpr size_t kDeployFireShadeBins = 50;
 inline constexpr float kDeployFireShadeInsidePx = 90.0f;
 inline constexpr float kDeployFireShadeOutsidePx = 10.0f;
@@ -113,7 +116,7 @@ struct SightPixels {
 	bool surround = false;
 	float inner_px = 0.0f, outer_px = 0.0f;
 	size_t band = 0, band_dark = 0;
-	size_t ring = 0, ring_dark = 0;
+	size_t ring = 0, ring_dark = 0, ring_black = 0;
 	size_t inside = 0, inside_dark = 0;
 	bool surround_vertex_colour = false;
 	float surround_colour_inner = 1.0f, surround_colour_outer = 1.0f;
@@ -204,6 +207,8 @@ struct DeployCheckState {
 	godot::Vector2 vm_sight_px;
 	SightSurfaces vm_sight_surfaces;
 	std::vector<SightMark> vm_sight_marks;
+	std::vector<std::string> optic_unlocks;
+	std::string chosen_optic_unlock;
 	bool vm_weapon_drawn = false;
 	bool vm_scope_only = false;
 	bool vm_optic_hides_weapon = false;
@@ -236,7 +241,7 @@ struct DeployCheckIo {
 
 class DeployCheck {
 public:
-	DeployCheck(std::string p_shots_dir, DeployCheckPhase p_phase);
+	DeployCheck(std::string p_shots_dir, DeployCheckPhase p_phase, std::string p_optic = {});
 
 	bool frame(Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io);
 	std::string report() const;
@@ -276,12 +281,16 @@ private:
 	static std::string node_fact(Bf3UiScreens &r_screens, std::string_view p_partition, std::string_view p_path);
 	static bool spawn_row_drawn(Bf3UiScreens &r_screens, std::string &r_fact);
 
-	bool fires() const { return kind_ == DeployCheckPhase::Scope; }
+	bool fires() const { return kind_ == DeployCheckPhase::Scope || kind_ == DeployCheckPhase::Optic; }
+	size_t fire_classes() const { return kind_ == DeployCheckPhase::Optic ? 1u : kDeployFireClassNames.size(); }
+	bool pick_named_optic(
+			Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io, const DeployCheckState &p_st);
 	uint32_t tab_spawns() const;
 	uint32_t expected_spawn_ends() const;
 
 	std::string shots_dir_;
 	DeployCheckPhase kind_ = DeployCheckPhase::Loadout;
+	std::string optic_;
 	uint32_t spawn_gadget_ = 0;
 	uint16_t spawn_gadget_def_ = bf3::sim::weapons::kNoWeapon;
 	std::string spawn_gadget_unlock_;
@@ -353,6 +362,8 @@ void fill_deploy_fire_state(DeployCheckState &r_state, GameState &r_game, const 
 		const bf3::host::SharedLevel *p_level, const bf3::host::ClientSession *p_extra, const godot::Camera3D *p_eye);
 
 SightPixels sight_pixels(const godot::Image &p_frame, std::span<const SightMark> p_marks);
+
+void fill_deploy_optic_state(DeployCheckState &r_state, const bf3::host::LoadoutCatalog *p_catalog, uint8_t p_team);
 
 DeployFireClass deploy_fire_class(const bf3::host::LoadoutCatalog &p_catalog,
 		std::span<const bf3::core::gameplay::WeaponDef> p_defs, uint8_t p_team, uint32_t p_item);

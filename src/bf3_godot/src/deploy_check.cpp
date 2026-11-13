@@ -6,6 +6,7 @@
 
 #include "bf3/core/ui/hud_screen.h"
 #include "bf3/core/ui/hud_widgets.h"
+#include "bf3/core/util/text.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -50,8 +51,8 @@ bool parse_deploy_check_phase(std::string_view p_text, DeployCheckPhase &r_phase
 	return false;
 }
 
-DeployCheck::DeployCheck(std::string p_shots_dir, DeployCheckPhase p_phase) :
-		shots_dir_(std::move(p_shots_dir)), kind_(p_phase) {
+DeployCheck::DeployCheck(std::string p_shots_dir, DeployCheckPhase p_phase, std::string p_optic) :
+		shots_dir_(std::move(p_shots_dir)), kind_(p_phase), optic_(bf3::core::to_lower_ascii(p_optic)) {
 	tab_ = kind_ == DeployCheckPhase::Squad ? kDeployCheckSquadTab : kDeployCheckCustomizeTab;
 }
 
@@ -60,7 +61,7 @@ uint32_t DeployCheck::tab_spawns() const {
 }
 
 uint32_t DeployCheck::expected_spawn_ends() const {
-	return kind_ == DeployCheckPhase::Scope ? 1u : tab_spawns() + 1u;
+	return fires() ? 1u : tab_spawns() + 1u;
 }
 
 bool DeployCheck::up(const Bf3UiScreens &p_screens, std::string_view p_partition) {
@@ -539,7 +540,7 @@ void DeployCheck::step(
 				break;
 			}
 			passed_ = failures_ == 0 && spawn_ends_ == expected_spawn_ends() &&
-					fire_class_ == (fires() ? kDeployFireClassNames.size() : 0u);
+					fire_class_ == (fires() ? fire_classes() : 0u);
 			done_ = true;
 			break;
 	}
@@ -692,6 +693,68 @@ void DeployCheck::customize(
 			break;
 		default:
 			break;
+	}
+}
+
+bool DeployCheck::pick_named_optic(
+		Bf3UiScreens &r_screens, double p_now_s, const DeployCheckIo &p_io, const DeployCheckState &p_st) {
+	const double in = p_now_s - fire_s_;
+	const DeployCheckList &optic = p_st.lists[kDeployCheckOpticList];
+	const std::string name = "fire." + std::string(kDeployFireClassNames[fire_class_]) + ".pick_optic";
+	if (fire_step_ == 33 && in >= kDeployCheckGridSeconds) {
+		fire_optic_expected_ = 0;
+		for (size_t i = 0; i < optic.count && i < p_st.optic_unlocks.size() && fire_optic_expected_ == 0; ++i) {
+			if (!optic_.empty() && bf3::core::to_lower_ascii(p_st.optic_unlocks[i]).find(optic_) != std::string::npos) {
+				fire_optic_expected_ = optic.items[i];
+			}
+		}
+		fire_mark_ = p_st;
+		fire_clicks_ = 0;
+		fire_next(44, p_now_s);
+	} else if (fire_step_ == 44 && fire_optic_expected_ != 0 && optic.chosen == fire_optic_expected_) {
+		shot(p_io, "fire_" + std::string(kDeployFireClassNames[fire_class_]) + "_optic", p_now_s);
+		row(name, p_st.loadout_requests > fire_mark_.loadout_requests,
+				"ACCESSORIES optic " + p_st.chosen_optic_unlock + " (item " + std::to_string(optic.chosen) +
+						"), named '" + optic_ + "', after " + std::to_string(fire_clicks_) + " click(s), " +
+						std::to_string(p_st.loadout_requests - fire_mark_.loadout_requests) + " loadout request(s)");
+		fire_next(37, p_now_s);
+	} else if (fire_step_ == 44 && (fire_optic_expected_ == 0 || fire_clicks_ > optic.count)) {
+		std::string listed;
+		for (const std::string &u : p_st.optic_unlocks) {
+			listed += (listed.empty() ? "" : ", ") + u;
+		}
+		row(name, false,
+				"no optic named '" + optic_ + "' reached among " + std::to_string(optic.count) + " (" + listed +
+						") after " + std::to_string(fire_clicks_) + " click(s)");
+		fire_next(37, p_now_s);
+	} else if (fire_step_ == 44 &&
+			click_clip(r_screens, kCustomizeScreenPartitions[2],
+					std::string(kDeployCheckOpticSelector) + std::string(kDeployCheckSelectorRight), p_io)) {
+		++fire_clicks_;
+		fire_next(45, p_now_s);
+	} else if (fire_step_ == 45 && in >= kDeployCheckGridSeconds) {
+		fire_next(44, p_now_s);
+	}
+	return fire_step_ == 37;
+}
+
+void fill_deploy_optic_state(DeployCheckState &r_state, const bf3::host::LoadoutCatalog *p_catalog, uint8_t p_team) {
+	const bf3::host::LoadoutKit *kit = p_catalog != nullptr ? p_catalog->kit(p_team, r_state.spawn_kit) : nullptr;
+	const bf3::host::LoadoutItem *item = kit != nullptr
+			? kit->find(size_t(bf3::core::gameplay::WeaponSlot::Primary), r_state.chosen_primary)
+			: nullptr;
+	if (item == nullptr) {
+		return;
+	}
+	const DeployCheckList &optic = r_state.lists[kDeployCheckOpticList];
+	r_state.optic_unlocks.assign(optic.count, std::string());
+	for (size_t i = 0; i < item->accessories[0].size() && i < item->accessory_unlocks[0].size(); ++i) {
+		for (size_t k = 0; k < optic.count; ++k) {
+			r_state.optic_unlocks[k] = optic.items[k] == item->accessories[0][i] ? item->accessory_unlocks[0][i]
+																				 : r_state.optic_unlocks[k];
+		}
+		r_state.chosen_optic_unlock =
+				optic.chosen == item->accessories[0][i] ? item->accessory_unlocks[0][i] : r_state.chosen_optic_unlock;
 	}
 }
 

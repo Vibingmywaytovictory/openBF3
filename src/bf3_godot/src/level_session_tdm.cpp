@@ -975,13 +975,14 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			DeployCheckPhase phase = DeployCheckPhase::Loadout;
 			if (!parse_deploy_check_phase(user_arg_value("deploy-phase"), phase)) {
 				UtilityFunctions::print(to_godot("[deploy] bad --deploy-phase=" + user_arg_value("deploy-phase") +
-						": loadout, gadget, squad or scope"));
+						": loadout, gadget, squad, scope or optic"));
 				m.finished = true;
 				finish(2);
 				return true;
 			}
 			m.deploy_run = std::unique_ptr<DeployCheck, void (*)(DeployCheck *)>(
-					new DeployCheck(user_arg_value("deploy-shots"), phase), &delete_part<DeployCheck>);
+					new DeployCheck(user_arg_value("deploy-shots"), phase, user_arg_value("deploy-optic")),
+					&delete_part<DeployCheck>);
 		}
 		DeployCheckIo io;
 		io.press = [this](Key p_key, bool p_pressed) { scripted_ui_key(p_key, p_pressed); };

@@ -1200,8 +1200,9 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_godot_row(godot.deploy.gadget godot_deploy.cmake WINDOW TIMEOUT 180 ARGS -DPHASE=gadget)
     openbf3_godot_row(godot.deploy.squad godot_deploy.cmake WINDOW TIMEOUT 180 ARGS -DPHASE=squad)
     openbf3_godot_row(godot.deploy.scope godot_deploy.cmake WINDOW TIMEOUT 180 ARGS -DPHASE=scope)
+    openbf3_godot_row(godot.deploy.optic.m145 godot_deploy.cmake WINDOW TIMEOUT 180 ARGS -DPHASE=optic -DOPTIC=m145)
     set_tests_properties(godot.deploy.loadout godot.deploy.gadget godot.deploy.squad godot.deploy.scope
-        PROPERTIES RUN_SERIAL TRUE)
+        godot.deploy.optic.m145 PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.crosshair_walk godot_crosshair_walk.cmake WINDOW TIMEOUT 120)
     openbf3_godot_row(godot.gadgets_draw godot_gadgets_draw.cmake WINDOW TIMEOUT 120)
     openbf3_godot_row(godot.vehicle_drive godot_vehicle_drive.cmake WINDOW TIMEOUT 180)
@@ -1220,6 +1221,7 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_cost(godot.deploy.gadget 1 33)
     openbf3_cost(godot.deploy.squad 1 25)
     openbf3_cost(godot.deploy.scope 1 104)
+    openbf3_cost(godot.deploy.optic.m145 1 45)
     openbf3_godot_row(godot.audio_ingame godot_audio_ingame.cmake WINDOW TIMEOUT 480 ARGS -DPHASE=mix)
     openbf3_godot_row(godot.audio_ingame.pool godot_audio_ingame.cmake WINDOW TIMEOUT 480 ARGS -DPHASE=pool)
     openbf3_godot_row(godot.audio_ingame.play godot_audio_ingame.cmake WINDOW TIMEOUT 300 ARGS -DPHASE=play)
