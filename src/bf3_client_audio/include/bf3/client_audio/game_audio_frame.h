@@ -6,6 +6,7 @@
 #include "bf3/audio/weapon_audio.h"
 #include "bf3/client_audio/kit_audio.h"
 #include "bf3/client_audio/soldier_audio.h"
+#include "bf3/client_audio/vehicle_sounds.h"
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/install.h"
 #include "bf3/host/client_session.h"
@@ -62,6 +63,7 @@ inline constexpr const char *kAuditionSuperbundles = "Win32/Levels/MP_001/MP_001
 struct GameAudioLoadOptions {
 
 	std::string audition_superbundles = kAuditionSuperbundles;
+	std::shared_ptr<const host::LevelVehicles> vehicles;
 };
 
 struct GameAuditionAsset {
@@ -76,6 +78,7 @@ struct GameAudioAssets {
 	std::shared_ptr<const ImpactSoundCache> impacts;
 	std::vector<FlyBySound> flybys;
 	std::optional<SoldierAudioAssets> soldier;
+	std::optional<VehicleAudioAssets> vehicles;
 	std::map<std::string, GameAuditionAsset, std::less<>> auditions;
 	std::shared_ptr<const core::audio::WaveBank> bank;
 	std::vector<std::string> report;

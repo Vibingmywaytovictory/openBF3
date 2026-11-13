@@ -5,12 +5,14 @@
 
 #include "bf3/audio/audio_load.h"
 #include "bf3/audio/movement_foley.h"
+#include "bf3/audio/vehicle_audio.h"
 #include "bf3/audio/voice_cull.h"
 #if OPENBF3_BUILD_CHECKS
 #include "bf3/client_audio/area_wave_observer.h"
 #endif
 #include "bf3/client_audio/game_audio_frame.h"
 #include "bf3/client_audio/kit_audio.h"
+#include "bf3/client_audio/vehicle_sounds.h"
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/util/elapsed.h"
@@ -119,6 +121,11 @@ struct Bf3GameAudio::Impl {
 	std::unique_ptr<ba::OwnHitAudio> own_hit;
 	std::unique_ptr<ba::MovementFoley> movement;
 	std::unique_ptr<ba::DeathScreamAudio> deaths;
+	std::optional<ba::VehicleAudioAssets> vehicle_assets;
+	std::shared_ptr<const host::LevelVehicles> level_vehicles;
+	std::unique_ptr<ba::VehicleAudio> vehicles;
+	std::vector<ba::VehicleSoundSource> vehicle_sources;
+	ba::VehicleSoundMemory vehicle_memory;
 	std::vector<ba::FootstepSoldier> step_soldiers;
 	TapForwarder tap;
 	Ref<Bf3AudioStream> stream;
@@ -168,8 +175,10 @@ core::Status Bf3GameAudio::load(const GameLoadInputs &p_in, std::span<const std:
 	}
 	m.db = p_in.db;
 	m.capture_guard = p_in.db->install->reader().write_guard();
-	core::Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(p_in.db->install, *p_in.db->level, *p_in.shared->gunplay, p_impact_sounds, p_in.threads, p_in.stop,
-			m.load_options);
+	ba::GameAudioLoadOptions options = m.load_options;
+	options.vehicles = p_in.shared->vehicles;
+	core::Result<ba::GameAudioAssets> a = ba::load_game_audio_assets(p_in.db->install, *p_in.db->level,
+			*p_in.shared->gunplay, p_impact_sounds, p_in.threads, p_in.stop, options);
 	if (!a) {
 		return a.error();
 	}
@@ -178,6 +187,8 @@ core::Status Bf3GameAudio::load(const GameLoadInputs &p_in, std::span<const std:
 	m.impacts_cache = std::move(a->impacts);
 	m.flyby_sounds = std::move(a->flybys);
 	m.soldier = std::move(a->soldier);
+	m.vehicle_assets = std::move(a->vehicles);
+	m.level_vehicles = p_in.shared->vehicles;
 	m.ground.reset();
 	if (m.soldier) {
 		core::Result<std::shared_ptr<ba::FootstepGroundProbe>> ground = ba::FootstepGroundProbe::create(
@@ -296,6 +307,9 @@ bool Bf3GameAudio::build(godot::Node *p_parent, std::string *r_error) {
 		m.movement = std::make_unique<ba::MovementFoley>(m.soldier->movement, m.bank, m.tuning);
 		m.deaths = std::make_unique<ba::DeathScreamAudio>(*m.mixer, m.soldier->death, m.bank, m.tuning, *m.pool);
 	}
+	if (m.vehicle_assets && m.level_vehicles && !m.vehicle_assets->programs.empty()) {
+		m.vehicles = std::make_unique<ba::VehicleAudio>(m.vehicle_assets->programs, m.bank, m.tuning);
+	}
 	m.beds.set_assets(m.bed_assets);
 	m.stream.instantiate();
 	m.stream->set_mixer(m.mixer);
@@ -384,6 +398,16 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 		const auto own = std::find_if(m.step_soldiers.begin(), m.step_soldiers.end(),
 				[](const ba::FootstepSoldier &s) { return s.local_player; });
 		m.movement->step(*m.mixer, own != m.step_soldiers.end() ? &*own : nullptr, in.listener);
+	}
+	if (m.vehicles && p_frame.frame != nullptr) {
+		ba::VehicleListenerView view;
+		view.listener = in.listener;
+		view.own_slot = p_frame.own_slot;
+		const std::span<const host::PresentedVehicle> presented(p_frame.frame->vehicles.data(),
+				std::min<size_t>(p_frame.frame->vehicle_count, p_frame.frame->vehicles.size()));
+		ba::vehicle_sound_sources(
+				presented, *m.level_vehicles, *m.vehicle_assets, view, m.vehicle_memory, m.vehicle_sources);
+		m.vehicles->step(*m.mixer, m.vehicle_sources, in.listener);
 	}
 	if (m.own_hit) {
 		m.own_hit->on_events(p_frame.events, p_frame.others, in.listener, m.clock->earliest_frame());
@@ -685,6 +709,7 @@ void Bf3GameAudio::shutdown() {
 	m.own_hit.reset();
 	m.movement.reset();
 	m.deaths.reset();
+	m.vehicles.reset();
 	m.clock.reset();
 	m.mixer.reset();
 	m.pool.reset();
@@ -725,6 +750,9 @@ ba::MixerA3Assets load_a3(const core::EbxResolver &p_db, Impl &r_m) {
 		programs.push_back(r_m.soldier->own_hit);
 		programs.push_back(r_m.soldier->movement);
 		programs.push_back(r_m.soldier->death);
+	}
+	if (r_m.vehicle_assets) {
+		programs.insert(programs.end(), r_m.vehicle_assets->programs.begin(), r_m.vehicle_assets->programs.end());
 	}
 	ba::MixerA3Assets a3 = ba::load_mixer_a3(p_db, programs);
 	char line[200];
@@ -810,6 +838,9 @@ template <class Impl> void drain_mixer_events(Impl &r_m, const Bf3GameAudio &p_a
 			r_m.beds.on_cut(e);
 			if (r_m.movement) {
 				r_m.movement->on_cut(e);
+			}
+			if (r_m.vehicles) {
+				r_m.vehicles->on_cut(e);
 			}
 			if (keep) {
 				if (c->events.size() < kMaxCaptureEvents) {
@@ -949,6 +980,17 @@ void capture_end(Impl &r_m) {
 		UtilityFunctions::print(String::utf8(("[audio] movement foley: " + std::to_string(foley.starts) + " starts, " +
 				std::to_string(foley.stops) + " stops, " + std::to_string(foley.ended) + " ended, " +
 				std::to_string(foley.jumps) + " jumps, peak " + std::to_string(foley.peak_speed) + " m/s")
+						.c_str()));
+	}
+	if (r_m.vehicles) {
+		const ba::VehicleAudioStats &vs = r_m.vehicles->stats();
+		UtilityFunctions::print(String::utf8(("[audio] vehicle engines: " + std::to_string(r_m.vehicles->programs()) +
+				" patches, " + std::to_string(vs.starts) + " starts, " + std::to_string(vs.stops) + " stops, " +
+				std::to_string(vs.ended) + " ended, " + std::to_string(vs.updates) + " updates, peak " +
+				std::to_string(vs.peak_live) + " live, " + std::to_string(vs.interior_frames) + " interior frames, " +
+				std::to_string(vs.push_failures) + " push failures, " + std::to_string(vs.create_failures) +
+				" create failures, peak " + std::to_string(vs.peak_velocity) + " m/s, throttle " +
+				std::to_string(vs.peak_throttle))
 						.c_str()));
 	}
 	if (r_m.own_hit) {
