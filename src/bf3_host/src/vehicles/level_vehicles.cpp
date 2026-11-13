@@ -188,6 +188,7 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 			k.box = sim::vehicles::chassis_box(**model);
 			k.material = def->material;
 			k.min_speed_for_mine = def->min_speed_for_mine_activation;
+			k.run_over = { def->kill_soldier_collision_speed_threshold, def->ignore_soldier_collision_normal };
 			k.explosion = def->explosion;
 			k.explosion_effect = def->explosion_effect;
 			k.disabled_input = def->disabled_input;

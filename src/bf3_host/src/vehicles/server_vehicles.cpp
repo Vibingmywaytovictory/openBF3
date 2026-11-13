@@ -52,6 +52,7 @@ core::Status ServerVehicles::rebuild() {
 	targets_.clear();
 	strikes_.clear();
 	crew_kills_.clear();
+	run_overs_.clear();
 	obstacles_.clear();
 	wrecks_.clear();
 	use_held_.fill(0);
@@ -531,6 +532,44 @@ void ServerVehicles::gather(std::span<const sim::weapons::DamageEvent> p_events,
 	}
 }
 
+void ServerVehicles::run_over(sim::Tick p_tick, size_t p_slot, std::span<const sim::ObstacleContact> p_contacts) {
+	if (!on() || seated(p_slot) || materials_ == nullptr) {
+		return;
+	}
+	float amount = 0.0f;
+	uint8_t driver = net::kNoVehicleOccupant;
+	for (const sim::ObstacleContact &c : p_contacts) {
+		if (c.slot >= vehicles_.size() || !vehicles_[c.slot].live) {
+			continue;
+		}
+		const core::gameplay::DamageRelation relation =
+				materials_->relation(hull_property(c.slot), materials_->zone_property(sim::weapons::HitZone::Body));
+		if (!relation.present) {
+			continue;
+		}
+		const LevelVehicleKind &kind = level_->kinds[level_->spawners[c.slot].kind];
+		const float hit = sim::vehicles::run_over_damage(kind.run_over,
+				sim::vehicles::run_over_speed(kind.run_over, c.velocity, c.normal), relation.collision_multiplier,
+				relation.collision_threshold);
+		if (hit > amount) {
+			amount = hit;
+			driver = vehicles_[c.slot].occupants[0];
+		}
+	}
+	if (!(amount > 0.0f)) {
+		return;
+	}
+	sim::weapons::DamageEvent e;
+	e.time = sim::weapons::tick_start(p_tick);
+	e.attacker_slot = driver != net::kNoVehicleOccupant ? driver : uint32_t(p_slot);
+	e.target = uint32_t(p_slot);
+	e.kind = sim::weapons::DamageKind::Direct;
+	e.base = amount;
+	e.amount = amount;
+	run_overs_.push_back(e);
+	++stats_.run_overs;
+}
+
 void ServerVehicles::take_hits(Gunplay &r_gunplay, std::vector<sim::weapons::DamageEvent> &r_damage) {
 	if (!on()) {
 		return;
@@ -566,6 +605,8 @@ void ServerVehicles::take_hits(Gunplay &r_gunplay, std::vector<sim::weapons::Dam
 	}
 	r_damage.insert(r_damage.end(), crew_kills_.begin(), crew_kills_.end());
 	crew_kills_.clear();
+	r_damage.insert(r_damage.end(), run_overs_.begin(), run_overs_.end());
+	run_overs_.clear();
 }
 
 void ServerVehicles::push(const sim::weapons::ProjectileStepOutput &p_out, const sim::weapons::WeaponTable *p_table) {

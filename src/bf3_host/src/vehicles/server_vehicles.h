@@ -54,6 +54,7 @@ struct ServerVehicleStats {
 	uint64_t unlocated = 0;
 	uint64_t pushes = 0;
 	uint64_t obstacle_failures = 0;
+	uint64_t run_overs = 0;
 };
 
 inline constexpr sim::Tick kWreckWireTicks = 6;
@@ -112,6 +113,7 @@ public:
 			std::span<const core::gameplay::WeaponDef> p_soldier_defs);
 	void step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_soldiers);
 	void take_hits(Gunplay &r_gunplay, std::vector<sim::weapons::DamageEvent> &r_damage);
+	void run_over(sim::Tick p_tick, size_t p_slot, std::span<const sim::ObstacleContact> p_contacts);
 	const sim::VehicleObstacles &obstacles() const { return obstacles_; }
 	std::span<const sim::vehicles::VehicleTarget> targets() const { return targets_; }
 	std::span<const sim::weapons::PackVehicle> pack_vehicles() const { return pack_vehicles_; }
@@ -170,6 +172,7 @@ private:
 	std::vector<sim::weapons::PackVehicle> pack_vehicles_;
 	std::vector<VehicleStrike> strikes_;
 	std::vector<sim::weapons::DamageEvent> crew_kills_;
+	std::vector<sim::weapons::DamageEvent> run_overs_;
 	sim::VehicleObstacles obstacles_;
 	std::vector<sim::weapons::DamageEvent> taken_;
 	VehicleScope scope_;

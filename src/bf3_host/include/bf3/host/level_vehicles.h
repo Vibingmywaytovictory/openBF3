@@ -6,6 +6,7 @@
 #include "bf3/net/protocol.h"
 #include "bf3/sim/vehicle_model.h"
 #include "bf3/sim/vehicle_world.h"
+#include "bf3/sim/vehicles/run_over_rules.h"
 #include "bf3/sim/vehicles/vehicle_armament.h"
 #include "bf3/sim/vehicles/vehicle_damage.h"
 
@@ -43,6 +44,7 @@ struct LevelVehicleKind {
 	core::gameplay::MaterialPairRef material;
 	std::array<bool, net::kMaxVehicleSeats> exposed{};
 	float min_speed_for_mine = 0;
+	sim::vehicles::RunOverRule run_over;
 	core::gameplay::Explosion explosion;
 	std::string explosion_effect;
 	std::vector<core::gameplay::VehicleInputModifierDef> disabled_input;

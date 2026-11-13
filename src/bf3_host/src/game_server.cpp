@@ -313,6 +313,9 @@ struct GameServer::Impl {
 				soldiers.seat(i, body.last, body.state.position);
 			} else {
 				soldiers.step(i, motor, combat.motor_modifiers(i, motor.params()));
+				if (was_alive && soldier_alive(body.state)) {
+					vehicles.run_over(n, i, motor.obstacle_contacts());
+				}
 			}
 			++times.motor_steps;
 			if (was_alive && !s.dummy && !seated) {

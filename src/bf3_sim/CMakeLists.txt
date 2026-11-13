@@ -102,6 +102,8 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/vehicles/vehicle_obstacles.h
     src/vehicles/vehicle_obstacles_internal.h
     src/vehicles/vehicle_obstacles.cpp
+    include/bf3/sim/vehicles/run_over_rules.h
+    src/vehicles/run_over_rules.cpp
 )
 
 target_sources(bf3_sim PRIVATE

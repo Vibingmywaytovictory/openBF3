@@ -7637,4 +7637,63 @@ TEST_SUITE("host-vehicles-contact") {
 		CHECK(walked->health == doctest::Approx(m.motor.params().max_health));
 		CHECK(m.rules().stats().runtime_faults == 0u);
 	}
+
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: a Growler driven into an enemy above its "
+			  "KillSoldierCollisionSpeedThreshold runs him over, credited to its driver") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		ParkedJeep j;
+		park_jeep(*level, j);
+		Match &m = *j.m;
+		std::printf("contact: kill speed %.1f m/s, normal ignored %d\n", double(j.kind->run_over.kill_speed),
+				int(j.kind->run_over.ignore_normal));
+		CHECK(j.kind->run_over.kill_speed == doctest::Approx(5.0f));
+		CHECK_FALSE(j.kind->run_over.ignore_normal);
+		m.teleport(*j.victim, j.ahead(20.0f), j.toward_hull);
+		sim::Tick use_at = 0;
+		int8_t throttle = 0;
+		m.scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+			c.buttons |= p_tick == use_at ? sim::buttons::kUse : 0u;
+			c.move_forward = throttle;
+			return c;
+		};
+		const sim::Vec3 door = beside_hull(m, j.parked, 2.0f);
+		m.teleport(*j.driver, door);
+		REQUIRE(m.until([&] { return horizontal(m.state(j.driver->slot())->position, door) < 0.5f; }, 30));
+		use_at = m.now() + 3u;
+		REQUIRE(m.until(
+				[&] {
+					j.watch.take(m.out, j.driver->peer());
+					return j.watch.of(j.hull)->occupants[0] == uint8_t(j.driver->slot());
+				},
+				60));
+		REQUIRE(is_alive(m.state(j.victim->slot())));
+		throttle = 127;
+		float speed_at_death = 0.0f;
+		m.until(
+				[&] {
+					j.watch.take(m.out, j.driver->peer());
+					const net::VehicleWire *w = j.watch.of(j.hull);
+					if (!is_alive(m.state(j.victim->slot()))) {
+						speed_at_death = speed_of(w->state.body.linear_velocity);
+						return true;
+					}
+					return j.along(w->state.body.com_position) > 30.0f;
+				},
+				600);
+		throttle = 0;
+		m.ticks(10);
+		const net::DeathEvent *death = last_death(*j.driver, j.victim->slot());
+		std::printf("contact: the driver ran into the victim 20 m ahead at %.1f m/s, killer %d (driver %d)\n",
+				double(speed_at_death), death != nullptr ? int(death->killer) : -1, j.driver->slot());
+		CHECK_FALSE(is_alive(m.state(j.victim->slot())));
+		REQUIRE(death != nullptr);
+		CHECK(int(death->killer) == j.driver->slot());
+		CHECK(speed_at_death > j.kind->run_over.kill_speed);
+		CHECK(is_alive(m.state(j.driver->slot())));
+		CHECK(m.rules().stats().runtime_faults == 0u);
+	}
 }
