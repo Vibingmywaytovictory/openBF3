@@ -1021,3 +1021,91 @@ TEST_SUITE("gadgets-unit") {
 		CHECK(e.guide.state == MissileState::Homing);
 	}
 }
+
+TEST_SUITE("gadgets-unit") {
+	TEST_CASE("paint: R2-G4 B laser painter: a placed SOFLAM's LockAlways controller locks the enemy vehicle in its "
+			  "15 degree cone along its facing from its laser origin and paints it TimeObjectIsPainted 0.5 s past "
+			  "each locked tick, so a LockOnLaserPainted controller sees it; the paint ends after the release") {
+		GadgetDef g;
+		g.weapon = "soflam";
+		g.kind = GadgetKind::LaserDesignator;
+		g.def = 6;
+		g.painter.controller = lock_controller(2.0, 1.0, 1.5, 0.06);
+		g.painter.controller.acceptance_angle_deg = 15.0f;
+		g.painter.painted_time = seconds_to_units(0.5);
+		g.painter.origin = Vec3{ 0.0f, 0.5f, 0.0f };
+		const std::vector<GadgetDef> defs{ g };
+		Deployable d;
+		d.id = 11;
+		d.def = 6;
+		d.team = 1;
+		d.resting = true;
+		d.facing = core::vec::normalize(Vec3{ 1.0f, 0.0f, 1.0f });
+		const LockAim aim = painter_aim(g.painter, d);
+		CHECK(aim.origin[1] == doctest::Approx(0.5f));
+		CHECK(aim.forward[0] == doctest::Approx(d.facing[0]));
+		CHECK(aim.team == 1u);
+		const auto turned = [&](float p_degrees, float p_distance) {
+			const Vec3 o = off_axis(p_degrees + 45.0f, p_distance);
+			return Vec3{ o[0], 0.0f, o[2] };
+		};
+		std::vector<LockCandidate> all{ candidate_at(7, turned(5.0f, 100.0f)), candidate_at(8, turned(0.0f, 100.0f)),
+			candidate_at(9, turned(20.0f, 100.0f)) };
+		all[1].team = 1;
+		Deployable flying = d;
+		flying.id = 12;
+		flying.resting = false;
+		const std::vector<Deployable> live{ d, flying };
+		LaserPainters painters;
+		Tick locked_at = 0;
+		for (Tick t = 1; t <= 200 && locked_at == 0; ++t) {
+			painters.step(defs, live, all, nullptr, tick_end(t));
+			const LockState *s = painters.lock_of(11);
+			REQUIRE(s != nullptr);
+			locked_at = s->locked ? t : 0;
+		}
+		MESSAGE("the SOFLAM locked at tick ", locked_at);
+		CHECK(locked_at == 152u);
+		CHECK(painters.lock_of(11)->target == 7u);
+		CHECK(painters.lock_of(12) == nullptr);
+		const SimTime now = tick_end(locked_at);
+		CHECK(painters.painted(7, now));
+		CHECK_FALSE(painters.painted(8, now));
+		CHECK_FALSE(painters.painted(9, now));
+		LockingControllerSimDef javelin = lock_controller(1.5, 1.0, 0.5, 0.06);
+		javelin.acceptance_angle_deg = 5.0f;
+		javelin.zoom_locks[1] = LockType::LaserPainted;
+		javelin.zoom_lock_count = 2;
+		LockAim gunner;
+		gunner.origin = Vec3{ 0.0f, 1.6f, 0.0f };
+		gunner.forward = core::vec::normalize(core::vec::sub(all[0].aim, gunner.origin));
+		gunner.team = 1;
+		gunner.zoom = 1;
+		CHECK(pick_lock_candidate(javelin, LockType::LaserPainted, gunner, all, nullptr) == nullptr);
+		std::vector<LockCandidate> marked = all;
+		painters.mark(marked, now);
+		CHECK(marked[0].painted);
+		CHECK_FALSE(marked[1].painted);
+		CHECK(lock_signature(marked[0], LockType::LaserPainted) == 1.0f);
+		const LockCandidate *laser = pick_lock_candidate(javelin, LockType::LaserPainted, gunner, marked, nullptr);
+		REQUIRE(laser != nullptr);
+		CHECK(laser->id == 7u);
+		const Tick held = locked_at + 8;
+		for (Tick t = locked_at + 1; t <= held; ++t) {
+			painters.step(defs, live, all, nullptr, tick_end(t));
+		}
+		REQUIRE(painters.lock_of(11)->locked);
+		CHECK(painters.lock_of(11)->release == g.painter.controller.release_time);
+		const std::vector<LockCandidate> none;
+		Tick unpainted = 0;
+		for (Tick t = held + 1; t <= held + 300 && unpainted == 0; ++t) {
+			painters.step(defs, live, none, nullptr, tick_end(t));
+			unpainted = painters.painted(7, tick_end(t)) ? 0 : t - held;
+		}
+		MESSAGE("the paint ended ", unpainted, " ticks after the target left the cone");
+		CHECK(unpainted == 93u);
+		CHECK(painters.painted().empty());
+		painters.step(defs, std::vector<Deployable>{}, none, nullptr, tick_end(held + 301));
+		CHECK(painters.lock_of(11) == nullptr);
+	}
+}

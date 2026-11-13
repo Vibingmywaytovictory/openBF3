@@ -897,6 +897,74 @@ void GadgetField::clear() {
 	}
 }
 
+LockAim painter_aim(const LaserPainterDef &p_painter, const Deployable &p_designator) {
+	LockAim aim;
+	aim.origin = core::vec::add(p_designator.position, shot_frame_vector(p_designator.facing, p_painter.origin));
+	aim.forward = core::vec::normalize_or(p_designator.facing, Vec3{ 0.0f, 0.0f, 1.0f });
+	aim.team = p_designator.team;
+	aim.zoom = 0;
+	return aim;
+}
+
+void LaserPainters::step(std::span<const GadgetDef> p_defs, std::span<const Deployable> p_live,
+		std::span<const LockCandidate> p_candidates, const CollisionWorld *p_world, SimTime p_now,
+		LockStepStats *r_stats) {
+	std::erase_if(designators_, [&](const Designator &p_d) {
+		return std::none_of(p_live.begin(), p_live.end(), [&](const Deployable &p_l) { return p_l.id == p_d.id; });
+	});
+	for (const Deployable &d : p_live) {
+		if (d.gadget >= p_defs.size() || p_defs[d.gadget].kind != GadgetKind::LaserDesignator || !d.resting) {
+			continue;
+		}
+		const LaserPainterDef &painter = p_defs[d.gadget].painter;
+		auto it = std::find_if(
+				designators_.begin(), designators_.end(), [&](const Designator &p_d) { return p_d.id == d.id; });
+		if (it == designators_.end()) {
+			designators_.push_back(Designator{ d.id, LockState() });
+			it = designators_.end() - 1;
+		}
+		step_lock(painter.controller, it->lock, painter_aim(painter, d), kTimeUnitsPerTick, p_candidates, p_world,
+				r_stats);
+		if (!it->lock.locked || it->lock.target == kNoLockTarget) {
+			continue;
+		}
+		const SimTime until = p_now + painter.painted_time;
+		auto paint = std::find_if(
+				painted_.begin(), painted_.end(), [&](const PaintedTarget &p_t) { return p_t.id == it->lock.target; });
+		if (paint == painted_.end()) {
+			painted_.push_back(PaintedTarget{ it->lock.target, until });
+		} else {
+			paint->until = std::max(paint->until, until);
+		}
+	}
+	std::erase_if(painted_, [&](const PaintedTarget &p_t) { return p_t.until <= p_now; });
+}
+
+bool LaserPainters::painted(uint32_t p_id, SimTime p_now) const {
+	return std::any_of(painted_.begin(), painted_.end(),
+			[&](const PaintedTarget &p_t) { return p_t.id == p_id && p_t.until > p_now; });
+}
+
+void LaserPainters::mark(std::span<LockCandidate> r_candidates, SimTime p_now) const {
+	for (LockCandidate &c : r_candidates) {
+		c.painted = c.painted || painted(c.id, p_now);
+	}
+}
+
+const LockState *LaserPainters::lock_of(uint16_t p_designator) const {
+	for (const Designator &d : designators_) {
+		if (d.id == p_designator) {
+			return &d.lock;
+		}
+	}
+	return nullptr;
+}
+
+void LaserPainters::clear() {
+	designators_.clear();
+	painted_.clear();
+}
+
 void arm_ammo_refill(AmmoRefillState &r_state, const SoldierWeaponsState &p_weapons) {
 	r_state = AmmoRefillState();
 	for (size_t s = 0; s < kMaxWeaponSlots; ++s) {

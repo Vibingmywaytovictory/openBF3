@@ -57,6 +57,7 @@ public:
 	void reset_lock(uint8_t p_slot);
 	const sim::weapons::WeaponLockState &lock(uint8_t p_slot) const;
 	const sim::weapons::GuidanceTargets &guidance() const { return guidance_; }
+	const sim::weapons::LaserPainters &painters() const { return painters_; }
 
 	std::optional<sim::Vec3> squad_beacon(uint8_t p_slot, uint8_t p_team, const SquadTable *p_squads) const;
 	std::span<const sim::weapons::Deployable> live() const { return field_.live(); }
@@ -68,6 +69,8 @@ private:
 		sim::weapons::DetonationEvent event;
 		bool owner_left = false;
 	};
+
+	void paint(const sim::CollisionWorld *p_world);
 
 	const GunplayLevel *level_ = nullptr;
 	std::shared_ptr<const sim::weapons::WeaponTable> table_;
@@ -84,6 +87,8 @@ private:
 	std::array<sim::weapons::WeaponLockState, net::kMaxSlots> locks_{};
 	std::array<uint16_t, net::kMaxSlots> lock_defs_{};
 	LockGuidance guidance_;
+	sim::weapons::LaserPainters painters_;
+	std::vector<sim::weapons::LockCandidate> marked_;
 	mutable GadgetStats stats_;
 	sim::Tick tick_ = 0;
 };

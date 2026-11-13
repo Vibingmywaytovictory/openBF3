@@ -242,6 +242,33 @@ private:
 	GadgetFieldStats stats_;
 };
 
+LockAim painter_aim(const LaserPainterDef &p_painter, const Deployable &p_designator);
+
+struct PaintedTarget {
+	uint32_t id = kNoLockTarget;
+	SimTime until = 0;
+};
+
+class LaserPainters {
+public:
+	void step(std::span<const GadgetDef> p_defs, std::span<const Deployable> p_live,
+			std::span<const LockCandidate> p_candidates, const CollisionWorld *p_world, SimTime p_now,
+			LockStepStats *r_stats = nullptr);
+	bool painted(uint32_t p_id, SimTime p_now) const;
+	void mark(std::span<LockCandidate> r_candidates, SimTime p_now) const;
+	const LockState *lock_of(uint16_t p_designator) const;
+	std::span<const PaintedTarget> painted() const { return painted_; }
+	void clear();
+
+private:
+	struct Designator {
+		uint16_t id = 0;
+		LockState lock;
+	};
+	std::vector<Designator> designators_;
+	std::vector<PaintedTarget> painted_;
+};
+
 struct AmmoRefillState {
 	std::array<float, kMaxWeaponSlots> progress{};
 	std::array<Tick, kMaxWeaponSlots> low_since{};

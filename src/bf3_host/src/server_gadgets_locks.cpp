@@ -44,7 +44,19 @@ sw::LockCandidate lock_candidate_of(const LevelVehicleKind &p_kind, uint16_t p_s
 }
 
 void ServerGadgets::set_lock_candidates(std::span<const sw::LockCandidate> p_candidates) {
-	guidance_.set(p_candidates);
+	marked_.assign(p_candidates.begin(), p_candidates.end());
+	painters_.mark(marked_, sw::tick_end(tick_));
+	for (const sw::LockCandidate &c : marked_) {
+		stats_.painted_candidates += c.painted ? 1u : 0u;
+	}
+	guidance_.set(marked_);
+}
+
+void ServerGadgets::paint(const sim::CollisionWorld *p_world) {
+	sw::LockStepStats s;
+	painters_.step(field_.defs(), field_.live(), guidance_.candidates(), p_world, sw::tick_end(tick_), &s);
+	stats_.paint_samples += s.samples;
+	stats_.lock_rays += s.rays;
 }
 
 bool ServerGadgets::aim_lock(uint8_t p_slot, uint8_t p_team, uint16_t p_def, uint8_t p_variant, const sim::Vec3 &p_eye,

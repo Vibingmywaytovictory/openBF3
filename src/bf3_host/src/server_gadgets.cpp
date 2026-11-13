@@ -126,6 +126,7 @@ void ServerGadgets::step(sim::Tick p_tick, const sim::CollisionWorld *p_world,
 		field_.step(*p_world);
 	}
 	field_.expire(p_tick);
+	paint(p_world);
 	receivers_.clear();
 	receiver_slots_.clear();
 	for (size_t i = 0; i < p_soldiers.size() && i < refill_.size(); ++i) {
@@ -270,6 +271,7 @@ void ServerGadgets::owner_died(uint8_t p_slot, sim::Tick p_tick) {
 
 void ServerGadgets::clear() {
 	field_.clear();
+	painters_.clear();
 	pending_.clear();
 	ownerless_.clear();
 }

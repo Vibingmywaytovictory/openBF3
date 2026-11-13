@@ -8158,3 +8158,127 @@ TEST_SUITE("host-gadgets-guided") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }
+
+TEST_SUITE("host-gadgets-soflam") {
+	TEST_CASE("gadgets: MP_007 ConquestSmall0: a recon's SOFLAM placed facing a parked enemy MBT paints it through its "
+			  "LockAlways controller, and an engineer's FGM-148 then locks it zoomed through its LockOnLaserPainted "
+			  "LockingController (LockTime 1.5 s) before its radar one could (2.25 s); the missile homes on it") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		auto watch = std::make_shared<GuidedWatch>();
+		std::unique_ptr<Match> m = start_match(
+				*level, true, 137u, 0, 1, [&](host::GameServerConfig &r_config) { r_config.gunplay.observer = watch; });
+		tdm::ScriptedPeer &p = m->join("spotter");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		const uint8_t slot = uint8_t(p.slot());
+		const uint8_t team = m->rules().team_of(slot);
+		const uint8_t gadget1 = uint8_t(core::gameplay::WeaponSlot::Gadget1);
+		const auto item_of = [&](host::KitRole p_kit, std::string_view p_unlock) -> const host::LoadoutItem * {
+			const host::LoadoutKit *kit = gl.loadouts.kit(team, uint8_t(p_kit));
+			REQUIRE(kit != nullptr);
+			const auto it = std::find_if(kit->slots[gadget1].begin(), kit->slots[gadget1].end(),
+					[&](const host::LoadoutItem &i) { return i.unlock == p_unlock; });
+			REQUIRE(it != kit->slots[gadget1].end());
+			REQUIRE(it->def < gl.defs.size());
+			return &*it;
+		};
+		const host::LoadoutItem *soflam = item_of(host::KitRole::Recon, "weapons/gadgets/soflam/u_soflam");
+		const host::LoadoutItem *javelin = item_of(host::KitRole::Engineer, "weapons/fgm148/u_fgm148");
+		const sw::GadgetDef *painter = nullptr;
+		for (const sw::GadgetDef &g : gl.gadgets) {
+			painter = g.def == soflam->def ? &g : painter;
+		}
+		REQUIRE(painter != nullptr);
+		REQUIRE(painter->kind == sw::GadgetKind::LaserDesignator);
+		const auto spawn_as = [&](host::KitRole p_kit, const host::LoadoutItem &p_item) {
+			net::LoadoutRequest request;
+			request.kit = uint8_t(p_kit);
+			request.items[gadget1] = p_item.identifier;
+			m->server.on_receive(p.peer(), net::kChannelReliable, net::encode_loadout_request(request));
+			m->ticks(1);
+			REQUIRE(m->until([&] { return m->now() >= m->rules().earliest_respawn(slot); }, 900));
+			p.spawn_request(uint8_t(p_kit));
+			REQUIRE(m->until([&] { return is_alive(m->state(slot)); }, 600));
+			REQUIRE(m->server.gunplay()->weapons(slot).slots[gadget1].def == p_item.def);
+		};
+		spawn_as(host::KitRole::Recon, *soflam);
+		VehicleWatch vehicles;
+		std::optional<tdm::LockStand> found;
+		REQUIRE(m->until(
+				[&] {
+					vehicles.take(m->out, p.peer());
+					found = tdm::mbt_lock_stand(*level->shared, *m->world, m->motor, vehicles.latest, team);
+					return found.has_value();
+				},
+				sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 600u));
+		const uint32_t tank_id = sim::vehicles::kVehicleTargetIdBase + uint32_t(found->spawner);
+		const sim::Vec3 stand = found->stand, aim = found->aim;
+		m->teleport(p, stand);
+		m->ticks(20);
+		bool zoom = false, fire = false;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(*m, p_tick, p_state, aim, sim::Pose::Stand,
+					select_and_fire(gadget1, fire) | (zoom ? sim::buttons::kZoom : 0u));
+		};
+		m->ticks(90);
+		const uint64_t deploys = m->server.gunplay()->gadget_stats().deploys;
+		fire = true;
+		REQUIRE(m->until([&] { return m->server.gunplay()->gadget_stats().deploys > deploys; }, 120));
+		fire = false;
+		const auto placed =
+				std::find_if(m->server.gunplay()->deployables().begin(), m->server.gunplay()->deployables().end(),
+						[&](const sw::Deployable &d) { return d.def == soflam->def && d.owner == slot; });
+		REQUIRE(placed != m->server.gunplay()->deployables().end());
+		CHECK(placed->resting);
+		const sim::Tick deployed = m->now();
+		REQUIRE(m->until([&] { return m->server.gunplay()->gadget_stats().painted_candidates > 0; }, 600));
+		const sim::Tick paint_ticks = m->now() - deployed;
+		std::printf("soflam: placed %.1f m from the %s of spawner %u, painting after %u ticks (%.3f s)\n",
+				double(horizontal(placed->position, aim)), lv.kinds[lv.spawners[found->spawner].kind].blueprint.c_str(),
+				unsigned(found->spawner), unsigned(paint_ticks), double(paint_ticks) / double(sim::kSimHz));
+		CHECK(paint_ticks >= 152u);
+		CHECK(paint_ticks <= 154u);
+		m->server.on_receive(p.peer(), net::kChannelReliable, net::encode_suicide_request());
+		REQUIRE(m->until([&] { return !is_alive(m->state(slot)); }, 60));
+		m->scripts[0] = nullptr;
+		spawn_as(host::KitRole::Engineer, *javelin);
+		m->teleport(p, stand);
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(*m, p_tick, p_state, aim, sim::Pose::Stand,
+					select_and_fire(gadget1, fire) | (zoom ? sim::buttons::kZoom : 0u));
+		};
+		m->ticks(150);
+		REQUIRE(m->server.gunplay()->deployables().size() > 0u);
+		CHECK_FALSE(m->server.gunplay()->lock_state(slot).locked());
+		zoom = true;
+		const sim::Tick zoomed = m->now();
+		REQUIRE(m->until([&] { return m->server.gunplay()->lock_state(slot).locked(); }, 600));
+		const sim::Tick lock_ticks = m->now() - zoomed;
+		const sw::WeaponLockState lock = m->server.gunplay()->lock_state(slot);
+		std::printf("soflam: the javelin locked after %u ticks (%.3f s), laser %s, radar %s, %llu painted candidate "
+					"ticks\n",
+				unsigned(lock_ticks), double(lock_ticks) / double(sim::kSimHz), lock.primary.locked ? "locked" : "not",
+				lock.secondary.locked ? "locked" : "not",
+				(unsigned long long)m->server.gunplay()->gadget_stats().painted_candidates);
+		CHECK(lock.primary.locked);
+		CHECK(lock.primary.target == tank_id);
+		CHECK_FALSE(lock.secondary.locked);
+		CHECK(double(lock_ticks) / double(sim::kSimHz) >= 1.5);
+		CHECK(double(lock_ticks) / double(sim::kSimHz) < 2.25);
+		const uint64_t shots = m->server.gunplay()->stats().shots;
+		const uint64_t launches = m->server.gunplay()->gadget_stats().guided_launches;
+		watch->def = javelin->def;
+		fire = true;
+		REQUIRE(m->until([&] { return m->server.gunplay()->stats().shots > shots; }, 120));
+		fire = false;
+		REQUIRE(watch->shots.size() == 1u);
+		CHECK(watch->shots.front().lock_target == tank_id);
+		CHECK(m->server.gunplay()->gadget_stats().guided_launches == launches + 1u);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}
