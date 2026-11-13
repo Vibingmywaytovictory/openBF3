@@ -130,6 +130,7 @@ core::Result<MotorParams> make_motor_params(const core::gameplay::SoldierDef &p_
 float eval(const Curve &p_curve, float p_x);
 
 float walk_speed(const MotorParams &p_params, const SoldierState &p_state);
+float sprint_speed(const MotorParams &p_params);
 
 float eye_height(const MotorParams &p_params, const SoldierState &p_state);
 

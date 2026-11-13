@@ -128,6 +128,7 @@ ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehi
 	b.player_id = p_slot;
 	b.side = view.team(p_slot);
 	b.position = p_state.position;
+	b.max_speed = p_shared.host.soldier_top_speed;
 	b.radius = p_shared.nav != nullptr && p_shared.nav->level != nullptr && p_shared.nav->level->nav != nullptr
 			? p_shared.nav->level->nav->params().agent_radius
 			: 0.0f;
@@ -177,6 +178,10 @@ void BotCrew::decide(
 	const std::vector<ai::ChangeVehicle> scene = change_vehicles(r_shared, *vehicles, p_slot, true);
 	const ai::ChangeBot bot = change_bot(r_shared, *vehicles, p_slot, p_state, spawned_, p_stuck);
 	const ai::ChangeChoice choice = ai::choose_change(bot, scene);
+	if (bot.vehicle < 0) {
+		r_shared.count(&TdmBotStats::vehicle_foot_decisions);
+		r_shared.count(&TdmBotStats::vehicle_foot_stay_milli, uint64_t(std::llround(double(choice.current) * 1000.0)));
+	}
 	if (choice.change) {
 		r_shared.count(&TdmBotStats::vehicle_choices);
 		r_shared.count(&TdmBotStats::vehicle_change_milli, uint64_t(std::llround(double(choice.urgency) * 1000.0)));

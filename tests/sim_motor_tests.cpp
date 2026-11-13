@@ -1040,6 +1040,7 @@ TEST_SUITE("sim-motor-unit") {
 		CHECK(prone.transition_ticks == std::array<uint16_t, 3>{ 42, 63, 0 });
 		CHECK(stand.on_ground.velocity == 4.0f);
 		CHECK(stand.on_ground.sprint_multiplier == 1.625f);
+		CHECK(sprint_speed(p) == doctest::Approx(synthetic_soldier().sprint_speed().value_or(-1.0f)));
 		CHECK(crouch.on_ground.velocity == 2.0f);
 		CHECK(prone.on_ground.velocity == 0.9f);
 		CHECK(stand.on_ground.acceleration_factor == doctest::Approx(1.0 - std::pow(0.65, 0.5)).epsilon(1e-6));

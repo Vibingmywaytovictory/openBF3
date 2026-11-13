@@ -116,6 +116,8 @@ struct TdmBotStats {
 	std::atomic<uint64_t> vehicle_choices{ 0 };
 	std::atomic<uint64_t> vehicle_change_milli{ 0 };
 	std::atomic<uint64_t> vehicle_winner_milli{ 0 };
+	std::atomic<uint64_t> vehicle_foot_decisions{ 0 };
+	std::atomic<uint64_t> vehicle_foot_stay_milli{ 0 };
 
 	std::atomic<uint64_t> last_perception_ns{ 0 };
 	std::atomic<uint64_t> last_brains_ns{ 0 };
@@ -180,6 +182,7 @@ struct TdmBrainHost {
 	std::shared_ptr<const BotLevel> nav;
 	sim::bots::WalkerParams walker;
 	float eye_heights[3] = { 1.6f, 1.0f, 0.3f };
+	float soldier_top_speed = 0.0f;
 	uint64_t match_seed = 0;
 	bool rules = false;
 	sim::Vec3 heat_origin{ -512.0f, 0.0f, -512.0f };

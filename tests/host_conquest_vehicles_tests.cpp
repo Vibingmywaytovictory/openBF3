@@ -6,6 +6,7 @@
 #include "bf3/host/server_view.h"
 #include "bf3/host/tdm_brain.h"
 #include "bf3/host/tdm_rules.h"
+#include "bf3/sim/soldier_motor.h"
 
 #include "tdm_fixture.h"
 #include "test_support.h"
@@ -46,6 +47,8 @@ struct JeepRun {
 	sim::Tick in_round = 0;
 	uint64_t choices = 0;
 	double change_urgency = 0.0, winner_urgency = 0.0;
+	uint64_t foot_decisions = 0;
+	double foot_stay = 0.0;
 	host::ServerVehicleStats vehicles;
 };
 
@@ -130,6 +133,10 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 		out.change_urgency = double(stats->vehicle_change_milli.load()) / 1000.0 / double(out.choices);
 		out.winner_urgency = double(stats->vehicle_winner_milli.load()) / 1000.0 / double(out.choices);
 	}
+	out.foot_decisions = stats->vehicle_foot_decisions.load();
+	if (out.foot_decisions > 0) {
+		out.foot_stay = double(stats->vehicle_foot_stay_milli.load()) / 1000.0 / double(out.foot_decisions);
+	}
 	return out;
 }
 
@@ -185,6 +192,14 @@ void check_jeeps(uint64_t p_seed) {
 	const JeepCount n = count_jeeps(*level, run, p_seed);
 	CHECK(n.near >= kM4Jeeps);
 	CHECK(n.near_taken * kM4Jeeps >= n.near * kM4Taken);
+	const float sprint = sim::sprint_speed(level->shared->motor);
+	std::printf("host.tdm.conquest_vehicles: seed %llu: soldier sprint speed %.2f m/s; %llu decisions on foot, mean "
+				"staying-on-foot urgency %.3f\n",
+			(unsigned long long)p_seed, double(sprint), (unsigned long long)run.foot_decisions, run.foot_stay);
+	CHECK(sprint > 0.0f);
+	CHECK(run.foot_decisions > 0u);
+	CHECK(run.foot_stay > 0.0);
+	CHECK(run.foot_stay <= 10.0 * double(sprint));
 }
 
 }

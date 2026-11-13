@@ -131,6 +131,11 @@ float walk_speed(const MotorParams &p_params, const SoldierState &p_state) {
 			eval(p_params.poses[size_t(p_state.pose)].throttle, 1.0f);
 }
 
+float sprint_speed(const MotorParams &p_params) {
+	const StateSpeed &ground = p_params.poses[size_t(Pose::Stand)].on_ground;
+	return ground.velocity * ground.forward * ground.sprint_multiplier * p_params.body_sprint_multiplier;
+}
+
 struct SoldierMotor::Impl {
 	std::shared_ptr<void> runtime;
 	const CollisionWorld *world = nullptr;
