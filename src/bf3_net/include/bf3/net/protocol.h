@@ -26,7 +26,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 15;
+inline constexpr uint16_t kProtocolVersion = 16;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -493,14 +493,19 @@ struct RemoteShot {
 	uint32_t lock_target = sim::weapons::kNoLockTarget;
 };
 inline constexpr size_t kMaxShotsPerDatagram = 128;
+inline constexpr uint8_t kMinShotFrameBits = 20;
+inline constexpr uint8_t kMaxShotFrameBits = 23;
 struct ShotEvents {
 	sim::Tick server_tick = 0;
+	uint8_t position_bits = kMinShotFrameBits;
 	std::vector<RemoteShot> shots;
 };
 
 struct ShotQuantization {
 	sim::Vec3 origin_min{};
+	uint8_t position_bits = kMinShotFrameBits;
 };
+ShotQuantization shot_frame_of(const sim::Vec3 &p_min, const sim::Vec3 &p_max, float p_margin);
 
 inline constexpr uint32_t kMaxShotTicksBack = 7;
 std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQuantization &p_frame,
@@ -555,6 +560,7 @@ struct ReviveEvent {
 inline constexpr size_t kMaxCombatEventsPerMessage = 256;
 struct CombatEvents {
 	sim::Tick server_tick = 0;
+	uint8_t position_bits = kMinShotFrameBits;
 	std::vector<HitEvent> hits;
 	std::vector<DeathEvent> deaths;
 	std::vector<DetonationWire> detonations;

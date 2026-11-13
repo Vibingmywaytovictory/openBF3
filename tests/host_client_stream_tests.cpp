@@ -71,7 +71,7 @@ constexpr StreamHashes kAlpha{ 0x909e68af3c7be871ull, 0x238e7e65144a0de2ull, 0x3
 	0xd9395164dc77a2eeull, 0x6279226fdb1eae88ull, 0xdd57c4f9576fabaaull };
 constexpr StreamHashes kBravo{ 0xd916a162637df67full, 0xf80907c45d1ebc51ull, 0x1e457c5464ef5348ull,
 	0xd8b18eb5fb459f28ull, 0x5f11829c247d996cull, 0x935e3bfa4c6f705full };
-constexpr StreamHashes kCharlie{ 0x431ccb3188366fe6ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull,
+constexpr StreamHashes kCharlie{ 0xf333dd062a195297ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull,
 	0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0xd4bbb61a31c1220aull };
 constexpr StreamHashes kDelta{ 0x2d9df1a72dadab93ull, 0x40ab0e0b2d925e99ull, 0xf272ee659e051d24ull,
 	0x9d73df418acd8dacull, 0x1a19ab8ca4e37d79ull, 0xfeb81668a201e17aull };
@@ -1872,7 +1872,17 @@ TEST_SUITE("host-gadgets-guided-client") {
 				tank, wire->team, wire->state.body.com_position, wire->state.body.rotation, false) };
 		guidance.set(candidates);
 		(*remote)->set_guidance(&guidance);
-		(*remote)->queue_remote(net::remote_shot_of(shot));
+		const net::ShotQuantization frame = host::shot_frame(*level->shared->static_world);
+		const std::optional<net::RemoteShot> wired =
+				net::quantize_remote_shot(net::remote_shot_of(shot), frame, sw::tick_containing(shot.time));
+		std::printf("javelin client: MP_007's shot frame is %u bits from (%.0f, %.0f, %.0f); the shot at (%.1f, %.1f, "
+					"%.1f) %s\n",
+				unsigned(frame.position_bits), double(frame.origin_min[0]), double(frame.origin_min[1]),
+				double(frame.origin_min[2]), double(shot.origin[0]), double(shot.origin[1]), double(shot.origin[2]),
+				wired ? "travels" : "is cut");
+		CHECK(frame.position_bits == 22u);
+		REQUIRE(wired.has_value());
+		(*remote)->queue_remote(*wired);
 		auto ring = std::make_unique<host::PresentationEvents>();
 		std::vector<host::PresentEvent> drained(256);
 		const double from = sw::units_to_seconds(shot.spawn_time) * double(sim::kSimHz);

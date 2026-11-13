@@ -543,35 +543,53 @@ void octa(A &r_a, V &r_dir, unsigned p_bits) {
 	r_a.store(r_dir, [&] { return octa_decode(code, p_bits); });
 }
 
-constexpr unsigned kFramePositionBits = 20;
 constexpr double kFrameStep = 1.0 / 256.0;
-constexpr uint32_t kFrameMaxCode = (1u << kFramePositionBits) - 1u;
+constexpr unsigned kFrameWidthBits = 2;
+static_assert(kMaxShotFrameBits - kMinShotFrameBits < (1u << kFrameWidthBits));
+
+constexpr unsigned frame_bits(const ShotQuantization &p_frame) {
+	return std::clamp<unsigned>(p_frame.position_bits, kMinShotFrameBits, kMaxShotFrameBits);
+}
+
+constexpr uint32_t frame_max_code(unsigned p_bits) {
+	return (1u << p_bits) - 1u;
+}
 
 bool frame_codes(const sim::Vec3 &p_v, const ShotQuantization &p_frame, std::array<uint32_t, 3> &r_codes) {
+	const uint32_t max_code = frame_max_code(frame_bits(p_frame));
 	bool inside = true;
 	for (size_t i = 0; i < 3; ++i) {
 		const double t = (double(p_v[i]) - double(p_frame.origin_min[i])) / kFrameStep + 0.5;
-		if (!(t >= 0.0) || !(t < double(kFrameMaxCode) + 1.0)) {
+		if (!(t >= 0.0) || !(t < double(max_code) + 1.0)) {
 			inside = false;
 		}
-		r_codes[i] = !(t > 0.0) ? 0u : t >= double(kFrameMaxCode) ? kFrameMaxCode : uint32_t(t);
+		r_codes[i] = !(t > 0.0) ? 0u : t >= double(max_code) ? max_code : uint32_t(t);
 	}
 	return inside;
 }
 
 sim::Vec3 frame_decode(const std::array<uint32_t, 3> &p_codes, const ShotQuantization &p_frame) {
+	const uint32_t max_code = frame_max_code(frame_bits(p_frame));
 	sim::Vec3 v{};
 	for (size_t i = 0; i < 3; ++i) {
-		v[i] = float(double(p_frame.origin_min[i]) + double(std::min(p_codes[i], kFrameMaxCode)) * kFrameStep);
+		v[i] = float(double(p_frame.origin_min[i]) + double(std::min(p_codes[i], max_code)) * kFrameStep);
 	}
 	return v;
 }
 
-template <class A, MaybeConst<std::array<uint32_t, 3>> C>
-constexpr void frame(A &r_a, C &r_codes) {
+template <class A, MaybeConst<std::array<uint32_t, 3>> C> constexpr void frame(A &r_a, C &r_codes, unsigned p_bits) {
 	for (auto &c : r_codes) {
-		r_a.bits(c, kFramePositionBits);
+		r_a.bits(c, p_bits);
 	}
+}
+
+template <class A, MaybeConst<uint8_t> B> constexpr void frame_width(A &r_a, B &r_bits) {
+	r_a.coded(
+			r_bits, kFrameWidthBits,
+			[](uint8_t p_bits) {
+				return uint32_t(std::clamp<unsigned>(p_bits, kMinShotFrameBits, kMaxShotFrameBits) - kMinShotFrameBits);
+			},
+			[](uint32_t p_code) { return uint8_t(kMinShotFrameBits + p_code); });
 }
 
 constexpr unsigned kTickFractionBits = 16;
@@ -1217,7 +1235,7 @@ constexpr uint32_t short_delta(uint32_t p_index, uint32_t p_prev) {
 }
 
 template <class A, MaybeConst<ShotCodes> C>
-constexpr void serialize(A &r_a, C &r_c, ShotIndexChain &r_chain, sim::Tick p_server_tick) {
+constexpr void serialize(A &r_a, C &r_c, ShotIndexChain &r_chain, sim::Tick p_server_tick, unsigned p_position_bits) {
 	r_a.bits(r_c.slot, kWireSlotBits);
 	const bool have = r_chain.have[r_c.slot];
 	const uint32_t prev = r_chain.prev[r_c.slot];
@@ -1235,7 +1253,7 @@ constexpr void serialize(A &r_a, C &r_c, ShotIndexChain &r_chain, sim::Tick p_se
 	r_a.bits(r_c.def, 8);
 	r_a.bits(r_c.time.back, kShotBackBits);
 	r_a.bits(r_c.time.fraction, kTickFractionBits);
-	frame(r_a, r_c.origin);
+	frame(r_a, r_c.origin, p_position_bits);
 	serialize(r_a, r_c.direction, kShotDirBits);
 	r_a.coded(r_c.pellets, kPelletBits, [](uint8_t p_pellets) { return uint32_t(p_pellets - 1); }, [](uint32_t p_code) { return uint8_t(p_code + 1); });
 	r_a.bits(r_c.tracer, 1);
@@ -1266,16 +1284,17 @@ constexpr size_t kShotMinBits = count_bits([](auto &r_a) {
 	ShotIndexChain chain{};
 	chain.have[codes.slot] = true;
 	chain.prev[codes.slot] = codes.index - 1;
-	serialize(r_a, codes, chain, sim::Tick(0));
+	serialize(r_a, codes, chain, sim::Tick(0), kMinShotFrameBits);
 });
 static_assert(kShotMinBits == 139);
 
-size_t shot_bits(const ShotCodes &p_codes, ShotIndexChain &r_chain) {
-	return count_bits([&](auto &r_a) { serialize(r_a, p_codes, r_chain, sim::Tick(0)); });
+size_t shot_bits(const ShotCodes &p_codes, ShotIndexChain &r_chain, unsigned p_position_bits) {
+	return count_bits([&](auto &r_a) { serialize(r_a, p_codes, r_chain, sim::Tick(0), p_position_bits); });
 }
 
 struct ShotEventsWire {
 	sim::Tick server_tick = 0;
+	uint8_t position_bits = kMinShotFrameBits;
 	std::vector<ShotCodes> shots;
 };
 
@@ -1293,13 +1312,14 @@ bool distinct_shots(const std::vector<ShotCodes> &p_shots) {
 template <class A, MaybeConst<ShotEventsWire> M>
 void serialize(A &r_a, M &r_m) {
 	r_a.bits(r_m.server_tick, 32);
+	frame_width(r_a, r_m.position_bits);
 	size_t count = r_m.shots.size();
 	r_a.bits(count, 8);
 	r_a.check("shot count out of range", [&] { return count <= kMaxShotsPerDatagram && r_a.fits(count * kShotMinBits); });
 	count = r_a.resize(r_m.shots, count);
 	ShotIndexChain chain;
 	for (size_t i = 0; i < count && r_a.ok(); ++i) {
-		serialize(r_a, r_m.shots[i], chain, r_m.server_tick);
+		serialize(r_a, r_m.shots[i], chain, r_m.server_tick, r_m.position_bits);
 	}
 	r_a.check("shot named twice", [&] { return distinct_shots(r_m.shots); });
 }
@@ -1404,7 +1424,7 @@ void frame_position(A &r_a, V &r_position, CombatFrame &r_f) {
 		}
 		return c;
 	});
-	frame(r_a, codes);
+	frame(r_a, codes, frame_bits(r_f.frame));
 	r_a.store(r_position, [&] { return frame_decode(codes, r_f.frame); });
 }
 
@@ -1531,6 +1551,9 @@ void combat_list(A &r_a, V &r_events, uint64_t p_count, CombatFrame &r_f) {
 template <class A, MaybeConst<CombatEvents> M>
 void serialize(A &r_a, M &r_m, const ShotQuantization &p_frame, size_t &r_clamped) {
 	r_a.bits(r_m.server_tick, 32);
+	ShotQuantization frame = p_frame;
+	frame_width(r_a, frame.position_bits);
+	r_a.store(r_m.position_bits, [&] { return frame.position_bits; });
 	uint64_t hits = r_m.hits.size();
 	uint64_t deaths = r_m.deaths.size();
 	uint64_t detonations = r_m.detonations.size();
@@ -1544,7 +1567,7 @@ void serialize(A &r_a, M &r_m, const ShotQuantization &p_frame, size_t &r_clampe
 				revives <= kMaxCombatEventsPerMessage && hits + deaths + detonations + revives <= kMaxCombatEventsPerMessage &&
 				r_a.fits(hits * kHitMinBits + deaths * kDeathMinBits + detonations * kDetonationMinBits + revives * kReviveMinBits);
 	});
-	CombatFrame f{ p_frame, r_m.server_tick };
+	CombatFrame f{ frame, r_m.server_tick };
 	combat_list(r_a, r_m.hits, hits, f);
 	combat_list(r_a, r_m.deaths, deaths, f);
 	combat_list(r_a, r_m.detonations, detonations, f);
@@ -2474,6 +2497,22 @@ uint32_t lock_target_of(uint16_t p_wire) {
 	return p_wire == kNoLockWire ? sw::kNoLockTarget : sim::vehicles::kVehicleTargetIdBase + p_wire;
 }
 
+ShotQuantization shot_frame_of(const sim::Vec3 &p_min, const sim::Vec3 &p_max, float p_margin) {
+	ShotQuantization q;
+	double extent = 0.0;
+	for (size_t k = 0; k < 3; ++k) {
+		q.origin_min[k] = std::isfinite(p_min[k]) ? std::floor(p_min[k]) - p_margin : 0.0f;
+		if (std::isfinite(p_max[k])) {
+			extent = std::max(extent, double(p_max[k]) + double(p_margin) - double(q.origin_min[k]));
+		}
+	}
+	while (q.position_bits < kMaxShotFrameBits &&
+			extent / kFrameStep + 0.5 >= double(frame_max_code(q.position_bits)) + 1.0) {
+		++q.position_bits;
+	}
+	return q;
+}
+
 std::optional<RemoteShot> quantize_remote_shot(const RemoteShot &p_shot, const ShotQuantization &p_frame, sim::Tick p_server_tick) {
 	const std::optional<ShotCodes> c = shot_codes(p_shot, p_frame, p_server_tick);
 	if (!c) {
@@ -2530,13 +2569,14 @@ std::vector<uint8_t> encode_shot_events(const ShotEvents &p_message, const ShotQ
 
 	ShotEventsWire wire;
 	wire.server_tick = p_message.server_tick;
+	wire.position_bits = uint8_t(frame_bits(p_frame));
 	ShotIndexChain chain;
 	size_t bits = kTypeBits + count_bits([&](auto &r_a) { serialize(r_a, wire); });
 	for (const Item &it : items) {
 		if (wire.shots.size() >= kMaxShotsPerDatagram) {
 			break;
 		}
-		const size_t b = shot_bits(it.codes, chain);
+		const size_t b = shot_bits(it.codes, chain, wire.position_bits);
 		if (bits + b > std::min(p_max_bytes, kMaxDatagramBytes) * 8) {
 			break;
 		}
@@ -2555,11 +2595,14 @@ core::Result<ShotEvents> decode_shot_events(std::span<const uint8_t> p_datagram,
 	if (!wire) {
 		return wire.error();
 	}
+	ShotQuantization frame = p_frame;
+	frame.position_bits = wire->position_bits;
 	ShotEvents m;
 	m.server_tick = wire->server_tick;
+	m.position_bits = wire->position_bits;
 	m.shots.reserve(wire->shots.size());
 	for (const ShotCodes &c : wire->shots) {
-		m.shots.push_back(shot_from_codes(c, p_frame, m.server_tick));
+		m.shots.push_back(shot_from_codes(c, frame, m.server_tick));
 	}
 	return m;
 }

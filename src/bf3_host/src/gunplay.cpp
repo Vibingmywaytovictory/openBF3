@@ -1352,12 +1352,7 @@ void Gunplay::count_trace_dropped(uint32_t p_count) {
 }
 
 net::ShotQuantization shot_frame(const sim::StaticWorldShapes &p_world) {
-	net::ShotQuantization q;
-	const sim::Vec3 lo = p_world.min();
-	for (size_t k = 0; k < 3; ++k) {
-		q.origin_min[k] = std::isfinite(lo[k]) ? std::floor(lo[k]) - kShotFrameMargin : 0.0f;
-	}
-	return q;
+	return net::shot_frame_of(p_world.min(), p_world.max(), kShotFrameMargin);
 }
 
 }

@@ -208,7 +208,8 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 			return check(p_bytes, [](std::span<const uint8_t> p) { return net::decode_shot_events(p, kFrame); },
 					[](const net::ShotEvents &p_m, bool &r_lossless) {
 						size_t dropped = 0;
-						std::vector<uint8_t> e = net::encode_shot_events(p_m, kFrame, { 3.0f, 60.0f, -7.0f }, &dropped);
+						const net::ShotQuantization frame{ kFrame.origin_min, p_m.position_bits };
+						std::vector<uint8_t> e = net::encode_shot_events(p_m, frame, { 3.0f, 60.0f, -7.0f }, &dropped);
 						r_lossless = dropped == 0;
 						return e;
 					});
@@ -237,7 +238,8 @@ Verdict decode_as(net::MessageType p_type, std::span<const uint8_t> p_bytes) {
 			return check(p_bytes, [](std::span<const uint8_t> p) { return net::decode_combat_events(p, kFrame); },
 					[](const net::CombatEvents &p_m, bool &r_lossless) {
 						size_t clamped = 0;
-						std::vector<uint8_t> e = net::encode_combat_events(p_m, kFrame, &clamped);
+						const net::ShotQuantization frame{ kFrame.origin_min, p_m.position_bits };
+						std::vector<uint8_t> e = net::encode_combat_events(p_m, frame, &clamped);
 						r_lossless = clamped == 0;
 						return e;
 					});
