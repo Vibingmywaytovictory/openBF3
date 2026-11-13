@@ -40,7 +40,8 @@ bool same_level(const LevelEntry &p_a, const LevelEntry &p_b) {
 }
 
 Rotation::Rotation(RotationConfig p_config) :
-		config_(std::move(p_config)), cursor_(config_.maps), current_config_(config_.first) {
+		config_(std::move(p_config)), cursor_(config_.maps), current_entry_(cursor_.current()),
+		current_config_(config_.first) {
 	round_id_ = current_config_ != nullptr ? current_config_->round_id : 0u;
 	stats_.current = cursor_.current();
 	stats_.round_id = round_id_;
@@ -66,6 +67,14 @@ void Rotation::start_load(const LevelEntry &p_entry) {
 	join_loader();
 	auto pending = std::make_shared<Pending>();
 	pending->entry = p_entry;
+	if (current_config_ != nullptr && same_level(p_entry, current_entry_)) {
+		pending->result = current_config_;
+		pending->done = true;
+		std::lock_guard lock(mutex_);
+		pending_ = pending;
+		stats_.last_load_s = 0.0;
+		return;
+	}
 	{
 		std::lock_guard lock(mutex_);
 		pending_ = pending;
@@ -208,6 +217,7 @@ std::unique_ptr<GameServer> Rotation::after_tick(GameServer &r_server) {
 		const core::Status st = next->init(c);
 		if (st.ok()) {
 			r_server.release_seats();
+			current_entry_ = cursor_.current();
 			current_config_ = std::make_shared<const GameServerConfig>(std::move(c));
 		} else {
 			error = st.error().message;

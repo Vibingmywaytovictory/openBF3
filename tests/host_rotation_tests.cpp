@@ -1021,3 +1021,51 @@ TEST_SUITE("host-rotation-unit") {
 		}
 	}
 }
+
+TEST_SUITE("host-rotation") {
+	TEST_CASE("a failed load: the rotation falls back to the level it runs without loading it again") {
+		tt::TdmLevel *level = tt::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		auto first = std::make_shared<const host::GameServerConfig>(metro_config(level->shared, *level, true));
+		host::RotationConfig rc;
+		rc.maps.entries = { host::LevelEntry{ level->shared->level, level->shared->mode, 1 },
+			host::LevelEntry{ "NOPE_000", level->shared->mode, 1 } };
+		rc.first = first;
+		rc.background = false;
+		rc.intermission_override_s = 0.0f;
+		uint32_t reloads = 0;
+		rc.load = [&](const host::LevelEntry &p_entry) -> core::Result<std::shared_ptr<const host::GameServerConfig>> {
+			if (p_entry.level == "NOPE_000") {
+				return core::make_error("unknown level NOPE_000");
+			}
+			++reloads;
+			return first;
+		};
+		host::Rotation rotation(rc);
+		auto server = std::make_unique<host::GameServer>();
+		REQUIRE(server->init(*first).ok());
+		std::vector<host::OutDatagram> out;
+		bool changed = false;
+		for (uint32_t i = 0; i < kRoundTicks + kIntermissionTicks && !changed; ++i) {
+			out.clear();
+			server->tick(out);
+			if (std::unique_ptr<host::GameServer> next = rotation.after_tick(*server)) {
+				server = std::move(next);
+				changed = true;
+			}
+		}
+		const host::RotationStats rs = rotation.stats();
+		std::printf("failed load: %llu load failure(s) (%s), %llu level change(s), %u reload(s) of %s\n",
+				(unsigned long long)rs.load_failures, rs.last_error.c_str(), (unsigned long long)rs.level_changes,
+				unsigned(reloads), rotation.current().level.c_str());
+		REQUIRE(changed);
+		CHECK(rs.load_failures == 1u);
+		CHECK(rs.last_error.find("NOPE_000") != std::string::npos);
+		CHECK(rs.level_changes == 1u);
+		CHECK(rotation.current().level == level->shared->level);
+		CHECK(reloads == 0u);
+		CHECK(server->rules() != nullptr);
+	}
+}

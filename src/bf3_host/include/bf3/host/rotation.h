@@ -79,6 +79,7 @@ private:
 	bool changing_ = false;
 	uint32_t round_id_ = 0;
 	sim::Tick round_over_tick_ = 0;
+	LevelEntry current_entry_;
 	std::shared_ptr<const GameServerConfig> current_config_;
 	uint64_t restarts_seen_ = 0;
 	int64_t round_kills_ = 0;
