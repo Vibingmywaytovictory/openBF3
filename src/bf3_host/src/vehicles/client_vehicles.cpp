@@ -246,6 +246,12 @@ std::optional<SeenSeat> ClientVehicles::seat_of(uint8_t p_slot) const {
 	return std::nullopt;
 }
 
+void ClientVehicles::each_wire(const std::function<void(const net::VehicleWire &)> &p_visit) const {
+	for (const Tracked &t : vehicles_) {
+		p_visit(t.wire);
+	}
+}
+
 void ClientVehicles::stats(ClientStats &r_stats) const {
 	r_stats.vehicle_messages = messages_;
 	r_stats.bad_vehicle_messages = bad_;

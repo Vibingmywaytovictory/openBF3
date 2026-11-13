@@ -7530,3 +7530,111 @@ TEST_SUITE("host-bots-gadgets") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }
+
+namespace {
+
+struct ParkedJeep {
+	std::unique_ptr<Match> m;
+	tdm::ScriptedPeer *driver = nullptr;
+	tdm::ScriptedPeer *victim = nullptr;
+	VehicleWatch watch;
+	uint16_t hull = 0;
+	const host::LevelVehicleKind *kind = nullptr;
+	net::VehicleWire parked;
+	std::array<float, 2> line{};
+	uint16_t toward_hull = 0;
+
+	float along(const sim::Vec3 &p_at) const {
+		const sim::Vec3 &o = parked.state.body.com_position;
+		return (p_at[0] - o[0]) * line[0] + (p_at[2] - o[2]) * line[1];
+	}
+	sim::Vec3 ahead(float p_metres) const {
+		const sim::Vec3 &o = parked.state.body.com_position;
+		return add(ground_at(*m->world, o[0] + p_metres * line[0], o[2] + p_metres * line[1], o[1] + 5.0f), 0.0f, 0.05f,
+				0.0f);
+	}
+};
+
+void park_jeep(tdm::TdmLevel &r_level, ParkedJeep &r_out) {
+	const host::LevelVehicles &lv = *r_level.shared->vehicles;
+	r_out.m = start_match(r_level, true, 131u, 0, 1);
+	Match &m = *r_out.m;
+	r_out.driver = &m.join("driver");
+	r_out.victim = &m.join("victim");
+	r_out.driver->ready();
+	r_out.victim->ready();
+	REQUIRE(wait_in_round(m));
+	const uint8_t team = m.rules().team_of(uint8_t(r_out.driver->slot()));
+	REQUIRE(team != m.rules().team_of(uint8_t(r_out.victim->slot())));
+	r_out.driver->spawn_request(0);
+	r_out.victim->spawn_request(0);
+	REQUIRE(m.until(
+			[&] { return is_alive(m.state(r_out.driver->slot())) && is_alive(m.state(r_out.victim->slot())); }, 900));
+	std::optional<uint16_t> hull;
+	float hull_clear = 0.0f;
+	REQUIRE(m.until(
+			[&] {
+				r_out.watch.take(m.out, r_out.driver->peer());
+				std::vector<sim::Vec3> others;
+				for (const net::VehicleWire &o : r_out.watch.latest) {
+					others.push_back(o.state.body.com_position);
+				}
+				for (const net::VehicleWire &w : r_out.watch.latest) {
+					if (w.team != team || host::land_tracked(*lv.kinds[lv.spawners[w.spawner].kind].model) ||
+							!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
+						continue;
+					}
+					const float c =
+							clear_run(*m.world, w.state.body.com_position, w.state.body.rotation, others, 40.0f);
+					if (c > hull_clear) {
+						hull = w.spawner;
+						hull_clear = c;
+					}
+				}
+				return hull_clear >= 35.0f;
+			},
+			sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 600u));
+	r_out.hull = *hull;
+	r_out.kind = &lv.kinds[lv.spawners[*hull].kind];
+	r_out.parked = *r_out.watch.of(*hull);
+	r_out.line = heading_of(r_out.parked.state.body.rotation);
+	r_out.toward_hull = sim::quantize_yaw(std::atan2(-r_out.line[0], -r_out.line[1]));
+	std::printf("contact: the %s of spawner %u, %.0f m clear\n", r_out.kind->blueprint.c_str(), unsigned(*hull),
+			double(hull_clear));
+}
+
+}
+
+TEST_SUITE("host-vehicles-contact") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: a soldier walking into a parked Growler stops at its hull unhurt") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		ParkedJeep j;
+		park_jeep(*level, j);
+		Match &m = *j.m;
+		m.teleport(*j.victim, j.ahead(8.0f), j.toward_hull);
+		m.ticks(20);
+		m.scripts[1] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			sim::Command c = sim::idle_command(p_tick, j.toward_hull, p_state.pitch, p_state.target_pose);
+			c.move_forward = 127;
+			return c;
+		};
+		float nearest = INFINITY;
+		for (uint32_t t = 0; t < 240; ++t) {
+			m.tick();
+			nearest = std::min(nearest, j.along(m.state(j.victim->slot())->position));
+		}
+		m.scripts[1] = {};
+		m.ticks(10);
+		const sim::SoldierState *walked = m.state(j.victim->slot());
+		std::printf("contact: walking 4 s into the parked hull from 8 m ahead, the victim got %.2f m from its centre "
+					"along its line, health %.1f\n",
+				double(nearest), double(walked->health));
+		CHECK(nearest > 1.5f);
+		CHECK(is_alive(walked));
+		CHECK(walked->health == doctest::Approx(m.motor.params().max_health));
+		CHECK(m.rules().stats().runtime_faults == 0u);
+	}
+}

@@ -98,6 +98,10 @@ target_sources(bf3_sim PRIVATE
     src/vehicles/vehicle_damage.cpp
     include/bf3/sim/vehicles/vehicle_targets.h
     src/vehicles/vehicle_targets.cpp
+    src/jolt_convert.h
+    include/bf3/sim/vehicles/vehicle_obstacles.h
+    src/vehicles/vehicle_obstacles_internal.h
+    src/vehicles/vehicle_obstacles.cpp
 )
 
 target_sources(bf3_sim PRIVATE

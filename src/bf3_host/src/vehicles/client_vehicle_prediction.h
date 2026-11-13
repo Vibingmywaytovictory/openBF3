@@ -7,6 +7,7 @@
 #include "bf3/sim/command.h"
 #include "bf3/sim/prediction.h"
 #include "bf3/sim/vehicle_world.h"
+#include "bf3/sim/vehicles/vehicle_obstacles.h"
 #include "client_vehicles.h"
 
 #include <cstdint>
@@ -44,6 +45,7 @@ public:
 	void stats(ClientStats &r_stats) const;
 
 	bool driving() const { return driving_; }
+	const sim::VehicleObstacles &obstacles() const { return obstacles_; }
 
 private:
 	struct Entry {
@@ -62,10 +64,12 @@ private:
 	bool advance(const sim::VehicleCommand &p_command);
 	sim::VehicleCommand command_of(const sim::Command &p_command) const;
 	std::optional<sim::Vec3> seat_of(const sim::VehicleState &p_state) const;
+	void refresh_obstacles(const ClientVehicles &p_seen);
 
 	std::shared_ptr<const LevelVehicles> level_;
 	std::unique_ptr<sim::VehicleWorld> world_;
 	std::vector<Entry> ring_;
+	sim::VehicleObstacles obstacles_;
 
 	bool seated_ = false;
 	sim::Tick seated_from_ = 0;

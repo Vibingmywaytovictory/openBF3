@@ -2,6 +2,7 @@
 
 #include "bf3/core/util/finite.h"
 
+#include "jolt_convert.h"
 #include "jolt_runtime.h"
 #include "static_world_internal.h"
 #include "vehicles/land_drive.h"
@@ -65,14 +66,6 @@ float combine_contact_friction(const JPH::Body &p_body1, const JPH::SubShapeID &
 		return p_body1.GetFriction();
 	}
 	return JPH::Sqrt(p_body1.GetFriction() * p_body2.GetFriction());
-}
-
-JPH::Vec3 to_jolt(const Vec3 &p_v) {
-	return JPH::Vec3(p_v[0], p_v[1], p_v[2]);
-}
-
-Vec3 from_jolt(JPH::Vec3Arg p_v) {
-	return { p_v.GetX(), p_v.GetY(), p_v.GetZ() };
 }
 
 using bf3::core::finite;
@@ -276,6 +269,44 @@ VehicleWorld::~VehicleWorld() {
 	w.temp.reset();
 }
 
+core::Result<JPH::RefConst<JPH::Shape>> vehicle_chassis_shape(const VehicleModel &p_model) {
+	JPH::Array<JPH::RefConst<JPH::Shape>> hulls;
+	for (size_t i = 0; i < p_model.chassis.size(); ++i) {
+		JPH::Array<JPH::Vec3> points;
+		points.reserve(p_model.chassis[i].points.size());
+		for (const Vec3 &p : p_model.chassis[i].points) {
+			points.push_back(to_jolt(p));
+		}
+		JPH::ConvexHullShapeSettings hull(points, p_model.chassis[i].convex_radius);
+		JPH::ShapeSettings::ShapeResult r = hull.Create();
+		if (r.HasError()) {
+			return core::make_error("chassis piece " + std::to_string(i) + ": " + std::string(r.GetError().c_str()));
+		}
+		hulls.push_back(r.Get());
+	}
+	JPH::RefConst<JPH::Shape> inner;
+	if (hulls.size() == 1) {
+		inner = hulls[0];
+	} else {
+		JPH::StaticCompoundShapeSettings compound;
+		for (const JPH::RefConst<JPH::Shape> &h : hulls) {
+			compound.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), h.GetPtr());
+		}
+		JPH::ShapeSettings::ShapeResult r = compound.Create();
+		if (r.HasError()) {
+			return core::make_error("chassis compound: " + std::string(r.GetError().c_str()));
+		}
+		inner = r.Get();
+	}
+	JPH::OffsetCenterOfMassShapeSettings offset(
+			to_jolt(p_model.center_of_mass) - inner->GetCenterOfMass(), inner.GetPtr());
+	JPH::ShapeSettings::ShapeResult chassis = offset.Create();
+	if (chassis.HasError()) {
+		return core::make_error("chassis centre of mass: " + std::string(chassis.GetError().c_str()));
+	}
+	return JPH::RefConst<JPH::Shape>(chassis.Get());
+}
+
 core::Result<std::unique_ptr<VehicleWorld>> VehicleWorld::create(std::shared_ptr<const StaticWorldShapes> p_shapes, const VehicleWorldOptions &p_options) {
 	if (p_shapes == nullptr) {
 		return core::make_error("vehicle world: no static shapes");
@@ -375,47 +406,19 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	}
 	const JPH::Quat rotation = JPH::Quat(p_placement.rotation[0], p_placement.rotation[1], p_placement.rotation[2], p_placement.rotation[3]).Normalized();
 
-	JPH::Array<JPH::RefConst<JPH::Shape>> hulls;
-	for (size_t i = 0; i < m.chassis.size(); ++i) {
-		JPH::Array<JPH::Vec3> points;
-		points.reserve(m.chassis[i].points.size());
-		for (const Vec3 &p : m.chassis[i].points) {
-			points.push_back(to_jolt(p));
-		}
-		JPH::ConvexHullShapeSettings hull(points, m.chassis[i].convex_radius);
-		JPH::ShapeSettings::ShapeResult r = hull.Create();
-		if (r.HasError()) {
-			return core::make_error(where + ": chassis piece " + std::to_string(i) + ": " + std::string(r.GetError().c_str()));
-		}
-		hulls.push_back(r.Get());
-	}
-	JPH::RefConst<JPH::Shape> inner;
-	if (hulls.size() == 1) {
-		inner = hulls[0];
-	} else {
-		JPH::StaticCompoundShapeSettings compound;
-		for (const JPH::RefConst<JPH::Shape> &h : hulls) {
-			compound.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), h.GetPtr());
-		}
-		JPH::ShapeSettings::ShapeResult r = compound.Create();
-		if (r.HasError()) {
-			return core::make_error(where + ": chassis compound: " + std::string(r.GetError().c_str()));
-		}
-		inner = r.Get();
-	}
-	JPH::OffsetCenterOfMassShapeSettings offset(to_jolt(m.center_of_mass) - inner->GetCenterOfMass(), inner.GetPtr());
-	JPH::ShapeSettings::ShapeResult chassis = offset.Create();
-	if (chassis.HasError()) {
-		return core::make_error(where + ": chassis centre of mass: " + std::string(chassis.GetError().c_str()));
+	core::Result<JPH::RefConst<JPH::Shape>> chassis = vehicle_chassis_shape(m);
+	if (!chassis) {
+		return core::make_error(where + ": " + chassis.error().message);
 	}
 
-	JPH::MassProperties mass = chassis.Get()->GetMassProperties();
+	JPH::MassProperties mass = (*chassis)->GetMassProperties();
 	mass.ScaleToMass(m.mass);
 	const JPH::Mat44 scale = JPH::Mat44::sScale(
 			JPH::Vec3(std::sqrt(m.inertia_modifier[0]), std::sqrt(m.inertia_modifier[1]), std::sqrt(m.inertia_modifier[2])));
 	mass.mInertia = scale * mass.mInertia * scale;
 
-	JPH::BodyCreationSettings body(chassis.Get(), JPH::RVec3(to_jolt(p_placement.position)), rotation, JPH::EMotionType::Dynamic, kVehicleLayer);
+	JPH::BodyCreationSettings body(chassis->GetPtr(), JPH::RVec3(to_jolt(p_placement.position)), rotation,
+			JPH::EMotionType::Dynamic, kVehicleLayer);
 	body.mOverrideMassProperties = JPH::EOverrideMassProperties::MassAndInertiaProvided;
 	body.mMassPropertiesOverride = mass;
 	body.mFriction = m.friction;

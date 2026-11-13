@@ -315,6 +315,7 @@ core::Status ClientLoop::attach_level(std::shared_ptr<const SharedLevel> p_level
 	BF3_TRY(prediction.init(*world, p_level->motor));
 	BF3_TRY(vehicle_prediction.init(*p_level));
 	prediction.set_seats(&vehicle_prediction);
+	prediction.set_obstacles(&vehicle_prediction.obstacles());
 	level = std::move(p_level);
 	following = false;
 	std::vector<HeldDatagram> replay;

@@ -10,6 +10,7 @@
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
+#include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Physics/StateRecorder.h>
 #include <Jolt/Physics/Vehicle/VehicleCollisionTester.h>
@@ -33,6 +34,8 @@ inline constexpr float kKickerZ0 = 30.0f, kKickerRamp = 4.0f, kKickerTop = 2.0f,
 inline constexpr float kSlopeX0 = 300.0f, kSlopeX1 = 380.0f, kSlopeZ0 = -40.0f, kSlopeZ1 = 40.0f;
 inline constexpr float kSlopeTan = 0.21255656167f;
 }
+
+core::Result<JPH::RefConst<JPH::Shape>> vehicle_chassis_shape(const VehicleModel &p_model);
 
 class ByteStateRecorder final : public JPH::StateRecorder {
 public:

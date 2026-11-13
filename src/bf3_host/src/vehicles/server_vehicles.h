@@ -8,6 +8,7 @@
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/vehicle_world.h"
 #include "bf3/sim/vehicles/vehicle_armament.h"
+#include "bf3/sim/vehicles/vehicle_obstacles.h"
 #include "bf3/sim/weapons/gadgets.h"
 #include "vehicle_gunnery.h"
 #include "vehicle_hits.h"
@@ -52,6 +53,7 @@ struct ServerVehicleStats {
 	uint64_t wreck_blast_vehicle_hits = 0;
 	uint64_t unlocated = 0;
 	uint64_t pushes = 0;
+	uint64_t obstacle_failures = 0;
 };
 
 inline constexpr sim::Tick kWreckWireTicks = 6;
@@ -110,6 +112,7 @@ public:
 			std::span<const core::gameplay::WeaponDef> p_soldier_defs);
 	void step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_soldiers);
 	void take_hits(Gunplay &r_gunplay, std::vector<sim::weapons::DamageEvent> &r_damage);
+	const sim::VehicleObstacles &obstacles() const { return obstacles_; }
 	std::span<const sim::vehicles::VehicleTarget> targets() const { return targets_; }
 	std::span<const sim::weapons::PackVehicle> pack_vehicles() const { return pack_vehicles_; }
 	bool hidden_crew(size_t p_slot) const;
@@ -144,6 +147,7 @@ private:
 	float wreck_amount(const sim::weapons::DamageEvent &p_event, uint8_t p_hull_property) const;
 	void push(const sim::weapons::ProjectileStepOutput &p_out, const sim::weapons::WeaponTable *p_table);
 	void refresh_targets();
+	void refresh_obstacles();
 	net::VehicleWire wire_of(size_t p_vehicle, const sim::VehicleState &p_state) const;
 	sim::Vec3 hull_centre(size_t p_vehicle) const;
 	uint8_t hull_property(size_t p_vehicle) const;
@@ -166,6 +170,7 @@ private:
 	std::vector<sim::weapons::PackVehicle> pack_vehicles_;
 	std::vector<VehicleStrike> strikes_;
 	std::vector<sim::weapons::DamageEvent> crew_kills_;
+	sim::VehicleObstacles obstacles_;
 	std::vector<sim::weapons::DamageEvent> taken_;
 	VehicleScope scope_;
 	size_t scope_viewers_ = 0;

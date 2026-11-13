@@ -5,6 +5,7 @@
 #include "server_vehicles.h"
 
 #include <algorithm>
+#include <array>
 
 namespace bf3::host {
 
@@ -80,6 +81,7 @@ void VehicleBlend::decay(float p_seconds) {
 core::Status ClientVehiclePrediction::init(const SharedLevel &p_level) {
 	level_ = p_level.vehicles;
 	world_.reset();
+	obstacles_.clear();
 	if (level_ == nullptr || level_->spawners.empty() || p_level.static_world == nullptr) {
 		return core::Status::success();
 	}
@@ -211,11 +213,29 @@ void ClientVehiclePrediction::replay(sim::Tick p_from, sim::Tick p_next, const C
 	}
 }
 
+void ClientVehiclePrediction::refresh_obstacles(const ClientVehicles &p_seen) {
+	std::array<bool, sim::kMaxVehicleSlots> placed{};
+	p_seen.each_wire([&](const net::VehicleWire &p_wire) {
+		if (p_wire.exploded || p_wire.spawner >= level_->spawners.size() || p_wire.spawner >= placed.size()) {
+			return;
+		}
+		const std::shared_ptr<const sim::VehicleModel> &model =
+				level_->kinds[level_->spawners[p_wire.spawner].kind].model;
+		placed[p_wire.spawner] = obstacles_.place(p_wire.spawner, model, p_wire.state.body).ok();
+	});
+	for (uint32_t i = 0; i < placed.size(); ++i) {
+		if (!placed[i]) {
+			obstacles_.remove(i);
+		}
+	}
+}
+
 void ClientVehiclePrediction::reconcile(
 		const ClientVehicles &p_seen, uint8_t p_own_slot, const CommandAt &p_commands, sim::Tick p_next) {
 	if (world_ == nullptr) {
 		return;
 	}
+	refresh_obstacles(p_seen);
 	const std::optional<SeenSeat> s = p_seen.seat_of(p_own_slot);
 	if (!s || s->wire == nullptr || s->wire->spawner >= level_->spawners.size()) {
 		seated_ = false;

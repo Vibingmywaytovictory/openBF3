@@ -52,6 +52,7 @@ core::Status ServerVehicles::rebuild() {
 	targets_.clear();
 	strikes_.clear();
 	crew_kills_.clear();
+	obstacles_.clear();
 	wrecks_.clear();
 	use_held_.fill(0);
 	seat_held_.fill(0);
@@ -144,6 +145,7 @@ void ServerVehicles::spawn_due(sim::Tick p_tick, const sim::logic::ConquestNativ
 		++stats_.spawned;
 		++stats_.live;
 	}
+	refresh_obstacles();
 }
 
 std::optional<VehicleSeat> ServerVehicles::seat_of(size_t p_slot) const {
@@ -345,6 +347,22 @@ void ServerVehicles::refresh_targets() {
 		pack_vehicles_.push_back(
 				sim::weapons::PackVehicle{ 0, hull_centre(i), state.body.com_position, state.body.linear_velocity,
 						level_->kinds[level_->spawners[i].kind].min_speed_for_mine, v.occupants[0] });
+	}
+	refresh_obstacles();
+}
+
+void ServerVehicles::refresh_obstacles() {
+	for (size_t i = 0; i < vehicles_.size(); ++i) {
+		if (!vehicles_[i].live || !world_->has_vehicle(sim::VehicleSlot(i))) {
+			obstacles_.remove(uint32_t(i));
+			continue;
+		}
+		const core::Status placed = obstacles_.place(
+				uint32_t(i), level_->kinds[level_->spawners[i].kind].model, world_->state(sim::VehicleSlot(i)).body);
+		if (!placed.ok()) {
+			obstacles_.remove(uint32_t(i));
+			++stats_.obstacle_failures;
+		}
 	}
 }
 

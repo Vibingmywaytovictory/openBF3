@@ -5,6 +5,7 @@
 #include "bf3/net/protocol.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <vector>
@@ -25,6 +26,7 @@ public:
 	void publish(PresentationFrame &r_frame) const;
 	void stats(ClientStats &r_stats) const;
 	std::optional<SeenSeat> seat_of(uint8_t p_slot) const;
+	void each_wire(const std::function<void(const net::VehicleWire &)> &p_visit) const;
 
 private:
 	struct Tracked {

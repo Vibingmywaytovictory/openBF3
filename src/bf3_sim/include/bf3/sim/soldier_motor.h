@@ -6,10 +6,12 @@
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/vault.h"
+#include "bf3/sim/vehicles/vehicle_obstacles.h"
 
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -169,6 +171,9 @@ public:
 	float eye_height(const SoldierState &p_state) const;
 
 	bool fits_standing(const Vec3 &p_feet) const;
+
+	void set_obstacles(const VehicleObstacles *p_obstacles);
+	std::span<const ObstacleContact> obstacle_contacts() const;
 
 private:
 	struct Impl;

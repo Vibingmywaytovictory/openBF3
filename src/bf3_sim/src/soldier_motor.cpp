@@ -2,6 +2,7 @@
 
 #include "collision_world_internal.h"
 #include "jolt_runtime.h"
+#include "vehicles/vehicle_obstacles_internal.h"
 
 #include <Jolt/Math/Trigonometry.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
@@ -137,6 +138,8 @@ struct SoldierMotor::Impl {
 	std::array<JPH::RefConst<JPH::Shape>, kPoseCount> shapes;
 	std::array<float, kPoseCount> shape_height{};
 	JPH::Ref<JPH::CharacterVirtual> character;
+	const VehicleObstacles *obstacles = nullptr;
+	std::unique_ptr<ObstacleContacts> touches = std::make_unique<ObstacleContacts>();
 
 	const CollisionWorld::Impl &w() const { return world->impl(); }
 
@@ -360,12 +363,28 @@ core::Status SoldierMotor::init(const CollisionWorld &p_world, const MotorParams
 	const Vec3 top = p_world.shapes()->max();
 	const JPH::RVec3 far(0.0f, std::max(top[1], 0.0f) + 10000.0f, 0.0f);
 	m.character = new JPH::CharacterVirtual(&settings, far, JPH::Quat::sIdentity(), 0, w.system.get());
+	set_obstacles(m.obstacles);
 
 	const uint32_t mask = query_mask::kMovement;
 	m.character->SetLinearVelocity(JPH::Vec3::sZero());
 	m.character->Update(kTickSeconds, JPH::Vec3(0.0f, -p_params.tuning.gravity, 0.0f), w.broadphase_filter(mask), w.object_filter(mask), w.body_filter,
 			w.shape_filter, *w.temp);
 	return core::Status::success();
+}
+
+void SoldierMotor::set_obstacles(const VehicleObstacles *p_obstacles) {
+	impl_->obstacles = p_obstacles;
+	impl_->touches->obstacles = p_obstacles != nullptr ? &p_obstacles->impl() : nullptr;
+	impl_->touches->contacts.clear();
+	if (impl_->character != nullptr) {
+		impl_->character->SetCharacterVsCharacterCollision(
+				p_obstacles != nullptr ? &p_obstacles->impl().collision : nullptr);
+		impl_->character->SetListener(p_obstacles != nullptr ? impl_->touches.get() : nullptr);
+	}
+}
+
+std::span<const ObstacleContact> SoldierMotor::obstacle_contacts() const {
+	return impl_->touches->contacts;
 }
 
 MotorModifiers motor_modifiers(const MotorParams &p_params) {
@@ -390,6 +409,7 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 	s.tick = p_command.tick;
 	s.events = 0;
 	s.damage = 0.0f;
+	m.touches->contacts.clear();
 	if (r_info != nullptr) {
 		*r_info = MotorStepInfo();
 	}
