@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace bf3::host {
 
@@ -22,6 +23,7 @@ namespace {
 constexpr float kAltitudeProbeMetres = 200.0f;
 constexpr float kNavProbeHeight = 8.0f;
 constexpr float kChangeRepathMetres = 5.0f;
+constexpr float kRpmToRadiansPerSecond = 2.0f * std::numbers::pi_v<float> / 60.0f;
 
 float up_y(const std::array<float, 4> &p_q) {
 	return 1.0f - 2.0f * (p_q[0] * p_q[0] + p_q[2] * p_q[2]);
@@ -50,12 +52,19 @@ bool live_vehicle(const ServerVehicles &p_vehicles, int p_id) {
 
 }
 
-float change_vehicle_max_speed(const ServerVehicles &p_vehicles, size_t p_vehicle) {
-	const LevelVehicles &level = *p_vehicles.level();
-	const sim::LandDriveModel &land = level.kinds[level.spawners[p_vehicle].kind].model->land;
+float change_vehicle_max_speed(const sim::VehicleModel &p_model) {
+	const sim::LandDriveModel &land = p_model.land;
+	if (land.forward_gears == 0) {
+		return 0.0f;
+	}
+	const float gear = land.forward_ratios[size_t(land.forward_gears) - 1];
 	float top = 0.0f;
-	for (uint8_t g = 0; g < land.forward_speed_count; ++g) {
-		top = std::max(top, land.forward_speeds[g]);
+	for (size_t i = 0; i < p_model.wheel_count; ++i) {
+		const sim::VehicleWheelModel &w = p_model.wheels[i];
+		const float reduction = gear * w.diff_gear_ratio;
+		if (w.driven != 0 && reduction > 0.0f) {
+			top = std::max(top, land.engine.rpm_max * kRpmToRadiansPerSecond * w.radius / reduction);
+		}
 	}
 	return top;
 }
@@ -81,7 +90,7 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 		c.up = up_y(s.body.rotation);
 		c.radius = std::sqrt(kind.box.half[0] * kind.box.half[0] + kind.box.half[1] * kind.box.half[1] +
 				kind.box.half[2] * kind.box.half[2]);
-		c.max_speed = change_vehicle_max_speed(p_vehicles, i);
+		c.max_speed = change_vehicle_max_speed(*kind.model);
 		const float full = sim::vehicles::full_vehicle_health(kind.damage);
 		c.health = full > 0.0f ? p_vehicles.health(i).value_or(0.0f) / full : 0.0f;
 		c.possessed_s = v.possessed_ever ? seconds(v.possessed) : -1.0e9;

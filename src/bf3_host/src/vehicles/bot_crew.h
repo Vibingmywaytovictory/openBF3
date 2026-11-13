@@ -4,6 +4,7 @@
 #include "bf3/sim/command.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/soldier_state.h"
+#include "bf3/sim/vehicle_model.h"
 
 #include <cstdint>
 #include <optional>
@@ -19,7 +20,7 @@ struct BotBody;
 struct BotFrame;
 }
 
-float change_vehicle_max_speed(const ServerVehicles &p_vehicles, size_t p_vehicle);
+float change_vehicle_max_speed(const sim::VehicleModel &p_model);
 
 std::vector<ai::ChangeVehicle> change_vehicles(
 		const TdmShared &p_shared, const ServerVehicles &p_vehicles, uint8_t p_slot, bool p_ground);

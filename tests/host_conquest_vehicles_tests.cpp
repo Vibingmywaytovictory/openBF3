@@ -9,6 +9,7 @@
 
 #include "tdm_fixture.h"
 #include "test_support.h"
+#include "vehicles/bot_crew.h"
 #include "vehicles/server_vehicles.h"
 
 #include <algorithm>
@@ -32,10 +33,11 @@ struct JeepSeen {
 	size_t spawner = 0;
 	uint8_t team = 0;
 	float initial_delay = 0.0f;
+	bool near_team = false;
 	sim::Tick live = 0;
 	sim::Tick taken = 0;
 	uint8_t taker = net::kNoVehicleOccupant;
-	bool near_team = false;
+	uint32_t bots_at_end = 0;
 };
 
 struct JeepRun {
@@ -44,7 +46,7 @@ struct JeepRun {
 	sim::Tick in_round = 0;
 	uint64_t choices = 0;
 	double change_urgency = 0.0, winner_urgency = 0.0;
-	uint64_t entries = 0;
+	host::ServerVehicleStats vehicles;
 };
 
 sim::Tick take_limit() {
@@ -57,7 +59,11 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	for (size_t i = 0; i < vehicles.spawners.size(); ++i) {
 		const host::LevelVehicleSpawner &s = vehicles.spawners[i];
 		if (host::land_jeep(*vehicles.kinds[s.kind].model)) {
-			out.jeeps.push_back(JeepSeen{ i, s.team, s.initial_spawn_delay });
+			JeepSeen j;
+			j.spawner = i;
+			j.team = s.team;
+			j.initial_delay = s.initial_spawn_delay;
+			out.jeeps.push_back(j);
 		}
 	}
 	auto stats = std::make_shared<host::TdmBotStats>();
@@ -87,29 +93,30 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 		if (live == nullptr) {
 			return;
 		}
-		out.entries = live->stats().entries;
+		out.vehicles = live->stats();
 		for (JeepSeen &j : out.jeeps) {
 			const host::ServerVehicle &v = live->vehicles()[j.spawner];
+			j.bots_at_end = 0;
 			if (!v.live) {
 				continue;
 			}
 			if (j.live == 0) {
 				j.live = p_tick;
 			}
-			if (j.taken != 0) {
-				continue;
-			}
 			const sim::Vec3 at = live->world()->state(sim::VehicleSlot(j.spawner)).body.com_position;
 			const std::span<const sim::SoldierState> states = view.states();
-			for (uint8_t slot = 0; slot < states.size() && !j.near_team; ++slot) {
+			for (uint8_t slot = 0; j.taken == 0 && slot < states.size() && !j.near_team; ++slot) {
 				j.near_team = view.bot(slot) && view.alive(slot) && view.team(slot) == v.team &&
 						tt::distance(states[slot].position, at) <= ai::kHardwareRadius;
 			}
 			for (const uint8_t occupant : v.occupants) {
-				if (occupant != net::kNoVehicleOccupant && view.bot(occupant)) {
+				if (occupant == net::kNoVehicleOccupant || !view.bot(occupant)) {
+					continue;
+				}
+				++j.bots_at_end;
+				if (j.taken == 0) {
 					j.taken = p_tick;
 					j.taker = occupant;
-					break;
 				}
 			}
 		}
@@ -128,27 +135,40 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 
 struct JeepCount {
 	uint32_t near = 0;
+	uint32_t near_taken = 0;
 	uint32_t taken = 0;
 };
 
-JeepCount count_jeeps(const JeepRun &p_run, uint64_t p_seed) {
+JeepCount count_jeeps(const tt::TdmLevel &p_level, const JeepRun &p_run, uint64_t p_seed) {
+	const host::LevelVehicles &vehicles = *p_level.shared->vehicles;
 	JeepCount n;
+	for (const host::LevelVehicleKind &kind : vehicles.kinds) {
+		std::printf("host.tdm.conquest_vehicles: seed %llu: %s top speed %.1f m/s\n", (unsigned long long)p_seed,
+				kind.blueprint.c_str(), host::change_vehicle_max_speed(*kind.model));
+	}
 	for (const JeepSeen &j : p_run.jeeps) {
 		const sim::Tick from = std::max(j.live, p_run.in_round);
 		const bool in_time = j.taken != 0 && j.live != 0 && j.taken - from <= take_limit();
 		n.near += j.near_team ? 1u : 0u;
-		n.taken += j.near_team && in_time ? 1u : 0u;
-		std::printf("host.tdm.conquest_vehicles: seed %llu: jeep spawner %zu team %u initial delay %.1f s, %s: live "
-					"at tick %u, taken at tick %u by slot %u (%.2f s)\n",
-				(unsigned long long)p_seed, j.spawner, unsigned(j.team), j.initial_delay,
-				j.near_team ? "a team bot within 75 m" : "no team bot within 75 m", unsigned(j.live), unsigned(j.taken),
-				unsigned(j.taker), j.taken != 0 ? double(j.taken - from) * double(sim::kTickSeconds) : -1.0);
+		n.near_taken += j.near_team && in_time ? 1u : 0u;
+		n.taken += in_time ? 1u : 0u;
+		const host::LevelVehicleKind &kind = vehicles.kinds[vehicles.spawners[j.spawner].kind];
+		std::printf("host.tdm.conquest_vehicles: seed %llu: jeep spawner %zu %s (top speed %.1f m/s) team %u, %s, "
+					"initial delay %.1f s: live at tick %u, taken at tick %u by slot %u (%.2f s), %u bots "
+					"aboard at the end\n",
+				(unsigned long long)p_seed, j.spawner, kind.blueprint.c_str(),
+				host::change_vehicle_max_speed(*kind.model), unsigned(j.team),
+				j.near_team ? "a team bot within 75 m" : "no team bot within 75 m", j.initial_delay, unsigned(j.live),
+				unsigned(j.taken), unsigned(j.taker),
+				j.taken != 0 ? double(j.taken - from) * double(sim::kTickSeconds) : -1.0, j.bots_at_end);
 	}
-	std::printf("host.tdm.conquest_vehicles: seed %llu: %u of the %u jeeps with a team bot within 75 m (%zu jeeps in "
-				"all) taken by bots within %.0f s, %llu entries, %llu change choices, mean change urgency before its "
-				"weight %.3f, mean winning weighted urgency %.3f\n",
-			(unsigned long long)p_seed, n.taken, n.near, p_run.jeeps.size(), double(kTakeSeconds),
-			(unsigned long long)p_run.entries, (unsigned long long)p_run.choices, p_run.change_urgency,
+	std::printf("host.tdm.conquest_vehicles: seed %llu: %u of the %u jeeps with a team bot within 75 m and %u of all "
+				"%zu jeeps taken by bots "
+				"within %.0f s; %llu entries, %llu exits, %llu seat switches; %llu change choices, mean change "
+				"urgency before its weight %.3f, mean winning weighted urgency %.3f\n",
+			(unsigned long long)p_seed, n.near_taken, n.near, n.taken, p_run.jeeps.size(), double(kTakeSeconds),
+			(unsigned long long)p_run.vehicles.entries, (unsigned long long)p_run.vehicles.exits,
+			(unsigned long long)p_run.vehicles.seat_switches, (unsigned long long)p_run.choices, p_run.change_urgency,
 			p_run.winner_urgency);
 	return n;
 }
@@ -162,9 +182,9 @@ void check_jeeps(uint64_t p_seed) {
 	const JeepRun run = run_jeeps(*level, p_seed);
 	CHECK_MESSAGE(run.error.empty(), run.error);
 	CHECK(run.in_round != 0u);
-	const JeepCount n = count_jeeps(run, p_seed);
+	const JeepCount n = count_jeeps(*level, run, p_seed);
 	CHECK(n.near >= kM4Jeeps);
-	CHECK(n.taken * kM4Jeeps >= n.near * kM4Taken);
+	CHECK(n.near_taken * kM4Jeeps >= n.near * kM4Taken);
 }
 
 }
