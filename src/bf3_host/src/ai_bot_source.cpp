@@ -406,6 +406,9 @@ AiBotSource::AiBotSource(std::shared_ptr<TdmShared> p_shared, uint32_t p_index) 
 
 AiBotSource::~AiBotSource() {
 	TdmShared *const sh = impl_->body.shared.get();
+	if (sh != nullptr) {
+		impl_->crew.drop(*sh, impl_->body.slot);
+	}
 	if (sh != nullptr && sh->strategy != nullptr) {
 		sh->strategy->remove_bot(impl_->body.slot);
 	}
