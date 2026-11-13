@@ -5,6 +5,7 @@
 #include "bf3/host/client_session.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/present/vehicle_damage_fx.h"
+#include "bf3/present/vehicle_turrets.h"
 #include "bf3/present/vehicle_zoom.h"
 #include "bf3/render/vehicle_meshes.h"
 #include "death_camera.h"
@@ -34,6 +35,7 @@ struct GameVehiclesStats {
 	uint32_t parts = 0;
 	uint32_t wheel_parts = 0;
 	uint32_t glass_surfaces = 0;
+	uint32_t turret_parts = 0;
 	uint32_t shown = 0;
 	uint32_t unknown = 0;
 	uint64_t created = 0;
@@ -56,6 +58,7 @@ struct OwnVehicleSeat {
 	godot::Transform3D body;
 	float heading = 0.0f;
 	godot::Vector3 velocity;
+	std::vector<godot::Transform3D> turrets;
 };
 
 struct VehicleSeatView {
@@ -67,12 +70,19 @@ struct VehicleSeatView {
 	float left_yaw = 0.0f, right_yaw = 0.0f, up_pitch = 0.0f, down_pitch = 0.0f;
 };
 
+struct GameVehicleTurretPart {
+	int turret = -1;
+	godot::Transform3D rest;
+	godot::Transform3D drawn;
+};
+
 struct GameVehicleView {
 	bool in_tree = false;
 	bool visible = false;
 	int32_t parts = 0;
 	godot::Transform3D body;
 	std::vector<godot::Transform3D> wheels;
+	std::vector<GameVehicleTurretPart> turret_parts;
 };
 
 class GameVehicles {
@@ -102,6 +112,7 @@ private:
 		godot::Ref<godot::ArrayMesh> mesh;
 		int8_t wheel = -1;
 		godot::Transform3D rest;
+		int8_t turret = -1;
 	};
 	struct Kind {
 		std::vector<Part> parts;

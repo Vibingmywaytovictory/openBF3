@@ -44,6 +44,10 @@ constexpr double kZoomSettle = 0.5;
 constexpr double kTankThrottle = 3.0;
 constexpr double kTankSteer = 2.0;
 constexpr float kTankTurnDegrees = 10.0f;
+constexpr double kTurretSettle = 2.0;
+constexpr float kTurretTurn = 1.0f;
+constexpr float kTurretYawTolerance = 0.05f;
+constexpr float kCameraRideTolerance = 0.05f;
 
 float heading(const std::array<float, 4> &p_q) {
 	return std::atan2(2.0f * (p_q[0] * p_q[2] + p_q[3] * p_q[1]), 1.0f - 2.0f * (p_q[0] * p_q[0] + p_q[1] * p_q[1]));
@@ -78,18 +82,22 @@ const host::PresentedVehicle *parked(
 	return best;
 }
 
-std::optional<float> first_person_zoom(const host::LevelVehicleKind &p_kind, uint8_t p_seat) {
+const core::gameplay::VehicleCameraDef *first_person_camera(const host::LevelVehicleKind &p_kind, uint8_t p_seat) {
 	if (p_seat >= p_kind.seat_defs.size()) {
-		return std::nullopt;
+		return nullptr;
 	}
 	for (const core::gameplay::VehicleCameraDef &c : p_kind.seat_defs[p_seat].cameras) {
 		if (c.first_person) {
-			return c.zoom_field_of_view;
+			return &c;
 		}
 	}
-	return std::nullopt;
+	return nullptr;
 }
 
+std::optional<float> first_person_zoom(const host::LevelVehicleKind &p_kind, uint8_t p_seat) {
+	const core::gameplay::VehicleCameraDef *c = first_person_camera(p_kind, p_seat);
+	return c != nullptr ? c->zoom_field_of_view : std::nullopt;
+}
 }
 
 void VehicleDriveRun::hud_row(const VehicleDriveInputs &p_in, uint8_t p_seat) {
@@ -114,6 +122,52 @@ void VehicleDriveRun::hud_row(const VehicleDriveInputs &p_in, uint8_t p_seat) {
 					double(v.health), unsigned(v.passenger_list.count),
 					own != nullptr && own->is_player ? "bold" : "missing", vehicle_health ? "shown" : "hidden",
 					passengers ? "shown" : "hidden", health ? "shown" : "hidden", ammo ? "shown" : "hidden"));
+}
+
+void VehicleDriveRun::turret_rows(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in) {
+	const host::LevelVehicles &lv = *p_in.vehicles->level();
+	const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[spawner_].kind];
+	int ring = -1;
+	for (size_t i = 0; kind.armament != nullptr && i < kind.armament->turrets.size() && ring < 0; ++i) {
+		const sim::vehicles::ArmamentTurret &t = kind.armament->turrets[i];
+		ring = t.parent < 0 && t.seat == 0 && t.aim == sim::vehicles::TurretAimAxis::Yaw ? int(i) : -1;
+	}
+	const std::optional<GameVehicleView> view = p_in.vehicles->view(spawner_);
+	const host::PresentedVehicle *v = presented(r_session.frame(), spawner_);
+	const GameVehicleTurretPart *part = nullptr;
+	for (size_t i = 0; view && i < view->turret_parts.size(); ++i) {
+		part = part == nullptr && view->turret_parts[i].turret == ring ? &view->turret_parts[i] : part;
+	}
+	if (ring < 0 || v == nullptr || !view || part == nullptr || p_in.camera == nullptr) {
+		row("turret_turn", false,
+				fmt("ring turret %d, presented %s, view %s, ring part %s", ring, v != nullptr ? "yes" : "no",
+						view ? "yes" : "no", part != nullptr ? "yes" : "no"));
+		return;
+	}
+	const Vector3 forward = (part->drawn.basis * part->rest.basis.inverse()).xform(Vector3(0, 0, 1));
+	const float drawn_yaw = std::atan2(forward.x, forward.z);
+	const float ghost = size_t(ring) < v->turret_count ? v->turret_angle[size_t(ring)] : 0.0f;
+	row("turret_turn",
+			std::fabs(std::remainder(drawn_yaw - turn_, sim::kTwoPi)) < kTurretYawTolerance &&
+					std::fabs(std::remainder(ghost - turn_, sim::kTwoPi)) < kTurretYawTolerance,
+			fmt("look %.3f rad off the hull's heading: the ring turret %d's drawn mesh turned %.3f rad, its "
+				"received angle %.3f rad, %zu turret parts drawn",
+					double(turn_), ring, double(drawn_yaw), double(ghost), view->turret_parts.size()));
+	const core::gameplay::VehicleCameraDef *camera = first_person_camera(kind, 0);
+	if (camera == nullptr) {
+		row("turret_camera", false, "no first-person camera on seat 0");
+		return;
+	}
+	const core::Vec3 &at = camera->transform.trans;
+	const Vector3 local = view->body.affine_inverse().xform(p_in.camera->get_global_transform().origin);
+	const Vector3 on_part = part->drawn.affine_inverse().xform(local);
+	const Vector3 at_rest = part->rest.affine_inverse().xform(Vector3(at[0], at[1], at[2]));
+	row("turret_camera",
+			on_part.distance_to(at_rest) < kCameraRideTolerance &&
+					local.distance_to(Vector3(at[0], at[1], at[2])) > kCameraRideTolerance,
+			fmt("the first-person camera sits %.3f m from its rest place on the drawn ring and %.3f m from its rest "
+				"place on the hull",
+					double(on_part.distance_to(at_rest)), double(local.distance_to(Vector3(at[0], at[1], at[2])))));
 }
 
 void VehicleDriveRun::row(const std::string &p_name, bool p_pass, const std::string &p_detail) {
@@ -531,9 +585,26 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 							kTankSteer, double(3.6f * speed(v->linear_velocity))));
 			shoot(p_in, "tank_turn");
 			mapper.release_all();
+			if (!seat) {
+				return fail("turret_turn", "not seated");
+			}
+			turn_ = kTurretTurn;
+			mapper.script_view(seat->heading + turn_, 0.0f);
+			enter(Phase::TurretTurn);
+			return false;
+		}
+		case Phase::TurretTurn:
+			if (!seat) {
+				return fail("turret_turn", "not seated");
+			}
+			mapper.script_view(seat->heading + turn_, 0.0f);
+			if (t_ < kTurretSettle) {
+				return false;
+			}
+			turret_rows(r_session, p_in);
+			shoot(p_in, "turret_turn");
 			phase_ = Phase::Done;
 			return true;
-		}
 		case Phase::Done:
 			return true;
 	}

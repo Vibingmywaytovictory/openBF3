@@ -56,6 +56,7 @@ private:
 		Unzoom,
 		TankDrive,
 		TankTurn,
+		TurretTurn,
 		Done
 	};
 
@@ -64,10 +65,12 @@ private:
 	bool fail(const std::string &p_name, const std::string &p_detail);
 	void shoot(const VehicleDriveInputs &p_in, const char *p_name);
 	void hud_row(const VehicleDriveInputs &p_in, uint8_t p_seat);
+	void turret_rows(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in);
 
 	std::string shots_;
 	bool zoom_ = false;
 	float regular_fov_ = 0.0f;
+	float turn_ = 0.0f;
 	Phase phase_ = Phase::WaitScreen;
 	double t_ = 0.0;
 	double next_press_ = 0.0;

@@ -146,7 +146,7 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 		return tex;
 	};
 	const auto make_parts = [&](const render::VehicleMeshKind *mk, const std::vector<int8_t> &wheel_of,
-									std::vector<Part> &r_parts) {
+									const host::LevelVehicleKind *p_kind, std::vector<Part> &r_parts) {
 		for (size_t p = 0; p < mk->parts.size(); ++p) {
 			const render::VehicleMeshPart &part = mk->parts[p];
 			const render::MeshMaterials &slots = mk->materials[mk->part_mesh[p]];
@@ -169,8 +169,14 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 				materials.push_back(m);
 			}
 			const int8_t wheel = p < wheel_of.size() ? wheel_of[p] : int8_t(-1);
+			const int turret = p_kind != nullptr && p_kind->armament != nullptr
+					? present::part_turret(
+							  p_kind->part_turrets, p_kind->component_mesh_turrets, mk->part_mesh[p], part.part)
+					: -1;
+			const int8_t rides =
+					turret >= 0 && size_t(turret) < p_kind->armament->turrets.size() ? int8_t(turret) : int8_t(-1);
 			if (drawn.surfaces.empty()) {
-				r_parts.push_back(Part{ Ref<ArrayMesh>(), wheel, Transform3D() });
+				r_parts.push_back(Part{ Ref<ArrayMesh>(), wheel, Transform3D(), rides });
 				continue;
 			}
 			const render::PreparedSurface *first = drawn.surfaces.data();
@@ -183,8 +189,9 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 				return false;
 			}
 			const Transform3D rest = godot_transform(part.rest) * godot_transform(part.part_transform);
-			r_parts.push_back(Part{ mesh, wheel, rest });
+			r_parts.push_back(Part{ mesh, wheel, rest, rides });
 			++stats_.parts;
+			stats_.turret_parts += rides >= 0 ? 1u : 0u;
 		}
 		return true;
 	};
@@ -205,7 +212,7 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 		for (const int8_t w : wheel_of) {
 			stats_.wheel_parts += w >= 0 ? 1u : 0u;
 		}
-		if (!make_parts(mk, wheel_of, kinds_[k].parts)) {
+		if (!make_parts(mk, wheel_of, &level_->kinds[k], kinds_[k].parts)) {
 			return false;
 		}
 		visuals.push_back(level_->kinds[k].damage_visuals);
@@ -218,7 +225,7 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 			*r_error = "vehicles: no wreck mesh loaded for " + wreck->blueprint;
 			return false;
 		}
-		if (!make_parts(wk, {}, wrecks_[wreck->blueprint])) {
+		if (!make_parts(wk, {}, nullptr, wrecks_[wreck->blueprint])) {
 			return false;
 		}
 	}
@@ -267,10 +274,20 @@ void GameVehicles::step(
 		if (wreck.hidden) {
 			continue;
 		}
+		std::vector<Transform3D> turrets;
+		if (const std::shared_ptr<const sim::vehicles::VehicleArmament> &armament = level_->kinds[kind].armament) {
+			const std::array<float, net::kMaxVehicleTurrets> &angle =
+					v.predicted != 0 ? v.turret_angle : pose.turret_angle;
+			const size_t angles = std::min<size_t>(v.turret_count, angle.size());
+			for (const core::Transform &o :
+					present::turret_offsets(*armament, std::span<const float>(angle.data(), angles))) {
+				turrets.push_back(godot_transform(o));
+			}
+		}
 		if (own_seat) {
 			const Vector3 forward = body.basis.get_column(2);
 			own_ = OwnVehicleSeat{ v.spawner, own_seat->seat, kind, body, std::atan2(forward.x, forward.z),
-				to_vector(v.linear_velocity) };
+				to_vector(v.linear_velocity), turrets };
 		}
 		live.insert(v.spawner);
 		Shown &shown = shown_[v.spawner];
@@ -298,6 +315,12 @@ void GameVehicles::step(
 		node->set_transform(body);
 		const std::vector<Part> &parts = kinds_[kind].parts;
 		for (size_t p = 0; p < parts.size() && p < shown.part_ids.size(); ++p) {
+			if (parts[p].turret >= 0 && size_t(parts[p].turret) < turrets.size()) {
+				if (MeshInstance3D *mi = Object::cast_to<MeshInstance3D>(ObjectDB::get_instance(shown.part_ids[p]))) {
+					mi->set_transform(turrets[size_t(parts[p].turret)] * parts[p].rest);
+				}
+				continue;
+			}
 			if (parts[p].wheel < 0 || size_t(parts[p].wheel) >= v.wheel_count) {
 				continue;
 			}
@@ -425,6 +448,13 @@ std::optional<GameVehicleView> GameVehicles::view(uint16_t p_spawner) const {
 	v.body = node->get_transform();
 	const std::vector<Part> &parts = kinds_[it->second.kind].parts;
 	for (size_t p = 0; p < parts.size() && p < it->second.part_ids.size(); ++p) {
+		if (parts[p].turret >= 0) {
+			if (const MeshInstance3D *mi =
+							Object::cast_to<MeshInstance3D>(ObjectDB::get_instance(it->second.part_ids[p]))) {
+				v.turret_parts.push_back(GameVehicleTurretPart{ parts[p].turret, parts[p].rest, mi->get_transform() });
+			}
+			continue;
+		}
 		if (parts[p].wheel < 0) {
 			continue;
 		}
@@ -489,8 +519,10 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 	out.fov_deg = zoomed.fov;
 	out.zoomed = zoomed.zoomed;
 	out.black = zoomed.black;
+	const Transform3D on = c.turret >= 0 && size_t(c.turret) < p_seat.turrets.size() ? p_seat.turrets[size_t(c.turret)]
+																					 : Transform3D();
 	if (!c.first_person && c.chase) {
-		const Vector3 pivot = p_seat.body.xform(to_vector(c.transform.trans));
+		const Vector3 pivot = p_seat.body.xform(on.xform(to_vector(c.transform.trans)));
 		ChaseTarget target;
 		target.eye = fx::Vec3{ pivot.x, pivot.y, pivot.z };
 		target.yaw_rad = p_yaw;
@@ -513,7 +545,7 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 		out.up_pitch = c.up_pitch * core::kDegToRadF;
 		out.down_pitch = c.down_pitch * core::kDegToRadF;
 	}
-	out.camera = p_seat.body * Transform3D(look, to_vector(c.transform.trans));
+	out.camera = p_seat.body * Transform3D(look, on.xform(to_vector(c.transform.trans)));
 	return out;
 }
 }
