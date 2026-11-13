@@ -3463,6 +3463,111 @@ TEST_SUITE("host-tdm-server") {
 		CHECK(m->rules().stats().squad_spawns == squad_before);
 	}
 
+	TEST_CASE("squad spawn: a bot's spawn on its chosen mate follows M-CQ3 rule 4 alone: a mate hit a tick ago with an "
+			  "enemy beside him takes it, a dead one does not and no other mate stands in, OnlySquadLeaderSpawn") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		for (const bool leader_only : { false, true }) {
+			std::unique_ptr<Match> m = start_match(*level, true, 71u, 0, 2,
+					[&](host::GameServerConfig &r_config) { r_config.rules.only_squad_leader_spawn = leader_only; });
+			std::vector<tdm::ScriptedPeer *> peers;
+			for (const char *name : { "alpha", "bravo", "charlie", "delta", "echo", "foxtrot" }) {
+				peers.push_back(&m->join(name));
+				peers.back()->ready();
+			}
+			REQUIRE(wait_in_round(*m));
+			for (tdm::ScriptedPeer *q : peers) {
+				q->spawn_request(1, 0);
+			}
+			REQUIRE(m->until(
+					[&] {
+						return std::all_of(peers.begin(), peers.end(),
+								[&](tdm::ScriptedPeer *q) { return is_alive(m->state(q->slot())); });
+					},
+					240));
+			m->ticks(20);
+			host::TdmRules &rules = *m->server.rules();
+			const host::SquadTable &table = rules.squads();
+			const uint8_t first = uint8_t(peers.front()->slot());
+			int leader = -1, enemy = -1;
+			tdm::ScriptedPeer *enemy_peer = nullptr;
+			std::vector<int> members;
+			for (tdm::ScriptedPeer *q : peers) {
+				const uint8_t s = uint8_t(q->slot());
+				if (table.team_of(s) != table.team_of(first)) {
+					enemy = s;
+					enemy_peer = q;
+				} else if ((table.same_squad(s, first) || s == first) && table.leader(s)) {
+					leader = s;
+				} else if (table.same_squad(s, first) || s == first) {
+					members.push_back(s);
+				}
+			}
+			REQUIRE(leader >= 0);
+			REQUIRE(enemy >= 0);
+			REQUIRE(members.size() >= 2u);
+			const uint8_t asker = uint8_t(members[0]);
+			const auto choice_of = [&](int p_mate) {
+				for (uint8_t i = 0; i < table.squad_size(); ++i) {
+					if (table.mate(asker, i) == p_mate) {
+						return uint8_t(i + 1u);
+					}
+				}
+				return uint8_t(0);
+			};
+			const auto under_fire = [&](int p_mate) {
+				const sim::Vec3 at = m->state(p_mate)->position;
+				const std::optional<sim::Vec3> beside = floor_at(*m->world, add(at, 2.0f, 0.0f, 0.0f));
+				m->teleport(*enemy_peer, add(beside.value_or(at), 0.0f, 0.05f, 0.0f));
+				m->ticks(2);
+				CHECK(distance(m->state(enemy)->position, m->state(p_mate)->position) < 5.0f);
+				net::HitEvent hit;
+				hit.victim = uint8_t(p_mate);
+				hit.shooter = uint8_t(enemy);
+				hit.damage = 10.0f;
+				rules.hit(hit);
+			};
+			const auto take = [&](int p_mate, sim::Vec3 &r_at) {
+				std::vector<sim::SoldierState> live(16);
+				for (size_t i = 0; i < live.size(); ++i) {
+					if (const sim::SoldierState *st = m->state(int(i))) {
+						live[i] = *st;
+					}
+				}
+				rules.set_spawn_choice(asker, choice_of(p_mate));
+				uint16_t yaw = 0;
+				return rules.take_squad_spawn(asker, live, r_at, yaw);
+			};
+			sim::Vec3 at{};
+			under_fire(members[1]);
+			const bool on_member = take(members[1], at);
+			const float from_member = distance(at, m->state(members[1])->position);
+			under_fire(leader);
+			const bool on_leader = take(leader, at);
+			const float from_leader = distance(at, m->state(leader)->position);
+			const auto dying = std::find_if(
+					peers.begin(), peers.end(), [&](tdm::ScriptedPeer *q) { return q->slot() == members[1]; });
+			REQUIRE(dying != peers.end());
+			m->server.on_receive((*dying)->peer(), net::kChannelReliable, net::encode_suicide_request());
+			m->ticks(3);
+			REQUIRE_FALSE(is_alive(m->state(members[1])));
+			const bool on_dead = take(members[1], at);
+			std::printf(
+					"squad spawn (OnlySquadLeaderSpawn %d): on a member under fire %d (%.1f m), on the leader under "
+					"fire %d (%.1f m), on a dead member %d\n",
+					int(leader_only), int(on_member), from_member, int(on_leader), from_leader, int(on_dead));
+			CHECK(on_member == !leader_only);
+			CHECK(on_leader);
+			CHECK(from_leader < 5.0f);
+			CHECK_FALSE(on_dead);
+			if (!leader_only) {
+				CHECK(from_member < 5.0f);
+			}
+		}
+	}
+
 	TEST_CASE("nav: a bot standing 1.1 m off the nav mesh at Metro's (-189.1, 64.2, -542.7), where an E2 bot stood "
 			  "40 s, walks back onto the mesh") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();

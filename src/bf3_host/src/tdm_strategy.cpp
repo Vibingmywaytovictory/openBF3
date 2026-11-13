@@ -295,7 +295,7 @@ void TdmStrategy::draw_spawn(uint8_t p_slot) {
 	const uint8_t team = table.team_of(p_slot);
 	const ai::SquadMember *const member = team != 0 ? squads_->squad_member(int(p_slot), team) : nullptr;
 	uint8_t choice = 0;
-	if (spawner_->follows_squad(member, tuning_.squad_spawn_draw)) {
+	if (spawner_->follows_squad(member)) {
 		const ai::SquadMember *const mate = spawner_->squad_mate_to_follow(member);
 		choice = 1;
 		for (uint8_t i = 0; mate != nullptr && i < table.squad_size(); ++i) {

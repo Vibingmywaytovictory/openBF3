@@ -20,7 +20,6 @@ const KeyDef<StrategyTuning> kKeys[] = {
 	{ "sai.squad_updates_per_tick", KeyKind::U32, 1, 64, BF3_SAI_FIELD(squad_updates_per_tick) },
 	{ "sai.hunt_heat", KeyKind::Float, 0.0, 1000000.0, BF3_SAI_FIELD(hunt_heat) },
 	{ "sai.hunt_keep", KeyKind::Float, 0.0, 1.0, BF3_SAI_FIELD(hunt_keep) },
-	{ "sai.squad_spawn_draw", KeyKind::Float, 0.0, 1.0, BF3_SAI_FIELD(squad_spawn_draw) },
 	{ "sai.order.revive", KeyKind::Float, 0.0, 100.0, BF3_SAI_FIELD(order[0]) },
 	{ "sai.order.fire_infantery", KeyKind::Float, 0.0, 100.0, BF3_SAI_FIELD(order[1]) },
 	{ "sai.order.take_cover_infantry", KeyKind::Float, 0.0, 100.0, BF3_SAI_FIELD(order[2]) },

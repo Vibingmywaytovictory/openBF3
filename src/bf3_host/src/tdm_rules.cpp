@@ -28,8 +28,6 @@ namespace {
 constexpr size_t kMaxRuleSlots = 256;
 constexpr size_t kMaxDeathRing = 256;
 constexpr uint32_t kNoTick = 0;
-constexpr uint32_t kBotSquadSpawnCalmTicks = 300;
-constexpr float kBotSquadSpawnClearMetres = 20.0f;
 
 uint32_t ticks_of(float p_seconds) {
 	return lg::logic_delay_ticks(std::isfinite(p_seconds) ? std::clamp(double(p_seconds), 0.0, 3600.0) : 0.0);
@@ -1458,32 +1456,9 @@ bool TdmRules::take_squad_spawn(
 	if (choice == 0 || m.faulted || (phase != lg::RoundPhase::PreRound && phase != lg::RoundPhase::InRound)) {
 		return false;
 	}
-	const auto calm = [&](int p_mate) {
-		const Impl::Slot &o = m.slots[size_t(p_mate)];
-		if (o.damaged && m.tick - o.last_damage < kBotSquadSpawnCalmTicks) {
-			return false;
-		}
-		const sim::Vec3 &at = p_live[size_t(p_mate)].position;
-		for (size_t i = 0; i < p_live.size() && i < m.slots.size(); ++i) {
-			if (m.slots[i].alive && m.team_of(i) != 0 && m.team_of(i) != m.team_of(p_slot) && state_alive(p_live[i]) &&
-					dist2(p_live[i].position, at) < kBotSquadSpawnClearMetres * kBotSquadSpawnClearMetres) {
-				return false;
-			}
-		}
-		return true;
-	};
-	const auto ready = [&](uint8_t p_choice) {
-		const int mate = p_choice != 0 ? m.squads.mate(p_slot, uint8_t(p_choice - 1u)) : kNoSquadMate;
-		return m.mate_ready(p_slot, mate, p_live) && m.squad_spawn_allowed(p_slot, mate) && calm(mate) &&
-						m.bot_nav_main(p_live[size_t(mate)].position)
-				? mate
-				: kNoSquadMate;
-	};
-	int mate = ready(choice);
-	for (uint8_t other = 1; mate == kNoSquadMate && other <= m.squads.squad_size(); ++other) {
-		mate = ready(other);
-	}
-	if (mate == kNoSquadMate) {
+	const int mate = m.squads.mate(p_slot, uint8_t(choice - 1u));
+	if (!m.mate_ready(p_slot, mate, p_live) || !m.squad_spawn_allowed(p_slot, mate) ||
+			!m.bot_nav_main(p_live[size_t(mate)].position)) {
 		return false;
 	}
 	const sim::SoldierState &st = p_live[size_t(mate)];

@@ -26,8 +26,8 @@ namespace tt = bf3::test::tdm;
 
 namespace {
 
-constexpr uint64_t kTdmStreamHash = 0xa80e2092431d5037ull;
-constexpr uint64_t kTdmStateHash = 0x2e0d502fe3e82fd9ull;
+constexpr uint64_t kTdmStreamHash = 0xde8310516448601cull;
+constexpr uint64_t kTdmStateHash = 0xb5ba3f009658bf21ull;
 constexpr uint64_t kDevStreamHash = 0x4d4bc6bf25c493e5ull;
 constexpr uint64_t kDevStateHash = 0xd7b3e0a24cbb58bbull;
 

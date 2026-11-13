@@ -100,11 +100,8 @@ const SquadMember *BotSpawner::squad_leader_to_follow(const SquadMember *p_membe
 	return nullptr;
 }
 
-bool BotSpawner::follows_squad(const SquadMember *p_member, float p_draw) {
-	const double follow = draw();
-	const SquadMember *const leader = p_member != nullptr ? p_member->squad().squad_leader() : nullptr;
-	return p_member != nullptr && p_member->squad().number_of_squad_members() > 1 &&
-			(follow > p_draw || (leader != nullptr && !leader->player().is_ai()));
+bool BotSpawner::follows_squad(const SquadMember *p_member) const {
+	return p_member != nullptr && p_member->squad().number_of_squad_members() > 1;
 }
 
 const SquadMember *BotSpawner::squad_mate_to_follow(const SquadMember *p_member) const {

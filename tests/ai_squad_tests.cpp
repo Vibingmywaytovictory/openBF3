@@ -2063,8 +2063,7 @@ TEST_SUITE("ai-strategy") {
 	}
 
 	TEST_CASE("BotSpawner: a member follows its living leader past the draw, never a leader, always a human leader; "
-			  "past the "
-			  "same draw a bot spawns on any living mate") {
+			  "a bot in a squad of two or more spawns on its leader, else on any living mate") {
 		World world;
 		SquadManager squads(world.services());
 		form_squad(world, squads, 1, { 1, 2, 3 }, { 0.0f, 0.0f, 0.0f });
@@ -2084,14 +2083,8 @@ TEST_SUITE("ai-strategy") {
 		for (int i = 0; i < 20; ++i) {
 			CHECK(spawner.squad_leader_to_follow(squads.squad_member(3, 1)) == nullptr);
 		}
-		int follows = 0;
-		for (int i = 0; i < 200; ++i) {
-			follows += spawner.follows_squad(squads.squad_member(1, 1), 0.3f) ? 1 : 0;
-		}
-		CHECK(follows > 120);
-		CHECK(follows < 160);
 		for (int i = 0; i < 20; ++i) {
-			CHECK(spawner.follows_squad(squads.squad_member(1, 1), 0.0f));
+			CHECK(spawner.follows_squad(squads.squad_member(1, 1)));
 		}
 		const SquadMember *const second = spawner.squad_mate_to_follow(squads.squad_member(1, 1));
 		REQUIRE(second != nullptr);
@@ -2102,7 +2095,7 @@ TEST_SUITE("ai-strategy") {
 		CHECK(third->player_id() == 3);
 		world.players[3]->alive = false;
 		CHECK(spawner.squad_mate_to_follow(squads.squad_member(1, 1)) == nullptr);
-		CHECK_FALSE(spawner.follows_squad(nullptr, 0.0f));
+		CHECK_FALSE(spawner.follows_squad(nullptr));
 		world.players[2]->alive = true;
 		world.players[3]->alive = true;
 		world.players[1]->down = false;
