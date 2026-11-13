@@ -6742,8 +6742,8 @@ TEST_SUITE("host-vehicles-damage-team") {
 TEST_SUITE("host-gunplay-gadgets") {
 	TEST_CASE("gadgets: an assault's slot 2 M320 picked in CUSTOMIZE fires each of its rounds in a Metro match: HE a "
 			  "dud before TimeToArm and a direct hit after, buckshot 12 pellets of falloff damage, smoke a 0-damage "
-			  "blast whose ShockwaveDamage floor the soldier zones' thresholds cut, the low-velocity grenade bouncing "
-			  "to its TimeToLive") {
+			  "blast whose ShockwaveDamage floor the soldier zones' thresholds cut, the low-velocity grenade going off "
+			  "at its TimeToLive") {
 		tdm::TdmLevel *level = tdm::load_tdm_level_once();
 		if (level == nullptr) {
 			return;
