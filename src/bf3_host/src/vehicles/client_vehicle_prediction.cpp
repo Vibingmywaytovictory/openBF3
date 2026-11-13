@@ -212,6 +212,9 @@ void ClientVehiclePrediction::reconcile(
 	}
 	const net::VehicleWire &w = *s->wire;
 	const bool same = driving_ && spawner_ == w.spawner && generation_ == w.generation;
+	if (!(seated_ && spawner_ == w.spawner && generation_ == w.generation)) {
+		seated_from_ = s->tick;
+	}
 	seated_ = true;
 	seat_ = s->seat;
 	generation_ = w.generation;
@@ -274,7 +277,7 @@ std::optional<sim::Vec3> ClientVehiclePrediction::seat_of(const sim::VehicleStat
 }
 
 std::optional<sim::Vec3> ClientVehiclePrediction::seat_at(sim::Tick p_tick) const {
-	if (!seated_ || level_ == nullptr) {
+	if (!seated_ || level_ == nullptr || p_tick < seated_from_) {
 		return std::nullopt;
 	}
 	if (driving_) {

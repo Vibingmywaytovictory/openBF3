@@ -67,6 +67,7 @@ private:
 	std::vector<Entry> ring_;
 
 	bool seated_ = false;
+	sim::Tick seated_from_ = 0;
 	uint16_t spawner_ = 0;
 	uint8_t seat_ = 0;
 	uint8_t generation_ = 0;

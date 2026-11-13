@@ -1447,6 +1447,7 @@ TEST_SUITE("host-vehicles-reconcile") {
 		std::map<sim::Tick, sim::Command> sent;
 		std::map<sim::Tick, sim::VehicleState> states;
 		std::map<sim::Tick, sim::Vec3> drawn_at;
+		bool seated_before_entry = true, seated_at_entry = false;
 		const host::CommandAt command_at = [&](sim::Tick p_tick) -> const sim::Command * {
 			const auto c = sent.find(p_tick);
 			return c != sent.end() ? &c->second : nullptr;
@@ -1489,6 +1490,10 @@ TEST_SUITE("host-vehicles-reconcile") {
 				seen.receive(net::encode_vehicle_states(m));
 			}
 			prediction.reconcile(seen, kOwnSlot, command_at, c);
+			if (c == kEntry + kLag) {
+				seated_before_entry = prediction.seat_at(kEntry - 1u).has_value();
+				seated_at_entry = prediction.seat_at(kEntry).has_value();
+			}
 			prediction.step(cmd);
 			frame->render_ticks_at_publish = double(c);
 			seen.publish(*frame);
@@ -1531,6 +1536,8 @@ TEST_SUITE("host-vehicles-reconcile") {
 				double(before), unsigned(kLag), double(jump), double(moved), double(fade[0]), double(fade[5]),
 				double(fade[10]), double(fade[15]), double(snapped), (unsigned long long)stats.vehicle_corrections,
 				double(stats.vehicle_max_correction_m), (unsigned long long)stats.vehicle_prediction_failures);
+		CHECK_FALSE(seated_before_entry);
+		CHECK(seated_at_entry);
 		CHECK(before < 0.01f);
 		CHECK(fade[0] > 0.4f);
 		CHECK(fade[0] < 0.5f);
