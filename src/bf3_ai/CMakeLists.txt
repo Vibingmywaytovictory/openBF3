@@ -189,3 +189,8 @@ target_sources(bf3_ai PRIVATE
     src/commander/commander.cpp
     src/strategic/sai_distribution.cpp
 )
+
+target_sources(bf3_ai PRIVATE
+    include/bf3/ai/behaviour/weapon_choice.h
+    src/behaviour/weapon_choice.cpp
+)

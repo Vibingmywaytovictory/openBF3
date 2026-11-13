@@ -1522,6 +1522,11 @@ set_tests_properties(ai.actionplan.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 add_test(NAME ai.interpreter.unit COMMAND test_ai_actionplan --test-suite=ai-interpreter)
 set_tests_properties(ai.interpreter.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 
+openbf3_test(test_ai_gadgets test_main.cpp ai_weapon_choice_tests.cpp)
+target_link_libraries(test_ai_gadgets PRIVATE bf3_ai)
+add_test(NAME ai.gadgets.unit COMMAND test_ai_gadgets --test-suite=ai-gadgets)
+set_tests_properties(ai.gadgets.unit PROPERTIES TIMEOUT 60 LABELS "unit")
+
 openbf3_test(test_audio_vehicle test_main.cpp audio_vehicle_tests.cpp test_support.h)
 target_link_libraries(test_audio_vehicle PRIVATE bf3_client_audio bf3_audio bf3_host bf3_core)
 target_compile_definitions(test_audio_vehicle PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg")
