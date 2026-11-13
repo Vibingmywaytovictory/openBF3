@@ -1042,7 +1042,9 @@ TEST_SUITE("render-look") {
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}
 
-	TEST_CASE("render.look: MP_007's river water wash is not drawn and no blend material draws a mask as its colour") {
+	TEST_CASE(
+			"render.look: MP_007's river water wash draws only through its program and no blend material draws a mask "
+			"as its colour") {
 		InstallReader reader;
 		if (!reader.locate({})) {
 			bf3::test::skip_install_case(reader.describe().c_str());
@@ -1067,7 +1069,8 @@ TEST_SUITE("render-look") {
 		const LookMaterial wash_look = resolver->resolve(wash, "levels/mp_007/props/mp007_waterwash_01_mesh");
 		std::printf("render.look MP_007 water wash: drawn %d, blend %d, colour %s\n", int(wash_look.drawn),
 				int(wash_look.blend), wash_look.color ? wash_look.color->name.c_str() : "-");
-		CHECK(!wash_look.drawn);
+		CHECK(wash_look.drawn);
+		CHECK(wash_look.graph != nullptr);
 
 		size_t drawn_slots = 0, blend_slots = 0;
 		for (const SceneMeshPlan &m : plan->meshes) {
@@ -1078,7 +1081,8 @@ TEST_SUITE("render-look") {
 				REQUIRE(s < plan->materials.size());
 				const SceneMaterialPlan &mat = plan->materials[s];
 				++drawn_slots;
-				CHECK(to_lower_ascii(mat.slot.shader) != "levels/mp_007/props/m_mp007_waterwash_01");
+				CHECK((to_lower_ascii(mat.slot.shader) != "levels/mp_007/props/m_mp007_waterwash_01" ||
+						mat.program >= 0));
 				if (!mat.blend || mat.glass || mat.albedo < 0) {
 					continue;
 				}

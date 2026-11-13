@@ -11,6 +11,7 @@
 #include "bf3/core/util/text.h"
 #include "bf3/render/dxbc.h"
 #include "bf3/render/level_scene.h"
+#include "bf3/render/look_environment.h"
 #include "bf3/render/shader_database.h"
 #include "bf3/render/shader_translate.h"
 #include "bf3/render/texture_prep.h"
@@ -104,6 +105,61 @@ std::vector<uint8_t> cube_pixel_program() {
 											{ dst(kTemp, 0, 0xF), src(kTemp, 1, swz(0, 1, 2, 0)), src(kResource, 1),
 													sampler(0) }),
 									ins(54, { dst(kOutput, 0, 0xF), src(kTemp, 0) }) }) } });
+}
+
+std::vector<uint32_t> negated(std::vector<uint32_t> p_operand) {
+	p_operand[0] |= 1u << 31;
+	p_operand.insert(p_operand.begin() + 1, 1u | 1u << 6);
+	return p_operand;
+}
+
+std::vector<uint8_t> fade_vertex_program() {
+	return container({ { "RDEF",
+							   rdef({ { "viewConstants", 0, 0 } }, "viewConstants",
+									   { { "crViewProjMatrix", 240, 64 },
+											   { "transparentStartAndEndAndClamp", 336, 12 } }) },
+			{ "ISGN", signature({ { "TEXCOORD", 0, 0, 0, 0xF } }) },
+			{ "OSGN", signature({ { "SV_Position", 0, 1, 0, 0xF }, { "TEXCOORD", 0, 0, 1, 0xF } }) },
+			{ "SHDR",
+					code_chunk(1, 2,
+							{ ins(54, { dst(kTemp, 0, 0x7), src(kInput, 0) }),
+									ins(54, { dst(kTemp, 0, 0x8), imm(1, 1, 1, 1) }),
+									ins(17, { dst(kTemp, 1, 0x1), src(kTemp, 0), cb(0, 18, kIdentity) }),
+									ins(0,
+											{ dst(kTemp, 1, 0x1), src(kTemp, 1, swz(0, 0, 0, 0)),
+													negated(cb(0, 21, swz(0, 0, 0, 0))) }),
+									ins(0,
+											{ dst(kTemp, 0, 0x1), negated(cb(0, 21, swz(0, 0, 0, 0))),
+													cb(0, 21, swz(1, 1, 1, 1)) }),
+									ins(14,
+											{ dst(kTemp, 0, 0x1), src(kTemp, 1, swz(0, 0, 0, 0)),
+													src(kTemp, 0, swz(0, 0, 0, 0)) }),
+									ins(52, { dst(kTemp, 0, 0x1), src(kTemp, 0, swz(0, 0, 0, 0)), imm(0, 0, 0, 0) }),
+									ins(51,
+											{ dst(kTemp, 0, 0x1), src(kTemp, 0, swz(0, 0, 0, 0)),
+													cb(0, 21, swz(2, 2, 2, 2)) }),
+									ins(0,
+											{ dst(kOutput, 1, 0x8), negated(src(kTemp, 0, swz(0, 0, 0, 0))),
+													imm(1, 1, 1, 1) }),
+									ins(54, { dst(kOutput, 1, 0x7), src(kInput, 0) }),
+									ins(54, { dst(kOutput, 0, 0xF), src(kTemp, 0) }) }) } });
+}
+
+std::vector<uint8_t> hemisphere_pixel_program(uint32_t p_first_register) {
+	return container({ { "RDEF",
+							   rdef({ { "$Globals", 0, 0 } }, "$Globals",
+									   { { "outdoorLightDir", 0, 12 }, { "outdoorLightHemisphereDir", 16, 12 },
+											   { "outdoorLightTopColor", 32, 12 },
+											   { "outdoorLightBottomColor", 48, 12 } }) },
+			{ "ISGN", signature({ { "SV_Position", 0, 1, 0, 0xF }, { "TEXCOORD", 0, 0, 1, 0xF } }) },
+			{ "OSGN", signature({ { "SV_Target", 0, 0, 0, 0xF } }) },
+			{ "SHDR",
+					code_chunk(0, 1,
+							{ ins(50,
+									  { dst(kTemp, 0, 0x7), cb(0, p_first_register, swz(1, 1, 1, 1)),
+											  cb(0, 2, swz(0, 1, 2, 0)), cb(0, 3, swz(0, 1, 2, 0)) }),
+									ins(56, { dst(kOutput, 0, 0x7), src(kTemp, 0), src(kInput, 1, swz(3, 3, 3, 3)) }),
+									ins(54, { dst(kOutput, 0, 0x8), src(kInput, 1, swz(3, 3, 3, 3)) }) }) } });
 }
 
 std::vector<uint8_t> world_vertex_program() {
@@ -381,6 +437,57 @@ TEST_SUITE("render-programs-unit") {
 		CHECK(code.find("sampler2D") == std::string::npos);
 	}
 
+	TEST_CASE("render.programs.unit: the outdoor light's hemisphere globals are engine constants, and the vertex stage "
+			  "reads clip w and the transparent fade") {
+		const std::vector<uint8_t> ps_blob = hemisphere_pixel_program(1), vs_blob = fade_vertex_program();
+		bf3::core::Result<dxbc::Program> ps = dxbc::parse(ps_blob);
+		bf3::core::Result<dxbc::Program> vs = dxbc::parse(vs_blob);
+		REQUIRE(ps.ok());
+		REQUIRE(vs.ok());
+		const std::vector<uint32_t> formats = { 10 };
+		const std::vector<VertexInputLanes> lanes = { { { { 1, 0 }, { 1, 1 }, { 1, 2 }, { 9, 0 } } } };
+		ProgramRequest request;
+		request.pixel = &*ps;
+		request.vertex = &*vs;
+		request.vertex_formats = formats;
+		request.vertex_lanes = lanes;
+		request.target = ProgramTarget::Forward;
+		bf3::core::Result<TranslatedProgram> t = translate_program(request);
+		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+		REQUIRE(t->constants.size() == 3);
+		CHECK(t->constants[0].uniform == "x0_1");
+		CHECK(t->constants[0].lanes[1].value == "outdoorLightHemisphereDir");
+		CHECK(t->constants[0].lanes[1].component == 1);
+		CHECK(t->constants[0].lanes[1].engine);
+		CHECK(t->constants[0].lanes[0].value.empty());
+		CHECK(t->constants[1].lanes[2].value == "outdoorLightTopColor");
+		CHECK(t->constants[2].lanes[0].value == "outdoorLightBottomColor");
+		const std::string &code = t->code;
+		CHECK(code.find("uniform vec4 x0_2;") != std::string::npos);
+		CHECK(code.find("vec4 cb0_1 = vec4(0.0, x0_1.y, 0.0, 0.0);") != std::string::npos);
+		CHECK(code.find("vec4 cb0_18 = vec4((PROJECTION_MATRIX * VIEW_MATRIX)[0][3], (PROJECTION_MATRIX * "
+						"VIEW_MATRIX)[1][3], (PROJECTION_MATRIX * VIEW_MATRIX)[2][3], dot(vec4(CAMERA_POSITION_WORLD, "
+						"1.0), vec4((PROJECTION_MATRIX * VIEW_MATRIX)[0][3], (PROJECTION_MATRIX * VIEW_MATRIX)[1][3], "
+						"(PROJECTION_MATRIX * VIEW_MATRIX)[2][3], (PROJECTION_MATRIX * VIEW_MATRIX)[3][3])));") !=
+				std::string::npos);
+		CHECK(code.find("vec4 cb0_21 = vec4(0.0, 1.0, 0.0, 0.0);") != std::string::npos);
+		CHECK(code.find("vec4 v1 = vec4(0.0, 0.0, 0.0, vso1.w);") != std::string::npos);
+		for (std::string_view name : kEngineGlobals) {
+			CHECK_MESSAGE(look_engine_global(LookEnvState{}, name).has_value(), name);
+		}
+		LookEnvState state;
+		state.outdoor_sky = { 0.25f, 0.5f, 0.75f };
+		CHECK(look_engine_global(state, "outdoorLightTopColor") == std::array<float, 4>{ 0.25f, 0.5f, 0.75f, 0.0f });
+		CHECK(!look_engine_global(state, "outdoorLightDir").has_value());
+		const std::vector<uint8_t> other_blob = hemisphere_pixel_program(0);
+		bf3::core::Result<dxbc::Program> other = dxbc::parse(other_blob);
+		REQUIRE(other.ok());
+		request.pixel = &*other;
+		bf3::core::Result<TranslatedProgram> refused = translate_program(request);
+		REQUIRE(!refused.ok());
+		CHECK(refused.error().message == "$Globals.outdoorLightDir");
+	}
+
 	TEST_CASE("render.programs.unit: instance vectors are the world rows, and a part's shown branch is the vertex "
 			  "stage") {
 		const std::vector<uint8_t> ps_blob = world_pixel_program(), vs_blob = instanced_vertex_program();
@@ -520,16 +627,16 @@ constexpr std::pair<const char *, std::string_view> kDrawnThroughPrograms[] = {
 	{ "XP3_Alborz", "levels/mp_whitepeak/objects/rock_01_wall_snow_lod" },
 	{ "XP3_Desert", "levels/xp3_desert/objects/ss_backdropocean_fade" },
 	{ "XP2_Skybar", "xp2/objects/skybarsigns/signs_shader" },
+	{ "XP2_Palace", "xp2/objects/palacecourtyardground_01/ss_palacecourtyardground_01_water" },
+	{ "MP_007", "levels/mp_007/props/m_mp007_waterwash_01" },
+	{ "XP1_002", "levels/sp_tank/props/backdrop_wires_main" },
 };
 constexpr std::string_view kHiddenLedger[] = {
-	"levels/mp_007/props/m_mp007_waterwash_01",
 	"levels/mp_018/terrain/mp018_wave",
-	"levels/sp_tank/props/backdrop_wires_main",
 	"levels/xp1_002/objects/xp1_002_wave",
 	"levels/xp5_001/objects/hover_jetflame",
 	"objects/busstopbig_01/busstopbig_crackedglass",
 	"xp2/objects/cellarpoolarea_01/shaders/poolwater_1",
-	"xp2/objects/palacecourtyardground_01/ss_palacecourtyardground_01_water",
 	"xp2/objects/wallsquares_01/ss_wallsquares_02",
 };
 

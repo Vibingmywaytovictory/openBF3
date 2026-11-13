@@ -785,7 +785,7 @@ void LookResolver::attach_program(
 		std::array<float, 4> v{};
 		for (size_t lane = 0; lane < 4; ++lane) {
 			const ProgramConstantLane &l = c.lanes[lane];
-			if (l.value.empty()) {
+			if (l.value.empty() || l.engine) {
 				continue;
 			}
 			const std::array<float, 4> *given = p_slot.vector(l.value);

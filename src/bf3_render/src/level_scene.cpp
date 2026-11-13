@@ -345,6 +345,29 @@ std::string material_key(const MaterialSlot &p_slot) {
 	return key;
 }
 
+void bind_engine_globals(LevelScenePlan &r_plan, const LookEnvState &p_state) {
+	for (SceneMaterialPlan &m : r_plan.materials) {
+		if (!m.look || !m.look->graph) {
+			continue;
+		}
+		const std::vector<ProgramConstant> &constants = m.look->graph->translated.constants;
+		for (size_t c = 0; c < constants.size() && c < m.look->graph_constants.size(); ++c) {
+			for (size_t lane = 0; lane < 4; ++lane) {
+				const ProgramConstantLane &l = constants[c].lanes[lane];
+				if (!l.engine) {
+					continue;
+				}
+				const std::optional<std::array<float, 4>> value = look_engine_global(p_state, l.value);
+				if (!value) {
+					r_plan.failures.emplace_back(l.value, "engine constant without a value");
+					continue;
+				}
+				m.look->graph_constants[c][lane] = (*value)[l.component];
+			}
+		}
+	}
+}
+
 std::string look_key(const LookMaterial &p_look) {
 	std::string key;
 	for (const std::optional<LookTexture> *t : { &p_look.color, &p_look.normal }) {
@@ -978,6 +1001,7 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 			plan.look_environment = std::move(*env);
 			decode_look_textures(*p_options.mount, plan.look_environment);
 			const LookEnvState &base = plan.look_environment.base;
+			bind_engine_globals(plan, base);
 			const auto sky_texture = [&](const std::string &p_name) { return p_name.empty() ? -1 : int32_t(builder.texture(p_name, TextureRole::Color)); };
 			if (base.sky) {
 				plan.sky_panorama = sky_texture(base.panorama);

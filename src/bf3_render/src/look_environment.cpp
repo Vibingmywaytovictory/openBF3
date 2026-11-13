@@ -507,6 +507,20 @@ LookVec3 look_grade(const LookEnvState &p_state, const std::vector<uint8_t> &p_c
 	return out;
 }
 
+std::optional<std::array<float, 4>> look_engine_global(const LookEnvState &p_state, std::string_view p_name) {
+	if (p_name == "outdoorLightHemisphereDir") {
+		return std::array<float, 4>{ 0.0f, 1.0f, 0.0f, 0.0f };
+	}
+	if (p_name == "outdoorLightTopColor") {
+		return std::array<float, 4>{ p_state.outdoor_sky[0], p_state.outdoor_sky[1], p_state.outdoor_sky[2], 0.0f };
+	}
+	if (p_name == "outdoorLightBottomColor") {
+		return std::array<float, 4>{ p_state.outdoor_ground[0], p_state.outdoor_ground[1], p_state.outdoor_ground[2],
+			0.0f };
+	}
+	return std::nullopt;
+}
+
 namespace {
 
 void read_logic_environments(const EbxResolver &p_db, const World &p_world, LookEnvironment &r_env) {

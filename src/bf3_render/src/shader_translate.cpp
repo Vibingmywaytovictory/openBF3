@@ -576,6 +576,21 @@ constexpr const char *kInstanceVectors = "instanceVectorBuffer";
 constexpr const char *kPartVectors = "boneVectors";
 constexpr uint32_t kWorldRows = 3;
 
+constexpr const char *kCameraViewProjection = "crViewProjMatrix";
+constexpr const char *kTransparentFade = "transparentStartAndEndAndClamp";
+constexpr const char *kTransparentFadeOff[] = { "0.0", "1.0", "0.0" };
+
+std::string clip_w_lane(uint32_t p_lane) {
+	const auto row = [](uint32_t p_column) {
+		return "(PROJECTION_MATRIX * VIEW_MATRIX)[" + std::to_string(p_column) + "][3]";
+	};
+	if (p_lane < 3) {
+		return row(p_lane);
+	}
+	return "dot(vec4(CAMERA_POSITION_WORLD, 1.0), vec4(" + row(0) + ", " + row(1) + ", " + row(2) + ", " + row(3) +
+			"))";
+}
+
 std::string model_row(uint32_t p_row) {
 	const std::string k = std::to_string(p_row);
 	return "vec4(MODEL_MATRIX[0][" + k + "], MODEL_MATRIX[1][" + k + "], MODEL_MATRIX[2][" + k + "], MODEL_MATRIX[3][" +
@@ -984,6 +999,11 @@ private:
 				lanes[c] = std::string("CAMERA_POSITION_WORLD.") + kLanes[component];
 			} else if (cb->name == kViewConstants && var->name == "time" && component == 0) {
 				lanes[c] = "TIME";
+			} else if (cb->name == kViewConstants && var->name == kCameraViewProjection && component >= 12 &&
+					component < 16) {
+				lanes[c] = clip_w_lane(component - 12);
+			} else if (cb->name == kViewConstants && var->name == kTransparentFade && component < 3) {
+				lanes[c] = kTransparentFadeOff[component];
 			} else {
 				return refuse("vertex program reads " + cb->name + "." + var->name);
 			}
@@ -1462,6 +1482,13 @@ private:
 					return refuse(var->name + " is wider than a vector");
 				}
 				external.lanes[c] = ProgramConstantLane{ var->name.substr(std::strlen(kExternalPrefix)), component };
+				lanes[c] = external.uniform + "." + kLanes[c];
+				uses_external = true;
+				continue;
+			}
+			if (cb->name == kGlobals && component < 4 &&
+					std::find(kEngineGlobals.begin(), kEngineGlobals.end(), var->name) != kEngineGlobals.end()) {
+				external.lanes[c] = ProgramConstantLane{ var->name, component, true };
 				lanes[c] = external.uniform + "." + kLanes[c];
 				uses_external = true;
 				continue;

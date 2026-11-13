@@ -8,6 +8,7 @@
 #include <functional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -39,7 +40,11 @@ enum class ProgramBlend : uint8_t {
 struct ProgramConstantLane {
 	std::string value;
 	uint8_t component = 0;
+	bool engine = false;
 };
+
+inline constexpr std::array<std::string_view, 3> kEngineGlobals{ "outdoorLightHemisphereDir", "outdoorLightTopColor",
+	"outdoorLightBottomColor" };
 
 struct ProgramConstant {
 	std::string uniform;

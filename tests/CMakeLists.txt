@@ -393,6 +393,11 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
         "-DVIEWS=rock_e@-391,96,-405,90,-15|rock_n@-405,96,-417,0,-15|rock_w@-419,96,-405,-90,-15|rock_s@-405,96,-393,180,-15"
         -DMIN_MATERIALS=14 -DMIN_INSTANCES=706)
     set_tests_properties(godot.look_programs.mp018 PROPERTIES RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.look_programs.palace godot_look_programs.cmake WINDOW TIMEOUT 400
+        ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DMAGENTA_LIMIT=0.0005 -DLEVEL=XP2_Palace
+        "-DVIEWS=water_e@-17.9,7,-12,30,-35|water_w@-17.9,7,-12,-30,-35|water_n@-17.9,7,-12,60,-35"
+        -DMIN_MATERIALS=19 -DMIN_INSTANCES=131)
+    set_tests_properties(godot.look_programs.palace PROPERTIES RUN_SERIAL TRUE)
 endif()
 openbf3_test(test_s1_contract test_main.cpp s1_contract_tests.cpp test_support.h)
 target_link_libraries(test_s1_contract PRIVATE bf3_host)
@@ -828,6 +833,7 @@ openbf3_cost(godot.swf_view 1 9)
 openbf3_cost(godot.look.exposure 1 40)
 openbf3_cost(godot.look_programs 1 27)
 openbf3_cost(godot.look_programs.mp018 1 35)
+openbf3_cost(godot.look_programs.palace 1 30)
 openbf3_cost(render.programs 6 6)
 openbf3_cost(godot.ui_effects 1 12)
 openbf3_cost(godot.m2a_hud 1 8)

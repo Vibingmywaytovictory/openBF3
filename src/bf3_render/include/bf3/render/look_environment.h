@@ -142,4 +142,5 @@ float look_cubic(const LookCubic &p_c, float p_t);
 
 LookVec3 look_grade(const LookEnvState &p_state, const std::vector<uint8_t> &p_cube, const LookVec3 &p_display);
 
+std::optional<std::array<float, 4>> look_engine_global(const LookEnvState &p_state, std::string_view p_name);
 }
