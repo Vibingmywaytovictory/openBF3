@@ -595,6 +595,16 @@ core::Result<ExplosionSimDef> make_explosion_sim_def(
 	return x;
 }
 
+core::Result<LockingSimDef> make_locking_sim_def(
+		const core::gameplay::LockingWeapon &p_locking, std::string_view p_where) {
+	Checker c{ std::string(p_where) };
+	LockingSimDef l = make_locking(c, p_locking);
+	if (!c.ok()) {
+		return c.error();
+	}
+	return l;
+}
+
 core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &p_def, const SurfaceMaterialTable &p_materials) {
 	Checker c(p_def.variant);
 	const FireFunction &f = p_def.fire;

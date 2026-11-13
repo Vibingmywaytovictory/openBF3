@@ -397,6 +397,19 @@ Result<WeaponAiming> read_weapon_aiming(const EbxResolver &p_db, std::string_vie
 	return a;
 }
 
+Result<LockingWeapon> read_locking_weapon_data(const EbxResolver &p_db, const EbxInstance &p_locking) {
+	if (!p_locking.is_a("LockingWeaponData")) {
+		return make_error("a " + std::string(p_locking.type_name()) + ", not a LockingWeaponData");
+	}
+	Fields f(p_db);
+	LockingWeapon w;
+	read_locking_weapon(f, p_locking, w);
+	if (!f.ok()) {
+		return f.error();
+	}
+	return w;
+}
+
 Result<std::vector<WeaponUnlockModifier>> weapon_unlock_modifiers(
 		const EbxResolver &p_db, std::string_view p_partition, std::string_view p_type) {
 	Fields f(p_db);

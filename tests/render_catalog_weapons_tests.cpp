@@ -1529,7 +1529,7 @@ TEST_SUITE("render-catalog-scope") {
 TEST_SUITE("render-catalog-deployables") {
 	TEST_CASE(
 			"catalog deployables: each kit gadget of Metro TDM resolves its projectile's mesh, materials and textures, "
-			"and the radio beacon the effect its OnSpawned starts") {
+			"and the radio beacon, T-UGS and MAV the effect their OnSpawned starts") {
 		core::InstallReader reader;
 		if (!reader.locate({})) {
 			test::skip_install_case(reader.describe().c_str());
@@ -1550,7 +1550,7 @@ TEST_SUITE("render-catalog-deployables") {
 			REQUIRE(g.def < level.defs.size());
 			specs.push_back(render::DeployedGadgetSpec{ g.def, level.defs[g.def].firing_data });
 		}
-		REQUIRE(specs.size() == 6);
+		REQUIRE(specs.size() == 9);
 		core::Result<std::unique_ptr<render::DeployedGadgetSet>> set =
 				render::load_deployed_gadgets(db->level->db(), db->level->mount(), specs);
 		REQUIRE_MESSAGE(set.ok(), (set.ok() ? "" : set.error().message));
@@ -1582,15 +1582,22 @@ TEST_SUITE("render-catalog-deployables") {
 						{ "weapons/gadgets/c4/c4", "weapons/gadgets/c4/c4_projectile_mesh" },
 						{ "weapons/gadgets/claymore/claymore", "weapons/gadgets/claymore/claymore_projectile_mesh" },
 						{ "weapons/gadgets/m15/m15", "weapons/gadgets/m15/m15projectile_mesh" },
+						{ "weapons/gadgets/mav/mav_pda", "weapons/gadgets/mav/mav_mesh" },
 						{ "weapons/gadgets/medicbag/medicbag", "weapons/gadgets/medicbag/mediccrate_projectile_mesh" },
 						{ "weapons/gadgets/radiobeacon/radio_beacon",
-								"weapons/gadgets/radiobeacon/radiobeacon_projectile_mesh" } });
+								"weapons/gadgets/radiobeacon/radiobeacon_projectile_mesh" },
+						{ "weapons/gadgets/soflam/soflam_pda", "weapons/gadgets/soflam/soflam_projectile_mesh" },
+						{ "weapons/gadgets/t-ugs/t-ugs", "weapons/gadgets/t-ugs/t-ugs_vehicle_mesh" } });
 		CHECK(effects ==
 				std::map<std::string, std::vector<std::string>>{ { "weapons/gadgets/ammobag/ammobag", {} },
 						{ "weapons/gadgets/c4/c4", {} }, { "weapons/gadgets/claymore/claymore", {} },
-						{ "weapons/gadgets/m15/m15", {} }, { "weapons/gadgets/medicbag/medicbag", {} },
+						{ "weapons/gadgets/m15/m15", {} },
+						{ "weapons/gadgets/mav/mav_pda", { "sound/weapons/handheld/tugs/tugs_object_sfx" } },
+						{ "weapons/gadgets/medicbag/medicbag", {} },
 						{ "weapons/gadgets/radiobeacon/radio_beacon",
-								{ "sound/weapons/handheld/radiobeacon/radiobeacon_object_sfx" } } });
+								{ "sound/weapons/handheld/radiobeacon/radiobeacon_object_sfx" } },
+						{ "weapons/gadgets/soflam/soflam_pda", {} },
+						{ "weapons/gadgets/t-ugs/t-ugs", { "sound/weapons/handheld/tugs/tugs_object_sfx" } } });
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
 		std::printf("render.catalog_deployables install.unchanged %s\n", diff.clean() ? "yes" : diff.summary().c_str());
 		CHECK(diff.clean());

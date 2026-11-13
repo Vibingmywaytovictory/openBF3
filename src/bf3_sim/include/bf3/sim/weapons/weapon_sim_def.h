@@ -16,6 +16,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace bf3::sim::weapons {
@@ -222,6 +223,9 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 
 core::Result<ExplosionSimDef> make_explosion_sim_def(
 		const core::gameplay::Explosion &p_explosion, const SurfaceMaterialTable &p_materials);
+
+core::Result<LockingSimDef> make_locking_sim_def(
+		const core::gameplay::LockingWeapon &p_locking, std::string_view p_where);
 
 struct WeaponTableOptions {
 	Mechanics mechanics;

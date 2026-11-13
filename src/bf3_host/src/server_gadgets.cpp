@@ -51,6 +51,30 @@ uint64_t gadget_defs_hash(std::span<const sw::GadgetDef> p_gadgets, std::span<co
 		core::fnv1a_value(h, g.pack.soldier_min_speed);
 		core::fnv1a_value(h, g.pack.soldier_delay_s);
 		core::fnv1a_value(h, g.pack.use_angle);
+		const sw::LockingControllerSimDef &c = g.painter.controller;
+		core::fnv1a_value(h, c.present);
+		core::fnv1a_value(h, c.lock_time);
+		core::fnv1a_value(h, c.release_time);
+		core::fnv1a_value(h, c.release_on_new_target_time);
+		core::fnv1a_value(h, c.sample_rate);
+		core::fnv1a_value(h, c.minimum_lock_time);
+		core::fnv1a_value(h, c.ray_length);
+		core::fnv1a_value(h, c.acceptance_angle_deg);
+		core::fnv1a_value(h, c.angle_constant);
+		core::fnv1a_value(h, c.distance_constant);
+		core::fnv1a_value(h, c.lock_on_empty_vehicles);
+		core::fnv1a_value(h, c.visible_only);
+		core::fnv1a_value(h, c.zoom_lock_count);
+		for (uint8_t z = 0; z < c.zoom_lock_count; ++z) {
+			core::fnv1a_value(h, uint8_t(c.zoom_locks[z]));
+		}
+		core::fnv1a_value(h, g.painter.painted_time);
+		for (const float v : g.painter.origin) {
+			core::fnv1a_value(h, v);
+		}
+		core::fnv1a_value(h, g.sweep.radius);
+		core::fnv1a_value(h, g.sweep.interval);
+		core::fnv1a_value(h, g.sweep.speed_threshold);
 	}
 	core::fnv1a_value(h, uint64_t(p_pickups.size()));
 	for (const sw::AmmoPickupDef &p : p_pickups) {

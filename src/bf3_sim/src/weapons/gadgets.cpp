@@ -1,6 +1,8 @@
 #include "bf3/sim/weapons/gadgets.h"
 
 #include "bf3/core/ebx.h"
+#include "bf3/core/gameplay/vehicle_def.h"
+#include "bf3/core/gameplay/weapon_resolver.h"
 #include "bf3/core/math.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/sim/collision_world.h"
@@ -109,6 +111,121 @@ bool has_mobile_spawn(const core::EbxResolver &p_db, const core::EbxInstance &p_
 	return vehicle && !vehicle->partition().instances_of("MobileSpawnComponentData").empty();
 }
 
+std::optional<core::EbxInstance> laser_painter_of(const core::EbxResolver &p_db, const core::EbxInstance &p_vehicle) {
+	for (const core::EbxInstance &w : p_vehicle.partition().instances_of("WeaponComponentData")) {
+		const std::optional<core::EbxInstance> custom = p_db.follow(w.data(), "CustomWeaponType");
+		if (custom && custom->is_a("LaserPainterData")) {
+			return custom;
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional<core::EbxInstance> radar_sweep_of(const core::EbxInstance &p_vehicle) {
+	for (const core::EbxInstance &s : p_vehicle.partition().instances_of("RadarSweepComponentData")) {
+		const std::optional<bool> excluded = bool_of(s.data(), "Excluded");
+		const std::optional<bool> controllables = bool_of(s.data(), "SweepForControllables");
+		if (excluded == std::optional<bool>(false) && controllables == std::optional<bool>(true)) {
+			return s;
+		}
+	}
+	return std::nullopt;
+}
+
+core::Status read_placed_vehicle(
+		const core::EbxResolver &p_db, std::string_view p_weapon, const core::EbxStruct &p_projectile, GadgetDef &r_g) {
+	core::Result<core::EbxInstance> data = weapon_data(p_db, p_weapon);
+	if (!data) {
+		return data.error();
+	}
+	const std::optional<core::EbxInstance> custom = p_db.follow(data->data(), "CustomWeaponType");
+	if (!custom || !custom->is_a("VehicleDeployWeaponData")) {
+		return gadget_error(p_weapon, "a vehicle projectile with no VehicleDeployWeaponData");
+	}
+	const std::optional<float> ray = f32_of(custom->data(), "DeployAreaGroundRayLength");
+	const std::optional<float> flat = f32_of(custom->data(), "DeployAreaGroundFlatness");
+	const std::optional<int32_t> count = i32_of(p_projectile, "MaxCount");
+	if (!ray || !flat || !count) {
+		return gadget_error(p_weapon, "the deployed vehicle misses a field");
+	}
+	if (!finite_in(*ray, 0.0f, 100.0f) || !finite_in(*flat, 0.0f, 1.0f) || *count < 1 || *count > 255) {
+		return gadget_error(p_weapon, "the deployed vehicle has a value out of range");
+	}
+	r_g.ground_ray_m = *ray;
+	r_g.ground_flatness = *flat;
+	r_g.max_count = uint8_t(*count);
+	return core::Status::success();
+}
+
+core::Result<Vec3> painter_origin(
+		const core::EbxResolver &p_db, std::string_view p_weapon, const core::EbxInstance &p_vehicle) {
+	const std::optional<std::string_view> name = p_db.name_of(p_vehicle.partition().guid());
+	if (!name) {
+		return gadget_error(p_weapon, "the laser designator's vehicle partition has no name");
+	}
+	core::Result<core::gameplay::VehicleDef> v = core::gameplay::read_vehicle_def(p_db, *name);
+	if (!v) {
+		return gadget_error(p_weapon, v.error().message);
+	}
+	if (v->weapons.size() != 1) {
+		return gadget_error(p_weapon,
+				"the laser designator's vehicle has " + std::to_string(v->weapons.size()) + " weapons, not 1");
+	}
+	const core::gameplay::VehicleWeaponDef &w = v->weapons.front();
+	Vec3 at = w.frame.trans;
+	int turret = w.frame_turret;
+	for (size_t guard = 0; turret >= 0 && size_t(turret) < v->turrets.size() && guard <= v->turrets.size(); ++guard) {
+		at = v->turrets[size_t(turret)].frame.transform_point(at);
+		turret = v->turrets[size_t(turret)].frame_turret;
+	}
+	if (turret >= 0 || !core::finite(at)) {
+		return gadget_error(p_weapon, "the laser designator's turret chain does not end at the vehicle");
+	}
+	return at;
+}
+
+core::Status read_laser_painter(const core::EbxResolver &p_db, std::string_view p_weapon,
+		const core::EbxInstance &p_vehicle, const core::EbxInstance &p_painter, GadgetDef &r_g) {
+	core::Result<core::gameplay::LockingWeapon> locking = core::gameplay::read_locking_weapon_data(p_db, p_painter);
+	if (!locking) {
+		return gadget_error(p_weapon, locking.error().message);
+	}
+	core::Result<LockingSimDef> sim = make_locking_sim_def(*locking, p_weapon);
+	if (!sim) {
+		return sim.error();
+	}
+	if (!sim->painter || !sim->primary.present) {
+		return gadget_error(p_weapon, "the LaserPainterData has no LockingController");
+	}
+	core::Result<Vec3> origin = painter_origin(p_db, p_weapon, p_vehicle);
+	if (!origin) {
+		return origin.error();
+	}
+	r_g.kind = GadgetKind::LaserDesignator;
+	r_g.painter.controller = sim->primary;
+	r_g.painter.painted_time = sim->painted_time;
+	r_g.painter.origin = *origin;
+	return core::Status::success();
+}
+
+core::Status read_radar_sweep(std::string_view p_weapon, const core::EbxInstance &p_sweep, GadgetDef &r_g) {
+	const std::optional<float> radius = f32_of(p_sweep.data(), "ControllableSweepRadius");
+	const std::optional<float> interval = f32_of(p_sweep.data(), "ControllableSweepInterval");
+	const std::optional<float> speed = f32_of(p_sweep.data(), "ControllableSpeedThreshold");
+	if (!radius || !interval || !speed) {
+		return gadget_error(p_weapon, "RadarSweepComponentData misses a field");
+	}
+	if (!finite_in(*radius, 0.0f, 1000.0f) || !finite_in(*interval, kTickSeconds, 3600.0f) ||
+			!finite_in(*speed, 0.0f, 1000.0f)) {
+		return gadget_error(p_weapon, "RadarSweepComponentData has a value out of range");
+	}
+	r_g.kind = GadgetKind::RadarSweep;
+	r_g.sweep.radius = *radius;
+	r_g.sweep.interval = seconds_to_units(double(*interval));
+	r_g.sweep.speed_threshold = *speed;
+	return core::Status::success();
+}
+
 core::Result<GadgetDef> read_explosion_pack(std::string_view p_weapon, const core::EbxStruct &p_p, GadgetDef p_g) {
 	const std::optional<core::EbxStruct> soldier = struct_of(p_p, "SoldierDetonationData");
 	if (!soldier) {
@@ -175,8 +292,17 @@ const char *gadget_kind_name(GadgetKind p_kind) {
 			return "spawn beacon";
 		case GadgetKind::ExplosionPack:
 			return "explosion pack";
+		case GadgetKind::LaserDesignator:
+			return "laser designator";
+		case GadgetKind::RadarSweep:
+			return "radar sweep";
 	}
 	return "?";
+}
+
+bool placed_on_ground(GadgetKind p_kind) {
+	return p_kind == GadgetKind::SpawnBeacon || p_kind == GadgetKind::LaserDesignator ||
+			p_kind == GadgetKind::RadarSweep;
 }
 
 core::Result<AmmoPickupDef> read_ammo_pickup(const core::EbxResolver &p_db, std::string_view p_weapon) {
@@ -270,28 +396,25 @@ core::Result<GadgetDef> read_gadget_def(const core::EbxResolver &p_db, std::stri
 		g.time_to_live_on_owner_gone_s = *ttl_gone;
 		return g;
 	}
-	if (projectile->is_a("VehicleProjectileEntityData") && has_mobile_spawn(p_db, *projectile)) {
-		core::Result<core::EbxInstance> data = weapon_data(p_db, p_weapon);
-		if (!data) {
-			return data.error();
+	if (projectile->is_a("VehicleProjectileEntityData")) {
+		const std::optional<core::EbxInstance> vehicle = p_db.follow(p, "Vehicle");
+		if (!vehicle) {
+			return g;
 		}
-		const std::optional<core::EbxInstance> custom = p_db.follow(data->data(), "CustomWeaponType");
-		if (!custom || !custom->is_a("VehicleDeployWeaponData")) {
-			return gadget_error(p_weapon, "a vehicle projectile with no VehicleDeployWeaponData");
+		const std::optional<core::EbxInstance> painter = laser_painter_of(p_db, *vehicle);
+		const std::optional<core::EbxInstance> sweep = radar_sweep_of(*vehicle);
+		const bool beacon = has_mobile_spawn(p_db, *projectile);
+		if (!beacon && !painter && !sweep) {
+			return g;
 		}
-		const std::optional<float> ray = f32_of(custom->data(), "DeployAreaGroundRayLength");
-		const std::optional<float> flat = f32_of(custom->data(), "DeployAreaGroundFlatness");
-		const std::optional<int32_t> count = i32_of(p, "MaxCount");
-		if (!ray || !flat || !count) {
-			return gadget_error(p_weapon, "the spawn beacon misses a field");
+		BF3_TRY(read_placed_vehicle(p_db, p_weapon, p, g));
+		if (beacon) {
+			g.kind = GadgetKind::SpawnBeacon;
+		} else if (painter) {
+			BF3_TRY(read_laser_painter(p_db, p_weapon, *vehicle, *painter, g));
+		} else {
+			BF3_TRY(read_radar_sweep(p_weapon, *sweep, g));
 		}
-		if (!finite_in(*ray, 0.0f, 100.0f) || !finite_in(*flat, 0.0f, 1.0f) || *count < 1 || *count > 255) {
-			return gadget_error(p_weapon, "the spawn beacon has a value out of range");
-		}
-		g.kind = GadgetKind::SpawnBeacon;
-		g.ground_ray_m = *ray;
-		g.ground_flatness = *flat;
-		g.max_count = uint8_t(*count);
 		return g;
 	}
 	if (projectile->is_a("ExplosionPackEntityData")) {
@@ -366,7 +489,7 @@ DeployOutcome GadgetField::deploy(const GadgetThrow &p_throw, const CollisionWor
 	d.healing_points = g->healing.capacity;
 	d.ammo_points = g->ammo.capacity;
 	d.health = g->health;
-	if (g->kind == GadgetKind::SpawnBeacon) {
+	if (placed_on_ground(g->kind)) {
 		StaticHit hit;
 		if (p_world == nullptr ||
 				!p_world->ray(d.position, Vec3{ 0.0f, -g->ground_ray_m, 0.0f }, query_mask::kProjectile, &hit)) {
@@ -379,6 +502,11 @@ DeployOutcome GadgetField::deploy(const GadgetThrow &p_throw, const CollisionWor
 		}
 		d.position = hit.position;
 		d.resting = true;
+		if (g->kind != GadgetKind::SpawnBeacon) {
+			d.normal = hit.normal;
+			d.facing = core::vec::normalize_or(
+					Vec3{ p_throw.direction[0], 0.0f, p_throw.direction[2] }, Vec3{ 0.0f, 0.0f, 1.0f });
+		}
 	} else {
 		d.velocity = shot_frame_vector(p_throw.direction, p_throw.launch_velocity);
 		d.facing = core::vec::normalize_or(
@@ -546,7 +674,7 @@ size_t GadgetField::owner_gone(uint8_t p_owner, Tick p_tick) {
 		} else if (d.owner_gone) {
 			d.owner_left = true;
 			++i;
-		} else if (defs_[d.gadget].kind == GadgetKind::SpawnBeacon) {
+		} else if (placed_on_ground(defs_[d.gadget].kind)) {
 			erase_at(i);
 			++removed;
 		} else {

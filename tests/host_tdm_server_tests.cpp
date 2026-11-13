@@ -2469,7 +2469,7 @@ TEST_SUITE("host-gunplay-gadgets") {
 		const host::GunplayLevel &g = *level->shared->gunplay;
 		std::printf("gadgets: %zu gadget defs, %zu ammo pickups for %zu weapon defs\n", g.gadgets.size(),
 				g.ammo_pickups.size(), g.defs.size());
-		CHECK(g.gadgets.size() == 6u);
+		CHECK(g.gadgets.size() == 9u);
 		CHECK(g.ammo_pickups.size() == g.defs.size());
 		const sw::GadgetDef *c4 = gadget_named(g, "weapons/gadgets/c4/c4");
 		const sw::GadgetDef *claymore = gadget_named(g, "weapons/gadgets/claymore/claymore");
@@ -2562,6 +2562,63 @@ TEST_SUITE("host-gunplay-gadgets") {
 			CHECK(std::none_of(g.gadgets.begin(), g.gadgets.end(),
 					[&](const sw::GadgetDef &p_gadget) { return p_gadget.def == engineer.defs[5]; }));
 			CHECK(g.kits.loadout(team, 3).defs[5] == beacon->def);
+		}
+	}
+
+	TEST_CASE("gadgets: the recon's SOFLAM, T-UGS and MAV are placed vehicles; the SOFLAM carries its LaserPainterData "
+			  "controller and the T-UGS and MAV their RadarSweepComponentData") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &g = *level->shared->gunplay;
+		const sw::GadgetDef *soflam = gadget_named(g, "weapons/gadgets/soflam/soflam_pda");
+		const sw::GadgetDef *tugs = gadget_named(g, "weapons/gadgets/t-ugs/t-ugs");
+		const sw::GadgetDef *mav = gadget_named(g, "weapons/gadgets/mav/mav_pda");
+		REQUIRE(soflam != nullptr);
+		REQUIRE(tugs != nullptr);
+		REQUIRE(mav != nullptr);
+		CHECK(soflam->kind == sw::GadgetKind::LaserDesignator);
+		CHECK(tugs->kind == sw::GadgetKind::RadarSweep);
+		CHECK(mav->kind == sw::GadgetKind::RadarSweep);
+		for (const sw::GadgetDef *p : { soflam, tugs, mav }) {
+			CHECK(sw::placed_on_ground(p->kind));
+			CHECK(p->ground_ray_m == doctest::Approx(3.1f));
+			CHECK(p->ground_flatness == doctest::Approx(0.5f));
+			CHECK(p->max_count == 1u);
+			REQUIRE(p->def < g.defs.size());
+		}
+		const sw::LockingControllerSimDef &laser = soflam->painter.controller;
+		REQUIRE(laser.present);
+		CHECK(laser.lock_type(0) == core::gameplay::LockType::Always);
+		CHECK(laser.zoom_lock_count == 1u);
+		CHECK(laser.lock_time == sw::seconds_to_units(2.0));
+		CHECK(laser.release_time == sw::seconds_to_units(1.0));
+		CHECK(laser.release_on_new_target_time == sw::seconds_to_units(1.5));
+		CHECK(laser.sample_rate == sw::seconds_to_units(0.06));
+		CHECK(laser.ray_length == 500.0f);
+		CHECK(laser.acceptance_angle_deg == 15.0f);
+		CHECK(laser.lock_on_empty_vehicles);
+		CHECK(laser.visible_only);
+		CHECK(soflam->painter.painted_time == sw::seconds_to_units(0.5));
+		std::printf("soflam: laser %.3f %.3f %.3f m from the placed origin\n", double(soflam->painter.origin[0]),
+				double(soflam->painter.origin[1]), double(soflam->painter.origin[2]));
+		CHECK(soflam->painter.origin[1] > 0.4f);
+		CHECK(soflam->painter.origin[1] < 0.7f);
+		CHECK(tugs->sweep.radius == 30.0f);
+		CHECK(tugs->sweep.interval == sw::seconds_to_units(2.0));
+		CHECK(tugs->sweep.speed_threshold == doctest::Approx(2.05f));
+		CHECK(mav->sweep.radius == 30.0f);
+		CHECK(mav->sweep.interval == sw::seconds_to_units(3.0));
+		CHECK(mav->sweep.speed_threshold == doctest::Approx(2.05f));
+		for (uint8_t team = 1; team <= host::kKitTeams; ++team) {
+			const host::LoadoutKit *recon = g.loadouts.kit(team, uint8_t(host::KitRole::Recon));
+			REQUIRE(recon != nullptr);
+			const size_t gadget1 = size_t(core::gameplay::WeaponSlot::Gadget1);
+			for (const sw::GadgetDef *p : { soflam, tugs, mav }) {
+				CHECK(std::any_of(recon->slots[gadget1].begin(), recon->slots[gadget1].end(),
+						[&](const host::LoadoutItem &i) { return i.def == p->def; }));
+			}
 		}
 	}
 

@@ -44,6 +44,7 @@ struct LockingControllerSimDef {
 	uint8_t zoom_lock_count = 0;
 
 	LockType lock_type(uint8_t p_zoom) const { return p_zoom < zoom_lock_count ? zoom_locks[p_zoom] : LockType::Count; }
+	bool operator==(const LockingControllerSimDef &) const = default;
 };
 
 struct LockingSimDef {

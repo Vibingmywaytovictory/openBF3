@@ -23,6 +23,8 @@ Result<WeaponDef> resolve_vehicle_weapon(const EbxResolver &p_db, std::string_vi
 
 Result<WeaponAiming> read_weapon_aiming(const EbxResolver &p_db, std::string_view p_controller);
 
+Result<LockingWeapon> read_locking_weapon_data(const EbxResolver &p_db, const EbxInstance &p_locking);
+
 struct WeaponUnlockModifier {
 	std::string unlock;
 	EbxInstance modifier;

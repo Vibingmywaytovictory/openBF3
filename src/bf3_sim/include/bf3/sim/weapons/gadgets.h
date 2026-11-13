@@ -21,8 +21,16 @@ class CollisionWorld;
 
 namespace bf3::sim::weapons {
 
-enum class GadgetKind : uint8_t { None = 0, Supply = 1, SpawnBeacon = 2, ExplosionPack = 3 };
+enum class GadgetKind : uint8_t {
+	None = 0,
+	Supply = 1,
+	SpawnBeacon = 2,
+	ExplosionPack = 3,
+	LaserDesignator = 4,
+	RadarSweep = 5
+};
 const char *gadget_kind_name(GadgetKind p_kind);
+bool placed_on_ground(GadgetKind p_kind);
 
 struct SupplyUnitDef {
 	float radius = 0;
@@ -59,6 +67,22 @@ struct ExplosionPackDef {
 	bool operator==(const ExplosionPackDef &) const = default;
 };
 
+struct LaserPainterDef {
+	LockingControllerSimDef controller;
+	SimTime painted_time = 0;
+	Vec3 origin{};
+
+	bool operator==(const LaserPainterDef &) const = default;
+};
+
+struct RadarSweepDef {
+	float radius = 0;
+	SimTime interval = 0;
+	float speed_threshold = 0;
+
+	bool operator==(const RadarSweepDef &) const = default;
+};
+
 struct GadgetDef {
 	std::string weapon;
 	std::string projectile_type;
@@ -79,6 +103,8 @@ struct GadgetDef {
 	float time_to_live_s = 0;
 	float time_to_live_on_owner_gone_s = 0;
 	ExplosionPackDef pack;
+	LaserPainterDef painter;
+	RadarSweepDef sweep;
 
 	bool operator==(const GadgetDef &) const = default;
 };
