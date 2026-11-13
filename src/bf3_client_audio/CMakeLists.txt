@@ -23,3 +23,8 @@ target_sources(bf3_client_audio PRIVATE
     src/soldier_audio.cpp
     include/bf3/client_audio/soldier_audio.h
 )
+
+target_sources(bf3_client_audio PRIVATE
+    src/vehicle_sounds.cpp
+    include/bf3/client_audio/vehicle_sounds.h
+)

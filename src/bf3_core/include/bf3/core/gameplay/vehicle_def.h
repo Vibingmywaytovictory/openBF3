@@ -68,6 +68,7 @@ struct VehicleTurretDef {
 	float align_speed = 0, align_stop_tolerance = 0;
 	int frame_turret = -1;
 	core::Transform frame;
+	std::string sound;
 };
 
 struct VehicleWeaponDef {

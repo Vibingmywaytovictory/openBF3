@@ -490,3 +490,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/deployed_object.h
     src/gameplay/deployed_object.cpp
 )
+
+target_sources(bf3_core PRIVATE
+    include/bf3/core/gameplay/vehicle_sound.h
+    src/gameplay/vehicle_sound.cpp
+)

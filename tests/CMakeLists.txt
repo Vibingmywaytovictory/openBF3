@@ -1507,6 +1507,13 @@ set_tests_properties(ai.actionplan.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 add_test(NAME ai.interpreter.unit COMMAND test_ai_actionplan --test-suite=ai-interpreter)
 set_tests_properties(ai.interpreter.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 
+openbf3_test(test_audio_vehicle test_main.cpp audio_vehicle_tests.cpp test_support.h)
+target_link_libraries(test_audio_vehicle PRIVATE bf3_client_audio bf3_audio bf3_host bf3_core)
+target_compile_definitions(test_audio_vehicle PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg")
+add_test(NAME core.audio.vehicles COMMAND test_audio_vehicle --test-suite=audio-vehicles-install)
+add_test(NAME audio.vehicles.drive COMMAND test_audio_vehicle --test-suite=audio-vehicles-drive)
+set_tests_properties(core.audio.vehicles audio.vehicles.drive PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     get_property(_openbf3_asan_rows DIRECTORY PROPERTY TESTS)

@@ -418,6 +418,7 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		}
 		t.frame_turret = t.parent;
 		t.frame = model_transform(layout.nodes[static_cast<size_t>(node)].turret_frame);
+		t.sound = ref_name(budget, p_db, component, "SoundEffect");
 		out.turrets.push_back(std::move(t));
 	}
 

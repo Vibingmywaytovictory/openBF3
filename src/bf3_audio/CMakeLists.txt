@@ -83,3 +83,8 @@ target_sources(bf3_audio PRIVATE
     include/bf3/audio/haptics_feed.h
     src/haptics_feed.cpp
 )
+
+target_sources(bf3_audio PRIVATE
+    include/bf3/audio/vehicle_audio.h
+    src/vehicle_audio.cpp
+)
