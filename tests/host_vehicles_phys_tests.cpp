@@ -101,6 +101,46 @@ TEST_SUITE("host-vehicles-phys-unit") {
 		CHECK(sim::vehicles::run_over_damage(rule, 9.0f, 0.0f, 0.0f) == 0.0f);
 	}
 
+	TEST_CASE("vehicles: a step's run-over adds the hulls' damages, each hull once at its strongest contact and each "
+			  "gated by its own threshold, credited to the hull that does the most") {
+		const auto contact = [](uint32_t p_slot, float p_speed) {
+			sim::ObstacleContact c;
+			c.slot = p_slot;
+			c.normal = { 1.0f, 0.0f, 0.0f };
+			c.velocity = { p_speed, 0.0f, 0.0f };
+			return c;
+		};
+		const auto hulls = [](uint32_t p_slot) -> std::optional<sim::vehicles::RunOverHull> {
+			if (p_slot == 1) {
+				return sim::vehicles::RunOverHull{ { 5.0f, false }, 0.04f, 0.0f };
+			}
+			if (p_slot == 2) {
+				return sim::vehicles::RunOverHull{ { 3.0f, false }, 0.06f, 0.0f };
+			}
+			if (p_slot == 3) {
+				return sim::vehicles::RunOverHull{ { 5.0f, false }, 0.5f, 600.0f };
+			}
+			return std::nullopt;
+		};
+		const sim::ObstacleContact one_hull[] = { contact(1, 6.0f), contact(1, 8.0f), contact(1, 6.0f) };
+		const sim::vehicles::RunOverTotal once = sim::vehicles::run_over_total(one_hull, hulls);
+		CHECK(once.damage == doctest::Approx(40.0f));
+		REQUIRE(once.heaviest.has_value());
+		CHECK(*once.heaviest == 1u);
+
+		const sim::ObstacleContact two_hulls[] = { contact(1, 6.0f), contact(2, 4.0f), contact(1, 1.0f),
+			contact(3, 9.0f), contact(4, 30.0f) };
+		const sim::vehicles::RunOverTotal both = sim::vehicles::run_over_total(two_hulls, hulls);
+		CHECK(both.damage == doctest::Approx(100.0f));
+		REQUIRE(both.heaviest.has_value());
+		CHECK(*both.heaviest == 2u);
+
+		const sim::ObstacleContact slow[] = { contact(1, 4.0f), contact(2, -9.0f), contact(4, 30.0f) };
+		const sim::vehicles::RunOverTotal none = sim::vehicles::run_over_total(slow, hulls);
+		CHECK(none.damage == 0.0f);
+		CHECK_FALSE(none.heaviest.has_value());
+	}
+
 	TEST_CASE("vehicles: VehicleObstacles places a chassis at its body state; a soldier's motor step into it reports "
 			  "the hull's slot, the normal out of the hull and the hull's velocity at the contact") {
 		sim::VehicleObstacles o;

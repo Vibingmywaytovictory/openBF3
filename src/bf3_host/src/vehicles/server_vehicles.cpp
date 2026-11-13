@@ -546,29 +546,24 @@ void ServerVehicles::run_over(sim::Tick p_tick, size_t p_slot, std::span<const s
 	if (!on() || seated(p_slot) || materials_ == nullptr) {
 		return;
 	}
-	float amount = 0.0f;
-	uint8_t driver = net::kNoVehicleOccupant;
-	for (const sim::ObstacleContact &c : p_contacts) {
-		if (c.slot >= vehicles_.size() || !vehicles_[c.slot].live) {
-			continue;
-		}
-		const core::gameplay::DamageRelation relation =
-				materials_->relation(hull_property(c.slot), materials_->zone_property(sim::weapons::HitZone::Body));
-		if (!relation.present) {
-			continue;
-		}
-		const LevelVehicleKind &kind = level_->kinds[level_->spawners[c.slot].kind];
-		const float hit = sim::vehicles::run_over_damage(kind.run_over,
-				sim::vehicles::run_over_speed(kind.run_over, c.velocity, c.normal), relation.collision_multiplier,
-				relation.collision_threshold);
-		if (hit > amount) {
-			amount = hit;
-			driver = vehicles_[c.slot].occupants[0];
-		}
-	}
-	if (!(amount > 0.0f)) {
+	const sim::vehicles::RunOverTotal total = sim::vehicles::run_over_total(
+			p_contacts, [&](uint32_t p_hull) -> std::optional<sim::vehicles::RunOverHull> {
+				if (p_hull >= vehicles_.size() || !vehicles_[p_hull].live) {
+					return std::nullopt;
+				}
+				const core::gameplay::DamageRelation relation = materials_->relation(
+						hull_property(p_hull), materials_->zone_property(sim::weapons::HitZone::Body));
+				if (!relation.present) {
+					return std::nullopt;
+				}
+				return sim::vehicles::RunOverHull{ level_->kinds[level_->spawners[p_hull].kind].run_over,
+					relation.collision_multiplier, relation.collision_threshold };
+			});
+	if (!(total.damage > 0.0f) || !total.heaviest) {
 		return;
 	}
+	const float amount = total.damage;
+	const uint8_t driver = vehicles_[*total.heaviest].occupants[0];
 	sim::weapons::DamageEvent e;
 	e.time = sim::weapons::tick_start(p_tick);
 	e.attacker_slot = driver != net::kNoVehicleOccupant ? driver : uint32_t(p_slot);

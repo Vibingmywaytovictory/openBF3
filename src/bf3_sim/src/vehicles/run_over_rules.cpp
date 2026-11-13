@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace bf3::sim::vehicles {
 
@@ -19,4 +20,36 @@ float run_over_damage(
 	return damage > p_collision_threshold ? damage : 0.0f;
 }
 
+RunOverTotal run_over_total(std::span<const ObstacleContact> p_contacts,
+		const std::function<std::optional<RunOverHull>(uint32_t)> &p_hull_of) {
+	struct Hull {
+		uint32_t slot = 0;
+		float damage = 0;
+	};
+	std::vector<Hull> hulls;
+	for (const ObstacleContact &c : p_contacts) {
+		const std::optional<RunOverHull> hull = p_hull_of(c.slot);
+		if (!hull) {
+			continue;
+		}
+		const float damage = run_over_damage(hull->rule, run_over_speed(hull->rule, c.velocity, c.normal),
+				hull->collision_multiplier, hull->collision_threshold);
+		const auto seen = std::find_if(hulls.begin(), hulls.end(), [&](const Hull &h) { return h.slot == c.slot; });
+		if (seen == hulls.end()) {
+			hulls.push_back(Hull{ c.slot, damage });
+		} else {
+			seen->damage = std::max(seen->damage, damage);
+		}
+	}
+	RunOverTotal total;
+	float heaviest = 0.0f;
+	for (const Hull &h : hulls) {
+		total.damage += h.damage;
+		if (h.damage > heaviest) {
+			heaviest = h.damage;
+			total.heaviest = h.slot;
+		}
+	}
+	return total;
+}
 }

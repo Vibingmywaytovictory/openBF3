@@ -7625,7 +7625,7 @@ struct ParkedJeep {
 	}
 };
 
-void park_jeep(tdm::TdmLevel &r_level, ParkedJeep &r_out) {
+void park_jeep(tdm::TdmLevel &r_level, ParkedJeep &r_out, bool p_tracked = false) {
 	const host::LevelVehicles &lv = *r_level.shared->vehicles;
 	r_out.m = start_match(r_level, true, 131u, 0, 1);
 	Match &m = *r_out.m;
@@ -7650,7 +7650,8 @@ void park_jeep(tdm::TdmLevel &r_level, ParkedJeep &r_out) {
 					others.push_back(o.state.body.com_position);
 				}
 				for (const net::VehicleWire &w : r_out.watch.latest) {
-					if (w.team != team || host::land_tracked(*lv.kinds[lv.spawners[w.spawner].kind].model) ||
+					if (w.team != team ||
+							host::land_tracked(*lv.kinds[lv.spawners[w.spawner].kind].model) != p_tracked ||
 							!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
 						continue;
 					}
@@ -7673,6 +7674,60 @@ void park_jeep(tdm::TdmLevel &r_level, ParkedJeep &r_out) {
 			double(hull_clear));
 }
 
+void run_over_case(tdm::TdmLevel &r_level, bool p_tracked) {
+	ParkedJeep j;
+	park_jeep(r_level, j, p_tracked);
+	Match &m = *j.m;
+	std::printf("contact: kill speed %.1f m/s, normal ignored %d\n", double(j.kind->run_over.kill_speed),
+			int(j.kind->run_over.ignore_normal));
+	CHECK(j.kind->run_over.kill_speed == doctest::Approx(5.0f));
+	CHECK_FALSE(j.kind->run_over.ignore_normal);
+	CHECK(host::land_tracked(*j.kind->model) == p_tracked);
+	m.teleport(*j.victim, j.ahead(20.0f), j.toward_hull);
+	sim::Tick use_at = 0;
+	int8_t throttle = 0;
+	m.scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+		sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+		c.buttons |= p_tick == use_at ? sim::buttons::kUse : 0u;
+		c.move_forward = throttle;
+		return c;
+	};
+	const sim::Vec3 door = beside_hull(m, j.parked, 2.0f);
+	m.teleport(*j.driver, door);
+	REQUIRE(m.until([&] { return horizontal(m.state(j.driver->slot())->position, door) < 0.5f; }, 30));
+	use_at = m.now() + 3u;
+	REQUIRE(m.until(
+			[&] {
+				j.watch.take(m.out, j.driver->peer());
+				return j.watch.of(j.hull)->occupants[0] == uint8_t(j.driver->slot());
+			},
+			60));
+	REQUIRE(is_alive(m.state(j.victim->slot())));
+	throttle = 127;
+	float speed_at_death = 0.0f;
+	m.until(
+			[&] {
+				j.watch.take(m.out, j.driver->peer());
+				const net::VehicleWire *w = j.watch.of(j.hull);
+				if (!is_alive(m.state(j.victim->slot()))) {
+					speed_at_death = speed_of(w->state.body.linear_velocity);
+					return true;
+				}
+				return j.along(w->state.body.com_position) > 30.0f;
+			},
+			600);
+	throttle = 0;
+	m.ticks(10);
+	const net::DeathEvent *death = last_death(*j.driver, j.victim->slot());
+	std::printf("contact: the driver ran into the victim 20 m ahead at %.1f m/s, killer %d (driver %d)\n",
+			double(speed_at_death), death != nullptr ? int(death->killer) : -1, j.driver->slot());
+	CHECK_FALSE(is_alive(m.state(j.victim->slot())));
+	REQUIRE(death != nullptr);
+	CHECK(int(death->killer) == j.driver->slot());
+	CHECK(speed_at_death > j.kind->run_over.kill_speed);
+	CHECK(is_alive(m.state(j.driver->slot())));
+	CHECK(m.rules().stats().runtime_faults == 0u);
+}
 }
 
 TEST_SUITE("host-vehicles-contact") {
@@ -7710,61 +7765,51 @@ TEST_SUITE("host-vehicles-contact") {
 
 	TEST_CASE("vehicles: MP_007 ConquestSmall0: a Growler driven into an enemy above its "
 			  "KillSoldierCollisionSpeedThreshold runs him over, credited to its driver") {
+		if (tdm::TdmLevel *level = tdm::load_conquest_level_once()) {
+			run_over_case(*level, false);
+		}
+	}
+
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: every land hull's run-over kills through its material relation "
+			  "against the soldier's body above its KillSoldierCollisionSpeedThreshold") {
 		tdm::TdmLevel *level = tdm::load_conquest_level_once();
 		if (level == nullptr) {
 			return;
 		}
-		ParkedJeep j;
-		park_jeep(*level, j);
-		Match &m = *j.m;
-		std::printf("contact: kill speed %.1f m/s, normal ignored %d\n", double(j.kind->run_over.kill_speed),
-				int(j.kind->run_over.ignore_normal));
-		CHECK(j.kind->run_over.kill_speed == doctest::Approx(5.0f));
-		CHECK_FALSE(j.kind->run_over.ignore_normal);
-		m.teleport(*j.victim, j.ahead(20.0f), j.toward_hull);
-		sim::Tick use_at = 0;
-		int8_t throttle = 0;
-		m.scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
-			sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
-			c.buttons |= p_tick == use_at ? sim::buttons::kUse : 0u;
-			c.move_forward = throttle;
-			return c;
-		};
-		const sim::Vec3 door = beside_hull(m, j.parked, 2.0f);
-		m.teleport(*j.driver, door);
-		REQUIRE(m.until([&] { return horizontal(m.state(j.driver->slot())->position, door) < 0.5f; }, 30));
-		use_at = m.now() + 3u;
-		REQUIRE(m.until(
-				[&] {
-					j.watch.take(m.out, j.driver->peer());
-					return j.watch.of(j.hull)->occupants[0] == uint8_t(j.driver->slot());
-				},
-				60));
-		REQUIRE(is_alive(m.state(j.victim->slot())));
-		throttle = 127;
-		float speed_at_death = 0.0f;
-		m.until(
-				[&] {
-					j.watch.take(m.out, j.driver->peer());
-					const net::VehicleWire *w = j.watch.of(j.hull);
-					if (!is_alive(m.state(j.victim->slot()))) {
-						speed_at_death = speed_of(w->state.body.linear_velocity);
-						return true;
-					}
-					return j.along(w->state.body.com_position) > 30.0f;
-				},
-				600);
-		throttle = 0;
-		m.ticks(10);
-		const net::DeathEvent *death = last_death(*j.driver, j.victim->slot());
-		std::printf("contact: the driver ran into the victim 20 m ahead at %.1f m/s, killer %d (driver %d)\n",
-				double(speed_at_death), death != nullptr ? int(death->killer) : -1, j.driver->slot());
-		CHECK_FALSE(is_alive(m.state(j.victim->slot())));
-		REQUIRE(death != nullptr);
-		CHECK(int(death->killer) == j.driver->slot());
-		CHECK(speed_at_death > j.kind->run_over.kill_speed);
-		CHECK(is_alive(m.state(j.driver->slot())));
-		CHECK(m.rules().stats().runtime_faults == 0u);
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		const sim::weapons::SurfaceMaterialTable &materials = *level->shared->gunplay->materials;
+		size_t tracked = 0, wheeled = 0;
+		for (const host::LevelVehicleKind &k : lv.kinds) {
+			if (k.model == nullptr || !(host::land_tracked(*k.model) || host::land_jeep(*k.model))) {
+				continue;
+			}
+			const sim::weapons::SurfacePair pair = materials.pair_of(k.material);
+			const core::gameplay::DamageRelation relation =
+					materials.relation(pair.property, materials.zone_property(sw::HitZone::Body));
+			const float damage = sim::vehicles::run_over_damage(k.run_over, k.run_over.kill_speed + 0.01f,
+					relation.collision_multiplier, relation.collision_threshold);
+			std::printf("run-over data: %s: kill speed %.1f m/s, normal ignored %d, hull property %u, relation %d "
+						"(multiplier %.3f, threshold %.1f), a kill does %.1f\n",
+					k.blueprint.c_str(), double(k.run_over.kill_speed), int(k.run_over.ignore_normal),
+					unsigned(pair.property), int(relation.present), double(relation.collision_multiplier),
+					double(relation.collision_threshold), double(damage));
+			CHECK_MESSAGE(k.material.present, k.blueprint);
+			CHECK_MESSAGE(pair.resolved, k.blueprint);
+			CHECK_MESSAGE(relation.present, k.blueprint);
+			CHECK_MESSAGE(k.run_over.kill_speed > 0.0f, k.blueprint);
+			CHECK_MESSAGE(damage >= level->shared->motor.max_health, k.blueprint);
+			tracked += host::land_tracked(*k.model) ? 1u : 0u;
+			wheeled += host::land_jeep(*k.model) ? 1u : 0u;
+		}
+		CHECK(tracked >= 2u);
+		CHECK(wheeled >= 1u);
+	}
+
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: a tank driven into an enemy above its "
+			  "KillSoldierCollisionSpeedThreshold runs him over, credited to its driver") {
+		if (tdm::TdmLevel *level = tdm::load_conquest_level_once()) {
+			run_over_case(*level, true);
+		}
 	}
 }
 
