@@ -188,6 +188,7 @@ public:
 	void supply(std::span<const SupplyReceiver> p_receivers, float p_seconds, std::span<SupplyGrant> r_grants);
 	size_t remove_owner(uint8_t p_owner);
 	size_t owner_gone(uint8_t p_owner, Tick p_tick);
+	size_t orphan_packs(uint8_t p_owner, Tick p_tick);
 	size_t expire(Tick p_tick);
 	bool damage(uint16_t p_id, float p_amount, bool p_explosion);
 	size_t blast(const ExplosionSimDef &p_explosion, BlastFalloff p_falloff, const Vec3 &p_at, const Vec3 &p_normal,

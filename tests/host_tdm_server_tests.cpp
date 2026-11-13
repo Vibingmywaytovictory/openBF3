@@ -6904,3 +6904,66 @@ TEST_SUITE("host-gunplay-gadgets") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 }
+
+TEST_SUITE("host-gunplay-gadgets") {
+	TEST_CASE("gadgets: a C4 outlives its owner's death by its TimeToLiveOnPlayerDeath (5 s) and goes without a "
+			  "blast (R2-G4 C: the owner-gone timer)") {
+		tdm::TdmLevel *level = tdm::load_tdm_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		std::unique_ptr<Match> m = start_match(*level, true, 95u, 0, 1);
+		tdm::ScriptedPeer &sapper = m->join("sapper");
+		sapper.ready();
+		REQUIRE(wait_in_round(*m));
+		const uint8_t support = uint8_t(host::KitRole::Support);
+		const uint8_t team = m->rules().team_of(uint8_t(sapper.slot()));
+		const host::LoadoutKit *kit = gl.loadouts.kit(team, support);
+		REQUIRE(kit != nullptr);
+		const size_t gadget2 = size_t(core::gameplay::WeaponSlot::Gadget2);
+		const auto c4 = std::find_if(kit->slots[gadget2].begin(), kit->slots[gadget2].end(),
+				[](const host::LoadoutItem &i) { return i.unlock == "weapons/gadgets/c4/u_c4"; });
+		REQUIRE(c4 != kit->slots[gadget2].end());
+		const sw::GadgetDef *pack = gadget_named(gl, "weapons/gadgets/c4/c4");
+		REQUIRE(pack != nullptr);
+		net::LoadoutRequest request;
+		request.kit = support;
+		request.items[gadget2] = c4->identifier;
+		m->server.on_receive(sapper.peer(), net::kChannelReliable, net::encode_loadout_request(request));
+		m->ticks(1);
+		sapper.spawn_request(support);
+		REQUIRE(m->until([&] { return is_alive(m->state(sapper.slot())); }, 600));
+		const std::optional<Drop> drop = find_drop(*m, true);
+		REQUIRE(drop.has_value());
+		const std::optional<Patch> patch = find_patch(*m, 3.0f);
+		REQUIRE(patch.has_value());
+		m->teleport(sapper, add(patch->shooter, 0.0f, 0.05f, 0.0f));
+		m->ticks(20);
+		bool fire = false;
+		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(*m, p_tick, p_state, add(patch->victim, 0.0f, 0.1f, 0.0f), sim::Pose::Stand,
+					select_and_fire(uint8_t(gadget2), fire && (p_tick % 30u) < 10u));
+		};
+		m->ticks(60);
+		fire = true;
+		REQUIRE(rest_tick(*m, 1, 300).has_value());
+		fire = false;
+		REQUIRE(m->server.gunplay()->deployables().size() == 1u);
+		m->teleport(sapper, add(drop->floor, 0.0f, drop->height, 0.0f));
+		REQUIRE(m->until([&] { return !is_alive(m->state(sapper.slot())); }, 600));
+		const sim::Tick died = m->now();
+		m->ticks(2);
+		REQUIRE(m->server.gunplay()->deployables().size() == 1u);
+		const sw::Deployable orphan = m->server.gunplay()->deployables()[0];
+		CHECK(orphan.owner_gone);
+		CHECK(pack->time_to_live_on_owner_gone_s == 5.0f);
+		REQUIRE(m->until([&] { return m->server.gunplay()->deployables().empty(); }, sim::seconds_to_ticks(6.0f)));
+		const float lived = float(m->now() - died) * sim::kTickSeconds;
+		std::printf("C4: its owner died at tick %u; it stayed %.2f s and went without a blast\n", unsigned(died),
+				double(lived));
+		CHECK(lived > 4.95f);
+		CHECK(lived < 5.05f);
+		CHECK(m->server.gunplay()->gadget_stats().pack_detonations == 0u);
+	}
+}

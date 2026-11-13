@@ -568,6 +568,19 @@ size_t GadgetField::owner_gone(uint8_t p_owner, Tick p_tick) {
 	return removed;
 }
 
+size_t GadgetField::orphan_packs(uint8_t p_owner, Tick p_tick) {
+	size_t orphaned = 0;
+	for (Deployable &d : live_) {
+		if (d.owner == p_owner && !d.owner_gone && defs_[d.gadget].kind == GadgetKind::ExplosionPack) {
+			d.owner_gone = true;
+			d.owner_gone_tick = p_tick;
+			++stats_.orphaned;
+			++orphaned;
+		}
+	}
+	return orphaned;
+}
+
 size_t GadgetField::expire(Tick p_tick) {
 	size_t expired = 0;
 	for (size_t i = 0; i < live_.size();) {

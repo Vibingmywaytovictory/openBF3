@@ -214,6 +214,7 @@ void ServerGadgets::detonate_packs(sim::Tick p_tick, std::span<const sim::Soldie
 }
 
 void ServerGadgets::forget(uint8_t p_slot) {
+	field_.orphan_packs(p_slot, tick_);
 	stats_.forgotten += field_.remove_owner(p_slot);
 	if (p_slot < refill_.size()) {
 		refill_[p_slot] = sw::AmmoRefillState();
@@ -225,6 +226,10 @@ void ServerGadgets::owner_left(uint8_t p_slot) {
 	if (p_slot < refill_.size()) {
 		refill_[p_slot] = sw::AmmoRefillState();
 	}
+}
+
+void ServerGadgets::owner_died(uint8_t p_slot) {
+	field_.orphan_packs(p_slot, tick_);
 }
 
 void ServerGadgets::clear() {

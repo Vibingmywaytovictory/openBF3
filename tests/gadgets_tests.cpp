@@ -584,3 +584,37 @@ TEST_SUITE("gadgets-unit") {
 		CHECK(tiny[2] == 0.0f);
 	}
 }
+
+TEST_SUITE("gadgets-unit") {
+	TEST_CASE("life: an owner's death leaves his explosion packs for their TimeToLiveOnPlayerDeath and keeps his bags; "
+			  "only a departure marks them left") {
+		GadgetDef pack = medkit_def();
+		pack.weapon = "pack";
+		pack.kind = GadgetKind::ExplosionPack;
+		pack.def = 7;
+		pack.max_attach_inclination_deg = 180.0f;
+		pack.time_to_live_on_owner_gone_s = 1.0f;
+		pack.pack.remote_detonator = true;
+		std::unique_ptr<CollisionWorld> w = floor_and_wall();
+		GadgetField field({ medkit_def(), pack });
+		for (const uint16_t def : { kMedkitDef, uint16_t(7) }) {
+			GadgetThrow t;
+			t.def = def;
+			t.owner = 2;
+			t.team = 1;
+			t.origin = Vec3{ 0.0f, 0.5f, 0.0f };
+			t.direction = Vec3{ 0.0f, -1.0f, 0.0f };
+			REQUIRE(field.deploy(t, w.get()) == DeployOutcome::Thrown);
+		}
+		CHECK(field.orphan_packs(2, 100) == 1u);
+		CHECK(field.orphan_packs(2, 100) == 0u);
+		for (const Deployable &d : field.live()) {
+			CHECK(d.owner_gone == (d.def == 7));
+		}
+		CHECK(field.remote_detonate(2, 7) == 0u);
+		CHECK(field.expire(100 + kSimHz - 1) == 0u);
+		CHECK(field.expire(100 + kSimHz + 1) == 1u);
+		REQUIRE(field.live().size() == 1u);
+		CHECK(field.live()[0].def == kMedkitDef);
+	}
+}

@@ -44,6 +44,7 @@ public:
 			const sim::weapons::HitTargetProvider &p_targets, sim::weapons::ProjectileStepOutput &r_out);
 	void forget(uint8_t p_slot);
 	void owner_left(uint8_t p_slot);
+	void owner_died(uint8_t p_slot);
 	void clear();
 
 	std::optional<sim::Vec3> squad_beacon(uint8_t p_slot, uint8_t p_team, const SquadTable *p_squads) const;
