@@ -5302,6 +5302,11 @@ struct VehicleSight {
 	bool pending = false;
 };
 
+bool destroyed_unexploded(const host::GameServer &p_server, uint16_t p_spawner) {
+	const std::optional<float> health = p_server.vehicle_health(p_spawner);
+	return health.has_value() && *health <= 0.0f;
+}
+
 VehicleSight sighted(std::span<const host::OutDatagram> p_out, uint32_t p_peer, uint16_t p_spawner) {
 	VehicleSight s;
 	for (const host::OutDatagram &d : p_out) {
@@ -5380,6 +5385,7 @@ struct WreckRun {
 	uint8_t respawn_condition = 0xFF;
 	uint32_t wreck_samples = 0;
 	uint32_t pending_samples = 0;
+	uint32_t destroyed_sends = 0;
 	uint32_t pending_after_wreck = 0;
 	uint64_t wreck_blasts = 0;
 	uint64_t wreck_soldier_hits = 0;
@@ -5686,6 +5692,7 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 			run.last_pending_tick = now.pending ? m->now() : run.last_pending_tick;
 			run.wreck_samples += now.wreck ? 1u : 0u;
 			run.pending_samples += now.pending ? 1u : 0u;
+			run.destroyed_sends += now.sent && destroyed_unexploded(m->server, target_spawner) ? 1u : 0u;
 			if (now.present) {
 				run.lowest_health = std::min(run.lowest_health, now.health);
 				const uint8_t expected = now.health == 0 ? uint8_t(sim::vehicles::VehicleCondition::Destroyed)
@@ -5722,6 +5729,7 @@ WreckRun wreck_and_respawn(tdm::TdmLevel &r_level, const std::function<bool(cons
 		run.last_pending_tick = seen.pending ? m->now() : run.last_pending_tick;
 		run.wreck_samples += seen.wreck ? 1u : 0u;
 		run.pending_samples += seen.pending ? 1u : 0u;
+		run.destroyed_sends += seen.sent && destroyed_unexploded(m->server, target_spawner) ? 1u : 0u;
 		if (seen.present) {
 			back = m->now();
 		}
@@ -5835,11 +5843,13 @@ void check_respawn(const WreckRun &p_run) {
 	CHECK(p_run.respawn_health == net::kVehicleHealthFull);
 	CHECK(p_run.respawn_condition == uint8_t(sim::vehicles::VehicleCondition::Healthy));
 	std::printf("damage: %u wreck samples on the wire from tick %u, %u destroyed before it exploded (the last at "
-				"tick %u), %u of those after; the blast at tick %u\n",
+				"tick %u; %u sends while the server held it destroyed and unexploded), %u of those after; the blast "
+				"at tick %u\n",
 			unsigned(p_run.wreck_samples), unsigned(p_run.first_wreck_tick), unsigned(p_run.pending_samples),
-			unsigned(p_run.last_pending_tick), unsigned(p_run.pending_after_wreck), unsigned(p_run.blast_tick));
+			unsigned(p_run.last_pending_tick), unsigned(p_run.destroyed_sends), unsigned(p_run.pending_after_wreck),
+			unsigned(p_run.blast_tick));
 	CHECK(p_run.wreck_samples >= 2u);
-	CHECK(p_run.pending_samples >= 1u);
+	CHECK(p_run.pending_samples == p_run.destroyed_sends);
 	CHECK(p_run.pending_after_wreck == 0u);
 	CHECK(p_run.first_wreck_tick >= p_run.blast_tick);
 	std::printf("damage: %u wreck blast, %u soldier hits, %u vehicle hits; the enemy bystander %.1f -> %.1f, the "
