@@ -24,14 +24,26 @@ aiSettings.setBehaviourModifier MedicAssist 2.5
 aiSettings.setBehaviourModifier CallForMedic 5.5
 aiSettings.setBehaviourModifier Resupply 2.4
 
-aiSettings.setVehicleBehaviour Infantry Revive BBRevive BBPRevive 0 Memory Default
-aiSettings.setVehicleBehaviour Infantry FireInfantery BBFireInfantery BBPFireInfantery 0 Memory Default
-aiSettings.setVehicleBehaviour Infantry TakeCoverInfantry BBTakeCoverInfantry BBPTakeCoverInfantry 0 Memory Default
-aiSettings.setVehicleBehaviour Infantry Avoid BBAvoid BBPAvoid 0 Memory Default
-aiSettings.setVehicleBehaviour Infantry MoveTo BBMoveTo BBPMoveTo 0 Memory Default
-aiSettings.setVehicleBehaviour Infantry Random BBRandom BBPRandom 0 Memory Default
-aiSettings.setVehicleBehaviour Infantry Idle BBIdle BBPIdle 0 Memory Default
-aiSettings.setVehicleBehaviour Infantry MedicAssist BBMedicAssist BBPMedicAssist 0 Memory Default
-aiSettings.setVehicleBehaviour Infantry CallForMedic BBCallForMedic BBPCallForMedic 0 Memory Default
-aiSettings.setVehicleBehaviour Infantry Resupply BBResupply BBPResupply 0 Memory Default
+aiSettings.createBehaviourModifiers Unit
+aiSettings.setBehaviourModifier Revive 1
+aiSettings.setBehaviourModifier FireInfantery 1
+aiSettings.setBehaviourModifier TakeCoverInfantry 1
+aiSettings.setBehaviourModifier Avoid 1
+aiSettings.setBehaviourModifier MoveTo 1
+aiSettings.setBehaviourModifier Random 1
+aiSettings.setBehaviourModifier Idle 1
+aiSettings.setBehaviourModifier MedicAssist 1
+aiSettings.setBehaviourModifier CallForMedic 1
+aiSettings.setBehaviourModifier Resupply 1
+
+aiSettings.setVehicleBehaviour Infantry Revive BBRevive BBPRevive 0 Memory Unit
+aiSettings.setVehicleBehaviour Infantry FireInfantery BBFireInfantery BBPFireInfantery 0 Memory Unit
+aiSettings.setVehicleBehaviour Infantry TakeCoverInfantry BBTakeCoverInfantry BBPTakeCoverInfantry 0 Memory Unit
+aiSettings.setVehicleBehaviour Infantry Avoid BBAvoid BBPAvoid 0 Memory Unit
+aiSettings.setVehicleBehaviour Infantry MoveTo BBMoveTo BBPMoveTo 0 Memory Unit
+aiSettings.setVehicleBehaviour Infantry Random BBRandom BBPRandom 0 Memory Unit
+aiSettings.setVehicleBehaviour Infantry Idle BBIdle BBPIdle 0 Memory Unit
+aiSettings.setVehicleBehaviour Infantry MedicAssist BBMedicAssist BBPMedicAssist 0 Memory Unit
+aiSettings.setVehicleBehaviour Infantry CallForMedic BBCallForMedic BBPCallForMedic 0 Memory Unit
+aiSettings.setVehicleBehaviour Infantry Resupply BBResupply BBPResupply 0 Memory Unit
 aiSettings.setBasicBotWeights Default

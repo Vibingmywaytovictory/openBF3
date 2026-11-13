@@ -648,4 +648,16 @@ TEST_SUITE("ai-behaviour") {
 		}
 		CHECK_FALSE(bf3::test::shipped_behaviour_tuning() == tuning);
 	}
+
+	TEST_CASE("the shipped behaviours each bind a modifier set of ones: the set a chosen behaviour applies to the "
+			  "others' urgencies weighs none of them") {
+		const AiConfig config = bf3::test::shipped_ai_config();
+		REQUIRE_FALSE(config.vehicle_behaviours.empty());
+		for (const VehicleBehaviour &b : config.vehicle_behaviours) {
+			const auto set = config.behaviour_modifiers.find(b.modifiers);
+			REQUIRE(set != config.behaviour_modifiers.end());
+			CAPTURE(b.modifiers);
+			CHECK(std::all_of(set->second.begin(), set->second.end(), [](float p_m) { return p_m == 1.0f; }));
+		}
+	}
 }
