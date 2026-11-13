@@ -106,7 +106,7 @@ private:
 	std::vector<Kind> kinds_;
 	std::map<uint16_t, Shown> shown_;
 	std::vector<GameVehicleWreck> wrecks_;
-	std::map<uint16_t, uint8_t> wrecked_;
+	host::VehicleWrecks wrecked_;
 	std::optional<OwnVehicleSeat> own_;
 	ChaseCamera chase_;
 	std::optional<std::array<uint32_t, 3>> chase_key_;

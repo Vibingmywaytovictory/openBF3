@@ -5763,6 +5763,44 @@ TEST_SUITE("host-vehicles-unit") {
 		CHECK(host::present_vehicle(w, 42).exploded);
 	}
 
+	TEST_CASE("vehicles: the client hides a vehicle and starts its explosion once per life on the exploded mark, "
+			  "not on Destroyed") {
+		host::VehicleWrecks wrecks;
+		net::VehicleWire w;
+		w.spawner = 7;
+		w.generation = 3;
+		const host::VehicleWreckSight live = wrecks.see(host::present_vehicle(w, 10));
+		CHECK_FALSE(live.hidden);
+		CHECK_FALSE(live.explosion);
+		w.health = 0;
+		w.condition = uint8_t(sim::vehicles::VehicleCondition::Destroyed);
+		const host::VehicleWreckSight destroyed = wrecks.see(host::present_vehicle(w, 11));
+		CHECK_FALSE(destroyed.hidden);
+		CHECK_FALSE(destroyed.explosion);
+		w.exploded = true;
+		const host::VehicleWreckSight first = wrecks.see(host::present_vehicle(w, 12));
+		CHECK(first.hidden);
+		CHECK(first.explosion);
+		for (sim::Tick t = 13; t < 18; ++t) {
+			const host::VehicleWreckSight again = wrecks.see(host::present_vehicle(w, t));
+			CHECK(again.hidden);
+			CHECK_FALSE(again.explosion);
+		}
+		w.spawner = 8;
+		CHECK(wrecks.see(host::present_vehicle(w, 18)).explosion);
+		w.spawner = 7;
+		w.generation = 4;
+		w.health = net::kVehicleHealthFull;
+		w.condition = uint8_t(sim::vehicles::VehicleCondition::Healthy);
+		w.exploded = false;
+		CHECK_FALSE(wrecks.see(host::present_vehicle(w, 600)).hidden);
+		w.health = 0;
+		w.condition = uint8_t(sim::vehicles::VehicleCondition::Destroyed);
+		w.exploded = true;
+		CHECK(wrecks.see(host::present_vehicle(w, 900)).explosion);
+		CHECK_FALSE(wrecks.see(host::present_vehicle(w, 901)).explosion);
+	}
+
 	TEST_CASE("vehicles: a disabled vehicle's driver input goes through the data's input modifiers: EIAThrottle on "
 			  "the forward pedal, EIABrake on the back pedal and the brake, EIAYaw on the steer") {
 		const std::vector<core::gameplay::VehicleInputModifierDef> tank{ { "EIAThrottle", 0.68f, 0.0f },

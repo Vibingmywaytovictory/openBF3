@@ -215,14 +215,12 @@ void GameVehicles::step(const host::PresentationFrame &p_frame, uint64_t p_now_n
 		const std::optional<host::PresentedSeat> own_seat = host::vehicle_seat_of(std::span(&v, 1), p_own_slot);
 		const host::PresentedVehiclePose pose = host::vehicle_pose_at(v, own_seat ? own_ticks : render_ticks);
 		const Transform3D body = vehicle_body_transform(model, pose);
-		if (v.exploded) {
-			const auto seen = wrecked_.find(v.spawner);
-			if (seen == wrecked_.end() || seen->second != v.generation) {
-				wrecked_[v.spawner] = v.generation;
-				wrecks_.push_back(
-						GameVehicleWreck{ v.spawner, v.generation, level_->kinds[kind].explosion_effect, body });
-				++stats_.wrecks;
-			}
+		const host::VehicleWreckSight wreck = wrecked_.see(v);
+		if (wreck.explosion) {
+			wrecks_.push_back(GameVehicleWreck{ v.spawner, v.generation, level_->kinds[kind].explosion_effect, body });
+			++stats_.wrecks;
+		}
+		if (wreck.hidden) {
 			continue;
 		}
 		if (own_seat) {

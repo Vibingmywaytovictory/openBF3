@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -77,4 +78,17 @@ struct PresentedSeat {
 };
 
 std::optional<PresentedSeat> vehicle_seat_of(std::span<const PresentedVehicle> p_vehicles, uint8_t p_slot);
+
+struct VehicleWreckSight {
+	bool hidden = false;
+	bool explosion = false;
+};
+
+class VehicleWrecks {
+public:
+	VehicleWreckSight see(const PresentedVehicle &p_vehicle);
+
+private:
+	std::map<uint16_t, uint8_t> exploded_;
+};
 }

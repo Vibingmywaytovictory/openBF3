@@ -118,6 +118,18 @@ std::optional<PresentedSeat> vehicle_seat_of(std::span<const PresentedVehicle> p
 	return std::nullopt;
 }
 
+VehicleWreckSight VehicleWrecks::see(const PresentedVehicle &p_vehicle) {
+	VehicleWreckSight s;
+	if (!p_vehicle.exploded) {
+		return s;
+	}
+	s.hidden = true;
+	const auto seen = exploded_.find(p_vehicle.spawner);
+	s.explosion = seen == exploded_.end() || seen->second != p_vehicle.generation;
+	exploded_[p_vehicle.spawner] = p_vehicle.generation;
+	return s;
+}
+
 PresentedVehiclePose vehicle_pose_at(const PresentedVehicle &p_vehicle, double p_ticks) {
 	const PresentedVehiclePose now = p_vehicle.pose();
 	if (!std::isfinite(p_ticks)) {
