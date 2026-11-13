@@ -1094,6 +1094,8 @@ add_test(NAME host.vehicles.damage COMMAND test_host_tdm --test-suite=host-vehic
 set_tests_properties(host.vehicles.damage PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 add_test(NAME host.vehicles.damage.team COMMAND test_host_tdm --test-suite=host-vehicles-damage-team)
 set_tests_properties(host.vehicles.damage.team PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+openbf3_cost(host.vehicles.damage 1 10)
+openbf3_cost(host.vehicles.damage.team 1 9)
 add_test(NAME host.vehicles.scope COMMAND test_host_tdm --test-suite=host-vehicles-scope)
 add_test(NAME host.vehicles.predict COMMAND test_host_tdm --test-suite=host-vehicles-predict)
 add_test(NAME host.vehicles.predict.tank COMMAND test_host_tdm --test-suite=host-vehicles-predict-tank)
