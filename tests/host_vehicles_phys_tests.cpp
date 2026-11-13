@@ -251,6 +251,45 @@ TEST_SUITE("host-vehicles-phys-unit") {
 		}
 	}
 
+	TEST_CASE("vehicles: a soldier spawned in the corner of two chassis pieces whose faces meet square comes out "
+			  "without being launched") {
+		std::unique_ptr<Walker> w = walker_on_floor();
+		const float radius = w->motor.params().radius;
+		auto model = std::make_shared<sim::VehicleModel>();
+		for (const std::array<float, 4> &b :
+				{ std::array<float, 4>{ -1.0f, 1.0f, -2.5f, 2.5f }, std::array<float, 4>{ 1.0f, 3.0f, 2.5f, 7.5f } }) {
+			sim::ChassisPiece piece;
+			for (const float x : { b[0], b[1] }) {
+				for (const float y : { 0.0f, 1.5f }) {
+					for (const float z : { b[2], b[3] }) {
+						piece.points.push_back({ x, y, z });
+					}
+				}
+			}
+			piece.convex_radius = 0.05f;
+			model->chassis.push_back(piece);
+		}
+		model->center_of_mass = { 0.0f, 0.75f, 0.0f };
+		model->mass = 2000.0f;
+		for (const float inside : { 0.1f, 0.2f, 0.3f }) {
+			w->obstacles.clear();
+			sim::SoldierState s = w->motor.spawn_state(
+					{ 11.0f + radius - inside, 0.02f, 22.5f - radius + inside }, 0, 1, 1000, false);
+			REQUIRE(w->obstacles.place(0, model, body_at({ 10.0f, 0.85f, 20.0f })).ok());
+			float fastest = 0.0f;
+			for (int t = 0; t < 90; ++t) {
+				w->motor.step(s, sim::idle_command(s.tick + 1, 0, 0, sim::Pose::Stand));
+				fastest = std::max(fastest, std::hypot(s.velocity[0], s.velocity[2]));
+			}
+			std::printf("corner of two pieces: %.1f m into each, after 90 ticks at (%.2f, %.2f, %.2f), fastest %.2f "
+						"m/s across\n",
+					double(inside), double(s.position[0]), double(s.position[1]), double(s.position[2]),
+					double(fastest));
+			CHECK(fastest < 1.0f);
+			CHECK(std::hypot(s.position[0] - 11.0f, s.position[2] - 22.5f) < 2.0f);
+		}
+	}
+
 	TEST_CASE("vehicles: a hull pushing a soldier below its kill speed for 2 s carries him ahead of its face at its "
 			  "own speed") {
 		std::unique_ptr<Walker> w = walker_on_floor();
