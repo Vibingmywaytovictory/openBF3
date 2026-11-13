@@ -11,6 +11,7 @@
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/gameplay/vehicle_sound.h"
+#include "bf3/core/util/finite.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/host/presented_vehicle.h"
@@ -109,6 +110,23 @@ std::string connected_inputs(const ca::SoundProgram &p_program) {
 	for (size_t i = 0; i < ba::kVehicleSoundParams; ++i) {
 		if (p_program.input_register(ba::vehicle_sound_param_hash(P(i))).has_value()) {
 			out += (out.empty() ? "" : ",") + std::to_string(i);
+		}
+	}
+	return out;
+}
+
+std::string other_inputs(const ca::SoundProgram &p_program) {
+	std::string out;
+	for (const ca::SoundInput &in : p_program.inputs) {
+		bool known = in.name_hash == uint32_t(cg::vehicle_sound_port::kStart) ||
+				in.name_hash == uint32_t(cg::vehicle_sound_port::kStop);
+		for (size_t i = 0; i < ba::kVehicleSoundParams; ++i) {
+			known = known || in.name_hash == ba::vehicle_sound_param_hash(P(i));
+		}
+		if (!known) {
+			char hex[16];
+			std::snprintf(hex, sizeof hex, "%08x%s", in.name_hash, in.event ? " event" : "");
+			out += (out.empty() ? "" : ",") + std::string(hex);
 		}
 	}
 	return out;
@@ -229,7 +247,7 @@ void drive(host::PresentedVehicle &r_v, const sim::VehicleModel &p_model, float 
 }
 
 TEST_SUITE("audio-vehicles-install") {
-	TEST_CASE("Caspian Conquest Small's vehicles: engine patches, engine positions and the inputs their graphs read") {
+	TEST_CASE("Caspian Conquest Small's vehicles: engine patches, engine positions and the inputs they declare") {
 		VehicleFixture *f = need_install();
 		if (f == nullptr) {
 			return;
@@ -297,6 +315,102 @@ TEST_SUITE("audio-vehicles-install") {
 			CHECK(f->assets.programs[program]->start_event == uint32_t(cg::vehicle_sound_port::kStart));
 			CHECK(f->assets.programs[program]->stop_event == uint32_t(cg::vehicle_sound_port::kStop));
 		}
+		check_unchanged(*f);
+	}
+
+	TEST_CASE("every land vehicle kind of other maps' Conquest Large: its engine patch compiles, declares its inputs "
+			  "and gives a running source for a driver") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		struct Expect {
+			const char *blueprint;
+			const char *engine;
+			const char *inputs;
+			const char *others;
+			size_t turrets;
+		};
+		const char *jeep = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,16";
+		const char *tracked = "0,1,2,3,4,5,7,8,9,10,11,12,14,15,16";
+		const Expect expect[] = {
+			{ "vehicles/humveearmored/humveearmored", "sound/vehicles/land/humvee/humvee_noboost", jeep, "", 0 },
+			{ "vehicles/bmp2/bmp2", "sound/vehicles/land/bmp2/bmp2_02", tracked, "", 0 },
+			{ "vehicles/m1a2/m1abrams", "sound/vehicles/land/m1a2_abrams/m1a2_abrams", tracked, "", 0 },
+			{ "vehicles/t90/t90", "sound/vehicles/land/t90/t90", tracked, "", 0 },
+			{ "vehicles/growleritv/growleritv", "sound/vehicles/land/growler/growler_noboost", jeep, "", 1 },
+			{ "vehicles/vdv_buggy/vdv_buggy", "sound/vehicles/land/vdv_buggy/vdv_buggy_noboost", jeep, "", 1 },
+			{ "vehicles/9k22_tunguska_m/9k22_tunguska_m", "sound/vehicles/land/tunguska/tunguska", tracked, "", 0 },
+			{ "vehicles/aav-7a1/aav-7a1", "sound/vehicles/land/aav-7a1/aav-7a1", tracked, "", 0 },
+			{ "vehicles/xpack01/dpv/dpv", "sound/vehicles/land/dpv_faav/dpv_faav_noboost", jeep, "", 1 },
+			{ "vehicles/xpack01/skidloader/skidloader", "sound/vehicles/land/constructionloader/constructionloader",
+					"0,1,2,3,4,5,7,8,9,10,11,12,16", "", 0 },
+			{ "vehicles/xp3/quadbike/quadbike", "sound/vehicles/land/atv_quadbike/atv_quadbike", jeep, "", 0 },
+			{ "vehicles/xp3/2s25-sprut-sd/2s25_sprut-sd", "sound/vehicles/land/bmp2/bmp2_02", tracked, "", 0 },
+			{ "vehicles/xp4/humveemodified/humveemodified", "sound/vehicles/land/humvee/humvee_noboost_xp4", jeep, "",
+					2 },
+			{ "vehicles/xp4/vodnikmodified/vodnikmodified_v2", "sound/vehicles/land/vodnik/vodnik_03_noboost_xp4", jeep,
+					"", 2 },
+			{ "vehicles/xp4/vanmodified/vanmodified", "sound/vehicles/land/van_xp4/van_xp4", jeep, "", 1 },
+			{ "vehicles/xp5/humvee_asrad/humvee_asrad", "sound/vehicles/land/xp5/humvee_asrad_xp5_noboost", jeep,
+					"3ea2059a event,1163a458 event", 0 },
+			{ "vehicles/xp5/bmp2_paradrop/bmp2_paradrop", "sound/vehicles/land/bmp2/bmp2_02", tracked, "", 0 },
+		};
+		const char *levels[] = { "MP_001", "MP_012", "MP_017", "XP1_002", "XP3_Desert", "XP4_Quake", "XP5_001" };
+		std::vector<std::string> seen;
+		for (const char *name : levels) {
+			CAPTURE(name);
+			core::Result<host::LevelDatabase> db =
+					host::open_level_database(f->mount.install, name, "ConquestLarge0", 0, nullptr);
+			REQUIRE_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
+			core::Result<std::shared_ptr<const host::LevelVehicles>> level =
+					host::load_level_vehicles(*db, sim::VehicleTuning{});
+			REQUIRE_MESSAGE(level.ok(), (level.ok() ? std::string() : level.error().message));
+			std::vector<std::string> report;
+			core::Result<ba::VehicleAudioAssets> assets = ba::load_vehicle_audio(db->level->db(), **level, report);
+			REQUIRE_MESSAGE(assets.ok(), (assets.ok() ? std::string() : assets.error().message));
+			for (const std::string &line : report) {
+				std::printf("%s ConquestLarge0 %s\n", name, line.c_str());
+				CHECK(line.find("NOT COMPILED") == std::string::npos);
+			}
+			for (size_t k = 0; k < (*level)->kinds.size(); ++k) {
+				const host::LevelVehicleKind &kind = (*level)->kinds[k];
+				CAPTURE(kind.blueprint);
+				const Expect *e = std::find_if(std::begin(expect), std::end(expect),
+						[&](const Expect &p_x) { return kind.blueprint == p_x.blueprint; });
+				REQUIRE_MESSAGE(e != std::end(expect), kind.blueprint);
+				const cg::VehicleSoundDef &def = assets->defs[k];
+				REQUIRE(def.engines.size() == 1);
+				const uint16_t program = assets->engine_program[k];
+				REQUIRE(program < assets->programs.size());
+				const std::string inputs = connected_inputs(*assets->programs[program]);
+				const std::string others = other_inputs(*assets->programs[program]);
+				CHECK(def.engines.front().patch == e->engine);
+				CHECK(inputs == e->inputs);
+				CHECK(others == e->others);
+				CHECK(def.turrets.size() == e->turrets);
+				CHECK(def.engines.front().surface_patch.empty());
+				const uint16_t spawner = spawner_of(**level, uint16_t(k)).value();
+				host::PresentedVehicle v = parked(**level, spawner);
+				v.occupants[0] = 3;
+				ba::VehicleListenerView view;
+				view.listener.position = { 10.0f, 101.6f, 0.0f };
+				ba::VehicleSoundMemory memory;
+				std::vector<ba::VehicleSoundSource> sources;
+				const host::PresentedVehicle one[1] = { v };
+				ba::vehicle_sound_sources(one, **level, *assets, view, memory, sources);
+				REQUIRE(sources.size() == 1);
+				CHECK(sources.front().program == program);
+				CHECK(sources.front().running);
+				CHECK(core::finite(sources.front().emitter.position));
+				if (std::find(seen.begin(), seen.end(), kind.blueprint) == seen.end()) {
+					seen.push_back(kind.blueprint);
+					std::printf("%s: %s, inputs [%s], other inputs [%s], %zu turret sounds\n", kind.blueprint.c_str(),
+							def.engines.front().patch.c_str(), inputs.c_str(), others.c_str(), def.turrets.size());
+				}
+			}
+		}
+		CHECK(seen.size() == std::size(expect));
 		check_unchanged(*f);
 	}
 }
