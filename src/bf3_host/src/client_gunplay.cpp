@@ -153,8 +153,7 @@ void ClientGunplay::Emit::emitted(const sim::Command &p_command, const sim::weap
 		}
 		if (s.projectiles_ != nullptr && (e.flags & present_flags::kNoRound) == 0) {
 			sim::weapons::ShotEvent guided = shot;
-			guided.lock_target = s.own_lock_ && s.own_lock_->locked ? net::lock_target_of(s.own_lock_->target)
-																	: sim::weapons::kNoLockTarget;
+			guided.lock_target = s.launch_target(shot);
 			s.projectiles_->spawn_own(guided, have_view ? v.view : ShotView{});
 		}
 	}
@@ -176,6 +175,7 @@ void ClientGunplay::Emit::emitted(const sim::Command &p_command, const sim::weap
 		std::lock_guard lock(s.log_mutex_);
 		for (size_t i = 0; i < p_output.shot_count && s.shot_log_.size() < kLogLimit; ++i) {
 			s.shot_log_.push_back({ p_command.tick, p_output.shots[i] });
+			s.shot_log_.back().shot.lock_target = s.launch_target(p_output.shots[i]);
 		}
 		for (size_t i = 0; i < p_output.timed_count && s.timed_log_.size() < kLogLimit; ++i) {
 			s.timed_log_.push_back({ p_command.tick, p_output.timed[i] });
@@ -302,6 +302,14 @@ bool ClientGunplay::fire_needs_lock(const sim::Command &p_command) const {
 	const sim::weapons::WeaponSlotState &s =
 			e->state.slots[in.select_slot < sim::weapons::kMaxWeaponSlots ? in.select_slot : e->state.active];
 	return def_ok(s.def) && table_->def(s.def, s.variant).locking.fire_only_when_locked;
+}
+
+uint32_t ClientGunplay::launch_target(const sim::weapons::ShotEvent &p_shot) const {
+	if (!own_lock_ || !own_lock_->locked || !def_ok(p_shot.def) ||
+			!table_->def(p_shot.def, p_shot.variant).locking.homing) {
+		return sim::weapons::kNoLockTarget;
+	}
+	return net::lock_target_of(own_lock_->target);
 }
 
 void ClientGunplay::guide_vehicles(const PresentationFrame &p_frame) {
@@ -716,6 +724,7 @@ void ClientGunplay::stats(ClientStats &r_stats) const {
 	r_stats.weapon_ring_misses = weapon_ring_misses_;
 	r_stats.predicted_shots = predicted_shots_;
 	r_stats.predicted_timed = predicted_timed_;
+	r_stats.lock_stripped_fire = lock_stripped_fire_;
 	r_stats.no_view_shots = no_view_shots_;
 	r_stats.snapshot_others_received = snapshot_others_received_;
 	r_stats.remote_shots = remote_shots_;

@@ -34,6 +34,7 @@ struct ClientProjectilesStats {
 	uint64_t remote_late = 0;
 	uint64_t events_refused = 0;
 	uint64_t bullets_unpresented = 0;
+	uint64_t own_homing_ticks = 0, remote_homing_ticks = 0;
 };
 static_assert(std::is_trivially_copyable_v<ClientProjectilesStats>);
 

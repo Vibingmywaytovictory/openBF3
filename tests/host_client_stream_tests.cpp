@@ -6,6 +6,8 @@
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/client_wiring.h"
+#include "bf3/host/duel.h"
+#include "bf3/host/gadgets.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
@@ -17,6 +19,7 @@
 #include "bf3/net/weapons_wire.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/command.h"
+#include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/vehicle_world.h"
 #include "bf3/sim/vehicles/vehicle_input.h"
@@ -25,6 +28,7 @@
 #include "vehicles/client_vehicle_prediction.h"
 #include "vehicles/server_vehicles.h"
 
+#include "gunplay_fixture.h"
 #include "tdm_fixture.h"
 #include "test_support.h"
 
@@ -47,6 +51,7 @@
 #include <vector>
 
 using namespace bf3;
+namespace tg = bf3::test::gunplay;
 namespace tt = bf3::test::tdm;
 
 namespace {
@@ -436,6 +441,7 @@ struct StreamClient {
 	bool keep_events = false;
 	std::vector<host::PresentEvent> kept;
 	std::vector<host::PresentClock> kept_clocks;
+	std::vector<host::PredictedShot> kept_shots;
 
 	StreamHashes hashes() const { return { sent.h, frames.h, presented.h, events.h, gunplay.h, stats.h }; }
 };
@@ -560,6 +566,9 @@ void drive(StreamClient &r_c, uint32_t p_step, uint64_t p_now) {
 		r_c.gunplay.add(e.event.event);
 		r_c.gunplay.add(e.event.weapon_slot);
 	}
+	if (r_c.keep_events) {
+		r_c.kept_shots.insert(r_c.kept_shots.end(), r_c.shot_log.begin(), r_c.shot_log.end());
+	}
 	r_c.shot_count += r_c.shot_log.size();
 	r_c.timed_count += r_c.timed_log.size();
 	r_c.shot_log.clear();
@@ -645,6 +654,8 @@ public:
 
 	uint64_t others = 0;
 
+	std::span<const host::OutDatagram> out() const { return out_; }
+
 	StreamClient &add(const char *p_name, uint32_t p_peer, uint32_t p_phase, uint8_t p_kit, host::ClientSessionConfig p_config) {
 		auto c = std::make_unique<StreamClient>();
 		c->name = p_name;
@@ -664,7 +675,13 @@ public:
 	}
 
 	void play(uint32_t p_ticks, const std::function<void(sim::Tick)> &p_on_tick) {
-		for (uint32_t step = 0; step < p_ticks * kStepsPerTick; ++step) {
+		run(p_ticks, p_on_tick);
+		finish();
+	}
+
+	void run(uint32_t p_ticks, const std::function<void(sim::Tick)> &p_on_tick) {
+		for (const uint32_t end = step_ + p_ticks * kStepsPerTick; step_ < end; ++step_) {
+			const uint32_t step = step_;
 			now_ += kStepNs;
 			for (const std::unique_ptr<StreamClient> &c : clients_) {
 				drive(*c, step, now_);
@@ -688,6 +705,9 @@ public:
 			}
 			p_on_tick(tick);
 		}
+	}
+
+	void finish() {
 		for (const std::unique_ptr<StreamClient> &c : clients_) {
 			add_stats(c->stats, c->loop.stats());
 			c->loop.shutdown();
@@ -705,6 +725,7 @@ private:
 	std::vector<std::unique_ptr<StreamClient>> clients_;
 	std::vector<uint8_t> hold_mask_ = tt::detail::echo_hold_mask();
 	std::vector<host::OutDatagram> out_;
+	uint32_t step_ = 0;
 };
 
 }
@@ -1669,5 +1690,204 @@ TEST_SUITE("host-vehicles-reconcile") {
 		CHECK(stats.vehicle_max_correction_m < 0.03f);
 		CHECK(stats.vehicle_prediction_starts == 1u);
 		CHECK(stats.vehicle_prediction_failures == 0u);
+	}
+}
+
+TEST_SUITE("host-gadgets-guided-client") {
+	TEST_CASE("gadgets: a client holding the FGM-148 on MP_007 ConquestSmall0 strips fire until its OwnLock is "
+			  "locked, then predicts the one shot the server fires with the tank as its lock target, and its own "
+			  "missile copy and a remote copy of that shot home on the tank") {
+		namespace sw = sim::weapons;
+		tt::TdmLevel *level = tt::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		host::GameServerConfig cfg;
+		cfg.level = level->shared;
+		cfg.max_slots = 8;
+		cfg.game_build = kStreamGameBuild;
+		cfg.dev_commands = true;
+		cfg.seed = 131;
+		cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+		cfg.rules.mode = host::MatchRulesConfig::Mode::Tdm;
+		cfg.rules.deploy_screen = true;
+		cfg.rules.revive = true;
+		cfg.rules.preround_override_s = 0.0f;
+		cfg.rules.min_players_override = 1;
+		host::GameServer server;
+		const core::Status st = server.init(cfg);
+		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+		core::Result<std::unique_ptr<sim::CollisionWorld>> world =
+				sim::CollisionWorld::create(level->shared->static_world);
+		REQUIRE(world.ok());
+		sim::SoldierMotor motor;
+		REQUIRE(motor.init(**world, level->shared->motor).ok());
+
+		const uint8_t engineer = uint8_t(host::KitRole::Engineer);
+		const uint8_t launcher_slot = uint8_t(core::gameplay::WeaponSlot::Gadget1);
+		Stream stream(server, level->shared);
+		host::ClientSessionConfig cc;
+		core::Result<net::NetSimConfig> ns = net::parse_netsim("lat=40-60,seed=3");
+		REQUIRE(ns.ok());
+		cc.netsim = *ns;
+		cc.request_dev_commands = true;
+		cc.record_predicted = true;
+		StreamClient &gunner = stream.add("gunner", 1u, 0, engineer, cc);
+		gunner.scripted = false;
+		gunner.keep_events = true;
+		const host::PresentationFrame &f = *gunner.frame;
+		tt::VehicleWatch vehicles;
+		const auto on_tick = [&](sim::Tick) { vehicles.take(stream.out(), gunner.peer); };
+		const auto until = [&](const std::function<bool()> &p_done, uint32_t p_ticks) {
+			for (uint32_t t = 0; t < p_ticks; ++t) {
+				stream.run(1, on_tick);
+				if (p_done()) {
+					return true;
+				}
+			}
+			return false;
+		};
+		const auto alive = [&] { return f.valid && (f.own_curr.flags & sim::soldier_flags::kAlive) != 0; };
+
+		REQUIRE(until([&] { return f.serial != 0 && server.rules()->phase() == net::MatchPhase::InRound; }, 600));
+		const uint8_t slot = f.stats.slot;
+		const uint8_t team = server.rules()->team_of(slot);
+		const host::LoadoutKit *kit = gl.loadouts.kit(team, engineer);
+		REQUIRE(kit != nullptr);
+		const auto item = std::find_if(kit->slots[launcher_slot].begin(), kit->slots[launcher_slot].end(),
+				[](const host::LoadoutItem &i) { return i.unlock == "weapons/fgm148/u_fgm148"; });
+		REQUIRE(item != kit->slots[launcher_slot].end());
+		REQUIRE(item->def < gl.defs.size());
+		const uint16_t javelin = item->def;
+		net::LoadoutRequest request;
+		request.kit = engineer;
+		request.items[launcher_slot] = item->identifier;
+		gunner.loop.send_loadout_request(request);
+		stream.run(2, on_tick);
+		REQUIRE(until(
+				[&] {
+					if (!alive() && server.current_tick() % 30u == 0u) {
+						gunner.loop.send_spawn_request(engineer);
+					}
+					return alive();
+				},
+				900));
+		REQUIRE(server.gunplay()->weapons(slot).slots[launcher_slot].def == javelin);
+
+		std::optional<tt::LockStand> found;
+		REQUIRE(until(
+				[&] {
+					found = tt::mbt_lock_stand(*level->shared, **world, motor, vehicles.latest, team);
+					return found.has_value();
+				},
+				sim::seconds_to_ticks(tt::latest_initial_delay(lv)) + 600u));
+		const uint16_t tank = found->spawner;
+		const uint32_t tank_id = sim::vehicles::kVehicleTargetIdBase + uint32_t(tank);
+		net::DebugRequest teleport;
+		teleport.kind = net::DebugKind::Teleport;
+		teleport.id = 1;
+		teleport.position = found->stand;
+		gunner.loop.send_debug(teleport);
+		stream.run(30, on_tick);
+		REQUIRE(alive());
+
+		bool zoom = false, fire = false;
+		const auto aim = [&](sim::Tick p_tick) {
+			on_tick(p_tick);
+			const host::ViewAim a = host::aim_at(host::present_own_eye(f), found->aim);
+			gunner.input.yaw = a.yaw;
+			gunner.input.pitch = a.pitch;
+			gunner.input.held_buttons = tg::select_slot_field(launcher_slot) | (zoom ? sim::buttons::kZoom : 0u) |
+					(fire ? sim::buttons::kFire : 0u);
+		};
+		const auto aimed_until = [&](const std::function<bool()> &p_done, uint32_t p_ticks) {
+			for (uint32_t t = 0; t < p_ticks; ++t) {
+				stream.run(1, aim);
+				if (p_done()) {
+					return true;
+				}
+			}
+			return false;
+		};
+		const auto never = [] { return false; };
+		aimed_until(never, 150);
+		const uint64_t server_shots = server.gunplay()->stats().shots;
+		const uint64_t predicted = f.stats.predicted_shots;
+		fire = true;
+		aimed_until(never, 60);
+		fire = false;
+		aimed_until(never, 10);
+		std::printf("javelin client: unlocked trigger held 60 ticks: %llu commands stripped of fire, %llu predicted "
+					"shots, %llu server shots\n",
+				(unsigned long long)f.stats.lock_stripped_fire,
+				(unsigned long long)(f.stats.predicted_shots - predicted),
+				(unsigned long long)(server.gunplay()->stats().shots - server_shots));
+		CHECK(f.stats.lock_stripped_fire > 0u);
+		CHECK(f.stats.predicted_shots == predicted);
+		CHECK(server.gunplay()->stats().shots == server_shots);
+		CHECK_FALSE(f.own_lock.locked);
+
+		zoom = true;
+		REQUIRE(aimed_until([&] { return f.own_lock.locked; }, 600));
+		CHECK(f.own_lock.target == tank);
+		CHECK(server.gunplay()->lock_state(slot).target() == tank_id);
+		const uint64_t launches = server.gunplay()->gadget_stats().guided_launches;
+		const uint64_t stripped = f.stats.lock_stripped_fire;
+		gunner.kept_shots.clear();
+		fire = true;
+		REQUIRE(aimed_until([&] { return f.stats.predicted_shots > predicted; }, 120));
+		fire = false;
+		aimed_until(never, 30);
+		std::printf("javelin client: locked on spawner %u; the trigger gave %llu predicted shot(s), %llu server "
+					"shot(s), %llu guided launch(es)\n",
+				unsigned(tank), (unsigned long long)(f.stats.predicted_shots - predicted),
+				(unsigned long long)(server.gunplay()->stats().shots - server_shots),
+				(unsigned long long)(server.gunplay()->gadget_stats().guided_launches - launches));
+		CHECK(f.stats.predicted_shots == predicted + 1u);
+		CHECK(server.gunplay()->stats().shots == server_shots + 1u);
+		CHECK(server.gunplay()->gadget_stats().guided_launches == launches + 1u);
+		CHECK(f.stats.lock_stripped_fire == stripped);
+		REQUIRE(gunner.kept_shots.size() == 1u);
+		const sw::ShotEvent shot = gunner.kept_shots.front().shot;
+		CHECK(shot.def == javelin);
+		CHECK(shot.lock_target == tank_id);
+
+		REQUIRE(aimed_until([&] { return f.stats.projectiles.live_own == 0u; }, 15 * 60));
+		std::printf("javelin client: the own missile copy flew %llu homing ticks\n",
+				(unsigned long long)f.stats.projectiles.own_homing_ticks);
+		CHECK(f.stats.projectiles.own_homing_ticks > 0u);
+
+		core::Result<std::shared_ptr<const host::ClientGunplayInputs>> inputs =
+				host::client_gunplay_inputs(*level->shared);
+		REQUIRE(inputs.ok());
+		core::Result<std::unique_ptr<host::ClientProjectiles>> remote =
+				host::ClientProjectiles::create((*inputs)->table, (*inputs)->capsules, 131);
+		REQUIRE(remote.ok());
+		const net::VehicleWire *wire = vehicles.of(tank);
+		REQUIRE(wire != nullptr);
+		host::LockGuidance guidance;
+		const std::array<sw::LockCandidate, 1> candidates{ host::lock_candidate_of(lv.kinds[lv.spawners[tank].kind],
+				tank, wire->team, wire->state.body.com_position, wire->state.body.rotation, false) };
+		guidance.set(candidates);
+		(*remote)->set_guidance(&guidance);
+		(*remote)->queue_remote(net::remote_shot_of(shot));
+		auto ring = std::make_unique<host::PresentationEvents>();
+		std::vector<host::PresentEvent> drained(256);
+		const double from = sw::units_to_seconds(shot.spawn_time) * double(sim::kSimHz);
+		for (uint32_t t = 1; t <= 15u * 60u; ++t) {
+			(*remote)->step_remote(from + double(t), **world, {}, *ring);
+			while (ring->drain(drained) > 0) {
+			}
+		}
+		const host::ClientProjectilesStats &rs = (*remote)->stats();
+		std::printf("javelin client: the remote copy spawned %llu, flew %llu homing ticks, %u live at the end\n",
+				(unsigned long long)rs.remote_spawned, (unsigned long long)rs.remote_homing_ticks,
+				unsigned(rs.live_remote));
+		CHECK(rs.remote_spawned == 1u);
+		CHECK(rs.remote_homing_ticks > 0u);
+		CHECK(rs.live_remote == 0u);
+		stream.finish();
 	}
 }

@@ -31,6 +31,11 @@ sw::TargetPose target_pose_of(const net::OtherPose &p_pose, uint32_t p_id) {
 	return t;
 }
 
+uint64_t homing(std::span<const sw::Projectile> p_live) {
+	return uint64_t(std::count_if(p_live.begin(), p_live.end(),
+			[](const sw::Projectile &p_p) { return p_p.guide.state == sw::MissileState::Homing; }));
+}
+
 bool bit(const std::array<uint64_t, 2> &p_mask, uint32_t p_slot) {
 	return p_slot < 128 && ((p_mask[p_slot >> 6] >> (p_slot & 63)) & 1u) != 0;
 }
@@ -347,6 +352,7 @@ void ClientProjectiles::step_own(sim::Tick p_tick, const sim::CollisionWorld &p_
 	provider.records = &p_records;
 	m.out.clear();
 	m.own->step(p_tick, p_world, provider, m.out);
+	m.stats.own_homing_ticks += homing(m.own->live());
 	m.emit_impacts(r_events, PresentTimeline::Predicted, true);
 	m.stats.live_own = uint32_t(m.own->live().size());
 }
@@ -388,6 +394,7 @@ void ClientProjectiles::step_remote(double p_render_ticks, const sim::CollisionW
 		m.out.clear();
 		m.before.assign(m.remote->live().begin(), m.remote->live().end());
 		m.remote->step(t, p_world, provider, m.out);
+		m.stats.remote_homing_ticks += homing(m.remote->live());
 		m.emit_impacts(r_events, PresentTimeline::Render, false);
 		if (m.out.removed > 0) {
 			m.note_ended();

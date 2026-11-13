@@ -161,6 +161,7 @@ struct ClientStats {
 	uint64_t health_rebases = 0;
 	uint64_t predicted_shots = 0;
 	uint64_t predicted_timed = 0;
+	uint64_t lock_stripped_fire = 0;
 	uint64_t no_view_shots = 0;
 	uint64_t snapshot_others_received = 0;
 	uint64_t remote_shots = 0;
