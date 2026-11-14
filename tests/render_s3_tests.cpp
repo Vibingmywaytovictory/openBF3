@@ -5,6 +5,7 @@
 #include "bf3/core/install_reader.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/render/soldier_assets.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <chrono>
@@ -27,16 +28,8 @@ using namespace bf3;
 namespace {
 
 struct Scratch {
-	fs::path root;
-	Scratch() {
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		root = fs::path(tmp) / (L"openbf3-render-s3-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
-	}
-	~Scratch() {
-		std::error_code ec;
-		fs::remove_all(root, ec);
-	}
+	bf3::test::ScratchDir dir{ "render-s3" };
+	fs::path root = dir.path() / L"cache";
 };
 
 uint32_t identity_count(const std::vector<anim::Mat34> &p_skin, float p_eps = 1e-3f) {

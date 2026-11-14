@@ -10,6 +10,7 @@
 #include "bf3/core/ui/swf_library.h"
 #include "bf3/core/ui/swf_movie.h"
 #include "bf3/core/ui/ui_fonts.h"
+#include "test_scratch.h"
 #include "test_support.h"
 #include "ui_swf_writer.h"
 
@@ -128,18 +129,8 @@ void check_round_trip(const SwfFontOutlines &p_src, const TrueTypeFont &p_ttf) {
 }
 
 struct ScratchRoot {
-	fs::path path;
-	ScratchRoot() {
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		path = fs::path(tmp) / (L"openbf3-ui1-fonts-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
-		std::error_code ec;
-		fs::create_directories(path, ec);
-	}
-	~ScratchRoot() {
-		std::error_code ec;
-		fs::remove_all(path, ec);
-	}
+	bf3::test::ScratchDir dir{ "ui-fonts" };
+	fs::path path = dir.path();
 };
 
 }

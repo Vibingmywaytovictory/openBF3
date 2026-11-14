@@ -1,3 +1,4 @@
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include "bf3/audio/audio_load.h"
@@ -416,20 +417,9 @@ void run_program(SoundProgram p_prog, std::shared_ptr<const WaveBank> p_bank) {
 	}
 }
 
-std::atomic<int> g_scratch{ 0 };
 struct ScratchCache {
-	fs::path base;
-	ScratchCache() {
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		base = fs::path(tmp) / (L"openbf3-audio-cache-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" +
-									   std::to_wstring(g_scratch++));
-		fs::create_directories(base);
-	}
-	~ScratchCache() {
-		std::error_code ec;
-		fs::remove_all(base, ec);
-	}
+	bf3::test::ScratchDir dir{ "audio-cache" };
+	fs::path base = dir.path();
 };
 
 }

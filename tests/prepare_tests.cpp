@@ -13,6 +13,7 @@
 #include "bf3/core/thread_pool.h"
 #include "bf3/render/mesh_cache.h"
 #include "bf3/render/viewmodel_assets.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <windows.h>
@@ -33,24 +34,16 @@ using namespace bf3::render;
 
 namespace {
 
-std::atomic<int> g_counter{ 0 };
-
 struct ScratchRoot {
+	bf3::test::ScratchDir dir{ "prepare" };
 	fs::path base;
 	fs::path root;
 	fs::path protected_dir;
 	ScratchRoot() {
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		base = fs::path(tmp) / (L"openbf3-prepare-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" +
-									   std::to_wstring(g_counter++));
+		base = dir.path();
 		root = base / L"cache";
 		protected_dir = base / L"install";
 		fs::create_directories(protected_dir);
-	}
-	~ScratchRoot() {
-		std::error_code ec;
-		fs::remove_all(base, ec);
 	}
 	CacheOptions options(const PathGuard *p_guard = nullptr) const {
 		CacheOptions o;

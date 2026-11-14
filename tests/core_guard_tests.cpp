@@ -2,6 +2,7 @@
 
 #include "bf3/core/install_reader.h"
 #include "bf3/core/path_guard.h"
+#include "test_scratch.h"
 
 #include <windows.h>
 #include <winioctl.h>
@@ -17,15 +18,14 @@ using Verdict = bf3::core::PathGuard::Verdict;
 namespace {
 
 struct ScratchTree {
+	bf3::test::ScratchDir dir{ "guard" };
 	fs::path base;
 	fs::path root;
 	fs::path file;
 	fs::path outside;
 
 	ScratchTree() {
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		base = fs::path(tmp) / (L"openbf3-guard-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+		base = dir.path();
 		root = base / L"root";
 		outside = base / L"out";
 		CreateDirectoryW(base.c_str(), nullptr);

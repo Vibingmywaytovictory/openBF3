@@ -5,6 +5,7 @@
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/cache/entry_format.h"
 #include "bf3/core/path_guard.h"
+#include "test_scratch.h"
 
 #include <windows.h>
 #include <winioctl.h>
@@ -23,8 +24,6 @@ namespace fs = std::filesystem;
 using namespace bf3::core;
 
 namespace {
-
-std::atomic<int> g_scratch_counter{ 0 };
 
 std::span<const uint8_t> bytes_of(std::string_view p_s) {
 	return { reinterpret_cast<const uint8_t *>(p_s.data()), p_s.size() };
@@ -109,16 +108,14 @@ bool make_junction(const fs::path &p_link, const fs::path &p_target) {
 }
 
 struct Scratch {
+	bf3::test::ScratchDir dir{ "cache" };
 	fs::path base;
 	fs::path install;
 	fs::path root;
 	fs::path install_file;
 
 	Scratch() {
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		base = fs::path(tmp) / (L"openbf3-cache-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" +
-									   std::to_wstring(g_scratch_counter++));
+		base = dir.path();
 		install = base / L"install";
 		root = base / L"cache";
 		CreateDirectoryW(base.c_str(), nullptr);

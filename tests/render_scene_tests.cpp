@@ -12,6 +12,7 @@
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/text.h"
 #include "bf3/render/level_scene.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <windows.h>
@@ -151,20 +152,9 @@ double mib(uint64_t p_bytes) {
 	return double(p_bytes) / (1024.0 * 1024.0);
 }
 
-std::atomic<int> g_root_counter{ 0 };
-
 struct ScratchRoot {
-	fs::path root;
-	ScratchRoot() {
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		root = fs::path(tmp) / (L"openbf3-scene-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" +
-									   std::to_wstring(g_root_counter++));
-	}
-	~ScratchRoot() {
-		std::error_code ec;
-		fs::remove_all(root, ec);
-	}
+	bf3::test::ScratchDir dir{ "scene" };
+	fs::path root = dir.path() / L"cache";
 };
 
 class CountingSink final : public SceneSink {

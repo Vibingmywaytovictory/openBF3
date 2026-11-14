@@ -4,6 +4,7 @@
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/cache/entry_format.h"
 #include "sim_world_support.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include "static_world_internal.h"
@@ -23,24 +24,16 @@ namespace {
 
 namespace fs = std::filesystem;
 
-std::atomic<int> g_scratch_counter{ 0 };
-
 struct WorldScratch {
+	bf3::test::ScratchDir dir{ "world" };
 	fs::path base;
 	fs::path root;
 	fs::path protected_dir;
 	WorldScratch() {
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		base = fs::path(tmp) / (L"openbf3-world-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" +
-									   std::to_wstring(g_scratch_counter++));
+		base = dir.path();
 		root = base / L"cache";
 		protected_dir = base / L"install";
 		fs::create_directories(protected_dir);
-	}
-	~WorldScratch() {
-		std::error_code ec;
-		fs::remove_all(base, ec);
 	}
 	core::CacheOptions options() const {
 		core::CacheOptions o;

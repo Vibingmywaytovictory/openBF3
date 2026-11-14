@@ -9,6 +9,7 @@
 #include "bf3/sim/nav_query.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim_harness/nav_input_check.h"
+#include "test_scratch.h"
 
 #include <DetourNavMesh.h>
 
@@ -139,22 +140,14 @@ size_t polys_with_area(const NavWorld &p_world, uint8_t p_area) {
 	return n;
 }
 
-std::atomic<int> g_scratch{ 0 };
-
 struct Scratch {
+	bf3::test::ScratchDir dir{ "nav" };
 	fs::path base, root, protected_dir;
 	Scratch() {
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		base = fs::path(tmp) /
-				(L"openbf3-nav-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(g_scratch++));
+		base = dir.path();
 		root = base / L"cache";
 		protected_dir = base / L"install";
 		fs::create_directories(protected_dir);
-	}
-	~Scratch() {
-		std::error_code ec;
-		fs::remove_all(base, ec);
 	}
 	core::CacheOptions options() const {
 		core::CacheOptions o;

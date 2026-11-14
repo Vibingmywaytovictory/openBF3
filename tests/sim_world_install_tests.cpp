@@ -13,6 +13,7 @@
 #include "bf3/core/level/world.h"
 #include "bf3/core/superbundle_mount.h"
 #include "sim_world_support.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include "collision_world_internal.h"
@@ -55,16 +56,8 @@ uint64_t peak_working_set() {
 }
 
 struct Scratch {
-	fs::path root;
-	Scratch() {
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		root = fs::path(tmp) / (L"o3w-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
-	}
-	~Scratch() {
-		std::error_code ec;
-		fs::remove_all(root, ec);
-	}
+	bf3::test::ScratchDir dir{ "world-install" };
+	fs::path root = dir.path() / L"cache";
 };
 
 struct D3 {

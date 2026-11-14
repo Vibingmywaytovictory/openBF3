@@ -4,6 +4,7 @@
 #include "bf3/core/cache/digest.h"
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/core/util/elapsed.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <windows.h>
@@ -139,9 +140,8 @@ TEST_SUITE("cache_data") {
 		CHECK(sha1_ok == rows.size());
 		MESSAGE("entries ", rows.size(), ", stored ", stored_bytes, " B, SHA-1 matches ", sha1_ok, ", ", t_sha1, " s (with file reads)");
 
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		const fs::path base = fs::path(tmp) / (L"openbf3-cache-data-" + std::to_wstring(GetCurrentProcessId()));
+		const bf3::test::ScratchDir scratch("cache-data");
+		const fs::path base = scratch.path();
 		const fs::path fake_install = base / L"install";
 		std::error_code ec;
 		fs::create_directories(fake_install, ec);

@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/install_reader.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <windows.h>
@@ -80,9 +81,7 @@ TEST_SUITE("install") {
 			MESSAGE("8.3 alias exercised");
 			CHECK(guard.check_write_target(std::wstring(shortp) + L"\\Data\\x.bin") == Verdict::UnderProtectedRoot);
 		}
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		CHECK(guard.check_write_target(std::filesystem::path(tmp) / L"openbf3-cache-probe.bin") == Verdict::Allowed);
+		CHECK(guard.check_write_target(bf3::test::temp_dir() / L"openbf3-cache-probe.bin") == Verdict::Allowed);
 	}
 
 	TEST_CASE("install: snapshot is stable across reads") {

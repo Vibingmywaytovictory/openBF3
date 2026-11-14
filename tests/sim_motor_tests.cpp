@@ -19,6 +19,7 @@
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim_harness/vault_spots.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -2665,16 +2666,8 @@ TEST_SUITE("sim-motor") {
 		}
 
 		namespace fs = std::filesystem;
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		const fs::path root = fs::path(tmp) / (L"o3m-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
-		struct RemoveRoot {
-			fs::path root;
-			~RemoveRoot() {
-				std::error_code ec;
-				fs::remove_all(root, ec);
-			}
-		} remove_root{ root };
+		const bf3::test::ScratchDir scratch("motor-cache");
+		const fs::path root = scratch.path() / L"cache";
 		const auto load = [&](bool p_warm) {
 			core::Cache cache;
 			core::CacheOptions o;

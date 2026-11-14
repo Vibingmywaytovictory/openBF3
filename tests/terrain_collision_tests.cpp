@@ -16,6 +16,7 @@
 #include "bf3/sim/static_world.h"
 #include "bf3/sim_harness/nav_input_check.h"
 #include "terrain_collision_support.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <windows.h>
@@ -572,16 +573,8 @@ unsigned g1_lanes() {
 }
 
 struct Scratch {
-	fs::path root;
-	Scratch() {
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		root = fs::path(tmp) / (L"o3t-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
-	}
-	~Scratch() {
-		std::error_code ec;
-		fs::remove_all(root, ec);
-	}
+	bf3::test::ScratchDir dir{ "terrain" };
+	fs::path root = dir.path() / L"cache";
 };
 
 struct RunResult {
