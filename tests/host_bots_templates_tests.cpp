@@ -8,7 +8,9 @@
 
 #include "bot_weapon_templates.h"
 #include "tdm_fixture.h"
+#include "vehicles/vehicle_hits.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -181,6 +183,60 @@ TEST_SUITE("host-bots-templates") {
 		}
 		std::error_code ec;
 		std::filesystem::remove_all(root, ec);
+	}
+
+	TEST_CASE("weapon templates: MP_007 ConquestSmall0: a hit on a vehicle is rated as the server damages it, "
+			  "through VehicleDamageSource under the weapon's def, variants included") {
+		tt::TdmLevel *level = tt::load_conquest_bots_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		namespace sw = sim::weapons;
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		core::Result<host::TemplateSource> source = host::template_source(gl, level->shared->vehicles.get());
+		REQUIRE(source.ok());
+		const sw::WeaponTable &t = *source->table;
+		host::VehicleDamageSource server;
+		server.configure(t, gl.defs);
+		size_t own_property = 0, rated = 0;
+		const auto check = [&](uint16_t p_def, const sw::WeaponSimDef &p_weapon) {
+			const sw::ProjectileSimDef &p = p_weapon.projectile;
+			if (p.kind == core::gameplay::ProjectileKind::None) {
+				return;
+			}
+			const bool missile = p.kind == core::gameplay::ProjectileKind::Missile;
+			sw::DamageEvent direct;
+			direct.def = p_def;
+			direct.kind = missile || p.explosion.present ? sw::DamageKind::Direct : sw::DamageKind::Bullet;
+			direct.base = !sw::fires_round(p) ? 0.0f : missile ? p.direct_damage : p.start_damage;
+			sw::DamageEvent blast;
+			blast.def = p_def;
+			blast.kind = sw::DamageKind::Blast;
+			blast.base = p.explosion.blast_damage;
+			own_property += p.property != t.defs[p_def].projectile.property ? 1u : 0u;
+			for (const host::StrengthTarget &target : source->targets) {
+				if (target.soldier) {
+					continue;
+				}
+				const float hit = server.amount(direct, target.property) * float(std::max(p_weapon.pellets, 1)) +
+						(p.explosion.present ? server.amount(blast, target.property) : 0.0f);
+				CHECK_MESSAGE(host::hit_damage(*source, p_def, p_weapon, target) ==
+								doctest::Approx(hit / target.armor).epsilon(0.001),
+						p_weapon.variant);
+				++rated;
+			}
+		};
+		for (size_t d = 0; d < t.defs.size() && d < size_t(sw::kNoWeapon); ++d) {
+			check(uint16_t(d), t.defs[d]);
+			if (d < t.variants.size()) {
+				for (const sw::WeaponSimDef &v : t.variants[d]) {
+					check(uint16_t(d), v);
+				}
+			}
+		}
+		std::printf("weapon templates: %zu vehicle hits rated, %zu variants with a projectile property of their own\n",
+				rated, own_property);
+		CHECK(own_property > 0u);
 	}
 
 	TEST_CASE("weapon templates: MP_007 ConquestSmall0: choseWeapon over an engineer's kit picks the rifle at a "

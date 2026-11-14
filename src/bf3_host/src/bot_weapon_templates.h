@@ -6,6 +6,7 @@
 #include "bf3/core/result.h"
 #include "bf3/sim/weapons/gadgets.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
+#include "vehicles/vehicle_hits.h"
 
 #include <cstdint>
 #include <map>
@@ -26,7 +27,7 @@ struct LevelVehicles;
 struct LevelVehicleKind;
 
 inline constexpr const char *kAiWeaponsCacheKind = "ai-weapons";
-inline constexpr uint32_t kAiWeaponsConverterVersion = 1;
+inline constexpr uint32_t kAiWeaponsConverterVersion = 2;
 inline constexpr float kStrengthSeconds = 60.0f;
 
 using WeaponTemplates = ai::WeaponTemplateMap;
@@ -43,6 +44,7 @@ struct TemplateSource {
 	const GunplayLevel *gunplay = nullptr;
 	std::shared_ptr<const sim::weapons::WeaponTable> table;
 	std::vector<StrengthTarget> targets;
+	VehicleDamageSource vehicle_damage;
 	uint16_t defib_def = sim::weapons::kNoWeapon;
 	float primary_magazines = 0.0f;
 };

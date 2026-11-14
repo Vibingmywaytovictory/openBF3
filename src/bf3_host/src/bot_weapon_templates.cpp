@@ -7,7 +7,6 @@
 #include "bf3/host/level_vehicles.h"
 #include "bf3/sim/vehicles/vehicle_damage.h"
 #include "bf3/sim/weapons/surface_materials.h"
-#include "vehicles/vehicle_hits.h"
 
 #include <algorithm>
 #include <array>
@@ -22,21 +21,6 @@ namespace {
 namespace sw = sim::weapons;
 
 constexpr std::string_view kScriptBreak = "\n\n";
-
-float relation_damage(float p_base, const core::gameplay::DamageRelation &p_relation) {
-	return p_relation.present ? sim::vehicles::material_relation_damage(
-										p_base, p_relation.protection_multiplier, p_relation.protection_threshold)
-							  : p_base;
-}
-
-std::optional<uint8_t> blast_property(const GunplayLevel &p_gunplay, uint16_t p_def) {
-	if (p_def >= p_gunplay.defs.size() || p_gunplay.materials == nullptr ||
-			!p_gunplay.defs[p_def].projectile.explosion.material.present) {
-		return std::nullopt;
-	}
-	const sw::SurfacePair pair = p_gunplay.materials->pair_of(p_gunplay.defs[p_def].projectile.explosion.material);
-	return pair.resolved ? std::optional<uint8_t>(pair.property) : std::nullopt;
-}
 
 float direct_damage(const sw::ProjectileSimDef &p_projectile) {
 	if (!sw::fires_round(p_projectile)) {
@@ -84,12 +68,12 @@ float kills_per_minute(const TemplateSource &p_source, uint16_t p_def, const sw:
 	return kStrengthSeconds * rounds_per_second(p_weapon) * share;
 }
 
-float repairs_per_minute(
-		const TemplateSource &, uint16_t, const sw::WeaponSimDef &p_weapon, const StrengthTarget &p_target) {
+float repairs_per_minute(const TemplateSource &p_source, uint16_t p_def, const sw::WeaponSimDef &p_weapon,
+		const StrengthTarget &p_target) {
 	if (p_target.soldier || !(p_target.health > 0.0f)) {
 		return 0.0f;
 	}
-	return kStrengthSeconds * rounds_per_second(p_weapon) * p_weapon.projectile.start_damage / p_target.health;
+	return kStrengthSeconds * rounds_per_second(p_weapon) * p_source.vehicle_damage.repair(p_def) / p_target.health;
 }
 
 }
@@ -148,6 +132,7 @@ core::Result<TemplateSource> template_source(const GunplayLevel &p_gunplay, cons
 	out.table = *table;
 	out.defib_def = p_gunplay.kits.defib_def;
 	out.primary_magazines = primary_magazines(p_gunplay, *out.table);
+	out.vehicle_damage.configure(*out.table, p_gunplay.defs);
 	const sw::SurfaceMaterialTable &materials = *p_gunplay.materials;
 	StrengthTarget soldier;
 	soldier.soldier = true;
@@ -174,13 +159,17 @@ core::Result<TemplateSource> template_source(const GunplayLevel &p_gunplay, cons
 float hit_damage(const TemplateSource &p_source, uint16_t p_def, const sw::WeaponSimDef &p_weapon,
 		const StrengthTarget &p_target) {
 	const sw::ProjectileSimDef &p = p_weapon.projectile;
-	const sw::SurfaceMaterialTable &materials = *p_source.gunplay->materials;
 	const sw::HitZone chest = sw::HitZone::Chest;
 	float direct = direct_damage(p);
 	if (p_target.soldier) {
 		direct *= p.zone[size_t(chest)].protection_multiplier;
 	} else {
-		direct = relation_damage(direct, materials.relation(p.property, p_target.property));
+		sw::DamageEvent e;
+		e.def = p_def;
+		e.kind = p.kind == core::gameplay::ProjectileKind::Missile || p.explosion.present ? sw::DamageKind::Direct
+																						  : sw::DamageKind::Bullet;
+		e.base = direct;
+		direct = p_source.vehicle_damage.amount(e, p_target.property);
 	}
 	direct *= float(std::max(p_weapon.pellets, 1));
 	float blast = 0.0f;
@@ -190,9 +179,11 @@ float hit_damage(const TemplateSource &p_source, uint16_t p_def, const sw::Weapo
 			blast = sim::vehicles::material_relation_damage(
 					x.blast_damage, x.zone_multiplier[size_t(chest)], x.zone_threshold[size_t(chest)]);
 		} else {
-			const std::optional<uint8_t> property = blast_property(*p_source.gunplay, p_def);
-			blast = property ? relation_damage(x.blast_damage, materials.relation(*property, p_target.property))
-							 : x.blast_damage;
+			sw::DamageEvent e;
+			e.def = p_def;
+			e.kind = sw::DamageKind::Blast;
+			e.base = x.blast_damage;
+			blast = p_source.vehicle_damage.amount(e, p_target.property);
 		}
 	}
 	const float damage = direct + blast;
