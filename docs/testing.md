@@ -57,8 +57,10 @@ functional.
 
 ## 2. Parallel-safe by default
 
-* Scratch goes to per-PID or `string(RANDOM)` roots, preferably under `${CMAKE_BINARY_DIR}/scratch`. Outputs go to
-  `${CMAKE_BINARY_DIR}/shots/<row>`, never a fixed `%TEMP%` name; the documented ui1 shots path is the one exception.
+* Scratch folders come only from the test scratch helper (`ScratchDir` or `process_scratch` in `tests/test_scratch.h`,
+  `openbf3_scratch_dir` in `tests/test_scratch.cmake`): `%TEMP%\openbf3-tests\<name>-<pid>-<n>`, removed at scope or
+  process end and swept once its owner has died; `test.scratch.paths` fails any other temp path in `tests/` or `tools/`.
+  Outputs go to `${CMAKE_BINARY_DIR}/shots/<row>`, never a fixed `%TEMP%` name; the documented ui1 shots path is the one exception.
 * Ports are 0. The install is read only through the readers.
 * Godot rows pass their own `--bf3-cache` root, never the shared `user://bf3cache`, and `godot_run` gives every run
   a scratch `--settings-file`; a run naming `user://settings.cfg` fails. A row seeds that file with `godot_run`'s

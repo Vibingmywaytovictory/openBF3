@@ -1560,6 +1560,8 @@ target_compile_definitions(test_scratch_tests PRIVATE "OPENBF3_CMAKE_COMMAND=\"$
 add_test(NAME test.scratch.unit COMMAND test_scratch_tests --test-suite=test-scratch)
 set_tests_properties(test.scratch.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 openbf3_proc_row(test.scratch.procs test_scratch_tests TIMEOUT 120 ARGS --test-suite=test-scratch-procs)
+add_test(NAME test.scratch.paths COMMAND ${CMAKE_COMMAND} "-DSOURCE_DIR=${CMAKE_SOURCE_DIR}" -P ${CMAKE_CURRENT_SOURCE_DIR}/test_scratch_paths.cmake)
+set_tests_properties(test.scratch.paths PROPERTIES TIMEOUT 60 LABELS "unit")
 
 openbf3_check_rows()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
