@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/ai/knowledge/ai_object.h"
 #include "bf3/ai/main/ai_settings.h"
 #include "bf3/core/result.h"
 
@@ -35,10 +36,39 @@ struct VehicleBehaviour {
 	bool operator==(const VehicleBehaviour &) const = default;
 };
 
+enum class CombatStrengthType : uint8_t {
+	Infantry = 0,
+	LightArmour = 1,
+	HeavyArmour = 2,
+	NavalArmour = 3,
+	Helicopter = 4,
+	AirPlane = 5
+};
+inline constexpr size_t kCombatStrengthTypeCount = 6;
+
 struct WeaponTemplate {
+	bool indirect = false;
+	bool is_thrown = false;
+	bool use_aimer_only = false;
+	int32_t fire_rate = -1;
+	float drag = 0.0f;
+	float min_range = 0.0f;
+	float max_range = 0.0f;
+	float explosion_radius = 0.0f;
+	float sound_sphere_radius = 50.0f;
+	float exit_velocity = 0.0f;
 	float deviation = 14.0f;
 	float deviation_correction_time = 15.0f;
 	float deviation_correction_rate = 0.06666667f;
+	std::array<int32_t, kCombatStrengthTypeCount> strengths{};
+	SoldierPose firing_pose = SoldierPose::Standing;
+	float allowed_deviation = 0.5f;
+	float optimal_range_percentage = 0.35f;
+	bool fires_through_transparent = true;
+	PlayerInputMap weapon_activate = PlayerInputMap::None;
+	PlayerInputMap weapon_fire = PlayerInputMap::None;
+
+	int32_t strength(CombatStrengthType p_type) const { return strengths[size_t(p_type)]; }
 
 	bool operator==(const WeaponTemplate &) const = default;
 };
@@ -95,6 +125,7 @@ core::Status run_ai_script(std::string_view p_text, std::string_view p_name, AiC
 core::Status run_ai_script_file(const std::filesystem::path &p_path, AiConfig &r_config);
 std::vector<StrategicAreaDef> strategic_areas_by_name(std::span<const StrategicAreaDef> p_areas);
 std::string format_strategic_areas(std::span<const StrategicAreaDef> p_areas);
+std::string format_weapon_template(std::string_view p_name, const WeaponTemplate &p_template);
 core::Result<AiConfig> load_level_ai_config(
 		const std::filesystem::path &p_root, std::string_view p_level, std::string_view p_derived_areas);
 core::Status apply_behaviour_weights(const AiConfig &p_config, BehaviourTuning &r_tuning);

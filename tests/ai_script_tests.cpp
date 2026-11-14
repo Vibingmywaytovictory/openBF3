@@ -294,6 +294,96 @@ TEST_SUITE("ai-script") {
 		CHECK(&find_weapon_template(c.weapon_templates, "Rifle") == &find_weapon_template({}, "Gun"));
 	}
 
+	TEST_CASE("weaponTemplate: every console binding of the pin with its constructor defaults, the strength type "
+			  "and pose names, the inputs the AI reads, and the formatter's round trip") {
+		const WeaponTemplate def;
+		CHECK_FALSE(def.indirect);
+		CHECK_FALSE(def.is_thrown);
+		CHECK_FALSE(def.use_aimer_only);
+		CHECK(def.fire_rate == -1);
+		CHECK(def.drag == 0.0f);
+		CHECK(def.min_range == 0.0f);
+		CHECK(def.max_range == 0.0f);
+		CHECK(def.explosion_radius == 0.0f);
+		CHECK(def.sound_sphere_radius == 50.0f);
+		CHECK(def.exit_velocity == 0.0f);
+		CHECK(def.strengths == std::array<int32_t, kCombatStrengthTypeCount>{});
+		CHECK(def.firing_pose == SoldierPose::Standing);
+		CHECK(def.allowed_deviation == 0.5f);
+		CHECK(def.optimal_range_percentage == 0.35f);
+		CHECK(def.fires_through_transparent);
+		CHECK(def.weapon_activate == PlayerInputMap::None);
+		CHECK(def.weapon_fire == PlayerInputMap::None);
+
+		AiConfig c;
+		REQUIRE(run_ai_script("weaponTemplate.create Rpg\n"
+							  "weaponTemplate.indirect 1\nweaponTemplate.useAimerOnly 1\nweaponTemplate.drag 0.25\n"
+							  "weaponTemplate.minRange 12\nweaponTemplate.maxRange 75\n"
+							  "weaponTemplate.weaponActivate PIWeaponSelect5\nweaponTemplate.weaponFire PIFire\n"
+							  "weaponTemplate.isThrown 1\nweaponTemplate.soundSphereRadius 33\n"
+							  "weaponTemplate.exitVelocity 310\nweaponTemplate.getStrength Infantry\n"
+							  "weaponTemplate.setStrength Infantery 3\nweaponTemplate.setStrength CSTLightArmour 6\n"
+							  "weaponTemplate.setStrength heavyarmour 5\nweaponTemplate.setStrength 3 -2\n"
+							  "weaponTemplate.setStrength Helicopter 9\nweaponTemplate.setStrength AirPlane 7\n"
+							  "weaponTemplate.fireRate 45\nweaponTemplate.firingPose SPLying\n"
+							  "weaponTemplate.optimalRangePercentage 40\nweaponTemplate.explosionRadius 3.5\n"
+							  "weaponTemplate.allowedDeviation 1.25\nweaponTemplate.firesThroughTransparent 0\n"
+							  "weaponTemplate.active Rpg\nweaponTemplate.DEVIATION 3\n",
+				"w.ai", c)
+						.ok());
+		const WeaponTemplate &w = c.weapon_template("Rpg");
+		CHECK(w.indirect);
+		CHECK(w.use_aimer_only);
+		CHECK(w.drag == 0.25f);
+		CHECK(w.min_range == 12.0f);
+		CHECK(w.max_range == 75.0f);
+		CHECK(w.weapon_activate == PlayerInputMap::WeaponSelect5);
+		CHECK(w.weapon_fire == PlayerInputMap::Fire);
+		CHECK(w.is_thrown);
+		CHECK(w.sound_sphere_radius == 33.0f);
+		CHECK(w.exit_velocity == 310.0f);
+		CHECK(w.strengths == std::array<int32_t, kCombatStrengthTypeCount>{ 3, 6, 5, -2, 9, 7 });
+		CHECK(w.strength(CombatStrengthType::HeavyArmour) == 5);
+		CHECK(w.fire_rate == 45);
+		CHECK(w.firing_pose == SoldierPose::Lying);
+		CHECK(w.optimal_range_percentage == 40.0f);
+		CHECK(w.explosion_radius == 3.5f);
+		CHECK(w.allowed_deviation == 1.25f);
+		CHECK_FALSE(w.fires_through_transparent);
+		CHECK(w.deviation == 3.0f);
+
+		AiConfig odd;
+		REQUIRE(run_ai_script("weaponTemplate.create Odd\nweaponTemplate.firingPose Kneeling\n"
+							  "weaponTemplate.weaponFire PINone\n",
+				"odd.ai", odd)
+						.ok());
+		CHECK(odd.weapon_template("Odd").firing_pose == SoldierPose::NotAvailable);
+		CHECK(odd.weapon_template("Odd").weapon_fire == PlayerInputMap::None);
+
+		const AiConfig before = c;
+		for (const char *bad : { "weaponTemplate.setStrength All 3\n", "weaponTemplate.setStrength 6 3\n",
+					 "weaponTemplate.setStrength Infantry 5.0\n", "weaponTemplate.getStrength Tank\n",
+					 "weaponTemplate.setSoundSphereRadius 33\n", "weaponTemplate.setFiringPose Lying\n",
+					 "weaponTemplate.weaponFire PIBogus\n", "weaponTemplate.weaponFire 8\n",
+					 "weaponTemplate.isThrown 2\n" }) {
+			AiConfig t = c;
+			CHECK_MESSAGE(!run_ai_script(bad, "bad.ai", t).ok(), bad);
+			CHECK(t == before);
+		}
+		AiConfig none;
+		CHECK_FALSE(run_ai_script("weaponTemplate.minRange 3\n", "none.ai", none).ok());
+
+		const std::string text = format_weapon_template("Rpg", w);
+		CHECK(text.rfind("weaponTemplate.create Rpg\n", 0) == 0);
+		CHECK(text.find("weaponTemplate.setStrength Infantry 3\n") != std::string::npos);
+		CHECK(text.find("weaponTemplate.firingPose Lying\n") != std::string::npos);
+		CHECK(text.find("weaponTemplate.weaponFire PIFire\n") != std::string::npos);
+		AiConfig again;
+		REQUIRE(run_ai_script(text, "again.ai", again).ok());
+		CHECK(again.weapon_template("Rpg") == w);
+		CHECK(format_weapon_template("Plain", WeaponTemplate{}) == "weaponTemplate.create Plain\n");
+	}
+
 	TEST_CASE("bot skill as the reconstruction reads it: EntryTrigger's skill, WeaponObject's deviation, "
 			  "BBPFireInfantery's first-shot delay and its fresh plan") {
 		CHECK(trigger_skill(0.75f, {}, true, false) == doctest::Approx(0.875f));

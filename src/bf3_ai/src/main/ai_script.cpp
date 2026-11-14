@@ -111,6 +111,109 @@ core::Status no_weapon_template() {
 	return core::make_error("no active weapon template (weaponTemplate.create or weaponTemplate.active)");
 }
 
+constexpr std::array<std::string_view, kCombatStrengthTypeCount> kStrengthTypeNames{ "Infantry", "LightArmour",
+	"HeavyArmour", "NavalArmour", "Helicopter", "AirPlane" };
+
+constexpr std::array<std::string_view, 5> kSoldierPoseNames{ "NotAvailable", "Standing", "Crouching", "Lying",
+	"Swimming" };
+
+constexpr std::array<std::pair<std::string_view, PlayerInputMap>, 33> kPlayerInputNames{ {
+		{ "PIYaw", PlayerInputMap::Yaw },
+		{ "PIPitch", PlayerInputMap::Pitch },
+		{ "PIRoll", PlayerInputMap::Roll },
+		{ "PIThrottle", PlayerInputMap::Throttle },
+		{ "PIMouseLookX", PlayerInputMap::MouseLookX },
+		{ "PIMouseLookY", PlayerInputMap::MouseLookY },
+		{ "PIFire", PlayerInputMap::Fire },
+		{ "PIAction", PlayerInputMap::Action },
+		{ "PIUse", PlayerInputMap::Use },
+		{ "PIMouseLook", PlayerInputMap::MouseLook },
+		{ "PISprint", PlayerInputMap::Sprint },
+		{ "PIWeaponSelect1", PlayerInputMap::WeaponSelect1 },
+		{ "PIWeaponSelect2", PlayerInputMap::WeaponSelect2 },
+		{ "PIWeaponSelect3", PlayerInputMap::WeaponSelect3 },
+		{ "PIWeaponSelect4", PlayerInputMap::WeaponSelect4 },
+		{ "PIWeaponSelect5", PlayerInputMap::WeaponSelect5 },
+		{ "PIWeaponSelect6", PlayerInputMap::WeaponSelect6 },
+		{ "PIWeaponSelect7", PlayerInputMap::WeaponSelect7 },
+		{ "PIWeaponSelect8", PlayerInputMap::WeaponSelect8 },
+		{ "PIWeaponSelect9", PlayerInputMap::WeaponSelect9 },
+		{ "PIPositionSelect1", PlayerInputMap::PositionSelect1 },
+		{ "PIPositionSelect2", PlayerInputMap::PositionSelect2 },
+		{ "PIPositionSelect3", PlayerInputMap::PositionSelect3 },
+		{ "PIPositionSelect4", PlayerInputMap::PositionSelect4 },
+		{ "PIPositionSelect5", PlayerInputMap::PositionSelect5 },
+		{ "PIPositionSelect6", PlayerInputMap::PositionSelect6 },
+		{ "PIPositionSelect7", PlayerInputMap::PositionSelect7 },
+		{ "PIPositionSelect8", PlayerInputMap::PositionSelect8 },
+		{ "PIAltFire", PlayerInputMap::AltFire },
+		{ "PIReload", PlayerInputMap::Reload },
+		{ "PILie", PlayerInputMap::Lie },
+		{ "PICrouch", PlayerInputMap::Crouch },
+		{ "PIFlareFire", PlayerInputMap::FlareFire },
+} };
+
+std::string_view player_input_name(PlayerInputMap p_input) {
+	for (const auto &[name, input] : kPlayerInputNames) {
+		if (input == p_input) {
+			return name;
+		}
+	}
+	return "PINone";
+}
+
+core::Status read_strength_type(std::string_view p_arg, CombatStrengthType &r_out) {
+	for (size_t i = 0; i < kStrengthTypeNames.size(); ++i) {
+		const std::string_view name = kStrengthTypeNames[i];
+		const bool infantery = i == 0 && (p_arg == "CSTInfantery" || core::iequals_ascii(p_arg, "Infantery"));
+		if (p_arg == std::to_string(i) || p_arg == "CST" + std::string(name) || core::iequals_ascii(p_arg, name) ||
+				infantery) {
+			r_out = CombatStrengthType(i);
+			return core::Status::success();
+		}
+	}
+	return core::make_error("'" + core::shown_text(p_arg) + "' is not a combat strength type (Infantry..AirPlane)");
+}
+
+SoldierPose soldier_pose(std::string_view p_arg) {
+	for (size_t i = 0; i < kSoldierPoseNames.size(); ++i) {
+		if (p_arg == kSoldierPoseNames[i] || p_arg == "SP" + std::string(kSoldierPoseNames[i])) {
+			return SoldierPose(i);
+		}
+	}
+	return SoldierPose::NotAvailable;
+}
+
+core::Status read_player_input(std::string_view p_arg, PlayerInputMap &r_out) {
+	if (p_arg == "PINone") {
+		r_out = PlayerInputMap::None;
+		return core::Status::success();
+	}
+	for (const auto &[name, input] : kPlayerInputNames) {
+		if (p_arg == name) {
+			r_out = input;
+			return core::Status::success();
+		}
+	}
+	return core::make_error(
+			"'" + core::shown_text(p_arg) + "' is not an input the AI reads (PIFire, PIWeaponSelect1..)");
+}
+
+template <float WeaponTemplate::*Field, int Lo, int Hi> core::Status weapon_float(Args p_args, AiConfig &r_config) {
+	WeaponTemplate *w = active_weapon(r_config);
+	return w != nullptr ? read_float(p_args[0], Lo, Hi, w->*Field) : no_weapon_template();
+}
+
+template <bool WeaponTemplate::*Field> core::Status weapon_bool(Args p_args, AiConfig &r_config) {
+	WeaponTemplate *w = active_weapon(r_config);
+	return w != nullptr ? read_bool(p_args[0], w->*Field) : no_weapon_template();
+}
+
+template <PlayerInputMap WeaponTemplate::*Field> core::Status weapon_input(Args p_args, AiConfig &r_config) {
+	WeaponTemplate *w = active_weapon(r_config);
+	return w != nullptr ? read_player_input(p_args[0], w->*Field) : no_weapon_template();
+}
+
 StrategicAreaDef *find_area(AiConfig &r_config, std::string_view p_name) {
 	return const_cast<StrategicAreaDef *>(std::as_const(r_config).strategic_area(p_name));
 }
@@ -412,7 +515,60 @@ const Command kCommands[] = {
 						w->deviation_correction_time != 0.0f ? 1.0f / w->deviation_correction_time : 0.0f;
 				return core::Status::success();
 			} },
+	{ "weaponTemplate.indirect", 1, 1, weapon_bool<&WeaponTemplate::indirect> },
+	{ "weaponTemplate.useAimerOnly", 1, 1, weapon_bool<&WeaponTemplate::use_aimer_only> },
+	{ "weaponTemplate.drag", 1, 1, weapon_float<&WeaponTemplate::drag, -1000000, 1000000> },
+	{ "weaponTemplate.minRange", 1, 1, weapon_float<&WeaponTemplate::min_range, -100000, 100000> },
+	{ "weaponTemplate.maxRange", 1, 1, weapon_float<&WeaponTemplate::max_range, -100000, 100000> },
+	{ "weaponTemplate.weaponActivate", 1, 1, weapon_input<&WeaponTemplate::weapon_activate> },
+	{ "weaponTemplate.weaponFire", 1, 1, weapon_input<&WeaponTemplate::weapon_fire> },
+	{ "weaponTemplate.isThrown", 1, 1, weapon_bool<&WeaponTemplate::is_thrown> },
+	{ "weaponTemplate.soundSphereRadius", 1, 1, weapon_float<&WeaponTemplate::sound_sphere_radius, -100000, 100000> },
+	{ "weaponTemplate.exitVelocity", 1, 1, weapon_float<&WeaponTemplate::exit_velocity, -100000, 100000> },
+	{ "weaponTemplate.getStrength", 1, 1,
+			[](Args a, AiConfig &c) -> core::Status {
+				CombatStrengthType type{};
+				return active_weapon(c) != nullptr ? read_strength_type(a[0], type) : no_weapon_template();
+			} },
+	{ "weaponTemplate.setStrength", 2, 2,
+			[](Args a, AiConfig &c) -> core::Status {
+				WeaponTemplate *w = active_weapon(c);
+				if (w == nullptr) {
+					return no_weapon_template();
+				}
+				CombatStrengthType type{};
+				BF3_TRY(read_strength_type(a[0], type));
+				return read_int(a[1], std::numeric_limits<int32_t>::lowest(), std::numeric_limits<int32_t>::max(),
+						w->strengths[size_t(type)]);
+			} },
+	{ "weaponTemplate.fireRate", 1, 1,
+			[](Args a, AiConfig &c) -> core::Status {
+				WeaponTemplate *w = active_weapon(c);
+				return w != nullptr ? read_int(a[0], std::numeric_limits<int32_t>::lowest(),
+											  std::numeric_limits<int32_t>::max(), w->fire_rate)
+									: no_weapon_template();
+			} },
+	{ "weaponTemplate.firingPose", 1, 1,
+			[](Args a, AiConfig &c) -> core::Status {
+				WeaponTemplate *w = active_weapon(c);
+				if (w == nullptr) {
+					return no_weapon_template();
+				}
+				w->firing_pose = soldier_pose(a[0]);
+				return core::Status::success();
+			} },
+	{ "weaponTemplate.optimalRangePercentage", 1, 1,
+			weapon_float<&WeaponTemplate::optimal_range_percentage, -1000000, 1000000> },
+	{ "weaponTemplate.explosionRadius", 1, 1, weapon_float<&WeaponTemplate::explosion_radius, -100000, 100000> },
+	{ "weaponTemplate.allowedDeviation", 1, 1, weapon_float<&WeaponTemplate::allowed_deviation, -180, 180> },
+	{ "weaponTemplate.firesThroughTransparent", 1, 1, weapon_bool<&WeaponTemplate::fires_through_transparent> },
 };
+
+const Command *find_command(std::string_view p_name) {
+	const auto found = std::find_if(std::begin(kCommands), std::end(kCommands),
+			[&](const Command &p_c) { return core::iequals_ascii(p_c.name, p_name); });
+	return found != std::end(kCommands) ? &*found : nullptr;
+}
 
 std::vector<std::string_view> tokens(std::string_view p_line) {
 	std::vector<std::string_view> out;
@@ -492,9 +648,8 @@ core::Status run_ai_script(std::string_view p_text, std::string_view p_name, AiC
 			continue;
 		}
 		const std::string where = name + ":" + std::to_string(line_no);
-		const auto command = std::find_if(std::begin(kCommands), std::end(kCommands),
-				[&](const Command &p_c) { return core::iequals_ascii(p_c.name, words[0]); });
-		if (command == std::end(kCommands)) {
+		const Command *command = find_command(words[0]);
+		if (command == nullptr) {
 			return core::make_error(where + ": unknown command '" + core::shown_text(words[0]) + "'");
 		}
 		const Args args(words.data() + 1, words.size() - 1);
@@ -560,6 +715,56 @@ std::string format_strategic_areas(std::span<const StrategicAreaDef> p_areas) {
 		assignments += "\n";
 	}
 	return areas + assignments;
+}
+
+std::string format_weapon_template(std::string_view p_name, const WeaponTemplate &p_template) {
+	const WeaponTemplate def;
+	const WeaponTemplate &w = p_template;
+	const std::string prefix = "weaponTemplate.";
+	std::string out = prefix + "create " + std::string(p_name) + "\n";
+	const auto real = [&](std::string_view p_field, float p_value, float p_default) {
+		if (p_value != p_default) {
+			out += prefix + std::string(p_field) + " " + core::float_text(p_value) + "\n";
+		}
+	};
+	const auto flag = [&](std::string_view p_field, bool p_value, bool p_default) {
+		if (p_value != p_default) {
+			out += prefix + std::string(p_field) + (p_value ? " 1\n" : " 0\n");
+		}
+	};
+	real("deviation", w.deviation, def.deviation);
+	real("deviationCorrectionTime", w.deviation_correction_time, def.deviation_correction_time);
+	flag("indirect", w.indirect, def.indirect);
+	flag("useAimerOnly", w.use_aimer_only, def.use_aimer_only);
+	real("drag", w.drag, def.drag);
+	real("minRange", w.min_range, def.min_range);
+	real("maxRange", w.max_range, def.max_range);
+	if (w.weapon_activate != def.weapon_activate) {
+		out += prefix + "weaponActivate " + std::string(player_input_name(w.weapon_activate)) + "\n";
+	}
+	if (w.weapon_fire != def.weapon_fire) {
+		out += prefix + "weaponFire " + std::string(player_input_name(w.weapon_fire)) + "\n";
+	}
+	flag("isThrown", w.is_thrown, def.is_thrown);
+	real("soundSphereRadius", w.sound_sphere_radius, def.sound_sphere_radius);
+	real("exitVelocity", w.exit_velocity, def.exit_velocity);
+	for (size_t i = 0; i < kCombatStrengthTypeCount; ++i) {
+		if (w.strengths[i] != def.strengths[i]) {
+			out += prefix + "setStrength " + std::string(kStrengthTypeNames[i]) + " " + std::to_string(w.strengths[i]) +
+					"\n";
+		}
+	}
+	if (w.fire_rate != def.fire_rate) {
+		out += prefix + "fireRate " + std::to_string(w.fire_rate) + "\n";
+	}
+	if (w.firing_pose != def.firing_pose) {
+		out += prefix + "firingPose " + std::string(kSoldierPoseNames[size_t(w.firing_pose)]) + "\n";
+	}
+	real("optimalRangePercentage", w.optimal_range_percentage, def.optimal_range_percentage);
+	real("explosionRadius", w.explosion_radius, def.explosion_radius);
+	real("allowedDeviation", w.allowed_deviation, def.allowed_deviation);
+	flag("firesThroughTransparent", w.fires_through_transparent, def.fires_through_transparent);
+	return out;
 }
 
 core::Result<AiConfig> load_level_ai_config(
