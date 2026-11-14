@@ -72,6 +72,7 @@ uint64_t gadget_defs_hash(std::span<const sw::GadgetDef> p_gadgets, std::span<co
 		for (const float v : g.painter.origin) {
 			core::fnv1a_value(h, v);
 		}
+		core::fnv1a_value(h, g.painter.always_active);
 		core::fnv1a_value(h, g.sweep.radius);
 		core::fnv1a_value(h, g.sweep.interval);
 		core::fnv1a_value(h, g.sweep.speed_threshold);

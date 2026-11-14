@@ -71,6 +71,7 @@ struct LaserPainterDef {
 	LockingControllerSimDef controller;
 	SimTime painted_time = 0;
 	Vec3 origin{};
+	bool always_active = false;
 
 	bool operator==(const LaserPainterDef &) const = default;
 };

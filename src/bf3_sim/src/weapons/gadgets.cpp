@@ -197,6 +197,10 @@ core::Status read_laser_painter(const core::EbxResolver &p_db, std::string_view 
 	if (!sim->painter || !sim->primary.present) {
 		return gadget_error(p_weapon, "the LaserPainterData has no LockingController");
 	}
+	const std::optional<bool> always_active = bool_of(p_painter.data(), "IsAlwaysActive");
+	if (!always_active) {
+		return gadget_error(p_weapon, "the LaserPainterData has no IsAlwaysActive");
+	}
 	core::Result<Vec3> origin = painter_origin(p_db, p_weapon, p_vehicle);
 	if (!origin) {
 		return origin.error();
@@ -205,6 +209,7 @@ core::Status read_laser_painter(const core::EbxResolver &p_db, std::string_view 
 	r_g.painter.controller = sim->primary;
 	r_g.painter.painted_time = sim->painted_time;
 	r_g.painter.origin = *origin;
+	r_g.painter.always_active = *always_active;
 	return core::Status::success();
 }
 
@@ -913,7 +918,8 @@ void LaserPainters::step(std::span<const GadgetDef> p_defs, std::span<const Depl
 		return std::none_of(p_live.begin(), p_live.end(), [&](const Deployable &p_l) { return p_l.id == p_d.id; });
 	});
 	for (const Deployable &d : p_live) {
-		if (d.gadget >= p_defs.size() || p_defs[d.gadget].kind != GadgetKind::LaserDesignator || !d.resting) {
+		if (d.gadget >= p_defs.size() || p_defs[d.gadget].kind != GadgetKind::LaserDesignator || !d.resting ||
+				!p_defs[d.gadget].painter.always_active) {
 			continue;
 		}
 		const LaserPainterDef &painter = p_defs[d.gadget].painter;

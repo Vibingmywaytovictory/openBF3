@@ -1034,6 +1034,7 @@ TEST_SUITE("gadgets-unit") {
 		g.painter.controller.acceptance_angle_deg = 15.0f;
 		g.painter.painted_time = seconds_to_units(0.5);
 		g.painter.origin = Vec3{ 0.0f, 0.5f, 0.0f };
+		g.painter.always_active = true;
 		const std::vector<GadgetDef> defs{ g };
 		Deployable d;
 		d.id = 11;
@@ -1107,6 +1108,42 @@ TEST_SUITE("gadgets-unit") {
 		CHECK(painters.painted().empty());
 		painters.step(defs, std::vector<Deployable>{}, none, nullptr, tick_end(held + 301));
 		CHECK(painters.lock_of(11) == nullptr);
+	}
+
+	TEST_CASE("paint: a placed laser designator whose LaserPainterData is not IsAlwaysActive never locks or paints") {
+		GadgetDef g;
+		g.weapon = "operated";
+		g.kind = GadgetKind::LaserDesignator;
+		g.def = 6;
+		g.painter.controller = lock_controller(2.0, 1.0, 0.5, 0.06);
+		g.painter.controller.acceptance_angle_deg = 15.0f;
+		g.painter.painted_time = seconds_to_units(0.5);
+		g.painter.always_active = false;
+		const std::vector<GadgetDef> defs{ g };
+		Deployable d;
+		d.id = 11;
+		d.def = 6;
+		d.team = 1;
+		d.resting = true;
+		d.facing = Vec3{ 0.0f, 0.0f, 1.0f };
+		const std::vector<LockCandidate> ahead{ candidate_at(7, Vec3{ 0.0f, 0.0f, 50.0f }) };
+		LaserPainters painters;
+		uint32_t painted_ticks = 0;
+		for (Tick t = 1; t <= 600; ++t) {
+			painters.step(defs, std::vector<Deployable>{ d }, ahead, nullptr, tick_end(t));
+			painted_ticks += painters.painted(7, tick_end(t)) ? 1u : 0u;
+		}
+		CHECK(painted_ticks == 0u);
+		CHECK(painters.lock_of(11) == nullptr);
+		CHECK(painters.painted().empty());
+		std::vector<GadgetDef> active = defs;
+		active.front().painter.always_active = true;
+		Tick painted_at = 0;
+		for (Tick t = 601; t <= 1200 && painted_at == 0; ++t) {
+			painters.step(active, std::vector<Deployable>{ d }, ahead, nullptr, tick_end(t));
+			painted_at = painters.painted(7, tick_end(t)) ? t : 0;
+		}
+		CHECK(painted_at > 600u);
 	}
 }
 

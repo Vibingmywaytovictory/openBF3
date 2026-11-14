@@ -2601,6 +2601,7 @@ TEST_SUITE("host-gunplay-gadgets") {
 		CHECK(laser.lock_on_empty_vehicles);
 		CHECK(laser.visible_only);
 		CHECK(soflam->painter.painted_time == sw::seconds_to_units(0.5));
+		CHECK(soflam->painter.always_active);
 		std::printf("soflam: laser %.3f %.3f %.3f m from the placed origin\n", double(soflam->painter.origin[0]),
 				double(soflam->painter.origin[1]), double(soflam->painter.origin[2]));
 		CHECK(soflam->painter.origin[1] > 0.4f);
