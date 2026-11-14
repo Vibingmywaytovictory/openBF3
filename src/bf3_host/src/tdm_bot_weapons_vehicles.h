@@ -52,6 +52,8 @@ float weapon_range(const TdmShared &p_shared, const BotArms &p_arms, uint8_t p_s
 std::array<ai::WeaponChoice, sim::weapons::kMaxWeaponSlots> template_choices(
 		const TdmShared &p_shared, const BotArms &p_arms, ai::CombatStrengthType p_type);
 float hull_surface(const sim::vehicles::VehicleTarget &p_vehicle, const sim::Vec3 &p_from, sim::Vec3 &r_near);
+std::array<ai::WeaponChoice, sim::weapons::kMaxWeaponSlots> firing_choices(
+		const TdmShared &p_shared, const BotArms &p_arms, ai::CombatStrengthType p_type, bool p_vehicle);
 std::optional<uint8_t> defib_slot(const TdmShared &p_shared, const BotArms &p_arms);
 
 struct SoldierWeapon {

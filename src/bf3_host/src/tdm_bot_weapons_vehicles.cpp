@@ -126,6 +126,19 @@ sim::Vec3 beside_hull_point(const VehicleAim &p_aim, const sim::Vec3 &p_eye, con
 	return { p_aim.near_point[0] + dx / len * out, p_feet[1], p_aim.near_point[2] + dz / len * out };
 }
 
+std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> firing_choices(
+		const TdmShared &p_shared, const BotArms &p_arms, ai::CombatStrengthType p_type, bool p_vehicle) {
+	std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> out = template_choices(p_shared, p_arms, p_type);
+	const Gunplay *g = p_shared.host.gunplay;
+	for (uint8_t s = 0; s < sw::kMaxWeaponSlots && g != nullptr; ++s) {
+		if (p_arms.def(s) != nullptr &&
+				!fires_at(g->level(), slot_def(p_arms, s), slot_template(p_shared, p_arms, s), p_vehicle)) {
+			out[s].strength = 0;
+		}
+	}
+	return out;
+}
+
 std::optional<uint8_t> defib_slot(const TdmShared &p_shared, const BotArms &p_arms) {
 	const int s = ai::chose_weapon(
 			template_choices(p_shared, p_arms, ai::CombatStrengthType::Infantry), -1, 0.0f, false, false, true, false);
@@ -138,7 +151,7 @@ std::optional<SoldierWeapon> soldier_weapon(const TdmShared &p_shared, const Bot
 		return std::nullopt;
 	}
 	const std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> choices =
-			template_choices(p_shared, p_arms, ai::CombatStrengthType::Infantry);
+			firing_choices(p_shared, p_arms, ai::CombatStrengthType::Infantry, false);
 	const int w = ai::chose_weapon(choices, int(p_arms.weapons()->active), p_distance, false, false, false, false);
 	if (w < 0) {
 		return std::nullopt;
@@ -151,8 +164,7 @@ std::optional<SoldierWeapon> soldier_weapon(const TdmShared &p_shared, const Bot
 		return SoldierWeapon{ s, Trigger::Knife };
 	}
 	const sw::WeaponSimDef *d = p_arms.def(s);
-	if (choices[s].type != ai::WeaponType::Default || slot_template(p_shared, p_arms, s).is_thrown ||
-			gadget_def(g->level(), slot_def(p_arms, s)) != nullptr || d == nullptr || !sw::fires_round(d->projectile)) {
+	if (choices[s].type != ai::WeaponType::Default || d == nullptr || !sw::fires_round(d->projectile)) {
 		return std::nullopt;
 	}
 	return SoldierWeapon{ s, Trigger::Launcher };
@@ -207,7 +219,7 @@ bool BotVehicleWeapons::sense(TdmShared &r_shared, const BotArms &p_arms, const 
 		ai::WeaponType type = previous.type;
 		if (!placing) {
 			const std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> choices =
-					template_choices(sh, p_arms, vehicle_type(sh, hull_property(v)));
+					firing_choices(sh, p_arms, vehicle_type(sh, hull_property(v)), true);
 			const int current = held && previous.weapon_slot < sw::kMaxWeaponSlots ? int(previous.weapon_slot) : -1;
 			w = ai::chose_weapon(choices, current, d, false, false, false, false);
 			if (w < 0) {

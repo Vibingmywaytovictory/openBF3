@@ -83,6 +83,7 @@ private:
 	std::vector<std::pair<uint8_t, ai::CombatStrengthType>> vehicle_types_;
 };
 
+bool fires_at(const GunplayLevel &p_gunplay, uint16_t p_def, const ai::WeaponTemplate &p_template, bool p_vehicle);
 ai::WeaponChoice template_choice(const ai::WeaponTemplate &p_template, ai::CombatStrengthType p_type,
 		ai::WeaponType p_weapon_type, int32_t p_ammo);
 }

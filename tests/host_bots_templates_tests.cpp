@@ -38,6 +38,16 @@ const ai::WeaponTemplate &named(const host::WeaponTemplates &p_templates, std::s
 	return found->second;
 }
 
+uint16_t def_of(const host::GunplayLevel &p_level, std::string_view p_variant) {
+	for (size_t d = 0; d < p_level.defs.size(); ++d) {
+		if (p_level.defs[d].variant == p_variant) {
+			return uint16_t(d);
+		}
+	}
+	FAIL("no def " << std::string(p_variant));
+	return sim::weapons::kNoWeapon;
+}
+
 std::filesystem::path scratch_dir(std::string_view p_tag) {
 	return std::filesystem::temp_directory_path() /
 			("openbf3-" + std::string(p_tag) + "-" +
@@ -182,27 +192,19 @@ TEST_SUITE("host-bots-templates") {
 		}
 		const host::GunplayLevel &gl = *level->shared->gunplay;
 		const host::WeaponTemplates &loaded = level->bots->ai_weapons;
-		const auto def_of = [&](std::string_view p_variant) {
-			for (size_t d = 0; d < gl.defs.size(); ++d) {
-				if (gl.defs[d].variant == p_variant) {
-					return uint16_t(d);
-				}
-			}
-			FAIL("no def " << std::string(p_variant));
-			return sim::weapons::kNoWeapon;
-		};
 		const std::array<std::string_view, 7> kit{ kAk, "weapons/m9/u_m9", kRpg,
 			"weapons/gadgets/repairtool/u_repairtool", kGrenade, "weapons/knife/u_knife",
 			"weapons/gadgets/medicbag/u_medkit" };
 		const auto choices = [&](ai::CombatStrengthType p_type) {
 			std::array<ai::WeaponChoice, 8> out{};
 			for (size_t s = 0; s < kit.size(); ++s) {
-				const uint16_t d = def_of(kit[s]);
+				const uint16_t d = def_of(gl, kit[s]);
 				out[s] = host::template_choice(
 						named(loaded, kit[s]), p_type, host::weapon_type_of(gl, gl.kits.defib_def, d), 5);
 			}
 			out[7] = host::template_choice(named(loaded, "weapons/gadgets/defibrillator/u_defib"), p_type,
-					host::weapon_type_of(gl, gl.kits.defib_def, def_of("weapons/gadgets/defibrillator/u_defib")), 1);
+					host::weapon_type_of(gl, gl.kits.defib_def, def_of(gl, "weapons/gadgets/defibrillator/u_defib")),
+					1);
 			return out;
 		};
 		using ai::CombatStrengthType;
@@ -298,5 +300,42 @@ TEST_SUITE("host-bots-templates") {
 			REQUIRE(pair.resolved);
 			CHECK((*generated)->vehicle_type(pair.property) == host::vehicle_strength_type(k));
 		}
+	}
+
+	TEST_CASE("weapon templates: MP_007 ConquestSmall0: a bot fires at a vehicle only what it can fire (a gun, a "
+			  "launcher, the C4) and at a soldier a gun or launcher; a thrown grenade or another pack is left out, "
+			  "so an engineer 25 m from a jeep takes the RPG-7, not the grenade the templates rate higher") {
+		tt::TdmLevel *level = tt::load_conquest_bots_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const host::WeaponTemplates &loaded = level->bots->ai_weapons;
+		const auto fires = [&](std::string_view p_variant, bool p_vehicle) {
+			return host::fires_at(gl, def_of(gl, p_variant), named(loaded, p_variant), p_vehicle);
+		};
+		for (const bool vehicle : { false, true }) {
+			CHECK(fires(kAk, vehicle));
+			CHECK(fires(kRpg, vehicle));
+			CHECK(fires(kM320, vehicle));
+			CHECK_FALSE(fires(kGrenade, vehicle));
+			CHECK_FALSE(fires("weapons/gadgets/claymore/u_claymore", vehicle));
+			CHECK_FALSE(fires("weapons/gadgets/m15/u_m15", vehicle));
+			CHECK_FALSE(fires("weapons/gadgets/medicbag/u_medkit", vehicle));
+		}
+		CHECK(fires(kC4, true));
+		CHECK_FALSE(fires(kC4, false));
+
+		const std::array<std::string_view, 3> kit{ kAk, kRpg, kGrenade };
+		std::array<ai::WeaponChoice, 3> rated{}, fired{};
+		for (size_t s = 0; s < kit.size(); ++s) {
+			const uint16_t d = def_of(gl, kit[s]);
+			rated[s] = host::template_choice(named(loaded, kit[s]), ai::CombatStrengthType::LightArmour,
+					host::weapon_type_of(gl, gl.kits.defib_def, d), 3);
+			fired[s] = rated[s];
+			fired[s].strength = host::fires_at(gl, d, named(loaded, kit[s]), true) ? rated[s].strength : 0;
+		}
+		CHECK(ai::chose_weapon(rated, -1, 25.0f, false, false, false, false) == 2);
+		CHECK(ai::chose_weapon(fired, -1, 25.0f, false, false, false, false) == 1);
 	}
 }

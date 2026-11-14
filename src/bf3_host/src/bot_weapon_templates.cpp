@@ -418,6 +418,14 @@ ai::CombatStrengthType BotWeaponTemplates::vehicle_type(uint8_t p_property) cons
 	return ai::CombatStrengthType::LightArmour;
 }
 
+bool fires_at(const GunplayLevel &p_gunplay, uint16_t p_def, const ai::WeaponTemplate &p_template, bool p_vehicle) {
+	if (p_template.is_thrown) {
+		return false;
+	}
+	const sw::GadgetDef *g = gadget_def(p_gunplay, p_def);
+	return g == nullptr || (p_vehicle && g->kind == sw::GadgetKind::ExplosionPack && g->pack.remote_detonator);
+}
+
 ai::WeaponChoice template_choice(const ai::WeaponTemplate &p_template, ai::CombatStrengthType p_type,
 		ai::WeaponType p_weapon_type, int32_t p_ammo) {
 	ai::WeaponChoice c;
