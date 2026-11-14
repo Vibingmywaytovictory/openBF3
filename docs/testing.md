@@ -59,7 +59,8 @@ functional.
 
 * Scratch folders come only from the test scratch helper (`ScratchDir` or `process_scratch` in `tests/test_scratch.h`,
   `openbf3_scratch_dir` in `tests/test_scratch.cmake`): `%TEMP%\openbf3-tests\<name>-<pid>-<n>`, removed at scope or
-  process end and swept once its owner has died; `test.scratch.paths` fails any other temp path in `tests/` or `tools/`.
+  process end and swept once its owner has died; `test.scratch.paths` fails any other temp path in `tests/` or `tools/`,
+  and `test.scratch.after`, the cleanup of a fixture every row requires, fails a ctest run that leaves one.
   Outputs go to `${CMAKE_BINARY_DIR}/shots/<row>`, never a fixed `%TEMP%` name; the documented ui1 shots path is the one exception.
 * Ports are 0. The install is read only through the readers.
 * Godot rows pass their own `--bf3-cache` root, never the shared `user://bf3cache`, and `godot_run` gives every run

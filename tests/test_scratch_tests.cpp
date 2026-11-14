@@ -10,8 +10,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -90,9 +92,12 @@ std::vector<std::string> child_case(const char *p_case) {
 	return { "--test-suite=test-scratch-children", std::string("--test-case=") + p_case, "--no-skip" };
 }
 
+fs::path from_utf8(std::string_view p_text) {
+	return fs::path(std::u8string(p_text.begin(), p_text.end()));
+}
+
 fs::path line_path(std::string_view p_line, std::string_view p_prefix) {
-	const std::string_view text = p_line.substr(p_prefix.size());
-	return fs::path(std::u8string(text.begin(), text.end()));
+	return from_utf8(p_line.substr(p_prefix.size()));
 }
 
 std::string utf8(const fs::path &p_path) {
@@ -115,6 +120,32 @@ fs::path move_into(const fs::path &p_entry, const fs::path &p_root) {
 	const fs::path target = p_root / p_entry.filename();
 	REQUIRE(MoveFileExW(p_entry.c_str(), target.c_str(), 0));
 	return target;
+}
+
+std::vector<std::string> pass_entries(const fs::path &p_temp) {
+	std::vector<std::string> out;
+	std::error_code ec;
+	for (fs::directory_iterator it(p_temp, ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
+		const std::string name = utf8(it->path().filename());
+		if (bf3::test::is_legacy_scratch_name(name)) {
+			out.push_back(name);
+		}
+	}
+	const fs::path root = p_temp / bf3::test::kScratchRootName;
+	for (fs::directory_iterator it(root, ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
+		const std::string name = utf8(it->path().filename());
+		if (name != ".sweep.lock") {
+			out.push_back(std::string(bf3::test::kScratchRootName) + "/" + name);
+		}
+	}
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
+fs::path listing_file() {
+	const char *v = std::getenv("OPENBF3_SCRATCH_LISTING");
+	REQUIRE_MESSAGE(v != nullptr, "OPENBF3_SCRATCH_LISTING names the pass's listing file (tests/CMakeLists.txt)");
+	return from_utf8(v);
 }
 
 struct SweepHold {
@@ -319,15 +350,15 @@ TEST_SUITE("test-scratch-procs") {
 	}
 
 	TEST_CASE("a crashed process leaves its folder, which reads dead and is removed by the next sweep") {
+		ScratchDir fake("procs-crash");
+		fs::create_directories(fake.path() / "openbf3-tests");
+		SweepHold no_other_sweep;
 		ProcDriver driver(driver_config_from_env());
 		bf3::core::Result<size_t> child =
 				driver.start(driver.tool_child("crash", self_exe(), child_case("held then crash")));
 		REQUIRE_MESSAGE(child.ok(), (child.ok() ? std::string() : child.error().message));
 		const fs::path held = wait_path(driver, *child, kHeldLine);
 		REQUIRE_FALSE(held.empty());
-		ScratchDir fake("procs-crash");
-		fs::create_directories(fake.path() / "openbf3-tests");
-		SweepHold no_other_sweep;
 		const ChildEnd end = driver.finish(*child, 30s);
 		CHECK(end.exited);
 		CHECK(end.code == 3);
@@ -389,5 +420,50 @@ TEST_SUITE("test-scratch-children" * doctest::skip()) {
 	TEST_CASE("held then crash") {
 		announce_held("procs-crash");
 		TerminateProcess(GetCurrentProcess(), 3);
+	}
+}
+
+TEST_SUITE("test-scratch-pass-before") {
+	TEST_CASE("the test scratch in the temp folder before the pass") {
+		bf3::test::scratch_startup();
+		const std::vector<std::string> before = pass_entries(bf3::test::temp_dir());
+		std::ofstream out(listing_file(), std::ios::binary | std::ios::trunc);
+		REQUIRE(out.good());
+		std::printf(
+				"test scratch before the pass (%s): %zu entries\n", utf8(bf3::test::temp_dir()).c_str(), before.size());
+		for (const std::string &e : before) {
+			out << e << '\n';
+			std::printf("  %s\n", e.c_str());
+		}
+	}
+}
+
+TEST_SUITE("test-scratch-pass-after") {
+	TEST_CASE("no test scratch is left in the temp folder after the pass") {
+		std::set<std::string> before;
+		{
+			std::ifstream in(listing_file(), std::ios::binary);
+			REQUIRE_MESSAGE(in.good(), "test.scratch.before did not write the listing");
+			for (std::string line; std::getline(in, line);) {
+				before.insert(line);
+			}
+		}
+		const fs::path temp = bf3::test::temp_dir();
+		const std::vector<std::string> after = pass_entries(temp);
+		std::printf("test scratch after the pass: %zu entries (%zu before)\n", after.size(), before.size());
+		std::vector<std::string> left;
+		for (const std::string &e : after) {
+			const bool fresh = before.count(e) == 0;
+			const ScratchOwner owner = bf3::test::scratch_owner(temp / from_utf8(e));
+			const bool live = owner == ScratchOwner::Alive && e.rfind(bf3::test::kScratchRootName, 0) == 0;
+			std::printf("  %s%s\n", e.c_str(), !fresh ? "" : live ? "  (new, owner still running)" : "  (new, LEFT)");
+			if (fresh && !live) {
+				left.push_back(e);
+			}
+		}
+		for (const std::string &e : left) {
+			FAIL_CHECK("left in the temp folder by this pass: " << e);
+		}
+		RemoveDirectoryW((temp / bf3::test::kScratchRootName).c_str());
 	}
 }
