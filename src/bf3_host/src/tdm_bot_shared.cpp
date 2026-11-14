@@ -1,5 +1,7 @@
 #include "tdm_bot_shared.h"
 
+#include "bot_weapon_templates.h"
+
 #include "bf3/host/gunplay.h"
 #include "bf3/host/server_view.h"
 #include "bf3/sim/weapons/weapon_sim_def.h"
@@ -142,6 +144,14 @@ core::Result<std::shared_ptr<TdmShared>> make_tdm_shared(const TdmBrainHost &p_h
 	sh->stats = sh->config->stats.get();
 	sh->observer = sh->config->observer.get();
 	sh->walker = p_host.walker;
+	if (p_host.gunplay != nullptr) {
+		core::Result<std::shared_ptr<const BotWeaponTemplates>> weapons = BotWeaponTemplates::create(
+				p_host.gunplay->table(), p_host.gunplay->level(), sh->config->weapon_templates, p_host.vehicles.get());
+		if (!weapons) {
+			return core::error_at("tdm bots", weapons.error());
+		}
+		sh->weapons = std::move(*weapons);
+	}
 	sh->walker.objective_share = std::clamp(sh->config->hunt_share, 0.0f, 1.0f);
 	if (p_host.nav != nullptr && p_host.nav->nav != nullptr) {
 		core::Result<std::unique_ptr<BotNav>> nav = make_bot_nav(p_host.nav);

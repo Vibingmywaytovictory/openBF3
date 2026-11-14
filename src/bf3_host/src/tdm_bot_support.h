@@ -72,11 +72,10 @@ private:
 	std::optional<sim::Vec3> medkit_;
 };
 
-const sim::weapons::GadgetDef *gadget_of(const Gunplay &p_gunplay, uint16_t p_def);
 std::optional<uint8_t> ask_medic(TdmShared &r_shared, uint8_t p_slot);
 bool may_help(const ai::BehaviourTuning &p_tuning, const SupportWay &p_way, const sim::Vec3 &p_self,
 		const sim::Vec3 &p_mate, size_t p_mate_slot);
-uint8_t supply_slot(const Gunplay &p_gunplay, const BotArms &p_arms, SupplyNeed p_need);
+uint8_t supply_slot(const TdmShared &p_shared, const BotArms &p_arms, SupplyNeed p_need);
 bool needs_supply(const Gunplay &p_gunplay, const ai::BehaviourTuning &p_tuning, uint8_t p_slot,
 		const sim::SoldierState &p_state, SupplyNeed p_need);
 bool supplied(const Gunplay &p_gunplay, uint8_t p_slot, uint8_t p_team, const sim::Vec3 &p_at, SupplyNeed p_need,

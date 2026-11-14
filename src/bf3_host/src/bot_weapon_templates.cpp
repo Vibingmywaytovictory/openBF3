@@ -350,4 +350,84 @@ core::Result<CachedWeaponTemplates> cached_weapon_templates(core::Cache *p_cache
 	return out;
 }
 
+core::Result<std::shared_ptr<const BotWeaponTemplates>> BotWeaponTemplates::create(const sw::WeaponTable &p_table,
+		const GunplayLevel &p_gunplay, const WeaponTemplates &p_templates, const LevelVehicles *p_vehicles) {
+	auto out = std::make_shared<BotWeaponTemplates>();
+	std::optional<TemplateSource> source;
+	const auto resolve = [&](uint16_t p_def,
+								 const sw::WeaponSimDef &p_weapon) -> core::Result<const ai::WeaponTemplate *> {
+		const auto given = p_templates.find(p_weapon.variant);
+		if (given != p_templates.end()) {
+			return &given->second;
+		}
+		const auto kept = out->owned_.find(p_weapon.variant);
+		if (kept != out->owned_.end()) {
+			return &kept->second;
+		}
+		if (!source) {
+			core::Result<TemplateSource> made = template_source(p_gunplay, p_vehicles);
+			if (!made) {
+				return made.error();
+			}
+			source = std::move(*made);
+		}
+		return &out->owned_.emplace(p_weapon.variant, derive_weapon_template(*source, p_def, p_weapon)).first->second;
+	};
+	out->defs_.resize(std::min(p_table.defs.size(), size_t(sw::kNoWeapon)));
+	for (size_t d = 0; d < out->defs_.size(); ++d) {
+		core::Result<const ai::WeaponTemplate *> base = resolve(uint16_t(d), p_table.defs[d]);
+		if (!base) {
+			return base.error();
+		}
+		out->defs_[d].push_back(*base);
+		if (d < p_table.variants.size()) {
+			for (const sw::WeaponSimDef &v : p_table.variants[d]) {
+				core::Result<const ai::WeaponTemplate *> variant = resolve(uint16_t(d), v);
+				if (!variant) {
+					return variant.error();
+				}
+				out->defs_[d].push_back(*variant);
+			}
+		}
+	}
+	if (p_vehicles != nullptr && p_gunplay.materials != nullptr) {
+		for (const LevelVehicleKind &k : p_vehicles->kinds) {
+			const sw::SurfacePair pair = p_gunplay.materials->pair_of(k.material);
+			if (pair.resolved) {
+				out->vehicle_types_.push_back({ pair.property, vehicle_strength_type(k) });
+			}
+		}
+	}
+	return std::shared_ptr<const BotWeaponTemplates>(std::move(out));
+}
+
+const ai::WeaponTemplate &BotWeaponTemplates::of(uint16_t p_def, uint8_t p_variant) const {
+	static const ai::WeaponTemplate kNone;
+	if (p_def >= defs_.size()) {
+		return kNone;
+	}
+	const std::vector<const ai::WeaponTemplate *> &d = defs_[p_def];
+	return p_variant < d.size() ? *d[p_variant] : *d.front();
+}
+
+ai::CombatStrengthType BotWeaponTemplates::vehicle_type(uint8_t p_property) const {
+	for (const auto &[property, type] : vehicle_types_) {
+		if (property == p_property) {
+			return type;
+		}
+	}
+	return ai::CombatStrengthType::LightArmour;
+}
+
+ai::WeaponChoice template_choice(const ai::WeaponTemplate &p_template, ai::CombatStrengthType p_type,
+		ai::WeaponType p_weapon_type, int32_t p_ammo) {
+	ai::WeaponChoice c;
+	c.type = p_weapon_type;
+	c.indirect = p_template.indirect;
+	c.ammo = p_ammo;
+	c.strength = p_template.strength(p_type);
+	c.min_range = p_template.min_range;
+	c.max_range = p_template.max_range;
+	return c;
+}
 }

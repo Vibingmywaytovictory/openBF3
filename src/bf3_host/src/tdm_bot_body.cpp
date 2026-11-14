@@ -144,7 +144,7 @@ BotFrame BotBody::sense_revive(
 	check.tick = p_tick;
 	check.slot = slot;
 	check.kit = kit;
-	check.defibrillator = sh.host.gunplay != nullptr && defib_slot(*sh.host.gunplay, arms).has_value();
+	check.defibrillator = defib_slot(sh, arms).has_value();
 	check.self = &p_state;
 	check.eye = eye;
 	check.shot_recent = shot_recent;
@@ -376,6 +376,10 @@ void BotBody::trigger_target(const BotFrame &p_frame, BotIntent &r_intent) {
 	BotIntent &i = r_intent;
 	const sim::SoldierState &ts = f.states[size_t(f.target)];
 	i.trigger = Trigger::Aimed;
+	if (const std::optional<SoldierWeapon> w = soldier_weapon(sh, f.arms, i.target_distance)) {
+		i.want_slot = w->slot;
+		i.trigger = w->trigger;
+	}
 	const float hd = horizontal(f.self.position, ts.position);
 	if (hd <= c.knife_within_m && f.arms.def(kSlotKnife) != nullptr) {
 		const float behind =
@@ -455,8 +459,7 @@ void BotBody::revive_trigger(const BotFrame &p_frame, BotIntent &r_intent) {
 	if (horizontal(f.self.position, corpse) > kReviveDirectMetres) {
 		return;
 	}
-	const std::optional<uint8_t> defib =
-			shared->host.gunplay != nullptr ? defib_slot(*shared->host.gunplay, f.arms) : std::nullopt;
+	const std::optional<uint8_t> defib = defib_slot(*shared, f.arms);
 	if (!defib.has_value()) {
 		return;
 	}
@@ -591,8 +594,8 @@ void BotBody::vehicle_aim(const BotFrame &p_frame, BotIntent &r_intent) {
 	ai::TriggerWeapon weapon;
 	weapon.explosion_radius = d != nullptr && d->projectile.explosion.present ? d->projectile.explosion.radius : 0.0f;
 	const double on = double(f.tick - a.since) * sim::kTickSeconds;
-	const float sigma =
-			ai::ai_deviation_deg(ai::WeaponTemplate{}, ai::trigger_skill(skill, weapon, true, false), on, 1.0f) *
+	const float sigma = ai::ai_deviation_deg(slot_template(*shared, f.arms, a.weapon_slot),
+								ai::trigger_skill(skill, weapon, true, false), on, 1.0f) *
 			core::kDegToRadF;
 	const AimError err = targeting.aim_error(f.tick, sigma, rng);
 	i.want_yaw = wrap(i.want_yaw + err.yaw);
@@ -667,12 +670,11 @@ void BotBody::repair_move(const BotFrame &p_frame, BotIntent &r_intent) {
 		return;
 	}
 	const VehicleAim &a = vehicles.repair();
-	const uint16_t tool = f.arms.weapons()->slots[a.weapon_slot].def;
-	if (a.surface <= ai::assist_reach(weapon_range(*shared->host.gunplay, tool), 0.0f)) {
+	const float reach = weapon_range(*shared, f.arms, a.weapon_slot);
+	if (a.surface <= ai::assist_reach(reach, 0.0f)) {
 		return;
 	}
-	navigation.set_goal(*shared, f.tick,
-			beside_hull_point(a, f.eye, f.self.position, 0.25f * weapon_range(*shared->host.gunplay, tool)), 0.5f, true,
+	navigation.set_goal(*shared, f.tick, beside_hull_point(a, f.eye, f.self.position, 0.25f * reach), 0.5f, true,
 			kSquadGoalMoveMetres);
 	walk_facing(f, r_intent);
 }
@@ -680,7 +682,7 @@ void BotBody::repair_move(const BotFrame &p_frame, BotIntent &r_intent) {
 void BotBody::repair_aim(const BotFrame &p_frame, BotIntent &r_intent) {
 	const VehicleAim &a = vehicles.repair();
 	if (a.held() && shared->host.gunplay != nullptr &&
-			a.surface <= weapon_range(*shared->host.gunplay, p_frame.arms.weapons()->slots[a.weapon_slot].def)) {
+			a.surface <= weapon_range(*shared, p_frame.arms, a.weapon_slot)) {
 		r_intent.target_distance = r_intent.aim_at(p_frame.eye, a.near_point);
 		r_intent.sprint = false;
 	}
@@ -692,7 +694,7 @@ void BotBody::repair_trigger(const BotFrame &p_frame, BotIntent &r_intent) {
 		return;
 	}
 	r_intent.want_slot = a.weapon_slot;
-	if (a.surface <= weapon_range(*shared->host.gunplay, p_frame.arms.weapons()->slots[a.weapon_slot].def)) {
+	if (a.surface <= weapon_range(*shared, p_frame.arms, a.weapon_slot)) {
 		r_intent.trigger = Trigger::Repair;
 	}
 }

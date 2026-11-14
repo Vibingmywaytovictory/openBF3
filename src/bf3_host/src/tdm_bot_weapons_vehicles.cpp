@@ -7,6 +7,7 @@
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/gadgets.h"
+#include "bot_weapon_templates.h"
 #include "tdm_bot_support.h"
 
 #include <algorithm>
@@ -24,26 +25,13 @@ uint16_t slot_def(const BotArms &p_arms, uint8_t p_slot) {
 																	   : sw::kNoWeapon;
 }
 
-float vehicle_strength(
-		const sw::WeaponSimDef &p_def, uint16_t p_index, const VehicleDamageSource &p_source, uint8_t p_property) {
-	const sw::ProjectileSimDef &p = p_def.projectile;
-	float strength = 0.0f;
-	if (p.kind != core::gameplay::ProjectileKind::None) {
-		sw::DamageEvent e;
-		e.def = p_index;
-		const bool missile = p.kind == core::gameplay::ProjectileKind::Missile;
-		e.kind = missile || p.explosion.present ? sw::DamageKind::Direct : sw::DamageKind::Bullet;
-		e.base = missile ? p.direct_damage : p.start_damage;
-		strength = std::max(strength, p_source.amount(e, p_property));
-	}
-	if (p.explosion.present) {
-		sw::DamageEvent e;
-		e.def = p_index;
-		e.kind = sw::DamageKind::Blast;
-		e.base = p.explosion.blast_damage;
-		strength = std::max(strength, p_source.amount(e, p_property));
-	}
-	return strength;
+uint8_t hull_property(const sim::vehicles::VehicleTarget &p_vehicle) {
+	return p_vehicle.target.capsule_count > 0 ? p_vehicle.target.capsules[0].property : uint8_t(0);
+}
+
+ai::CombatStrengthType vehicle_type(const TdmShared &p_shared, uint8_t p_property) {
+	return p_shared.weapons != nullptr ? p_shared.weapons->vehicle_type(p_property)
+									   : ai::CombatStrengthType::LightArmour;
 }
 
 bool enemy_crew(const TdmShared &p_shared, const sim::vehicles::VehicleTarget &p_vehicle, uint8_t p_team) {
@@ -78,52 +66,33 @@ bool own_packs(const Gunplay &p_gunplay, uint8_t p_slot, uint16_t p_def) {
 }
 
 ai::WeaponType weapon_type(const Gunplay &p_gunplay, uint16_t p_def) {
-	if (p_def == sw::kNoWeapon) {
-		return ai::WeaponType::Default;
-	}
-	if (p_def == p_gunplay.config().defib_def) {
-		return ai::WeaponType::Resurrect;
-	}
-	if (p_def < p_gunplay.table().defs.size() && p_gunplay.table().defs[p_def].weapon_class == kRepairToolClass) {
-		return ai::WeaponType::Heal;
-	}
-	const sw::GadgetDef *g = gadget_of(p_gunplay, p_def);
-	if (g == nullptr) {
-		return ai::WeaponType::Default;
-	}
-	if (g->kind == sw::GadgetKind::ExplosionPack && g->pack.remote_detonator) {
-		return ai::WeaponType::C4;
-	}
-	if (g->kind == sw::GadgetKind::Supply) {
-		return g->healing.active() ? ai::WeaponType::Heal : ai::WeaponType::Ammo;
-	}
-	return ai::WeaponType::Default;
+	return weapon_type_of(p_gunplay.level(), p_gunplay.config().defib_def, p_def);
 }
 
-float weapon_range(const Gunplay &p_gunplay, uint16_t p_def) {
-	if (p_def >= p_gunplay.table().defs.size() || weapon_type(p_gunplay, p_def) == ai::WeaponType::C4) {
-		return 0.0f;
+const ai::WeaponTemplate &slot_template(const TdmShared &p_shared, const BotArms &p_arms, uint8_t p_slot) {
+	static const ai::WeaponTemplate kNone;
+	if (p_shared.weapons == nullptr || p_arms.def(p_slot) == nullptr) {
+		return kNone;
 	}
-	const sw::ProjectileSimDef &p = p_gunplay.table().defs[p_def].projectile;
-	return float(sw::units_to_seconds(p.time_to_live)) * std::max(p.muzzle_speed, p.max_speed);
+	const sw::WeaponSlotState &ss = p_arms.weapons()->slots[p_slot];
+	return p_shared.weapons->of(ss.def, ss.variant);
 }
 
-std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> vehicle_weapon_choices(
-		const Gunplay &p_gunplay, const VehicleDamageSource &p_source, const BotArms &p_arms, uint8_t p_property) {
+float weapon_range(const TdmShared &p_shared, const BotArms &p_arms, uint8_t p_slot) {
+	return slot_template(p_shared, p_arms, p_slot).max_range;
+}
+
+std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> template_choices(
+		const TdmShared &p_shared, const BotArms &p_arms, ai::CombatStrengthType p_type) {
 	std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> out{};
+	const Gunplay *g = p_shared.host.gunplay;
+	if (g == nullptr) {
+		return out;
+	}
 	for (uint8_t s = 0; s < sw::kMaxWeaponSlots; ++s) {
-		const sw::WeaponSimDef *d = p_arms.def(s);
-		if (d == nullptr) {
-			continue;
-		}
-		const uint16_t def = slot_def(p_arms, s);
-		ai::WeaponChoice &c = out[s];
-		c.type = weapon_type(p_gunplay, def);
-		c.ammo = p_arms.rounds(s);
-		c.max_range = weapon_range(p_gunplay, def);
-		const sw::GadgetDef *g = gadget_of(p_gunplay, def);
-		if (s != kSlotGrenade && (g == nullptr || c.type == ai::WeaponType::C4)) {
-			c.strength = int(std::lround(vehicle_strength(*d, def, p_source, p_property)));
+		if (p_arms.def(s) != nullptr) {
+			out[s] = template_choice(
+					slot_template(p_shared, p_arms, s), p_type, weapon_type(*g, slot_def(p_arms, s)), p_arms.rounds(s));
 		}
 	}
 	return out;
@@ -157,14 +126,36 @@ sim::Vec3 beside_hull_point(const VehicleAim &p_aim, const sim::Vec3 &p_eye, con
 	return { p_aim.near_point[0] + dx / len * out, p_feet[1], p_aim.near_point[2] + dz / len * out };
 }
 
-std::optional<uint8_t> defib_slot(const Gunplay &p_gunplay, const BotArms &p_arms) {
-	const uint16_t defib = p_gunplay.config().defib_def;
-	for (const uint8_t s : kGadgetSlots) {
-		if (defib != sw::kNoWeapon && slot_def(p_arms, s) == defib && p_arms.def(s) != nullptr) {
-			return s;
-		}
+std::optional<uint8_t> defib_slot(const TdmShared &p_shared, const BotArms &p_arms) {
+	const int s = ai::chose_weapon(
+			template_choices(p_shared, p_arms, ai::CombatStrengthType::Infantry), -1, 0.0f, false, false, true, false);
+	return s >= 0 ? std::optional<uint8_t>(uint8_t(s)) : std::nullopt;
+}
+
+std::optional<SoldierWeapon> soldier_weapon(const TdmShared &p_shared, const BotArms &p_arms, float p_distance) {
+	const Gunplay *g = p_shared.host.gunplay;
+	if (g == nullptr || p_arms.weapons() == nullptr) {
+		return std::nullopt;
 	}
-	return std::nullopt;
+	const std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> choices =
+			template_choices(p_shared, p_arms, ai::CombatStrengthType::Infantry);
+	const int w = ai::chose_weapon(choices, int(p_arms.weapons()->active), p_distance, false, false, false, false);
+	if (w < 0) {
+		return std::nullopt;
+	}
+	const uint8_t s = uint8_t(w);
+	if (s == kSlotPrimary || s == kSlotSidearm) {
+		return SoldierWeapon{ s, Trigger::Aimed };
+	}
+	if (s == kSlotKnife) {
+		return SoldierWeapon{ s, Trigger::Knife };
+	}
+	const sw::WeaponSimDef *d = p_arms.def(s);
+	if (choices[s].type != ai::WeaponType::Default || slot_template(p_shared, p_arms, s).is_thrown ||
+			gadget_def(g->level(), slot_def(p_arms, s)) != nullptr || d == nullptr || !sw::fires_round(d->projectile)) {
+		return std::nullopt;
+	}
+	return SoldierWeapon{ s, Trigger::Launcher };
 }
 
 void BotVehicleWeapons::new_life() {
@@ -173,14 +164,6 @@ void BotVehicleWeapons::new_life() {
 	phase_ = ExplosivePhase::Approach;
 	rounds_before_ = 0;
 	detonate_at_ = 0;
-}
-
-const VehicleDamageSource &BotVehicleWeapons::source(const Gunplay &p_gunplay) {
-	if (!configured_) {
-		source_.configure(p_gunplay.table(), p_gunplay.level().defs);
-		configured_ = true;
-	}
-	return source_;
 }
 
 bool BotVehicleWeapons::sense(TdmShared &r_shared, const BotArms &p_arms, const VehicleCheck &p_check) {
@@ -195,7 +178,6 @@ bool BotVehicleWeapons::sense(TdmShared &r_shared, const BotArms &p_arms, const 
 		return false;
 	}
 	const sim::bots::PerceptionParams &pp = sh.config->perception;
-	const VehicleDamageSource &src = source(*g);
 	const sim::CollisionWorld &world = sh.host.view->world();
 	VehicleAim best;
 	float best_d = std::numeric_limits<float>::infinity();
@@ -224,9 +206,8 @@ bool BotVehicleWeapons::sense(TdmShared &r_shared, const BotArms &p_arms, const 
 		int w = placing ? int(previous.weapon_slot) : -1;
 		ai::WeaponType type = previous.type;
 		if (!placing) {
-			const uint8_t property = v.target.capsule_count > 0 ? v.target.capsules[0].property : uint8_t(0);
 			const std::array<ai::WeaponChoice, sw::kMaxWeaponSlots> choices =
-					vehicle_weapon_choices(*g, src, p_arms, property);
+					template_choices(sh, p_arms, vehicle_type(sh, hull_property(v)));
 			const int current = held && previous.weapon_slot < sw::kMaxWeaponSlots ? int(previous.weapon_slot) : -1;
 			w = ai::chose_weapon(choices, current, d, false, false, false, false);
 			if (w < 0) {
@@ -276,17 +257,6 @@ bool BotVehicleWeapons::sense_repair(TdmShared &r_shared, const BotArms &p_arms,
 	if (g == nullptr || vehicles.empty() || p_arms.weapons() == nullptr || p_check.self == nullptr || team == 0) {
 		return false;
 	}
-	uint8_t tool = 0xFF;
-	for (uint8_t s = 0; s < sw::kMaxWeaponSlots && tool == 0xFF; ++s) {
-		const uint16_t def = slot_def(p_arms, s);
-		if (p_arms.def(s) != nullptr && def < g->table().defs.size() &&
-				g->table().defs[def].weapon_class == kRepairToolClass) {
-			tool = s;
-		}
-	}
-	if (tool == 0xFF) {
-		return false;
-	}
 	VehicleAim best;
 	float best_score = 0.0f;
 	for (const sim::vehicles::VehicleTarget &v : vehicles) {
@@ -306,12 +276,17 @@ bool BotVehicleWeapons::sense_repair(TdmShared &r_shared, const BotArms &p_arms,
 		if (!(d <= ai::kAssistRadiusMetres)) {
 			continue;
 		}
+		const int tool = ai::chose_weapon(
+				template_choices(sh, p_arms, vehicle_type(sh, hull_property(v))), -1, 0.0f, false, true, false, false);
+		if (tool < 0) {
+			continue;
+		}
 		const float score = ai::assist_score(1.0f, v.health, std::max(d, 1.0f));
 		if (score > best_score) {
 			best_score = score;
 			best.id = v.target.id;
 			best.centre = v.target.bound_center;
-			best.weapon_slot = tool;
+			best.weapon_slot = uint8_t(tool);
 			best.type = ai::WeaponType::Heal;
 			best.surface = hull_surface(v, p_check.eye, best.near_point);
 		}

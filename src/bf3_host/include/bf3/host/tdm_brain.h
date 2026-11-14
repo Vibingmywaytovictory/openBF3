@@ -26,6 +26,7 @@ class BotMain;
 namespace bf3::host {
 
 struct BotLevel;
+struct LevelVehicles;
 class Gunplay;
 class ServerView;
 
@@ -171,6 +172,7 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 struct TdmBrainHost {
 	const ServerView *view = nullptr;
 	const Gunplay *gunplay = nullptr;
+	std::shared_ptr<const LevelVehicles> vehicles;
 	std::shared_ptr<const BotLevel> nav;
 	sim::bots::WalkerParams walker;
 	float eye_heights[3] = { 1.6f, 1.0f, 0.3f };

@@ -1,5 +1,7 @@
 #include "tdm_bot_support.h"
 
+#include "tdm_bot_weapons_vehicles.h"
+
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
 #include "bf3/sim/commo.h"
@@ -34,18 +36,6 @@ size_t soldiers(const TdmShared &p_shared, std::span<const sim::SoldierState> p_
 
 }
 
-const sw::GadgetDef *gadget_of(const Gunplay &p_gunplay, uint16_t p_def) {
-	if (p_def == sw::kNoWeapon) {
-		return nullptr;
-	}
-	for (const sw::GadgetDef &g : p_gunplay.level().gadgets) {
-		if (g.def == p_def) {
-			return &g;
-		}
-	}
-	return nullptr;
-}
-
 bool may_help(const ai::BehaviourTuning &p_tuning, const SupportWay &p_way, const sim::Vec3 &p_self,
 		const sim::Vec3 &p_mate, size_t p_mate_slot) {
 	if (!p_way.point.has_value()) {
@@ -57,19 +47,10 @@ bool may_help(const ai::BehaviourTuning &p_tuning, const SupportWay &p_way, cons
 			horizontal(p_self, p_mate) + horizontal(p_mate, goal) - straight <= p_tuning.order_detour_m;
 }
 
-uint8_t supply_slot(const Gunplay &p_gunplay, const BotArms &p_arms, SupplyNeed p_need) {
-	const sw::SoldierWeaponsState *ws = p_arms.weapons();
-	if (ws == nullptr) {
-		return kNoSupplySlot;
-	}
-	for (const uint8_t s : kGadgetSlots) {
-		const sw::GadgetDef *g = gadget_of(p_gunplay, ws->slots[s].def);
-		if (g != nullptr && g->kind == sw::GadgetKind::Supply && g->supply_soldiers &&
-				(healing(p_need) ? g->healing : g->ammo).active()) {
-			return s;
-		}
-	}
-	return kNoSupplySlot;
+uint8_t supply_slot(const TdmShared &p_shared, const BotArms &p_arms, SupplyNeed p_need) {
+	const int s = ai::chose_weapon(template_choices(p_shared, p_arms, ai::CombatStrengthType::Infantry), -1, 0.0f,
+			false, healing(p_need), false, !healing(p_need));
+	return s >= 0 ? uint8_t(s) : kNoSupplySlot;
 }
 
 bool needs_supply(const Gunplay &p_gunplay, const ai::BehaviourTuning &p_tuning, uint8_t p_slot,
@@ -115,7 +96,7 @@ std::optional<uint8_t> nearest_medic(const TdmShared &p_shared, uint8_t p_slot, 
 	const size_t n = std::min(states.size(), sh.teams.size());
 	for (size_t s = 0; s < n; ++s) {
 		if (s == p_slot || sh.teams[s] == 0 || sh.teams[s] != sh.teams[p_slot] || sh.alive[s] == 0 ||
-				supply_slot(g, BotArms(&g, uint8_t(s)), SupplyNeed::Health) == kNoSupplySlot) {
+				supply_slot(sh, BotArms(&g, uint8_t(s)), SupplyNeed::Health) == kNoSupplySlot) {
 			continue;
 		}
 		const sim::Vec3 d = core::vec::sub(states[s].position, states[p_slot].position);
@@ -234,7 +215,7 @@ SupportSense BotSupport::update(TdmShared &r_shared, const BotArms &p_arms, cons
 	const uint32_t assist_ticks = sim::seconds_to_ticks(b.assist_s);
 	for (const SupplyNeed need : { SupplyNeed::Health, SupplyNeed::Ammo }) {
 		const size_t k = size_t(need);
-		slots_[k] = supply_slot(g, p_arms, need);
+		slots_[k] = supply_slot(sh, p_arms, need);
 		Target &t = targets_[k];
 		const int keep = t.slot;
 		if (q.engaged || q.tick < rethrow_until_ || slots_[k] == kNoSupplySlot || p_arms.rounds(slots_[k]) <= 0 ||
@@ -300,7 +281,7 @@ bool BotSupport::update_call(TdmShared &r_shared, const SupportCheck &p_check) {
 				horizontal(q.self->position, q.states[s].position) > b.call_radius_m) {
 			continue;
 		}
-		medic = supply_slot(g, BotArms(&g, uint8_t(s)), SupplyNeed::Health) != kNoSupplySlot;
+		medic = supply_slot(sh, BotArms(&g, uint8_t(s)), SupplyNeed::Health) != kNoSupplySlot;
 	}
 	if (!medic) {
 		calling_ = false;

@@ -286,6 +286,7 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 	TdmBrainHost host;
 	host.view = &r_server.view();
 	host.gunplay = r_server.gunplay();
+	host.vehicles = p_config.level->vehicles;
 	host.match_seed = r_server.gunplay() != nullptr ? r_server.gunplay()->match_seed() : p_config.seed;
 	host.rules = p_config.rules.mode == MatchRulesConfig::Mode::Tdm;
 	for (size_t i = 0; i < 3; ++i) {

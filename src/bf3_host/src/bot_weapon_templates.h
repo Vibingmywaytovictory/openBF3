@@ -69,4 +69,20 @@ core::Result<CachedWeaponTemplates> cached_weapon_templates(core::Cache *p_cache
 		std::string_view p_level, std::string_view p_mode, const GunplayLevel &p_gunplay,
 		const LevelVehicles *p_vehicles);
 
+class BotWeaponTemplates {
+public:
+	static core::Result<std::shared_ptr<const BotWeaponTemplates>> create(const sim::weapons::WeaponTable &p_table,
+			const GunplayLevel &p_gunplay, const WeaponTemplates &p_templates, const LevelVehicles *p_vehicles);
+
+	const ai::WeaponTemplate &of(uint16_t p_def, uint8_t p_variant) const;
+	ai::CombatStrengthType vehicle_type(uint8_t p_property) const;
+
+private:
+	WeaponTemplates owned_;
+	std::vector<std::vector<const ai::WeaponTemplate *>> defs_;
+	std::vector<std::pair<uint8_t, ai::CombatStrengthType>> vehicle_types_;
+};
+
+ai::WeaponChoice template_choice(const ai::WeaponTemplate &p_template, ai::CombatStrengthType p_type,
+		ai::WeaponType p_weapon_type, int32_t p_ammo);
 }
