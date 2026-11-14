@@ -1,9 +1,12 @@
 function(openbf3_test name)
     add_executable(${name} ${ARGN})
-    target_link_libraries(${name} PRIVATE doctest::doctest)
+    target_link_libraries(${name} PRIVATE doctest::doctest test_scratch)
     target_compile_definitions(${name} PRIVATE DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS)
     openbf3_module(${name})
 endfunction()
+add_library(test_scratch STATIC test_scratch.cpp test_scratch.h)
+target_include_directories(test_scratch PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+openbf3_module(test_scratch)
 
 function(openbf3_case_row)
     cmake_parse_arguments(PARSE_ARGV 0 R "" "NAME;EXE;SUITE;GROUP;COUNT;INSTALL_CASE" "CASES;EXCLUDE")
@@ -1549,6 +1552,14 @@ set_tests_properties(godot.kick_popup godot.net.fx_same godot.net.late_join PROP
 openbf3_cost(godot.kick_popup 1 9)
 openbf3_cost(godot.net.fx_same 1 32)
 openbf3_cost(godot.net.late_join 1 38)
+
+openbf3_test(test_scratch_tests test_scratch_tests.cpp test_scratch.h test_support.h)
+target_link_libraries(test_scratch_tests PRIVATE test_proc_driver)
+target_compile_definitions(test_scratch_tests PRIVATE "OPENBF3_CMAKE_COMMAND=\"${CMAKE_COMMAND}\""
+    "OPENBF3_SCRATCH_CHILD_CMAKE=\"${CMAKE_CURRENT_SOURCE_DIR}/test_scratch_child.cmake\"")
+add_test(NAME test.scratch.unit COMMAND test_scratch_tests --test-suite=test-scratch)
+set_tests_properties(test.scratch.unit PROPERTIES TIMEOUT 60 LABELS "unit")
+openbf3_proc_row(test.scratch.procs test_scratch_tests TIMEOUT 120 ARGS --test-suite=test-scratch-procs)
 
 openbf3_check_rows()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)

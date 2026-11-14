@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <doctest/doctest.h>
 
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <atomic>
@@ -20,6 +21,7 @@ bool any_case_skipped() {
 }
 
 int main(int argc, char **argv) {
+	bf3::test::scratch_startup();
 	doctest::Context ctx(argc, argv);
 	const int result = ctx.run();
 	if (ctx.shouldExit() || result != 0) {
