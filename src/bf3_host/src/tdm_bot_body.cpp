@@ -42,6 +42,17 @@ constexpr uint32_t kHoldTicks = 240;
 
 }
 
+float aim_sigma_deg(
+		const TdmBotConfig &p_config, const sw::WeaponSimDef *p_weapon, float p_skill, double p_seconds_on) {
+	ai::TriggerWeapon weapon;
+	weapon.explosion_radius = p_weapon != nullptr && p_weapon->projectile.explosion.present
+			? p_weapon->projectile.explosion.radius
+			: 0.0f;
+	return ai::weapon_deviation_deg(p_config.weapon_templates,
+			p_weapon != nullptr ? std::string_view(p_weapon->variant) : std::string_view(), weapon, p_skill,
+			p_seconds_on);
+}
+
 void BotBody::attach(std::shared_ptr<TdmShared> p_shared, uint32_t p_index) {
 	shared = std::move(p_shared);
 	index = p_index;
@@ -351,12 +362,8 @@ void BotBody::aim_target(const BotFrame &p_frame, BotIntent &r_intent) {
 	}
 	i.target_distance = i.aim_at(f.eye, point);
 
-	ai::TriggerWeapon weapon;
-	weapon.explosion_radius = d != nullptr && d->projectile.explosion.present ? d->projectile.explosion.radius : 0.0f;
 	const double on = double(f.tick - targeting.target_since()) * sim::kTickSeconds;
-	const float sigma =
-			ai::ai_deviation_deg(ai::WeaponTemplate{}, ai::trigger_skill(skill, weapon, true, false), on, 1.0f) *
-			core::kDegToRadF;
+	const float sigma = aim_sigma_deg(c, d, skill, on) * core::kDegToRadF;
 	const AimError err = targeting.aim_error(f.tick, sigma, rng);
 	i.want_yaw = wrap(i.want_yaw + err.yaw);
 	i.want_pitch += err.pitch;

@@ -247,6 +247,7 @@ core::Status load_bot_ai(const std::filesystem::path &p_root, std::string_view p
 	r_config.behaviours = behaviours;
 	r_config.ai = loaded->settings;
 	r_config.strategic_areas = loaded->strategic_areas;
+	r_config.weapon_templates = loaded->weapon_templates;
 	return core::Status::success();
 }
 

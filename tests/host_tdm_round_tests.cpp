@@ -28,6 +28,7 @@
 #include "test_support.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -486,6 +487,32 @@ TEST_SUITE("host-tdm-bots-unit") {
 		REQUIRE_FALSE(none.ok());
 		CHECK(none.error().message.find("StrategicAreas.ai") != std::string::npos);
 		CHECK(broken.ai.bot_skill == 0.5f);
+	}
+
+	TEST_CASE("the bots' AI scripts: a weaponTemplate named after a weapon's variant reaches the bot body's aim "
+			  "deviation, every other weapon keeps the constructor's template") {
+		const std::filesystem::path shipped = host::bot_ai_root(OPENBF3_BOT_TUNING_CFG);
+		const std::filesystem::path root = std::filesystem::temp_directory_path() /
+				("openbf3-bot-weapons-" +
+						std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+		std::filesystem::create_directories(ai::level_ai_script(root, "XP9_Gun").parent_path());
+		std::filesystem::copy_file(shipped / ai::kAiDefaultScript, root / ai::kAiDefaultScript);
+		std::filesystem::copy_file(shipped / ai::kAiBehavioursScript, root / ai::kAiBehavioursScript);
+		std::ofstream(ai::level_ai_script(root, "XP9_Gun"), std::ios::binary)
+				<< "weaponTemplate.create TestRifle\nweaponTemplate.deviation 0\n";
+		host::TdmBotConfig c;
+		const core::Status st =
+				host::load_bot_ai(root, "XP9_Gun", "aiStrategicArea.createFromControlPoint A 0 30\n", c);
+		std::error_code ec;
+		std::filesystem::remove_all(root, ec);
+		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+		sim::weapons::WeaponSimDef rifle, other;
+		rifle.variant = "TestRifle";
+		other.variant = "OtherRifle";
+		CHECK(host::tdm_bot::aim_sigma_deg(c, &rifle, 0.75f, 0.0) == 0.0f);
+		CHECK(host::tdm_bot::aim_sigma_deg(c, &other, 0.75f, 0.0) == doctest::Approx(1.75f));
+		CHECK(host::tdm_bot::aim_sigma_deg(c, nullptr, 0.75f, 0.0) == doctest::Approx(1.75f));
+		CHECK(host::tdm_bot::aim_sigma_deg(host::TdmBotConfig{}, &rifle, 0.75f, 0.0) == doctest::Approx(1.75f));
 	}
 
 	TEST_CASE("botSkill reaches the bot body: a fresh fire plan's first shot waits BBPFireInfantery's delay, a switch "

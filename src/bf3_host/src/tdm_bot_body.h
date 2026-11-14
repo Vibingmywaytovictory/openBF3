@@ -73,6 +73,9 @@ struct BotIntent {
 	}
 };
 
+float aim_sigma_deg(
+		const TdmBotConfig &p_config, const sim::weapons::WeaponSimDef *p_weapon, float p_skill, double p_seconds_on);
+
 struct BotBody {
 	std::shared_ptr<TdmShared> shared;
 	uint32_t index = 0;

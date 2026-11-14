@@ -269,7 +269,8 @@ TEST_SUITE("ai-script") {
 		CHECK_FALSE(run_ai_script_file(kShipped / "no-such.ai", big).ok());
 	}
 
-	TEST_CASE("weaponTemplate: the reconstruction's defaults, the console's correction rate, unknown names default") {
+	TEST_CASE("weaponTemplate: the reconstruction's defaults, the console's correction rate, unknown names default, "
+			  "the deviation weapon_deviation_deg takes from a named template") {
 		const WeaponTemplate def;
 		CHECK(def.deviation == 14.0f);
 		CHECK(def.deviation_correction_time == 15.0f);
@@ -286,6 +287,11 @@ TEST_SUITE("ai-script") {
 		CHECK(c.weapon_template("Other") == def);
 		AiConfig twice = c;
 		CHECK_FALSE(run_ai_script("weaponTemplate.create GUN\n", "w2.ai", twice).ok());
+		CHECK(weapon_deviation_deg(c.weapon_templates, "Gun", {}, 0.75f, 0.0) == doctest::Approx(0.5f));
+		CHECK(weapon_deviation_deg(c.weapon_templates, "gun", {}, 0.75f, 2.0) == doctest::Approx(0.25f));
+		CHECK(weapon_deviation_deg(c.weapon_templates, "Rifle", {}, 0.75f, 0.0) == doctest::Approx(1.75f));
+		CHECK(weapon_deviation_deg(c.weapon_templates, "Zero", {}, 1.0f, 0.0) == 0.0f);
+		CHECK(&find_weapon_template(c.weapon_templates, "Rifle") == &find_weapon_template({}, "Gun"));
 	}
 
 	TEST_CASE("bot skill as the reconstruction reads it: EntryTrigger's skill, WeaponObject's deviation, "

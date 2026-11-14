@@ -25,6 +25,12 @@ float ai_deviation_deg(const WeaponTemplate &p_template, float p_skill, double p
 	return float((((1.0 - t) + 1.0) * 0.5) * (1.0 - double(p_skill)) * double(p_template.deviation) * double(p_scale));
 }
 
+float weapon_deviation_deg(const std::map<std::string, WeaponTemplate> &p_templates, std::string_view p_weapon,
+		const TriggerWeapon &p_trigger, float p_bot_skill, double p_seconds_since) {
+	return ai_deviation_deg(find_weapon_template(p_templates, p_weapon),
+			trigger_skill(p_bot_skill, p_trigger, true, false), p_seconds_since, 1.0f);
+}
+
 float fire_delay_s(float p_bot_skill, float p_unit_draw) {
 	return (1.0f - p_bot_skill) * (p_unit_draw + 1.5f);
 }

@@ -148,6 +148,7 @@ struct TdmBotConfig {
 	ai::StrategyTuning strategy;
 	ai::AiSettings ai;
 	std::vector<ai::StrategicAreaDef> strategic_areas;
+	std::map<std::string, ai::WeaponTemplate> weapon_templates;
 	bool squads = true;
 
 	std::string tuning_cfg;

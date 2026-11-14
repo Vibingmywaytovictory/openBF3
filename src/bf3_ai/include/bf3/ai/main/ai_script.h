@@ -89,6 +89,8 @@ inline constexpr std::string_view kStrategicAreasScript = "StrategicAreas.ai";
 
 std::filesystem::path level_ai_script(const std::filesystem::path &p_root, std::string_view p_level);
 std::filesystem::path level_strategic_areas_script(const std::filesystem::path &p_root, std::string_view p_level);
+const WeaponTemplate &find_weapon_template(
+		const std::map<std::string, WeaponTemplate> &p_templates, std::string_view p_weapon);
 core::Status run_ai_script(std::string_view p_text, std::string_view p_name, AiConfig &r_config);
 core::Status run_ai_script_file(const std::filesystem::path &p_path, AiConfig &r_config);
 std::vector<StrategicAreaDef> strategic_areas_by_name(std::span<const StrategicAreaDef> p_areas);

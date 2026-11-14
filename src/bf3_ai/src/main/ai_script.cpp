@@ -444,8 +444,13 @@ int AiConfig::behaviour_id(std::string_view p_name) const {
 }
 
 const WeaponTemplate &AiConfig::weapon_template(std::string_view p_name) const {
+	return find_weapon_template(weapon_templates, p_name);
+}
+
+const WeaponTemplate &find_weapon_template(
+		const std::map<std::string, WeaponTemplate> &p_templates, std::string_view p_weapon) {
 	static const WeaponTemplate kDefault;
-	const WeaponTemplate *found = find_named(weapon_templates, p_name);
+	const WeaponTemplate *found = find_named(p_templates, p_weapon);
 	return found != nullptr ? *found : kDefault;
 }
 
