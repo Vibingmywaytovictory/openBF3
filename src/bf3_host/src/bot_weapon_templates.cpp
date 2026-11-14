@@ -356,9 +356,8 @@ core::Result<std::shared_ptr<const BotWeaponTemplates>> BotWeaponTemplates::crea
 	std::optional<TemplateSource> source;
 	const auto resolve = [&](uint16_t p_def,
 								 const sw::WeaponSimDef &p_weapon) -> core::Result<const ai::WeaponTemplate *> {
-		const auto given = p_templates.find(p_weapon.variant);
-		if (given != p_templates.end()) {
-			return &given->second;
+		if (const ai::WeaponTemplate *given = ai::named_weapon_template(p_templates, p_weapon.variant)) {
+			return given;
 		}
 		const auto kept = out->owned_.find(p_weapon.variant);
 		if (kept != out->owned_.end()) {

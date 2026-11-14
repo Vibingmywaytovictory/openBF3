@@ -603,10 +603,14 @@ const WeaponTemplate &AiConfig::weapon_template(std::string_view p_name) const {
 	return find_weapon_template(weapon_templates, p_name);
 }
 
+const WeaponTemplate *named_weapon_template(const WeaponTemplateMap &p_templates, std::string_view p_weapon) {
+	const auto exact = p_templates.find(p_weapon);
+	return exact != p_templates.end() ? &exact->second : find_named(p_templates, p_weapon);
+}
+
 const WeaponTemplate &find_weapon_template(const WeaponTemplateMap &p_templates, std::string_view p_weapon) {
 	static const WeaponTemplate kDefault;
-	const auto exact = p_templates.find(p_weapon);
-	const WeaponTemplate *found = exact != p_templates.end() ? &exact->second : find_named(p_templates, p_weapon);
+	const WeaponTemplate *found = named_weapon_template(p_templates, p_weapon);
 	return found != nullptr ? *found : kDefault;
 }
 

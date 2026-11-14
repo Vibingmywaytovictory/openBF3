@@ -4,6 +4,7 @@
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/host/tdm_brain.h"
+#include "bf3/sim/weapons/surface_materials.h"
 
 #include "bot_weapon_templates.h"
 #include "tdm_fixture.h"
@@ -253,5 +254,49 @@ TEST_SUITE("host-bots-templates") {
 		CHECK(none.weapon_templates == generated);
 		std::error_code ec;
 		std::filesystem::remove_all(root, ec);
+	}
+
+	TEST_CASE("weapon templates: MP_007 ConquestSmall0: the bots' per-def table takes a config's template by name in "
+			  "any case, generates the missing ones, and maps each hull material to its kind's class") {
+		tt::TdmLevel *level = tt::load_conquest_bots_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const host::LevelVehicles *vehicles = level->shared->vehicles.get();
+		const host::WeaponTemplates &loaded = level->bots->ai_weapons;
+		core::Result<std::shared_ptr<const sim::weapons::WeaponTable>> table =
+				host::make_match_table(gl, sim::weapons::Mechanics{}, false, false);
+		REQUIRE(table.ok());
+		uint16_t ak = sim::weapons::kNoWeapon, rpg = sim::weapons::kNoWeapon;
+		for (size_t d = 0; d < (*table)->defs.size(); ++d) {
+			ak = (*table)->defs[d].variant == kAk ? uint16_t(d) : ak;
+			rpg = (*table)->defs[d].variant == kRpg ? uint16_t(d) : rpg;
+		}
+		REQUIRE(ak != sim::weapons::kNoWeapon);
+		REQUIRE(rpg != sim::weapons::kNoWeapon);
+
+		host::WeaponTemplates hand = loaded;
+		ai::WeaponTemplate unarmed = named(loaded, kRpg);
+		unarmed.strengths[size_t(ai::CombatStrengthType::HeavyArmour)] = 0;
+		hand.erase(hand.find(kRpg));
+		hand.emplace("WEAPONS/RPG7/U_RPG7", unarmed);
+		core::Result<std::shared_ptr<const host::BotWeaponTemplates>> by_hand =
+				host::BotWeaponTemplates::create(**table, gl, hand, vehicles);
+		REQUIRE(by_hand.ok());
+		CHECK((*by_hand)->of(rpg, 0) == unarmed);
+		CHECK((*by_hand)->of(ak, 0) == named(loaded, kAk));
+
+		core::Result<std::shared_ptr<const host::BotWeaponTemplates>> generated =
+				host::BotWeaponTemplates::create(**table, gl, {}, vehicles);
+		REQUIRE(generated.ok());
+		CHECK((*generated)->of(rpg, 0) == named(loaded, kRpg));
+		CHECK((*generated)->of(ak, 0) == named(loaded, kAk));
+		CHECK((*generated)->of(sim::weapons::kNoWeapon, 0) == ai::WeaponTemplate{});
+		for (const host::LevelVehicleKind &k : vehicles->kinds) {
+			const sim::weapons::SurfacePair pair = gl.materials->pair_of(k.material);
+			REQUIRE(pair.resolved);
+			CHECK((*generated)->vehicle_type(pair.property) == host::vehicle_strength_type(k));
+		}
 	}
 }
