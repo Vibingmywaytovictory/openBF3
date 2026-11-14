@@ -1,16 +1,14 @@
 cmake_minimum_required(VERSION 3.29)
 set(GODOT_WINDOWED TRUE)
 include(${CMAKE_CURRENT_LIST_DIR}/godot_common.cmake)
-string(RANDOM LENGTH 8 ALPHABET 0123456789abcdef tag)
-set(scratch "${BUILD_DIR}/scratch/${ROW}-${tag}")
+openbf3_scratch_dir(scratch godot-level-change)
 set(cache "${BUILD_DIR}/godot-cache/${ROW}")
-file(REMOVE_RECURSE "${scratch}")
-file(MAKE_DIRECTORY "${scratch}" "${cache}")
+file(MAKE_DIRECTORY "${cache}")
 file(WRITE "${scratch}/maplist.cfg" "MP_Subway TeamDeathMatch0 1\nMP_011 TeamDeathMatch0 1\nMP_003 TeamDeathMatch0 1\n")
 godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 570 REMOVE_ON_SKIP "${scratch}"
     ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- "--maplist=${scratch}/maplist.cfg"
         --bots=15 --kill-limit=10 --preround=0 --match-levels=3 --quit-after=2 "--bf3-cache=${cache}")
-file(REMOVE_RECURSE "${scratch}")
+openbf3_scratch_remove_all()
 set(failures "")
 foreach(want
         "[match] listen server rotates MP_Subway TeamDeathMatch0 x1, MP_011 TeamDeathMatch0 x1, MP_003 TeamDeathMatch0 x1"
