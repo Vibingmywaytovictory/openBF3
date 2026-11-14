@@ -25,6 +25,7 @@
 #include "tdm_bot_shared.h"
 #include "tdm_bot_support.h"
 #include "tdm_fixture.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -492,9 +493,8 @@ TEST_SUITE("host-tdm-bots-unit") {
 	TEST_CASE("the bots' AI scripts: a weaponTemplate named after a weapon's variant reaches the bot body's aim "
 			  "deviation, every other weapon keeps the constructor's template") {
 		const std::filesystem::path shipped = host::bot_ai_root(OPENBF3_BOT_TUNING_CFG);
-		const std::filesystem::path root = std::filesystem::temp_directory_path() /
-				("openbf3-bot-weapons-" +
-						std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+		const bf3::test::ScratchDir scratch("bot-weapons");
+		const std::filesystem::path root = scratch.path();
 		std::filesystem::create_directories(ai::level_ai_script(root, "XP9_Gun").parent_path());
 		std::filesystem::copy_file(shipped / ai::kAiDefaultScript, root / ai::kAiDefaultScript);
 		std::filesystem::copy_file(shipped / ai::kAiBehavioursScript, root / ai::kAiBehavioursScript);
@@ -1400,9 +1400,8 @@ TEST_SUITE("host-tdm-bots") {
 		REQUIRE(ai::run_ai_script(level->bots->ai_areas, "derived", derived).ok());
 		REQUIRE_FALSE(derived.strategic_areas.empty());
 		const std::filesystem::path shipped = host::bot_ai_root(OPENBF3_BOT_TUNING_CFG);
-		const std::filesystem::path root = std::filesystem::temp_directory_path() /
-				("openbf3-bot-areas-" +
-						std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+		const bf3::test::ScratchDir scratch("bot-areas");
+		const std::filesystem::path root = scratch.path();
 		const std::filesystem::path ai_root = root / "ai";
 		const std::filesystem::path areas_file = ai::level_strategic_areas_script(ai_root, level->shared->level);
 		std::filesystem::create_directories(root / "config");

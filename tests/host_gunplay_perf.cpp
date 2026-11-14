@@ -7,6 +7,7 @@
 #include "bf3/host/firefight_run.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/soldier_motor.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <chrono>
@@ -20,14 +21,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-#if defined(_WIN32)
-#include <process.h>
-#define OPENBF3_GETPID _getpid
-#else
-#include <unistd.h>
-#define OPENBF3_GETPID getpid
-#endif
 
 namespace {
 
@@ -75,7 +68,7 @@ Fixture *fixture() {
 	}
 	f->install = *opened;
 	std::error_code ec;
-	f->cache_root = std::filesystem::temp_directory_path(ec) / ("openbf3_host_gunplay_perf_" + std::to_string(OPENBF3_GETPID()));
+	f->cache_root = bf3::test::process_scratch("host-gunplay-perf");
 	std::filesystem::remove_all(f->cache_root, ec);
 	core::Cache cache;
 	core::CacheOptions co;

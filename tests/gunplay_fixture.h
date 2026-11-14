@@ -20,6 +20,7 @@
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <chrono>
@@ -214,8 +215,7 @@ inline Metro *metro() {
 	core::Result<std::shared_ptr<core::Install>> opened = core::Install::open(*m->reader);
 	REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
 	m->install = *opened;
-	m->cache_root = std::filesystem::temp_directory_path() /
-			("openbf3-gunplay-" + std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+	m->cache_root = bf3::test::process_scratch("gunplay");
 	std::error_code ec;
 	std::filesystem::remove_all(m->cache_root, ec);
 	core::Cache cache;
@@ -464,8 +464,7 @@ inline Metro *metro_gunplay() {
 	core::Result<std::shared_ptr<core::Install>> opened = core::Install::open(*m->reader);
 	REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
 	m->install = *opened;
-	m->cache_root = std::filesystem::temp_directory_path() /
-			("openbf3-gunplay-sv-" + std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+	m->cache_root = bf3::test::process_scratch("gunplay-sv");
 	std::error_code ec;
 	std::filesystem::remove_all(m->cache_root, ec);
 	core::Cache cache;

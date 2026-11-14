@@ -7,6 +7,7 @@
 #include "bf3/core/util/text.h"
 #include "bf3/sim/weapons/spread_recoil.h"
 #include "bf3/sim_harness/shooting_range.h"
+#include "test_scratch.h"
 
 #include <algorithm>
 #include <array>
@@ -834,9 +835,8 @@ TEST_SUITE("host-gunplay-server") {
 		}
 		const std::string base = read_text(mechanics_cfg_path());
 		REQUIRE(!base.empty());
-		const std::filesystem::path dir = std::filesystem::temp_directory_path() / "openbf3-sv-variants";
-		std::error_code ec;
-		std::filesystem::create_directories(dir, ec);
+		const bf3::test::ScratchDir scratch("sv-variants");
+		const std::filesystem::path dir = scratch.path();
 		struct Variant {
 			const char *key;
 			const char *value;
@@ -959,7 +959,6 @@ TEST_SUITE("host-gunplay-server") {
 			row("E6", "a client cfg differing from the server's gives another weapon_hash", t != nullptr && h != shipped_hash && shipped_hash != 0,
 					fmt("server %016" PRIx64 ", client %016" PRIx64 " (the disconnect itself: cl)", shipped_hash, h), "different");
 		}
-		std::filesystem::remove_all(dir, ec);
 	}
 
 	TEST_CASE("hostile") {

@@ -19,6 +19,7 @@
 #include "gunplay_fixture.h"
 #include "server_gadgets.h"
 #include "server_ghosts.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -34,14 +35,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-
-#if defined(_WIN32)
-#include <process.h>
-#define OPENBF3_GETPID _getpid
-#else
-#include <unistd.h>
-#define OPENBF3_GETPID getpid
-#endif
 
 namespace {
 
@@ -87,8 +80,7 @@ Fixture *fixture() {
 		return nullptr;
 	}
 	std::error_code ec;
-	f->cache_root =
-			std::filesystem::temp_directory_path(ec) / ("openbf3_host_ghost_" + std::to_string(OPENBF3_GETPID()));
+	f->cache_root = bf3::test::process_scratch("host-ghost");
 	std::filesystem::remove_all(f->cache_root, ec);
 	core::Cache cache;
 	core::CacheOptions co;

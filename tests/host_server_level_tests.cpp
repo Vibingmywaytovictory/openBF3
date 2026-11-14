@@ -15,6 +15,7 @@
 
 #include "gunplay_fixture.h"
 #include "tdm_fixture.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <atomic>
@@ -33,9 +34,7 @@ namespace tt = bf3::test::tdm;
 namespace {
 
 std::filesystem::path scratch_cache(const char *p_tag) {
-	const std::filesystem::path root = std::filesystem::temp_directory_path() /
-			(std::string("openbf3-") + p_tag + "-" +
-					std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+	const std::filesystem::path root = bf3::test::process_scratch(p_tag);
 	std::error_code ec;
 	std::filesystem::remove_all(root, ec);
 	return root;

@@ -8,6 +8,7 @@
 #include "bf3/fx/fx_harness.h"
 #include "bf3/fx/simulator.h"
 #include "fx_test_support.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <windows.h>
@@ -56,13 +57,14 @@ EffectStart start_with(uint64_t p_seed) {
 }
 
 struct TempCache {
+	bf3::test::ScratchDir dir;
 	std::filesystem::path root;
 	std::filesystem::path fence;
 	bf3::core::Cache cache;
 	bool open = false;
 
-	explicit TempCache(const char *p_name) {
-		const std::filesystem::path base = std::filesystem::temp_directory_path() / ("openbf3_fx_" + std::string(p_name) + "_" + std::to_string(GetCurrentProcessId()));
+	explicit TempCache(const char *p_name) : dir(std::string("fx-") + p_name) {
+		const std::filesystem::path base = dir.path();
 		std::error_code ec;
 		std::filesystem::remove_all(base, ec);
 		std::filesystem::create_directories(base / "fence", ec);

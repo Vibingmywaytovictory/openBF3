@@ -18,6 +18,7 @@
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 #include "tdm_fixture.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -479,9 +480,7 @@ ModeLevel load_mode_level(
 		std::shared_ptr<core::Install> p_install, const core::InstallReader &p_reader, const std::string &p_mode) {
 	ModeLevel out;
 	const auto start = std::chrono::steady_clock::now();
-	const std::filesystem::path root = std::filesystem::temp_directory_path() /
-			("openbf3-ai-world-" + p_mode + "-" +
-					std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+	const std::filesystem::path root = bf3::test::process_scratch("ai-world-" + p_mode);
 	core::Cache cache;
 	core::CacheOptions co;
 	co.root = root;
@@ -909,9 +908,8 @@ TEST_SUITE("ai-world-install") {
 		CHECK((*tdm_world)->area(1)->is_takeable(1));
 		CHECK((*tdm_world)->owner_of_control_point(0) == 0);
 
-		const std::filesystem::path root = std::filesystem::temp_directory_path() /
-				("openbf3-ai-areas-" +
-						std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+		const bf3::test::ScratchDir scratch("ai-areas");
+		const std::filesystem::path root = scratch.path();
 		{
 			core::Cache cache;
 			core::CacheOptions co;

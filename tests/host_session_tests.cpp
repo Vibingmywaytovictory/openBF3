@@ -25,6 +25,7 @@
 #include "pipe_transport.h"
 #include "server_net_thread.h"
 #include "server_soldiers.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -1456,7 +1457,7 @@ Metro *metro() {
 	REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
 	m->install = *opened;
 
-	m->cache_root = std::filesystem::temp_directory_path() / ("openbf3-host-session-" + std::to_string(GetCurrentProcessId()));
+	m->cache_root = bf3::test::process_scratch("host-session");
 	std::error_code ec;
 	std::filesystem::remove_all(m->cache_root, ec);
 	SharedLoadOptions options;
@@ -2253,8 +2254,8 @@ TEST_SUITE("host-session-unit") {
 	TEST_CASE("host.session: a client prepares the level a RoundOverInfo names on 4 below-normal threads, reports "
 			  "Prepare to the server, holds the LevelChange while it runs, and the cache entry its job wrote is there "
 			  "when the next level attaches") {
-		const std::filesystem::path root = std::filesystem::temp_directory_path() /
-				("openbf3-host-prepare-" + std::to_string(GetCurrentProcessId()));
+		const bf3::test::ScratchDir scratch("host-prepare");
+		const std::filesystem::path root = scratch.path();
 		std::error_code ec;
 		std::filesystem::remove_all(root, ec);
 		std::filesystem::create_directories(root / "install", ec);

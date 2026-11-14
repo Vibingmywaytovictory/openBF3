@@ -1,5 +1,6 @@
 #define OPENBF3_GUNPLAY_CLIENT_TESTS 1
 #include "gunplay_fixture.h"
+#include "test_scratch.h"
 #include "weapons_support.h"
 
 #include "bf3/core/gameplay/capsule_pose_table.h"
@@ -210,9 +211,7 @@ std::string mechanics_cfg_path() {
 std::filesystem::path scratch_dir() {
 	static std::filesystem::path s_dir;
 	if (s_dir.empty()) {
-		s_dir = std::filesystem::temp_directory_path() / ("openbf3-cl-" + std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
-		std::error_code ec;
-		std::filesystem::create_directories(s_dir, ec);
+		s_dir = bf3::test::process_scratch("cl");
 	}
 	return s_dir;
 }

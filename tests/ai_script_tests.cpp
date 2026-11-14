@@ -4,6 +4,7 @@
 #include "bf3/ai/main/ai_script.h"
 #include "bf3/ai/main/bot_skill.h"
 #include "bf3/core/level/level.h"
+#include "test_scratch.h"
 
 #include <chrono>
 #include <cstdint>
@@ -23,17 +24,12 @@ constexpr std::string_view kTwoAreas = "aiStrategicArea.createFromControlPoint A
 									   "aiStrategicArea.createFromControlPoint B 1 30\n";
 
 struct ScratchRoot {
-	std::filesystem::path dir = std::filesystem::temp_directory_path() /
-			("openbf3-ai-script-" +
-					std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+	bf3::test::ScratchDir scratch{ "ai-script" };
+	std::filesystem::path dir = scratch.path();
 	ScratchRoot() {
 		std::filesystem::create_directories(dir);
 		std::filesystem::copy_file(kShipped / kAiDefaultScript, dir / kAiDefaultScript);
 		std::filesystem::copy_file(kShipped / kAiBehavioursScript, dir / kAiBehavioursScript);
-	}
-	~ScratchRoot() {
-		std::error_code ec;
-		std::filesystem::remove_all(dir, ec);
 	}
 	void level(std::string_view p_level, std::string_view p_text) const { file(level_ai_script(dir, p_level), p_text); }
 	void file(const std::filesystem::path &p_path, std::string_view p_text) const {

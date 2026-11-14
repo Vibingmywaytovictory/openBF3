@@ -21,6 +21,7 @@
 #include "bf3/sim/static_world.h"
 #include "gunplay_fixture.h"
 #include "tdm_fixture.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <windows.h>
@@ -681,7 +682,7 @@ struct WarmCache {
 
 void warm_cache(Install &r_install, const char *p_level, WarmCache &r_warm) {
 	std::error_code ec;
-	r_warm.root = std::filesystem::temp_directory_path(ec) / ("openbf3_host_scale_" + std::to_string(GetCurrentProcessId()));
+	r_warm.root = bf3::test::process_scratch("host-scale");
 	std::filesystem::remove_all(r_warm.root, ec);
 	core::CacheOptions co;
 	co.root = r_warm.root;
@@ -769,8 +770,7 @@ PeerLevel *peer_level(Install &r_install) {
 	s_tried = true;
 	auto l = std::make_unique<PeerLevel>();
 	std::error_code ec;
-	l->warm.root = std::filesystem::temp_directory_path(ec) /
-			("openbf3_host_scale_peers_" + std::to_string(GetCurrentProcessId()));
+	l->warm.root = bf3::test::process_scratch("host-scale-peers");
 	std::filesystem::remove_all(l->warm.root, ec);
 	core::CacheOptions co;
 	co.root = l->warm.root;

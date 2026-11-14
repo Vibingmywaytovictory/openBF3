@@ -14,6 +14,7 @@
 #include "bf3/fx/emitter_atlas.h"
 #include "bf3/fx/fx_harness.h"
 #include "bf3/fx/impact_table.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <windows.h>
@@ -250,8 +251,8 @@ TEST_CASE("cache: cold and warm compiles give the same defs") {
 		return;
 	}
 	Session &s = *shared;
-	const std::filesystem::path root =
-			std::filesystem::temp_directory_path() / ("openbf3_fx_install_cache_" + std::to_string(GetCurrentProcessId()));
+	const bf3::test::ScratchDir scratch("fx-install-cache");
+	const std::filesystem::path root = scratch.path();
 	std::error_code ec;
 	std::filesystem::remove_all(root, ec);
 	{

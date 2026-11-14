@@ -232,6 +232,7 @@ core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunConfig &
 #include "bf3/host/gunplay.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 #include "gunplay_fixture.h"
+#include "test_scratch.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -370,8 +371,7 @@ inline std::unique_ptr<TdmLevel> load_tdm_level(const char *p_level, const char 
 	}
 	l->install = *opened;
 
-	l->cache_root = std::filesystem::temp_directory_path() /
-			("openbf3-tdm-" + std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+	l->cache_root = bf3::test::process_scratch("tdm");
 	std::error_code ec;
 	std::filesystem::remove_all(l->cache_root, ec);
 	core::Cache cache;

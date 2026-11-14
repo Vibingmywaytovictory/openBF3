@@ -20,9 +20,8 @@
 #include "bf3/sim/soldier_motor.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim_harness/nav_input_check.h"
+#include "test_scratch.h"
 #include "test_support.h"
-
-#include <process.h>
 
 #include <algorithm>
 #include <chrono>
@@ -94,7 +93,7 @@ Install *install() {
 		m->tuning = *t;
 	}
 	std::error_code ec;
-	m->scratch = std::filesystem::temp_directory_path(ec) / ("openbf3_s1_sim_nav_" + std::to_string(_getpid()));
+	m->scratch = bf3::test::process_scratch("sim-nav");
 	std::filesystem::remove_all(m->scratch, ec);
 	s_install = std::move(m);
 	return s_install.get();

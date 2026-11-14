@@ -8,6 +8,7 @@
 
 #include "bot_weapon_templates.h"
 #include "tdm_fixture.h"
+#include "test_scratch.h"
 #include "vehicles/vehicle_hits.h"
 
 #include <algorithm>
@@ -51,9 +52,7 @@ uint16_t def_of(const host::GunplayLevel &p_level, std::string_view p_variant) {
 }
 
 std::filesystem::path scratch_dir(std::string_view p_tag) {
-	return std::filesystem::temp_directory_path() /
-			("openbf3-" + std::string(p_tag) + "-" +
-					std::to_string(uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())));
+	return bf3::test::process_scratch(p_tag);
 }
 
 void print_template(std::string_view p_name, const ai::WeaponTemplate &p_template) {
