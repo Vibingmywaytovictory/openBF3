@@ -384,6 +384,40 @@ TEST_SUITE("ai-script") {
 		CHECK(format_weapon_template("Plain", WeaponTemplate{}) == "weaponTemplate.create Plain\n");
 	}
 
+	TEST_CASE("weapon templates: a level's generated templates join the config after the hand-written Weapons/*.ai "
+			  "files, which win by name in any case; a broken hand file fails the load") {
+		ScratchRoot root;
+		WeaponTemplate rifle;
+		rifle.strengths[0] = 78;
+		WeaponTemplate rocket;
+		rocket.strengths = { 11, 7, 2, 0, 0, 0 };
+		rocket.min_range = 20.0f;
+		const WeaponTemplateMap generated{ { "weapons/ak/u_ak", rifle }, { "weapons/rpg/u_rpg", rocket } };
+
+		const core::Result<AiConfig> plain = load_level_ai_config(root.dir, "XP9_W", kTwoAreas, generated);
+		REQUIRE(plain.ok());
+		CHECK(plain->weapon_templates == generated);
+
+		root.file(root.dir / kWeaponTemplatesDir / "b.ai",
+				"weaponTemplate.create WEAPONS/RPG/U_RPG\n"
+				"weaponTemplate.setStrength HeavyArmour 9\n");
+		root.file(root.dir / kWeaponTemplatesDir / "a.ai", "weaponTemplate.create Hand\n");
+		root.file(root.dir / kWeaponTemplatesDir / "notes.txt", "not a script\n");
+		const core::Result<AiConfig> hand = load_level_ai_config(root.dir, "XP9_W", kTwoAreas, generated);
+		REQUIRE(hand.ok());
+		CHECK(hand->weapon_templates.size() == 3u);
+		CHECK(hand->weapon_template("weapons/rpg/u_rpg").strengths == std::array<int32_t, 6>{ 0, 0, 9, 0, 0, 0 });
+		CHECK(hand->weapon_template("weapons/rpg/u_rpg").min_range == 0.0f);
+		CHECK(hand->weapon_template("weapons/ak/u_ak") == rifle);
+		CHECK(hand->weapon_templates.count("Hand") == 1u);
+		REQUIRE(hand->scripts.size() >= 2u);
+
+		root.file(root.dir / kWeaponTemplatesDir / "c.ai", "weaponTemplate.setStrength Tank 1\n");
+		const core::Result<AiConfig> broken = load_level_ai_config(root.dir, "XP9_W", kTwoAreas, generated);
+		REQUIRE_FALSE(broken.ok());
+		CHECK(broken.error().message.find("c.ai") != std::string::npos);
+	}
+
 	TEST_CASE("bot skill as the reconstruction reads it: EntryTrigger's skill, WeaponObject's deviation, "
 			  "BBPFireInfantery's first-shot delay and its fresh plan") {
 		CHECK(trigger_skill(0.75f, {}, true, false) == doctest::Approx(0.875f));

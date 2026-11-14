@@ -62,13 +62,13 @@ core::Status read_uint(std::string_view p_arg, double p_min, double p_max, uint3
 	return o.fault == KeyFault::None ? core::Status::success() : core::Status(fault(p_arg, o, p_min, p_max));
 }
 
-template <class T> T *find_named(std::map<std::string, T> &r_map, std::string_view p_name) {
+template <class T, class C> T *find_named(std::map<std::string, T, C> &r_map, std::string_view p_name) {
 	const auto found = std::find_if(r_map.begin(), r_map.end(),
 			[&](const auto &p_entry) { return core::iequals_ascii(p_entry.first, p_name); });
 	return found != r_map.end() ? &found->second : nullptr;
 }
 
-template <class T> const T *find_named(const std::map<std::string, T> &p_map, std::string_view p_name) {
+template <class T, class C> const T *find_named(const std::map<std::string, T, C> &p_map, std::string_view p_name) {
 	const auto found = std::find_if(p_map.begin(), p_map.end(),
 			[&](const auto &p_entry) { return core::iequals_ascii(p_entry.first, p_name); });
 	return found != p_map.end() ? &found->second : nullptr;
@@ -603,10 +603,10 @@ const WeaponTemplate &AiConfig::weapon_template(std::string_view p_name) const {
 	return find_weapon_template(weapon_templates, p_name);
 }
 
-const WeaponTemplate &find_weapon_template(
-		const std::map<std::string, WeaponTemplate> &p_templates, std::string_view p_weapon) {
+const WeaponTemplate &find_weapon_template(const WeaponTemplateMap &p_templates, std::string_view p_weapon) {
 	static const WeaponTemplate kDefault;
-	const WeaponTemplate *found = find_named(p_templates, p_weapon);
+	const auto exact = p_templates.find(p_weapon);
+	const WeaponTemplate *found = exact != p_templates.end() ? &exact->second : find_named(p_templates, p_weapon);
 	return found != nullptr ? *found : kDefault;
 }
 
@@ -767,8 +767,38 @@ std::string format_weapon_template(std::string_view p_name, const WeaponTemplate
 	return out;
 }
 
-core::Result<AiConfig> load_level_ai_config(
-		const std::filesystem::path &p_root, std::string_view p_level, std::string_view p_derived_areas) {
+core::Status run_weapon_template_files(const std::filesystem::path &p_root, AiConfig &r_config) {
+	const std::filesystem::path dir = p_root / kWeaponTemplatesDir;
+	std::error_code ec;
+	if (!std::filesystem::is_directory(dir, ec)) {
+		return core::Status::success();
+	}
+	std::vector<std::filesystem::path> files;
+	for (const std::filesystem::directory_entry &e : std::filesystem::directory_iterator(dir, ec)) {
+		if (e.is_regular_file(ec) && core::iequals_ascii(e.path().extension().string(), ".ai")) {
+			files.push_back(e.path());
+		}
+	}
+	if (ec) {
+		return core::make_error("ai scripts: cannot list " + dir.generic_string());
+	}
+	std::sort(files.begin(), files.end());
+	for (const std::filesystem::path &f : files) {
+		BF3_TRY(run_ai_script_file(f, r_config));
+	}
+	return core::Status::success();
+}
+
+void add_generated_weapon_templates(const WeaponTemplateMap &p_generated, AiConfig &r_config) {
+	for (const auto &[name, w] : p_generated) {
+		if (find_named(r_config.weapon_templates, name) == nullptr) {
+			r_config.weapon_templates.emplace(name, w);
+		}
+	}
+}
+
+core::Result<AiConfig> load_level_ai_config(const std::filesystem::path &p_root, std::string_view p_level,
+		std::string_view p_derived_areas, const WeaponTemplateMap &p_generated_weapons) {
 	AiConfig config;
 	BF3_TRY(run_ai_script_file(p_root / kAiDefaultScript, config));
 	BF3_TRY(run_ai_script_file(p_root / kAiBehavioursScript, config));
@@ -779,6 +809,8 @@ core::Result<AiConfig> load_level_ai_config(
 	} else {
 		BF3_TRY(run_ai_script(p_derived_areas, "derived:" + areas.generic_string(), config));
 	}
+	BF3_TRY(run_weapon_template_files(p_root, config));
+	add_generated_weapon_templates(p_generated_weapons, config);
 	const std::filesystem::path level = level_ai_script(p_root, p_level);
 	if (std::filesystem::is_regular_file(level, ec)) {
 		BF3_TRY(run_ai_script_file(level, config));

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/ai/main/ai_script.h"
 #include "bf3/ai/nav/nav_clusters.h"
 #include "bf3/core/result.h"
 #include "bf3/host/bot_fill_stats.h"
@@ -10,6 +11,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <span>
 #include <string>
@@ -91,6 +93,7 @@ struct BotLevel {
 	double seconds_components = 0.0;
 	double seconds_strategic = 0.0;
 	std::string ai_areas;
+	ai::WeaponTemplateMap ai_weapons;
 };
 
 struct BotLoadOptions {

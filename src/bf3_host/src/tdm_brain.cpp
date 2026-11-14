@@ -237,8 +237,8 @@ std::filesystem::path bot_ai_root(const std::string &p_tuning_cfg) {
 }
 
 core::Status load_bot_ai(const std::filesystem::path &p_root, std::string_view p_level, std::string_view p_areas,
-		TdmBotConfig &r_config) {
-	core::Result<ai::AiConfig> loaded = ai::load_level_ai_config(p_root, p_level, p_areas);
+		TdmBotConfig &r_config, const ai::WeaponTemplateMap &p_weapons) {
+	core::Result<ai::AiConfig> loaded = ai::load_level_ai_config(p_root, p_level, p_areas, p_weapons);
 	if (!loaded) {
 		return loaded.error();
 	}
@@ -262,10 +262,13 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 	const std::string_view areas = p_config.bots != nullptr && p_config.bots->level != nullptr
 			? std::string_view(p_config.bots->level->ai_areas)
 			: std::string_view();
+	const ai::WeaponTemplateMap no_weapons;
+	const ai::WeaponTemplateMap &weapons =
+			p_config.bots != nullptr && p_config.bots->level != nullptr ? p_config.bots->level->ai_weapons : no_weapons;
 	if (!config->tuning_cfg.empty()) {
 		auto tuned = std::make_shared<TdmBotConfig>(*config);
 		BF3_TRY(load_bot_tuning(config->tuning_cfg, *tuned));
-		BF3_TRY(load_bot_ai(bot_ai_root(config->tuning_cfg), p_config.level->level, areas, *tuned));
+		BF3_TRY(load_bot_ai(bot_ai_root(config->tuning_cfg), p_config.level->level, areas, *tuned, weapons));
 		tuned->count = config->count;
 		config = tuned;
 	} else if (config->strategic_areas.empty() && !areas.empty()) {
@@ -273,6 +276,11 @@ core::Status add_tdm_bots(GameServer &r_server, const GameServerConfig &p_config
 		BF3_TRY(ai::run_ai_script(areas, "derived:" + p_config.level->level, derived));
 		auto tuned = std::make_shared<TdmBotConfig>(*config);
 		tuned->strategic_areas = std::move(derived.strategic_areas);
+		config = tuned;
+	}
+	if (config->weapon_templates.empty() && !weapons.empty()) {
+		auto tuned = std::make_shared<TdmBotConfig>(*config);
+		tuned->weapon_templates = weapons;
 		config = tuned;
 	}
 	TdmBrainHost host;

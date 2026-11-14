@@ -148,7 +148,7 @@ struct TdmBotConfig {
 	ai::StrategyTuning strategy;
 	ai::AiSettings ai;
 	std::vector<ai::StrategicAreaDef> strategic_areas;
-	std::map<std::string, ai::WeaponTemplate> weapon_templates;
+	ai::WeaponTemplateMap weapon_templates;
 	bool squads = true;
 
 	std::string tuning_cfg;
@@ -162,7 +162,7 @@ core::Status parse_bot_tuning(std::string_view p_text, TdmBotConfig &r_config);
 core::Status load_bot_tuning(const std::string &p_path, TdmBotConfig &r_config);
 std::filesystem::path bot_ai_root(const std::string &p_tuning_cfg);
 core::Status load_bot_ai(const std::filesystem::path &p_root, std::string_view p_level, std::string_view p_areas,
-		TdmBotConfig &r_config);
+		TdmBotConfig &r_config, const ai::WeaponTemplateMap &p_weapons = {});
 
 struct TdmShared;
 

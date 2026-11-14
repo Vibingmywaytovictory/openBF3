@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <span>
 #include <string>
@@ -73,6 +74,8 @@ struct WeaponTemplate {
 	bool operator==(const WeaponTemplate &) const = default;
 };
 
+using WeaponTemplateMap = std::map<std::string, WeaponTemplate, std::less<>>;
+
 struct StrategicAreaDef {
 	std::string name;
 	std::string category;
@@ -98,7 +101,7 @@ struct AiConfig {
 	std::map<std::string, std::vector<bool>> given_modifiers;
 	std::string active_modifiers;
 	std::vector<VehicleBehaviour> vehicle_behaviours;
-	std::map<std::string, WeaponTemplate> weapon_templates;
+	WeaponTemplateMap weapon_templates;
 	std::string active_weapon_template;
 	std::vector<StrategicAreaDef> strategic_areas;
 	std::string active_area;
@@ -116,18 +119,20 @@ inline constexpr size_t kMaxAiScriptLines = 2048;
 inline constexpr std::string_view kAiDefaultScript = "AIDefault.ai";
 inline constexpr std::string_view kAiBehavioursScript = "AIBehaviours.ai";
 inline constexpr std::string_view kStrategicAreasScript = "StrategicAreas.ai";
+inline constexpr std::string_view kWeaponTemplatesDir = "Weapons";
 
 std::filesystem::path level_ai_script(const std::filesystem::path &p_root, std::string_view p_level);
 std::filesystem::path level_strategic_areas_script(const std::filesystem::path &p_root, std::string_view p_level);
-const WeaponTemplate &find_weapon_template(
-		const std::map<std::string, WeaponTemplate> &p_templates, std::string_view p_weapon);
+const WeaponTemplate &find_weapon_template(const WeaponTemplateMap &p_templates, std::string_view p_weapon);
 core::Status run_ai_script(std::string_view p_text, std::string_view p_name, AiConfig &r_config);
 core::Status run_ai_script_file(const std::filesystem::path &p_path, AiConfig &r_config);
 std::vector<StrategicAreaDef> strategic_areas_by_name(std::span<const StrategicAreaDef> p_areas);
 std::string format_strategic_areas(std::span<const StrategicAreaDef> p_areas);
 std::string format_weapon_template(std::string_view p_name, const WeaponTemplate &p_template);
-core::Result<AiConfig> load_level_ai_config(
-		const std::filesystem::path &p_root, std::string_view p_level, std::string_view p_derived_areas);
+core::Status run_weapon_template_files(const std::filesystem::path &p_root, AiConfig &r_config);
+void add_generated_weapon_templates(const WeaponTemplateMap &p_generated, AiConfig &r_config);
+core::Result<AiConfig> load_level_ai_config(const std::filesystem::path &p_root, std::string_view p_level,
+		std::string_view p_derived_areas, const WeaponTemplateMap &p_generated_weapons = {});
 core::Status apply_behaviour_weights(const AiConfig &p_config, BehaviourTuning &r_tuning);
 
 }

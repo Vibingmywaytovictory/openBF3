@@ -243,6 +243,8 @@ target_sources(bf3_host PRIVATE
     src/ai_world.cpp
     include/bf3/host/ai_level_config.h
     src/ai_level_config.cpp
+    src/bot_weapon_templates.h
+    src/bot_weapon_templates.cpp
     src/tdm_strategy.h
     src/tdm_strategy.cpp
     src/server_ghosts.h

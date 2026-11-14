@@ -12,7 +12,7 @@ struct TriggerWeapon {
 
 float trigger_skill(float p_bot_skill, const TriggerWeapon &p_weapon, bool p_soldier, bool p_human_vehicle_target);
 float ai_deviation_deg(const WeaponTemplate &p_template, float p_skill, double p_seconds_since, float p_scale);
-float weapon_deviation_deg(const std::map<std::string, WeaponTemplate> &p_templates, std::string_view p_weapon,
+float weapon_deviation_deg(const WeaponTemplateMap &p_templates, std::string_view p_weapon,
 		const TriggerWeapon &p_trigger, float p_bot_skill, double p_seconds_since);
 float fire_delay_s(float p_bot_skill, float p_unit_draw);
 bool fresh_fire_plan(bool p_fire_plan_running, float p_bot_skill);

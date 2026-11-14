@@ -1,6 +1,7 @@
 #include "bf3/host/bot_fill.h"
 
 #include "bot_director.h"
+#include "bot_weapon_templates.h"
 #include "strategic_map.h"
 
 #include "bf3/core/cache/disk_cache.h"
@@ -207,6 +208,14 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 		return core::error_at("load_bot_level", ai_areas.error());
 	}
 	out->ai_areas = std::move(ai_areas->text);
+	if (p_shared.gunplay != nullptr) {
+		core::Result<CachedWeaponTemplates> weapons = cached_weapon_templates(
+				p_options.cache, install, out->level, out->mode, *p_shared.gunplay, p_shared.vehicles.get());
+		if (!weapons) {
+			return core::error_at("load_bot_level", weapons.error());
+		}
+		out->ai_weapons = std::move(weapons->templates);
+	}
 	out->seconds_strategic = seconds_since(clock);
 	return std::shared_ptr<const BotLevel>(std::move(out));
 }
