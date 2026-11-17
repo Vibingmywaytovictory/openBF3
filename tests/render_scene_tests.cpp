@@ -422,8 +422,9 @@ TEST_SUITE("render-scene-unit") {
 		CHECK(si::merge_role(TextureRole::Data, TextureRole::Data) == TextureRole::Data);
 
 		CHECK_FALSE(si::shader_flags("shaders/invisible/invisiblecollision").drawn);
-		CHECK_FALSE(si::shader_flags("shaders/root/occluder").drawn);
-		CHECK_FALSE(si::shader_flags("Shaders/ShadowMesh").drawn);
+		CHECK_FALSE(si::shader_flags("UI/Shaders/UI_Menu_Cover").drawn);
+		CHECK(si::shader_flags("shaders/root/occluder").drawn);
+		CHECK(si::shader_flags("Shaders/ShadowMesh").drawn);
 		const si::ShaderFlags foliage = si::shader_flags("shaders/vegetation/foliage_tree");
 		CHECK(foliage.drawn);
 		CHECK(foliage.alpha_test);
@@ -556,8 +557,8 @@ TEST_SUITE("render-scene") {
 		REQUIRE(census.ok());
 		const double seconds_census = seconds_since(t0);
 		CHECK(census->placements == 10873);
-		CHECK(census->scene_meshes == 844);
-		CHECK(census->scene_instances == 10573);
+		CHECK(census->scene_meshes == 896);
+		CHECK(census->scene_instances == 10630);
 
 		Result<LevelScenePlan> plan = plan_level_scene(lvl, **world, *census);
 		REQUIRE(plan.ok());
@@ -565,7 +566,7 @@ TEST_SUITE("render-scene") {
 		std::printf("render.scene plan: load + traverse %.3f s, census %.3f s, plan %.3f s\n", seconds_load, seconds_census, p.seconds);
 
 		check_requests_match_m0(*census, p.requests);
-		CHECK(p.requests.size() == 621);
+		CHECK(p.requests.size() == 623);
 
 		size_t kept = 0, start_hidden = 0;
 		std::vector<size_t> shown(census->meshes.size(), 0);
@@ -588,11 +589,11 @@ TEST_SUITE("render-scene") {
 					"start-hidden), %zu materials, %zu textures, %zu terrains, %zu failures\n",
 				p.requests.size(), p.meshes.size(), kept, expected_meshes, p.instances.size(), census->instances.size(),
 				start_hidden, p.materials.size(), p.textures.size(), p.terrains.size(), p.failures.size());
-		CHECK(kept == 842);
-		CHECK(census->instances.size() == 10571);
+		CHECK(kept == 894);
+		CHECK(census->instances.size() == 10628);
 		CHECK(start_hidden == 64);
 		CHECK(p.meshes.size() == expected_meshes);
-		CHECK(p.meshes.size() <= 842);
+		CHECK(p.meshes.size() <= 894);
 		CHECK(p.instances.size() == census->instances.size());
 		size_t hidden_at_start = 0, driven = 0, hidden_undriven = 0;
 		for (const SceneInstancePlan &inst : p.instances) {

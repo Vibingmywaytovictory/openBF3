@@ -12,6 +12,7 @@
 #include <chrono>
 #include <climits>
 #include <cmath>
+#include <cstring>
 #include <iterator>
 #include <span>
 #include <tuple>
@@ -49,7 +50,7 @@ constexpr std::string_view kOverlayWords[] = { "puddle", "waterpuddle" };
 constexpr std::string_view kFoliageWords[] = { "vegetation", "foliage", "leaf", "leaves", "bush", "grass", "ivy", "vine" };
 constexpr std::string_view kBackdropWords[] = { "backdrop" };
 constexpr std::string_view kGlassWords[] = { "glass", "window" };
-constexpr std::string_view kUndrawnShaders[] = { "invisible", "occluder", "shadowmesh", "ui_menu" };
+constexpr std::string_view kUndrawnShaders[] = { "invisible", "ui_menu" };
 constexpr std::string_view kCharacterBackdropWords[] = { "charbackdrop" };
 constexpr std::string_view kLightConeWords[] = { "lightcone" };
 constexpr std::string_view kDustWords[] = { "lightdust" };
@@ -305,7 +306,70 @@ struct LookResolver::ProgramInfo {
 	std::map<uint64_t, std::shared_ptr<const GraphProgram>> variants;
 	ProgramAnalysis analysis;
 	std::vector<ProgramBinding> mask_bindings;
+	std::optional<std::array<float, 3>> flat_colour;
+	bool flat_unlit = false;
 };
+
+namespace {
+
+constexpr std::array<float, 4> kDepthPassOutput{ 1.0f, 0.0f, 0.0f, 1.0f };
+
+bool writes_target(const dxbc::Program &p_pixel, uint32_t p_register) {
+	return std::any_of(p_pixel.outputs.begin(), p_pixel.outputs.end(),
+			[&](const dxbc::SignatureElement &p_e) { return p_e.name == "SV_Target" && p_e.reg == p_register; });
+}
+
+std::optional<std::array<float, 4>> constant_target(const dxbc::Program &p_pixel, uint32_t p_register) {
+	std::array<float, 4> value{};
+	uint8_t written = 0;
+	for (const dxbc::Instruction &i : p_pixel.code) {
+		if (i.operands.empty() || !i.operands[0].is(dxbc::OperandType::Output) ||
+				i.operands[0].index[0] != p_register) {
+			continue;
+		}
+		if (!i.is(dxbc::Op::Mov) || i.operands.size() != 2 || !i.operands[1].is(dxbc::OperandType::Immediate32)) {
+			return std::nullopt;
+		}
+		const uint8_t mask = i.operands[0].write_mask();
+		for (uint8_t lane = 0; lane < 4; ++lane) {
+			if ((mask & (1u << lane)) == 0) {
+				continue;
+			}
+			const uint32_t bits = i.operands[1].imm[i.operands[1].lane(lane)];
+			std::memcpy(&value[lane], &bits, 4);
+			written |= uint8_t(1u << lane);
+		}
+	}
+	if ((written & 7u) != 7u || !std::isfinite(value[0]) || !std::isfinite(value[1]) || !std::isfinite(value[2])) {
+		return std::nullopt;
+	}
+	return value;
+}
+
+struct FlatOutputs {
+	bool gbuffer = false;
+	std::optional<std::array<float, 4>> albedo;
+	std::optional<std::array<float, 4>> emitted;
+
+	void note(const dxbc::Program &p_pixel) {
+		if (writes_target(p_pixel, 1)) {
+			if (!gbuffer) {
+				albedo = constant_target(p_pixel, 1);
+			}
+			gbuffer = true;
+			return;
+		}
+		if (emitted || !writes_target(p_pixel, 0)) {
+			return;
+		}
+		const std::optional<std::array<float, 4>> colour = constant_target(p_pixel, 0);
+		if (colour && *colour != kDepthPassOutput) {
+			emitted = colour;
+		}
+	}
+};
+
+}
 
 struct LookResolver::FolderIndex {
 
@@ -613,6 +677,17 @@ LookResolver::ProgramInfo &LookResolver::program_info(const SurfaceShader &p_sha
 	constexpr std::string_view kTexturePrefix = "texture_";
 	std::string last = "no solution draws its target with a texture";
 	std::optional<TranslatedProgram> probe;
+	FlatOutputs flat;
+	const auto finish_flat = [&]() {
+		if (info->target != ProgramTarget::Deferred) {
+			return;
+		}
+		const std::optional<std::array<float, 4>> &colour = flat.gbuffer ? flat.albedo : flat.emitted;
+		if (colour) {
+			info->flat_colour = std::array<float, 3>{ (*colour)[0], (*colour)[1], (*colour)[2] };
+			info->flat_unlit = !flat.gbuffer;
+		}
+	};
 	for (const ShaderSolution &s : p_shader.solutions) {
 		if (!s.pixel_program || !s.vertex_program) {
 			continue;
@@ -622,6 +697,7 @@ LookResolver::ProgramInfo &LookResolver::program_info(const SurfaceShader &p_sha
 			last = pixel.error().message;
 			continue;
 		}
+		flat.note(*pixel);
 		const bool target =
 				std::any_of(pixel->outputs.begin(), pixel->outputs.end(), [&](const dxbc::SignatureElement &p_e) {
 					return p_e.name == "SV_Target" && p_e.reg == target_register;
@@ -675,6 +751,7 @@ LookResolver::ProgramInfo &LookResolver::program_info(const SurfaceShader &p_sha
 		}
 		last = t.error().message;
 	}
+	finish_flat();
 	if (!probe) {
 		info->solution = nullptr;
 		info->refusal = last;
@@ -732,6 +809,10 @@ core::Result<TranslatedProgram> LookResolver::translate(
 void LookResolver::attach_program(
 		LookMaterial &r_out, const SurfaceShader &p_shader, const MaterialSlot &p_slot, bool p_hidden_mask) {
 	ProgramInfo &info = program_info(p_shader);
+	if (!r_out.color) {
+		r_out.flat_colour = info.flat_colour;
+		r_out.flat_unlit = info.flat_colour && info.flat_unlit;
+	}
 	if (!info.refusal.empty()) {
 		r_out.graph_refusal = info.refusal;
 		for (const ProgramBinding &b : info.mask_bindings) {

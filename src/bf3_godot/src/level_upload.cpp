@@ -154,6 +154,8 @@ uniform int normal_uv = 0;
 uniform float normal_scale = 1.0;
 uniform vec3 albedo_tint : source_color = vec3(0.55);
 uniform float roughness_value = 0.6;
+uniform float specular_value = 0.5;
+uniform vec3 emission_value = vec3(0.0);
 uniform float glass_opacity = 0.0;
 varying vec3 world_pos;
 varying vec3 world_nrm;
@@ -177,7 +179,8 @@ void fragment() {
 	ALBEDO = c.rgb * albedo_tint;
 	ROUGHNESS = roughness_value;
 	METALLIC = 0.0;
-	SPECULAR = 0.5;
+	SPECULAR = specular_value;
+	EMISSION = emission_value;
 	if (has_normal) {
 		NORMAL_MAP = vec3(texture(normal_tex, look_uv(normal_uv, normal_scale, UV, UV2)).rg, 1.0);
 	}
@@ -632,6 +635,16 @@ void LevelUpload::create_materials(double p_deadline_us) {
 				roughness = 0.1f;
 				if (mp.albedo < 0) {
 					tint = Color(render::kLookGlassTint, render::kLookGlassTint, render::kLookGlassTint);
+				}
+			}
+			if (plan.look == render::SceneLook::L1 && mp.look && mp.look->flat_colour && mp.program < 0) {
+				const std::array<float, 3> &flat = *mp.look->flat_colour;
+				if (mp.look->flat_unlit) {
+					tint = Color(0, 0, 0);
+					rs->material_set_param(m, "specular_value", 0.0f);
+					rs->material_set_param(m, "emission_value", Vector3(flat[0], flat[1], flat[2]));
+				} else {
+					tint = Color(flat[0], flat[1], flat[2]);
 				}
 			}
 			rs->material_set_param(m, "albedo_tint", tint);

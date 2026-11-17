@@ -6,6 +6,7 @@
 #include "bf3/render/shader_database.h"
 #include "bf3/render/shader_translate.h"
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -98,6 +99,8 @@ struct LookMaterial {
 	std::string graph_refusal;
 	bool graph_plain = false;
 	bool graph_mask_colour = false;
+	std::optional<std::array<float, 3>> flat_colour;
+	bool flat_unlit = false;
 };
 
 struct LookStats {
