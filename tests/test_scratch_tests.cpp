@@ -281,6 +281,8 @@ TEST_SUITE("test-scratch") {
 		const fs::path legacy_young = make_dir(temp / "openbf3-ai-script-306298858428200");
 		const fs::path other_old = make_dir(temp / "o3p-not-ours");
 		REQUIRE(set_times(other_old, 7h));
+		const fs::path other_prefix = make_dir(temp / "o3x-17528-320331515");
+		REQUIRE(set_times(other_prefix, 7h));
 		const fs::path not_ours = make_dir(temp / "someone-else");
 		REQUIRE(set_times(not_ours, 7h));
 
@@ -304,7 +306,7 @@ TEST_SUITE("test-scratch") {
 		}
 		CHECK_FALSE(fs::exists(root / "m1-prepare-cmake-89abcdef.lock"));
 		CHECK_FALSE(fs::exists(orphan_lock));
-		for (const fs::path &p : { live, unknown_young, legacy_young, other_old, not_ours }) {
+		for (const fs::path &p : { live, unknown_young, legacy_young, other_old, other_prefix, not_ours }) {
 			INFO(utf8(p));
 			CHECK(fs::exists(p));
 			CHECK_FALSE(contains_path(r.removed, p));

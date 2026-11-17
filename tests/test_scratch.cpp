@@ -20,6 +20,7 @@ constexpr std::wstring_view kTrashName = L".trash";
 constexpr std::wstring_view kSweepLock = L".sweep.lock";
 constexpr std::wstring_view kCmakeTag = L"-cmake-";
 constexpr std::wstring_view kLockSuffix = L".lock";
+constexpr std::string_view kLegacyShortTags = "pcmwt";
 constexpr std::chrono::milliseconds kStartupSweepBudget{ 2000 };
 
 std::atomic<uint32_t> g_next{ 0 };
@@ -330,7 +331,8 @@ bool is_legacy_scratch_name(std::string_view p_name) {
 	if (prefixed) {
 		return p_name != kScratchRootName;
 	}
-	if (p_name.size() < 5 || p_name.rfind("o3", 0) != 0 || p_name[2] < 'a' || p_name[2] > 'z' || p_name[3] != '-') {
+	if (p_name.size() < 5 || p_name.rfind("o3", 0) != 0 || kLegacyShortTags.find(p_name[2]) == std::string_view::npos ||
+			p_name[3] != '-') {
 		return false;
 	}
 	for (char c : p_name.substr(4)) {
