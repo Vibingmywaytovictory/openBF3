@@ -5,7 +5,7 @@ set(shots "$ENV{OPENBF3_FX3_SHOT_DIR}")
 if(shots STREQUAL "")
     set(shots "${BUILD_DIR}/shots/godot.fx3_demo")
 endif()
-set(root "${BUILD_DIR}/scratch/godot.fx3_demo/bf3cache")
+set(root "${BUILD_DIR}/godot-cache/godot.fx3_demo")
 file(MAKE_DIRECTORY "${root}")
 godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 600
     ARGS --path "${PROJECT_DIR}" res://scenes/fx3_demo.tscn -- --fx3-check --walkers=0 --no-hud "--bf3-cache=${root}"

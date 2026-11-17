@@ -131,11 +131,11 @@ target_link_libraries(test_res_install PRIVATE bf3_core)
 add_test(NAME core.res.install COMMAND test_res_install)
 set_tests_properties(core.res.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 add_test(NAME tools.export.cache COMMAND ${CMAKE_COMMAND} -DKIND=cache -DBF3DUMP=$<TARGET_FILE:bf3dump> -DCONSUMER=$<TARGET_FILE:test_cache>
-    -DSCRATCH=${CMAKE_BINARY_DIR}/scratch -P ${CMAKE_CURRENT_SOURCE_DIR}/bf3dump_export.cmake)
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/bf3dump_export.cmake)
 add_test(NAME tools.export.res COMMAND ${CMAKE_COMMAND} -DKIND=res -DBF3DUMP=$<TARGET_FILE:bf3dump> -DCONSUMER=$<TARGET_FILE:test_res>
-    -DRESDUMP=$<TARGET_FILE:resdump> -DSCRATCH=${CMAKE_BINARY_DIR}/scratch -P ${CMAKE_CURRENT_SOURCE_DIR}/bf3dump_export.cmake)
+    -DRESDUMP=$<TARGET_FILE:resdump> -P ${CMAKE_CURRENT_SOURCE_DIR}/bf3dump_export.cmake)
 add_test(NAME tools.export.ant COMMAND ${CMAKE_COMMAND} -DKIND=ant -DBF3DUMP=$<TARGET_FILE:bf3dump> -DCONSUMER=$<TARGET_FILE:test_ant>
-    -DANTDUMP=$<TARGET_FILE:antdump> -DSCRATCH=${CMAKE_BINARY_DIR}/scratch -P ${CMAKE_CURRENT_SOURCE_DIR}/bf3dump_export.cmake)
+    -DANTDUMP=$<TARGET_FILE:antdump> -P ${CMAKE_CURRENT_SOURCE_DIR}/bf3dump_export.cmake)
 set_tests_properties(tools.export.cache tools.export.res tools.export.ant PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 openbf3_test(test_gameplay test_main.cpp gameplay_tests.cpp test_support.h)
 target_link_libraries(test_gameplay PRIVATE bf3_core)
