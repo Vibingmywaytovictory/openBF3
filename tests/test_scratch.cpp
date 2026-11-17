@@ -48,16 +48,23 @@ bool digits(std::wstring_view p_text) {
 	return true;
 }
 
-bool hex8(std::wstring_view p_text) {
+template <class Char> bool hex8(std::basic_string_view<Char> p_text) {
 	if (p_text.size() != 8) {
 		return false;
 	}
-	for (wchar_t c : p_text) {
-		if (!((c >= L'0' && c <= L'9') || (c >= L'a' && c <= L'f'))) {
+	for (Char c : p_text) {
+		if (!((c >= Char('0') && c <= Char('9')) || (c >= Char('a') && c <= Char('f')))) {
 			return false;
 		}
 	}
 	return true;
+}
+
+template <class Char> std::basic_string_view<Char> name_tag(std::basic_string_view<Char> p_name) {
+	if (p_name.size() > 9 && p_name[8] == Char('.') && hex8(p_name.substr(0, 8))) {
+		return p_name.substr(0, 8);
+	}
+	return {};
 }
 
 bool ends_with(std::wstring_view p_text, std::wstring_view p_tail) {
@@ -181,17 +188,17 @@ void stamp_created_now(const fs::path &p_dir) {
 std::wstring checked_name(std::string_view p_name) {
 	std::wstring out;
 	for (char c : p_name) {
-		const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' ||
-				c == '_' || c == '.';
+		const bool ok =
+				(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
 		if (!ok) {
-			std::fprintf(stderr, "test scratch: '%.*s' is not a scratch name ([A-Za-z0-9._-])\n", int(p_name.size()),
+			std::fprintf(stderr, "test scratch: '%.*s' is not a scratch name ([A-Za-z0-9_-])\n", int(p_name.size()),
 					p_name.data());
 			std::abort();
 		}
 		out += wchar_t(c);
 	}
-	if (out.empty() || out.front() == L'.') {
-		std::fprintf(stderr, "test scratch: a scratch name is not empty and does not start with '.'\n");
+	if (out.empty()) {
+		std::fprintf(stderr, "test scratch: a scratch name is not empty\n");
 		std::abort();
 	}
 	return out;
@@ -199,7 +206,9 @@ std::wstring checked_name(std::string_view p_name) {
 
 fs::path create_scratch(std::string_view p_name) {
 	scratch_startup();
-	const std::wstring base = checked_name(p_name) + L"-" + std::to_wstring(GetCurrentProcessId()) + L"-";
+	const std::string tag = scratch_tag();
+	const std::wstring base = (tag.empty() ? std::wstring() : std::wstring(tag.begin(), tag.end()) + L".") +
+			checked_name(p_name) + L"-" + std::to_wstring(GetCurrentProcessId()) + L"-";
 	const fs::path root = scratch_root();
 	for (int attempt = 0; attempt < 64; ++attempt) {
 		std::error_code ec;
@@ -271,6 +280,17 @@ fs::path scratch_root() {
 	return temp_dir() / kScratchRootName;
 }
 
+std::string scratch_tag() {
+	char buffer[16] = {};
+	const DWORD n = GetEnvironmentVariableA(std::string(kScratchTagVariable).c_str(), buffer, sizeof(buffer));
+	const std::string_view text(buffer, n < sizeof(buffer) ? n : 0);
+	return hex8(text) ? std::string(text) : std::string();
+}
+
+std::string_view scratch_name_tag(std::string_view p_name) {
+	return name_tag(p_name);
+}
+
 ScratchDir::ScratchDir(std::string_view p_name) : path_(create_scratch(p_name)) {}
 
 ScratchDir::~ScratchDir() {
@@ -335,9 +355,10 @@ bool is_legacy_scratch_name(std::string_view p_name) {
 	return true;
 }
 
-SweepReport sweep_scratch(
-		const fs::path &p_temp, std::chrono::seconds p_legacy_age, std::chrono::milliseconds p_budget) {
+SweepReport sweep_scratch(const fs::path &p_temp, std::chrono::seconds p_legacy_age, std::chrono::milliseconds p_budget,
+		std::string_view p_pass_tag) {
 	SweepReport report;
+	const std::wstring pass_tag(p_pass_tag.begin(), p_pass_tag.end());
 	const fs::path root = p_temp / kScratchRootName;
 	std::error_code ec;
 	fs::create_directories(root, ec);
@@ -378,7 +399,10 @@ SweepReport sweep_scratch(
 			continue;
 		}
 		const ScratchOwner owner = scratch_owner(entry);
-		if (owner == ScratchOwner::Dead || (owner == ScratchOwner::Unknown && older_than(entry, p_legacy_age))) {
+		const std::wstring_view tag = name_tag(std::wstring_view(name));
+		const bool old = older_than(entry, p_legacy_age);
+		const bool left_to_its_pass = !tag.empty() && tag != pass_tag && !old;
+		if ((owner == ScratchOwner::Dead && !left_to_its_pass) || (owner == ScratchOwner::Unknown && old)) {
 			dead.push_back(entry);
 		} else {
 			report.kept.push_back(entry);
@@ -400,7 +424,7 @@ void scratch_startup() {
 	static std::once_flag once;
 	std::call_once(once, [] {
 		registry();
-		sweep_scratch(temp_dir(), kLegacyScratchAge, kStartupSweepBudget);
+		sweep_scratch(temp_dir(), kLegacyScratchAge, kStartupSweepBudget, {});
 	});
 }
 

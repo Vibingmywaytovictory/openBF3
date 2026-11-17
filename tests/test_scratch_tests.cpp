@@ -31,6 +31,8 @@ using bf3::test::procs::ProcDriver;
 constexpr std::string_view kHeldLine = "scratch held=";
 constexpr std::string_view kCmakeLine = "cmake scratch=";
 constexpr uint32_t kGonePid = 0xFFFFFFF0u;
+constexpr std::string_view kOwnTag = "0a1b2c3d";
+constexpr std::string_view kOtherTag = "89abcdef";
 
 fs::path self_exe() {
 	std::wstring path(MAX_PATH, L'\0');
@@ -122,6 +124,15 @@ fs::path move_into(const fs::path &p_entry, const fs::path &p_root) {
 	return target;
 }
 
+std::string tag_prefix() {
+	const std::string tag = bf3::test::scratch_tag();
+	return tag.empty() ? tag : tag + ".";
+}
+
+std::string tagged(std::string_view p_tag, std::string_view p_name) {
+	return std::string(p_tag) + "." + std::string(p_name);
+}
+
 std::vector<std::string> pass_entries(const fs::path &p_temp) {
 	std::vector<std::string> out;
 	std::error_code ec;
@@ -142,10 +153,48 @@ std::vector<std::string> pass_entries(const fs::path &p_temp) {
 	return out;
 }
 
+enum class PassEntry : uint8_t {
+	Elsewhere,
+	Before,
+	Running,
+	Left,
+};
+
+PassEntry pass_entry(const fs::path &p_temp, std::string_view p_tag, const std::set<std::string> &p_before,
+		const std::string &p_entry) {
+	const std::string root = std::string(bf3::test::kScratchRootName) + "/";
+	const fs::path path = p_temp / from_utf8(p_entry);
+	if (p_entry.rfind(root, 0) != 0 || !fs::is_directory(path) ||
+			bf3::test::scratch_name_tag(std::string_view(p_entry).substr(root.size())) != p_tag) {
+		return PassEntry::Elsewhere;
+	}
+	if (p_before.count(p_entry) != 0) {
+		return PassEntry::Before;
+	}
+	return bf3::test::scratch_owner(path) == ScratchOwner::Alive ? PassEntry::Running : PassEntry::Left;
+}
+
+std::vector<std::string> pass_leftovers(
+		const fs::path &p_temp, std::string_view p_tag, const std::set<std::string> &p_before) {
+	std::vector<std::string> left;
+	for (const std::string &e : pass_entries(p_temp)) {
+		if (pass_entry(p_temp, p_tag, p_before, e) == PassEntry::Left) {
+			left.push_back(e);
+		}
+	}
+	return left;
+}
+
 fs::path listing_file() {
 	const char *v = std::getenv("OPENBF3_SCRATCH_LISTING");
 	REQUIRE_MESSAGE(v != nullptr, "OPENBF3_SCRATCH_LISTING names the pass's listing file (tests/CMakeLists.txt)");
 	return from_utf8(v);
+}
+
+std::string pass_tag() {
+	const std::string tag = bf3::test::scratch_tag();
+	REQUIRE_MESSAGE(!tag.empty(), "OPENBF3_SCRATCH_TAG names the pass's checkout, 8 hex digits (tests/CMakeLists.txt)");
+	return tag;
 }
 
 struct SweepHold {
@@ -205,7 +254,7 @@ TEST_SUITE("test-scratch") {
 			second = b.path();
 			CHECK(first.parent_path() == bf3::test::scratch_root());
 			CHECK(bf3::test::scratch_root() == bf3::test::temp_dir() / "openbf3-tests");
-			CHECK(utf8(first.filename()).rfind("unit-scope-" + own_pid() + "-", 0) == 0);
+			CHECK(utf8(first.filename()).rfind(tag_prefix() + "unit-scope-" + own_pid() + "-", 0) == 0);
 			CHECK(first != second);
 			CHECK(fs::is_directory(first));
 			make_dir(first);
@@ -285,51 +334,115 @@ TEST_SUITE("test-scratch") {
 		REQUIRE(set_times(other_prefix, 7h));
 		const fs::path not_ours = make_dir(temp / "someone-else");
 		REQUIRE(set_times(not_ours, 7h));
+		const fs::path pass_gone = make_dir(root / tagged(kOwnTag, "gone-" + pid_text(kGonePid) + "-4"));
+		const fs::path pass_cmake = make_dir(root / tagged(kOwnTag, "godot-m1-cmake-0123abcd"));
+		const fs::path pass_live = make_dir(root / tagged(kOwnTag, "live-" + own_pid() + "-5"));
+		const fs::path other_pass_gone = make_dir(root / tagged(kOtherTag, "gone-" + pid_text(kGonePid) + "-6"));
+		const fs::path other_pass_old = make_dir(root / tagged(kOtherTag, "gone-" + pid_text(kGonePid) + "-7"));
+		REQUIRE(set_times(other_pass_old, 7h));
 
 		{
 			HANDLE busy = CreateFileW((root / ".sweep.lock").c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
 					OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
 			REQUIRE(busy != INVALID_HANDLE_VALUE);
-			const bf3::test::SweepReport skipped = bf3::test::sweep_scratch(temp, bf3::test::kLegacyScratchAge, 10s);
+			const bf3::test::SweepReport skipped =
+					bf3::test::sweep_scratch(temp, bf3::test::kLegacyScratchAge, 10s, {});
 			CHECK_FALSE(skipped.ran);
 			CHECK(fs::exists(gone));
 			CloseHandle(busy);
 		}
 
-		const bf3::test::SweepReport r = bf3::test::sweep_scratch(temp, bf3::test::kLegacyScratchAge, 10s);
+		const bf3::test::SweepReport r = bf3::test::sweep_scratch(temp, bf3::test::kLegacyScratchAge, 10s, {});
 		CHECK(r.ran);
 		for (const fs::path &p : { gone, reused, trash, cmake_dead, unknown_old, legacy_old, legacy_old_underscore,
-					 legacy_cmake_old, legacy_tick_old }) {
+					 legacy_cmake_old, legacy_tick_old, other_pass_old }) {
 			INFO(utf8(p));
 			CHECK_FALSE(fs::exists(p));
 			CHECK(contains_path(r.removed, p));
 		}
 		CHECK_FALSE(fs::exists(root / "m1-prepare-cmake-89abcdef.lock"));
 		CHECK_FALSE(fs::exists(orphan_lock));
-		for (const fs::path &p : { live, unknown_young, legacy_young, other_old, other_prefix, not_ours }) {
+		for (const fs::path &p : { live, unknown_young, legacy_young, other_old, other_prefix, not_ours, pass_gone,
+					 pass_cmake, pass_live, other_pass_gone }) {
 			INFO(utf8(p));
 			CHECK(fs::exists(p));
 			CHECK_FALSE(contains_path(r.removed, p));
 		}
 		CHECK(contains_path(r.kept, live));
+		CHECK(contains_path(r.kept, pass_gone));
 		CHECK_FALSE(fs::exists(root / ".sweep.lock"));
+
+		const bf3::test::SweepReport own = bf3::test::sweep_scratch(temp, bf3::test::kLegacyScratchAge, 10s, kOwnTag);
+		for (const fs::path &p : { pass_gone, pass_cmake }) {
+			INFO(utf8(p));
+			CHECK_FALSE(fs::exists(p));
+			CHECK(contains_path(own.removed, p));
+		}
+		for (const fs::path &p : { live, unknown_young, pass_live, other_pass_gone }) {
+			INFO(utf8(p));
+			CHECK(fs::exists(p));
+		}
 		std::vector<fs::path> left;
 		for (const fs::directory_entry &e : fs::directory_iterator(root)) {
 			left.push_back(e.path());
 		}
-		CHECK(left.size() == 2);
+		CHECK(left.size() == 4);
+	}
+
+	TEST_CASE("a pass's leftovers are the folders with its tag that were not there before it and whose owner is "
+			  "gone; another checkout's, untagged and legacy folders are not, and the pass's sweep removes them") {
+		ScratchDir fake("unit-pass");
+		const fs::path temp = fake.path();
+		const fs::path root = temp / "openbf3-tests";
+		const std::string dir = std::string(bf3::test::kScratchRootName) + "/";
+		const std::string killed = tagged(kOwnTag, "cl-" + pid_text(kGonePid) + "-0");
+		const std::string failed_script = tagged(kOwnTag, "godot-m1-cmake-0123abcd");
+		const std::string earlier = tagged(kOwnTag, "tdm-" + pid_text(kGonePid) + "-1");
+		const std::string running = tagged(kOwnTag, "host-session-" + own_pid() + "-2");
+		const std::string sibling = tagged(kOtherTag, "cl-" + pid_text(kGonePid) + "-3");
+		const std::string by_hand = "cl-" + pid_text(kGonePid) + "-4";
+		for (const std::string &name : { killed, failed_script, earlier, running, sibling, by_hand }) {
+			make_dir(root / name);
+		}
+		write_file(root / (tagged(kOwnTag, "tc-cost-cmake-00112233") + ".lock"), "");
+		make_dir(temp / "openbf3-cl-316962746298100");
+		const std::set<std::string> before = { dir + earlier };
+
+		CHECK(pass_entry(temp, kOwnTag, before, dir + killed) == PassEntry::Left);
+		CHECK(pass_entry(temp, kOwnTag, before, dir + earlier) == PassEntry::Before);
+		CHECK(pass_entry(temp, kOwnTag, before, dir + running) == PassEntry::Running);
+		CHECK(pass_entry(temp, kOwnTag, before, dir + sibling) == PassEntry::Elsewhere);
+		CHECK(pass_entry(temp, kOwnTag, before, dir + by_hand) == PassEntry::Elsewhere);
+		CHECK(pass_entry(temp, kOwnTag, before, "openbf3-cl-316962746298100") == PassEntry::Elsewhere);
+		const std::vector<std::string> left = pass_leftovers(temp, kOwnTag, before);
+		CHECK(left == std::vector<std::string>{ dir + killed, dir + failed_script });
+		CHECK(pass_leftovers(temp, kOtherTag, {}) == std::vector<std::string>{ dir + sibling });
+
+		bf3::test::sweep_scratch(temp, bf3::test::kLegacyScratchAge, 10s, kOwnTag);
+		CHECK(pass_leftovers(temp, kOwnTag, before).empty());
+		for (const std::string &name : { killed, failed_script, earlier, by_hand }) {
+			INFO(name);
+			CHECK_FALSE(fs::exists(root / name));
+		}
+		for (const std::string &name : { running, sibling }) {
+			INFO(name);
+			CHECK(fs::exists(root / name));
+		}
+		CHECK(fs::exists(temp / "openbf3-cl-316962746298100"));
 	}
 
 	TEST_CASE("a sweep stops claiming folders when its time budget is spent and leaves the rest for the next one") {
 		ScratchDir fake("unit-budget");
 		const fs::path root = fake.path() / "openbf3-tests";
 		const fs::path gone = make_dir(root / ("gone-" + pid_text(kGonePid) + "-1"));
-		const bf3::test::SweepReport spent = bf3::test::sweep_scratch(fake.path(), bf3::test::kLegacyScratchAge, -1ms);
+		const bf3::test::SweepReport spent =
+				bf3::test::sweep_scratch(fake.path(), bf3::test::kLegacyScratchAge, -1ms, {});
 		CHECK(spent.ran);
 		CHECK(spent.removed.empty());
 		CHECK(contains_path(spent.kept, gone));
 		CHECK(fs::exists(gone));
-		const bf3::test::SweepReport next = bf3::test::sweep_scratch(fake.path(), bf3::test::kLegacyScratchAge, 10s);
+		const bf3::test::SweepReport next =
+				bf3::test::sweep_scratch(fake.path(), bf3::test::kLegacyScratchAge, 10s, {});
 		CHECK(contains_path(next.removed, gone));
 		CHECK_FALSE(fs::exists(gone));
 	}
@@ -367,7 +480,8 @@ TEST_SUITE("test-scratch-procs") {
 		REQUIRE(fs::is_directory(held));
 		CHECK(bf3::test::scratch_owner(held) == ScratchOwner::Dead);
 		const fs::path moved = move_into(held, fake.path() / "openbf3-tests");
-		const bf3::test::SweepReport r = bf3::test::sweep_scratch(fake.path(), bf3::test::kLegacyScratchAge, 10s);
+		const bf3::test::SweepReport r =
+				bf3::test::sweep_scratch(fake.path(), bf3::test::kLegacyScratchAge, 10s, bf3::test::scratch_tag());
 		CHECK(contains_path(r.removed, moved));
 		CHECK_FALSE(fs::exists(moved));
 	}
@@ -381,7 +495,7 @@ TEST_SUITE("test-scratch-procs") {
 		const fs::path dir = wait_path(driver, *hold, kCmakeLine);
 		REQUIRE_FALSE(dir.empty());
 		CHECK(fs::equivalent(dir.parent_path(), bf3::test::scratch_root()));
-		CHECK(utf8(dir.filename()).rfind("scratch-child-cmake-", 0) == 0);
+		CHECK(utf8(dir.filename()).rfind(tag_prefix() + "scratch-child-cmake-", 0) == 0);
 		CHECK(bf3::test::scratch_owner(dir) == ScratchOwner::Alive);
 		ScratchDir fake("procs-cmake");
 		fs::create_directories(fake.path() / "openbf3-tests");
@@ -394,7 +508,8 @@ TEST_SUITE("test-scratch-procs") {
 		lock += ".lock";
 		const fs::path moved = move_into(dir, fake.path() / "openbf3-tests");
 		const fs::path moved_lock = move_into(lock, fake.path() / "openbf3-tests");
-		const bf3::test::SweepReport r = bf3::test::sweep_scratch(fake.path(), bf3::test::kLegacyScratchAge, 10s);
+		const bf3::test::SweepReport r =
+				bf3::test::sweep_scratch(fake.path(), bf3::test::kLegacyScratchAge, 10s, bf3::test::scratch_tag());
 		CHECK(contains_path(r.removed, moved));
 		CHECK_FALSE(fs::exists(moved));
 		CHECK_FALSE(fs::exists(moved_lock));
@@ -427,12 +542,13 @@ TEST_SUITE("test-scratch-children" * doctest::skip()) {
 
 TEST_SUITE("test-scratch-pass-before") {
 	TEST_CASE("the test scratch in the temp folder before the pass") {
-		bf3::test::scratch_startup();
+		const std::string tag = pass_tag();
+		bf3::test::sweep_scratch(bf3::test::temp_dir(), bf3::test::kLegacyScratchAge, 10s, tag);
 		const std::vector<std::string> before = pass_entries(bf3::test::temp_dir());
 		std::ofstream out(listing_file(), std::ios::binary | std::ios::trunc);
 		REQUIRE(out.good());
-		std::printf(
-				"test scratch before the pass (%s): %zu entries\n", utf8(bf3::test::temp_dir()).c_str(), before.size());
+		std::printf("test scratch before pass %s (%s): %zu entries\n", tag.c_str(), utf8(bf3::test::temp_dir()).c_str(),
+				before.size());
 		for (const std::string &e : before) {
 			out << e << '\n';
 			std::printf("  %s\n", e.c_str());
@@ -450,22 +566,31 @@ TEST_SUITE("test-scratch-pass-after") {
 				before.insert(line);
 			}
 		}
+		const std::string tag = pass_tag();
 		const fs::path temp = bf3::test::temp_dir();
 		const std::vector<std::string> after = pass_entries(temp);
-		std::printf("test scratch after the pass: %zu entries (%zu before)\n", after.size(), before.size());
-		std::vector<std::string> left;
+		std::printf("test scratch after pass %s: %zu entries (%zu before)\n", tag.c_str(), after.size(), before.size());
 		for (const std::string &e : after) {
-			const bool fresh = before.count(e) == 0;
-			const ScratchOwner owner = bf3::test::scratch_owner(temp / from_utf8(e));
-			const bool live = owner == ScratchOwner::Alive && e.rfind(bf3::test::kScratchRootName, 0) == 0;
-			std::printf("  %s%s\n", e.c_str(), !fresh ? "" : live ? "  (new, owner still running)" : "  (new, LEFT)");
-			if (fresh && !live) {
-				left.push_back(e);
-			}
+			const PassEntry kind = pass_entry(temp, tag, before, e);
+			std::printf("  %s%s\n", e.c_str(),
+					kind == PassEntry::Left				 ? "  (LEFT by this pass)"
+							: kind == PassEntry::Running ? "  (this pass, owner still running)"
+							: kind == PassEntry::Before	 ? "  (this checkout, there before the pass)"
+							: before.count(e) == 0		 ? "  (new, not a folder of this pass)"
+														 : "");
 		}
+		const std::vector<std::string> left = pass_leftovers(temp, tag, before);
+		bf3::test::sweep_scratch(temp, bf3::test::kLegacyScratchAge, 30s, tag);
 		for (const std::string &e : left) {
-			FAIL_CHECK("left in the temp folder by this pass: " << e);
+			const bool removed = !fs::exists(temp / from_utf8(e));
+			FAIL_CHECK(
+					"left in the temp folder by this pass" << (removed ? " (removed now): " : " (NOT removed): ") << e);
 		}
 		RemoveDirectoryW((temp / bf3::test::kScratchRootName).c_str());
+		const std::vector<std::string> swept = pass_entries(temp);
+		std::printf("test scratch after the pass's sweep: %zu entries\n", swept.size());
+		for (const std::string &e : swept) {
+			std::printf("  %s\n", e.c_str());
+		}
 	}
 }

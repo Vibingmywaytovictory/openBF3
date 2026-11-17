@@ -3,16 +3,20 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace bf3::test {
 
 constexpr std::string_view kScratchRootName = "openbf3-tests";
+constexpr std::string_view kScratchTagVariable = "OPENBF3_SCRATCH_TAG";
 constexpr std::chrono::hours kLegacyScratchAge{ 6 };
 
 std::filesystem::path temp_dir();
 std::filesystem::path scratch_root();
+std::string scratch_tag();
+std::string_view scratch_name_tag(std::string_view p_name);
 
 class ScratchDir {
 public:
@@ -46,8 +50,8 @@ struct SweepReport {
 	std::vector<std::filesystem::path> kept;
 };
 
-SweepReport sweep_scratch(
-		const std::filesystem::path &p_temp, std::chrono::seconds p_legacy_age, std::chrono::milliseconds p_budget);
+SweepReport sweep_scratch(const std::filesystem::path &p_temp, std::chrono::seconds p_legacy_age,
+		std::chrono::milliseconds p_budget, std::string_view p_pass_tag);
 void scratch_startup();
 
 }

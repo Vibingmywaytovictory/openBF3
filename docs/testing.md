@@ -58,9 +58,13 @@ functional.
 ## 2. Parallel-safe by default
 
 * Scratch folders come only from the test scratch helper (`ScratchDir` or `process_scratch` in `tests/test_scratch.h`,
-  `openbf3_scratch_dir` in `tests/test_scratch.cmake`): `%TEMP%\openbf3-tests\<name>-<pid>-<n>`, removed at scope or
-  process end and swept once its owner has died; `test.scratch.paths` fails any other temp path in `tests/` or `tools/`,
-  and `test.scratch.after`, the cleanup of a fixture every row requires, fails a ctest run that leaves one.
+  `openbf3_scratch_dir` in `tests/test_scratch.cmake`): `%TEMP%\openbf3-tests\<pass>.<name>-<pid>-<n>`, removed at scope or
+  process end; `test.scratch.paths` fails any other temp path in `tests/` or `tools/`. Every row requires the
+  `openbf3_scratch_pass` fixture and carries `OPENBF3_SCRATCH_TAG`, its build directory's pass tag: `test.scratch.before`
+  sweeps and lists the temp folder, and `test.scratch.after` fails the ctest run on every folder with its tag that was
+  not there before and whose owner is gone (a row killed by a timeout or a crash, a script that failed without
+  removing its folder), then removes it. Other processes leave a tagged folder to its pass until it is 6 h old, and
+  sweep untagged ones (a test run by hand) as soon as their owner has died.
   Outputs go to `${CMAKE_BINARY_DIR}/shots/<row>`, never a fixed `%TEMP%` name; the documented ui1 shots path is the one exception.
 * Ports are 0. The install is read only through the readers.
 * Godot rows pass their own `--bf3-cache` root, never the shared `user://bf3cache`, and `godot_run` gives every run

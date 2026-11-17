@@ -1647,11 +1647,14 @@ set_tests_properties(core.audio.vehicles audio.vehicles.drive audio.vehicles.wea
 
 add_test(NAME test.scratch.before COMMAND test_scratch_tests --test-suite=test-scratch-pass-before)
 add_test(NAME test.scratch.after COMMAND test_scratch_tests --test-suite=test-scratch-pass-after)
-set_tests_properties(test.scratch.before PROPERTIES FIXTURES_SETUP openbf3_scratch_pass TIMEOUT 60
+set_tests_properties(test.scratch.before PROPERTIES FIXTURES_SETUP openbf3_scratch_pass TIMEOUT 60 LABELS "unit"
     ENVIRONMENT "OPENBF3_SCRATCH_LISTING=${CMAKE_BINARY_DIR}/scratch-listing.txt")
-set_tests_properties(test.scratch.after PROPERTIES FIXTURES_CLEANUP openbf3_scratch_pass TIMEOUT 60
+set_tests_properties(test.scratch.after PROPERTIES FIXTURES_CLEANUP openbf3_scratch_pass TIMEOUT 60 LABELS "unit"
     ENVIRONMENT "OPENBF3_SCRATCH_LISTING=${CMAKE_BINARY_DIR}/scratch-listing.txt")
+string(SHA1 _openbf3_scratch_tag "${CMAKE_BINARY_DIR}")
+string(SUBSTRING "${_openbf3_scratch_tag}" 0 8 _openbf3_scratch_tag)
 get_property(_openbf3_pass_rows DIRECTORY PROPERTY TESTS)
+set_property(TEST ${_openbf3_pass_rows} APPEND PROPERTY ENVIRONMENT "OPENBF3_SCRATCH_TAG=${_openbf3_scratch_tag}")
 list(REMOVE_ITEM _openbf3_pass_rows test.scratch.before test.scratch.after)
 set_property(TEST ${_openbf3_pass_rows} APPEND PROPERTY FIXTURES_REQUIRED openbf3_scratch_pass)
 
