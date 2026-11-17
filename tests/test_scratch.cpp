@@ -114,17 +114,10 @@ bool remove_tree(const fs::path &p_dir) {
 	return false;
 }
 
-void remove_root_if_empty(const fs::path &p_root) {
-	RemoveDirectoryW(p_root.c_str());
-}
-
 ProcessScratch::~ProcessScratch() {
 	const std::lock_guard<std::mutex> lock(mutex);
 	for (const fs::path &d : dirs) {
 		remove_tree(d);
-	}
-	if (!dirs.empty()) {
-		remove_root_if_empty(dirs.front().parent_path());
 	}
 }
 
@@ -283,7 +276,6 @@ ScratchDir::ScratchDir(std::string_view p_name) : path_(create_scratch(p_name)) 
 ScratchDir::~ScratchDir() {
 	if (!path_.empty()) {
 		remove_tree(path_);
-		remove_root_if_empty(path_.parent_path());
 	}
 }
 
@@ -401,7 +393,6 @@ SweepReport sweep_scratch(
 		}
 	}
 	CloseHandle(lock);
-	remove_root_if_empty(root);
 	return report;
 }
 
