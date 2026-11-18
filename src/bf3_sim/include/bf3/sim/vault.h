@@ -73,6 +73,8 @@ inline constexpr float kHighOffset = 0.5f;
 inline constexpr float kMiddleOffset = -0.2f;
 inline constexpr float kLowOffset = -0.4f;
 inline constexpr float kProbeReach = 0.5f;
+inline constexpr float kDetectionRayMinScale = 1.2f;
+inline constexpr float kDetectionRayMaxScale = 5.0f;
 inline constexpr float kDownProbe = 1.8f;
 inline constexpr float kMinHeight = 0.1f;
 inline constexpr float kFrontEpsilon = 1e-6f;
@@ -89,6 +91,7 @@ inline constexpr float kContactCos = -0.5f;
 }
 
 bool vault_input_allows(float p_forward);
+float vault_probe_reach(float p_speed);
 float vault_probe_height(float p_fraction);
 VaultKind vault_up_or_over(VaultKind p_kind, float p_front_height, float p_further_height);
 uint8_t choose_vault_variant(const VaultParams &p_params, VaultKind p_kind, const VaultMeasure &p_measure);
@@ -108,7 +111,7 @@ float move_duration(const SpecialMoveParams &p_move);
 
 bool vault_contact_aborts(const Vec3 &p_contact_offset, const Vec3 &p_normal, const Vec3 &p_motion);
 
-std::optional<VaultStart> probe_vault(
-		const CollisionWorld &p_world, const Vec3 &p_feet, const Vec3 &p_forward, uint32_t p_mask);
+std::optional<VaultStart> probe_vault(const CollisionWorld &p_world, const Vec3 &p_feet, const Vec3 &p_forward,
+		uint32_t p_mask, float p_reach = vault_rules::kProbeReach);
 
 }

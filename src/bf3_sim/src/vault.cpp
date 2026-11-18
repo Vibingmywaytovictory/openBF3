@@ -31,19 +31,24 @@ float height_at(
 }
 
 std::optional<float> face_distance(
-		const CollisionWorld &p_world, const Vec3 &p_origin, const Vec3 &p_forward, uint32_t p_mask) {
+		const CollisionWorld &p_world, const Vec3 &p_origin, const Vec3 &p_forward, uint32_t p_mask, float p_reach) {
 	StaticHit hit;
-	const Vec3 reach = { p_forward[0] * vault_rules::kProbeReach, 0.0f, p_forward[2] * vault_rules::kProbeReach };
+	const Vec3 reach = { p_forward[0] * p_reach, 0.0f, p_forward[2] * p_reach };
 	if (!p_world.ray(p_origin, reach, p_mask, &hit)) {
 		return std::nullopt;
 	}
-	return hit.fraction * vault_rules::kProbeReach;
+	return hit.fraction * p_reach;
 }
 
 }
 
 bool vault_input_allows(float p_forward) {
 	return !(vault_rules::kMinForwardInput > p_forward);
+}
+
+float vault_probe_reach(float p_speed) {
+	return vault_rules::kProbeReach *
+			clamp_between(p_speed, vault_rules::kDetectionRayMinScale, vault_rules::kDetectionRayMaxScale);
 }
 
 float vault_probe_height(float p_fraction) {
@@ -151,19 +156,20 @@ bool vault_contact_aborts(const Vec3 &p_contact_offset, const Vec3 &p_normal, co
 }
 
 std::optional<VaultStart> probe_vault(
-		const CollisionWorld &p_world, const Vec3 &p_feet, const Vec3 &p_forward, uint32_t p_mask) {
+		const CollisionWorld &p_world, const Vec3 &p_feet, const Vec3 &p_forward, uint32_t p_mask, float p_reach) {
 	using namespace vault_rules;
 	const Vec3 &forward = p_forward;
 	const Vec3 right{ -forward[2], 0.0f, forward[0] };
-	if (face_distance(p_world, at(p_feet, forward, 0.0f, kMiddleHeight + kHighOffset), forward, p_mask)) {
+	if (face_distance(p_world, at(p_feet, forward, 0.0f, kMiddleHeight + kHighOffset), forward, p_mask, p_reach)) {
 		return std::nullopt;
 	}
 	VaultStart out;
 	float probe_up = kMiddleHeight + kMiddleOffset;
-	std::optional<float> distance = face_distance(p_world, at(p_feet, forward, 0.0f, probe_up), forward, p_mask);
+	std::optional<float> distance =
+			face_distance(p_world, at(p_feet, forward, 0.0f, probe_up), forward, p_mask, p_reach);
 	if (!distance) {
 		probe_up = kMiddleHeight + kLowOffset;
-		distance = face_distance(p_world, at(p_feet, forward, 0.0f, probe_up), forward, p_mask);
+		distance = face_distance(p_world, at(p_feet, forward, 0.0f, probe_up), forward, p_mask, p_reach);
 		if (!distance) {
 			return std::nullopt;
 		}
@@ -176,7 +182,7 @@ std::optional<VaultStart> probe_vault(
 	float nearest = d;
 	for (const float side : { kSideOffset, -kSideOffset }) {
 		const Vec3 origin{ p_feet[0] + right[0] * side, p_feet[1] + probe_up, p_feet[2] + right[2] * side };
-		if (const std::optional<float> s = face_distance(p_world, origin, forward, p_mask)) {
+		if (const std::optional<float> s = face_distance(p_world, origin, forward, p_mask, p_reach)) {
 			nearest = std::fmin(nearest, *s);
 		}
 	}

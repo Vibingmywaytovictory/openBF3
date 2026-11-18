@@ -2008,6 +2008,156 @@ TEST_SUITE("sim-motor-unit") {
 		}
 	}
 
+	TEST_CASE("sim.motor: vault detection reach: 0.5 m x the speed clamped to 1.2..5; every state of the data is "
+			  "chosen by its "
+			  "distance band") {
+		CHECK(vault_probe_reach(0.0f) == doctest::Approx(0.6f));
+		CHECK(vault_probe_reach(1.0f) == doctest::Approx(0.6f));
+		CHECK(vault_probe_reach(3.0f) == doctest::Approx(1.5f));
+		CHECK(vault_probe_reach(4.0f) == doctest::Approx(2.0f));
+		CHECK(vault_probe_reach(6.5f) == doctest::Approx(2.5f));
+		CHECK(vault_probe_reach(20.0f) == doctest::Approx(2.5f));
+
+		const MotorParams params = params_with(shipped_tuning());
+		struct Band {
+			VaultKind kind;
+			float distance;
+			uint8_t variant;
+		};
+		const Band bands[] = { { VaultKind::OverHigh, 0.45f, 0 }, { VaultKind::OverHigh, 0.61f, 1 },
+			{ VaultKind::OverHigh, 1.99f, 1 }, { VaultKind::OverHigh, 2.01f, kPlainVaultMove },
+			{ VaultKind::UpHigh, 0.45f, 0 }, { VaultKind::UpHigh, 0.61f, 1 }, { VaultKind::UpHigh, 1.34f, 1 },
+			{ VaultKind::UpHigh, 1.36f, kPlainVaultMove }, { VaultKind::OverLow, 0.45f, 0 },
+			{ VaultKind::OverLow, 0.89f, 0 }, { VaultKind::OverLow, 0.91f, 1 }, { VaultKind::OverLow, 1.59f, 1 },
+			{ VaultKind::OverLow, 1.61f, kPlainVaultMove } };
+		std::set<std::pair<uint8_t, uint8_t>> chosen;
+		for (const Band &b : bands) {
+			const float length = b.kind == VaultKind::UpHigh ? vault_rules::kUpLength : 0.2f;
+			const uint8_t variant = choose_vault_variant(params.vault, b.kind, { b.distance, 1.0f, length });
+			CHECK_MESSAGE(variant == b.variant, "kind " << int(b.kind) << " at " << b.distance << " m");
+			chosen.insert({ uint8_t(b.kind), variant });
+			CHECK(b.distance < vault_probe_reach(6.5f));
+			if (b.distance < vault_probe_reach(0.0f)) {
+				CHECK(variant == 0);
+			}
+		}
+		CHECK(chosen.size() == 9);
+		CHECK(choose_vault_variant(params.vault, VaultKind::OverLow, { 0.7f, 0.45f, 2.5f }) == kPlainVaultMove);
+	}
+
+	TEST_CASE("sim.motor: a soldier running at an obstacle vaults from where jump is pressed: each kind and each of "
+			  "its states, "
+			  "the vault ends beyond or on the obstacle, prediction matches") {
+		const MotorParams params = params_with(shipped_tuning());
+		const float face = 2.0f;
+		struct Approach {
+			const char *name;
+			float height, depth, press_at;
+			bool sprint;
+			bool vault;
+			VaultKind kind;
+			uint8_t variant;
+		};
+		const Approach approaches[] = {
+			{ "1 m wall, walk, 1.0 m", 1.0f, 0.2f, 1.0f, false, true, VaultKind::OverHigh, 1 },
+			{ "1 m wall, walk, 1.9 m", 1.0f, 0.2f, 1.9f, false, true, VaultKind::OverHigh, 1 },
+			{ "1 m wall, sprint, 2.3 m", 1.0f, 0.2f, 2.3f, true, true, VaultKind::OverHigh, kPlainVaultMove },
+			{ "1 m wall, walk, 2.3 m", 1.0f, 0.2f, 2.3f, false, false, VaultKind::OverHigh, 0 },
+			{ "1 m wall, sprint, 2.8 m", 1.0f, 0.2f, 2.8f, true, false, VaultKind::OverHigh, 0 },
+			{ "1 m block, walk, 1.0 m", 1.0f, 10.0f, 1.0f, false, true, VaultKind::UpHigh, 1 },
+			{ "1 m block, walk, 1.7 m", 1.0f, 10.0f, 1.7f, false, true, VaultKind::UpHigh, kPlainVaultMove },
+			{ "0.45 m wall, walk, 0.7 m", 0.45f, 0.1f, 0.7f, false, true, VaultKind::OverLow, 0 },
+			{ "0.45 m wall, walk, 1.2 m", 0.45f, 0.1f, 1.2f, false, true, VaultKind::OverLow, 1 },
+			{ "0.45 m wall, walk, 1.8 m", 0.45f, 0.1f, 1.8f, false, true, VaultKind::OverLow, kPlainVaultMove },
+			{ "0.45 m wall, sprint, 2.3 m", 0.45f, 0.1f, 2.3f, true, true, VaultKind::OverLow, kPlainVaultMove },
+			{ "2 m wall, sprint, 1.5 m", 2.0f, 0.2f, 1.5f, true, false, VaultKind::OverHigh, 0 },
+		};
+		for (const Approach &a : approaches) {
+			std::vector<StaticTriangle> t = flat_world(50.0f);
+			add_box(t, { -3.0f, 0.0f, face }, { 3.0f, a.height, face + a.depth });
+			const auto attempt = [&](const SoldierMotor &p_motor) {
+				SoldierState s = at_rest(p_motor, { 0.0f, 0.0f, -8.0f });
+				std::vector<SoldierState> trace;
+				bool pressed = false;
+				uint32_t after = 0;
+				while (after < 150 && trace.size() < 900) {
+					uint32_t held = a.sprint ? buttons::kSprint : 0u;
+					if (!pressed && face - s.position[2] <= a.press_at) {
+						held |= buttons::kJump;
+						pressed = true;
+						trace.clear();
+					}
+					p_motor.step(s, move_command(s.tick + 1, kAxisMax, 0, 0, Pose::Stand, held));
+					trace.push_back(s);
+					after += pressed ? 1 : 0;
+				}
+				return trace;
+			};
+			Rig server = rig_of(t, params);
+			const std::vector<SoldierState> trace = attempt(*server.motor);
+			const SoldierState &first = trace.front();
+			const SoldierState &last = trace.back();
+			CAPTURE(a.name);
+			REQUIRE(((first.events & soldier_events::kVaulted) != 0) == a.vault);
+			if (!a.vault) {
+				CHECK((first.events & soldier_events::kJumped) != 0);
+				continue;
+			}
+			CHECK(first.vault.kind == uint8_t(a.kind));
+			CHECK(first.vault.variant == a.variant);
+			CHECK(first.vault.distance == doctest::Approx(a.press_at).epsilon(0.12));
+			size_t ended = trace.size();
+			float highest = 0.0f;
+			for (size_t i = 0; i < trace.size() && ended == trace.size(); ++i) {
+				highest = std::max(highest, trace[i].position[1]);
+				if ((trace[i].events & soldier_events::kVaultEnded) != 0) {
+					ended = i;
+				}
+			}
+			REQUIRE(ended < trace.size());
+			const bool stopped = trace[ended].velocity == Vec3{ 0.0f, 0.0f, 0.0f };
+			std::printf("vault %-26s: kind %u variant %3u D %.2f H %.2f L %.2f, %zu ticks, feet up to %.2f m, ends at "
+						"z %.2f y %.2f%s, "
+						"after 150 ticks z %.2f y %.2f\n",
+					a.name, unsigned(first.vault.kind), unsigned(first.vault.variant), double(first.vault.distance),
+					double(first.vault.height), double(first.vault.length), ended + 1, double(highest),
+					double(trace[ended].position[2]), double(trace[ended].position[1]), stopped ? " STOPPED" : "",
+					double(last.position[2]), double(last.position[1]));
+			CHECK_FALSE(stopped);
+			CHECK(grounded(last));
+			if (a.kind == VaultKind::UpHigh) {
+				CHECK(last.position[1] == doctest::Approx(a.height + params.tuning.character_padding).epsilon(0.03));
+				CHECK(last.position[2] > face);
+			} else {
+				CHECK(std::fabs(last.position[1]) < 0.03f);
+				CHECK(last.position[2] > face + a.depth + params.radius);
+			}
+			Rig client = rig_of(t, params);
+			const std::vector<SoldierState> predicted = attempt(*client.motor);
+			REQUIRE(predicted.size() == trace.size());
+			for (size_t i = 0; i < trace.size(); ++i) {
+				REQUIRE_MESSAGE(soldier_state_hash(predicted[i]) == soldier_state_hash(trace[i]), "tick " << i);
+			}
+			PredictionRing ring(256);
+			const size_t mid = std::min<size_t>(ended / 2, 20);
+			for (size_t i = 0; i + 1 < trace.size() && i < 120; ++i) {
+				SoldierState wrong = trace[i + 1];
+				wrong.vault = {};
+				wrong.position[1] += 0.5f;
+				ring.put({ move_command(
+								   trace[i + 1].tick, kAxisMax, 0, 0, Pose::Stand, a.sprint ? buttons::kSprint : 0u),
+						wrong, true });
+			}
+			const size_t until = std::min<size_t>(ended + 10, 110);
+			(void)catch_up(*client.motor, trace[mid], ring, trace[until].tick);
+			for (size_t i = mid; i < until; ++i) {
+				const PredictionEntry *e = ring.find(trace[i].tick);
+				REQUIRE(e != nullptr);
+				REQUIRE_MESSAGE(soldier_state_hash(e->state) == soldier_state_hash(trace[i]), "resimulated tick " << i);
+			}
+		}
+	}
+
 	TEST_CASE("sim.motor: a walker bot crosses a 1 m wall over its vault link: the path's kVault corner, the jump, the "
 			  "vault") {
 		std::vector<StaticTriangle> t = flat_world(32.0f);

@@ -534,7 +534,8 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 			grounded0 && s.pose == Pose::Stand && s.target_pose == Pose::Stand && s.transition_ticks == 0 &&
 			vault_input_allows(forward_in)) {
 		const Vec3 facing{ JPH::Sin(yaw), 0.0f, JPH::Cos(yaw) };
-		if (const std::optional<VaultStart> start = probe_vault(*m.world, s.position, facing, mask)) {
+		const float reach = vault_probe_reach(std::sqrt(s.velocity[0] * s.velocity[0] + s.velocity[2] * s.velocity[2]));
+		if (const std::optional<VaultStart> start = probe_vault(*m.world, s.position, facing, mask, reach)) {
 			m.begin_vault(s, *start);
 		}
 	}
