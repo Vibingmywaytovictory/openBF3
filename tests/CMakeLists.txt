@@ -1622,7 +1622,8 @@ target_link_libraries(test_audio_vehicle PRIVATE bf3_client_audio bf3_audio bf3_
 target_compile_definitions(test_audio_vehicle PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg")
 add_test(NAME core.audio.vehicles COMMAND test_audio_vehicle --test-suite=audio-vehicles-install)
 add_test(NAME audio.vehicles.drive COMMAND test_audio_vehicle --test-suite=audio-vehicles-drive)
-set_tests_properties(core.audio.vehicles audio.vehicles.drive PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+add_test(NAME audio.vehicles.weapons COMMAND test_audio_vehicle --test-suite=audio-vehicles-weapons)
+set_tests_properties(core.audio.vehicles audio.vehicles.drive audio.vehicles.weapons PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)

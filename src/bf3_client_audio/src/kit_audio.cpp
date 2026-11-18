@@ -43,6 +43,24 @@ const char *mode_name(WeaponFireMode p_mode) {
 
 }
 
+WeaponSoundSource weapon_sound_source(const gp::WeaponDef &p_def) {
+	WeaponSoundSource s;
+	s.sound = p_def.sound;
+	s.one_shot = is_one_shot(p_def);
+	s.explosive =
+			p_def.projectile.kind == gp::ProjectileKind::Grenade && p_def.fire.logic == gp::FireLogic::HoldAndRelease;
+	s.fire_mode = fire_mode_of(p_def.fire.logic);
+	const double interval = gp::shot_interval(p_def.fire);
+	s.shot_interval_s = std::isfinite(interval) && interval > 0.0 ? interval : 0.1;
+	return s;
+}
+
+void add_vehicle_weapon_sounds(KitAudioSources &r_sources, std::span<const gp::WeaponDef> p_weapons) {
+	for (const gp::WeaponDef &d : p_weapons) {
+		r_sources.sources.push_back(weapon_sound_source(d));
+	}
+}
+
 KitAudioSources kit_audio_sources(const host::GunplayLevel &p_level) {
 	KitAudioSources out;
 	out.sources.resize(p_level.defs.size());
@@ -68,14 +86,8 @@ KitAudioSources kit_audio_sources(const host::GunplayLevel &p_level) {
 			continue;
 		}
 		const gp::WeaponDef &d = p_level.defs[i];
-		WeaponSoundSource &s = out.sources[i];
-		s.sound = d.sound;
-		s.one_shot = is_one_shot(d);
-		s.explosive = d.projectile.kind == gp::ProjectileKind::Grenade && d.fire.logic == gp::FireLogic::HoldAndRelease;
-		s.fire_mode = fire_mode_of(d.fire.logic);
-		const double interval = gp::shot_interval(d.fire);
-		s.shot_interval_s = std::isfinite(interval) && interval > 0.0 ? interval : 0.1;
-		out.items.push_back(KitAudioItem{ uint16_t(i), d.variant, d.sound, teams[i], s.one_shot });
+		out.sources[i] = weapon_sound_source(d);
+		out.items.push_back(KitAudioItem{ uint16_t(i), d.variant, d.sound, teams[i], out.sources[i].one_shot });
 	}
 	return out;
 }

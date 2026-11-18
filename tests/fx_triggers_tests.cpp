@@ -686,6 +686,48 @@ TEST_CASE("shots: 1p and 3p muzzles, shells per firearm shot, fallbacks, knife, 
 	CHECK(t.stats().double_starts == 0);
 }
 
+TEST_CASE("shots: a vehicle shot's muzzle starts at the shot's own origin and aim, not on the seated soldier's weapon, "
+		  "and is not attached to that weapon") {
+	std::shared_ptr<FireEffectTable> fire = small_fire_table();
+	fire->defs[0].third_person[0].update_transform = true;
+	std::unique_ptr<Syn> s = make_syn(fire);
+	FxWorld world;
+	FxTriggerConfig cfg;
+	cfg.own_slot = 1;
+	cfg.match_seed = kMatch;
+	FxTriggers t(world, *s->library, s->fire, cfg);
+	MuzzleSample seated;
+	seated.slot = 5;
+	seated.valid = true;
+	seated.first_person = false;
+	seated.transform = effect_frame({ 3.5f, 1.35f, 3.8f }, { 0, 0, 1 }, { 0, 1, 0 });
+	t.on_muzzles(std::span<const MuzzleSample>(&seated, 1));
+
+	hk::PresentEvent rifle = ev(hk::PresentKind::RemoteShot, 5, 1, 0, { 3.5f, 1.6f, 3.5f }, { 0, 0, 1 });
+	t.on_events(std::span<const hk::PresentEvent>(&rifle, 1), clock_at(0), kNear);
+	{
+		const auto m = starts_of(t, kMuzz3p);
+		REQUIRE(m.size() == 1);
+		CHECK(m[0]->transform == seated.transform);
+	}
+	t.on_muzzles(std::span<const MuzzleSample>(&seated, 1));
+	const uint64_t rifle_updates = t.stats().attached_updates;
+	CHECK(rifle_updates == 1);
+
+	const Vec3 origin{ 6.0f, 2.4f, 9.0f }, aim{ 0.6f, 0.0f, 0.8f };
+	hk::PresentEvent cannon = ev(hk::PresentKind::RemoteShot, 5, 2, 0, origin, aim);
+	cannon.flags = uint8_t(hk::present_flags::kVehicle);
+	t.on_events(std::span<const hk::PresentEvent>(&cannon, 1), clock_at(0), kNear);
+	{
+		const auto m = starts_of(t, kMuzz3p);
+		REQUIRE(m.size() == 1);
+		CHECK(m[0]->transform == aim_muzzle(5, origin, aim, {}).transform);
+		CHECK_FALSE(m[0]->transform == seated.transform);
+	}
+	CHECK(t.stats().muzzle_fallbacks == 0);
+	t.on_muzzles(std::span<const MuzzleSample>(&seated, 1));
+	CHECK(t.stats().attached_updates == rifle_updates + 1);
+}
 TEST_CASE("tracers: from the muzzle onto the aim over the converge distance, ended by the impact or the time to live") {
 	std::unique_ptr<Syn> s = make_syn();
 	FxWorld world;

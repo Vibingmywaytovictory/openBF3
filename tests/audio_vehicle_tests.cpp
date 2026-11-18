@@ -7,6 +7,7 @@
 #include "bf3/audio/vehicle_audio.h"
 #include "bf3/audio/voice_cull.h"
 #include "bf3/audio/weapon_audio.h"
+#include "bf3/client_audio/kit_audio.h"
 #include "bf3/client_audio/vehicle_sounds.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/wave_bank.h"
@@ -429,6 +430,34 @@ TEST_SUITE("audio-vehicles-install") {
 	}
 }
 
+TEST_SUITE("audio-vehicles-weapons") {
+	TEST_CASE("vehicle weapons: every MP_007 ConquestSmall0 vehicle weapon gets a sound source after the soldier "
+			  "sources, and its fire sound compiles to a voice") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::vector<core::gameplay::WeaponDef> &weapons = f->level->weapons;
+		REQUIRE(!weapons.empty());
+		ba::KitAudioSources kits;
+		kits.sources.resize(3);
+		ba::add_vehicle_weapon_sounds(kits, weapons);
+		REQUIRE(kits.sources.size() == 3 + weapons.size());
+		core::Result<ba::WeaponAudioTable> table = ba::load_weapon_audio(f->db->level->db(), kits.sources, 48000);
+		REQUIRE_MESSAGE(table.ok(), (table.ok() ? std::string() : table.error().message));
+		size_t voiced = 0;
+		for (size_t i = 0; i < weapons.size(); ++i) {
+			const ba::WeaponAudioDef &d = table->defs[3 + i];
+			std::printf("vehicle weapon %s [%s]: %s\n", weapons[i].variant.c_str(), weapons[i].sound.c_str(),
+					d.form == ba::WeaponAudioForm::None ? "no voice" : d.patch.c_str());
+			CHECK(kits.sources[3 + i].sound == weapons[i].sound);
+			voiced += !weapons[i].sound.empty() && d.form != ba::WeaponAudioForm::None ? 1u : 0u;
+		}
+		std::printf("vehicle weapons: %zu of %zu voiced\n", voiced, weapons.size());
+		CHECK(voiced == weapons.size());
+		CHECK(table->failed == 0);
+	}
+}
 TEST_SUITE("audio-vehicles-drive") {
 	TEST_CASE("a scripted Growler drive: engine off parked, started by a driver, louder under throttle and speed, "
 			  "the interior camera, stopped when the driver leaves") {

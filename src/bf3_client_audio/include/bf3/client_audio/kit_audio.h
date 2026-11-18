@@ -34,7 +34,11 @@ struct KitAudioSources {
 	std::vector<KitAudioVariant> variants;
 };
 
+WeaponSoundSource weapon_sound_source(const core::gameplay::WeaponDef &p_def);
+
 KitAudioSources kit_audio_sources(const host::GunplayLevel &p_level);
+
+void add_vehicle_weapon_sounds(KitAudioSources &r_sources, std::span<const core::gameplay::WeaponDef> p_weapons);
 
 std::vector<std::string> add_accessory_sounds(
 		KitAudioSources &r_sources, const core::EbxResolver &p_db, const host::GunplayLevel &p_level);

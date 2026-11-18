@@ -444,7 +444,7 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 			p.slot = e.aux;
 		} else if (e.kind == host::PresentKind::RemoteShot) {
 			remote_shot_seen = true;
-			if ((e.flags & host::present_flags::kNoRound) != 0) {
+			if ((e.flags & (host::present_flags::kNoRound | host::present_flags::kVehicle)) != 0) {
 				continue;
 			}
 		} else if (e.kind != host::PresentKind::Spawn) {

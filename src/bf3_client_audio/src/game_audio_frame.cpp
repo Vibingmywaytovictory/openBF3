@@ -4,6 +4,7 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/level/level.h"
 #include "bf3/host/gunplay.h"
+#include "bf3/host/level_vehicles.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <algorithm>
@@ -154,6 +155,9 @@ core::Result<GameAudioAssets> load_game_audio_assets(const std::shared_ptr<const
 	GameAudioAssets a;
 
 	a.kits = kit_audio_sources(p_gunplay);
+	if (p_options.vehicles != nullptr) {
+		add_vehicle_weapon_sounds(a.kits, p_options.vehicles->weapons);
+	}
 	for (const std::string &note : add_accessory_sounds(a.kits, db, p_gunplay)) {
 		a.report.push_back("accessory sounds " + note);
 	}

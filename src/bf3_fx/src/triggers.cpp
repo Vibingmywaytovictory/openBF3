@@ -1023,7 +1023,10 @@ struct FxTriggers::Impl {
 			++stats.accessory_effects;
 		}
 		MuzzleSample m;
-		if (const MuzzleSample *s = muzzle_for(p_e.slot, own)) {
+		const bool vehicle = (p_e.flags & present::flags::kVehicle) != 0;
+		if (vehicle) {
+			m = aim_muzzle(p_e.slot, origin, dir, {});
+		} else if (const MuzzleSample *s = muzzle_for(p_e.slot, own)) {
 			m = *s;
 		} else if (const MuzzleSample *s3 = own ? muzzle_for(p_e.slot, false) : nullptr) {
 			m = *s3;
@@ -1050,7 +1053,7 @@ struct FxTriggers::Impl {
 				continue;
 			}
 			++(fe.shell ? stats.shells : stats.muzzle_starts);
-			if (fe.update_transform && m.valid) {
+			if (fe.update_transform && m.valid && !vehicle) {
 				if (attached.size() >= kMaxAttached) {
 					attached.erase(attached.begin());
 				}

@@ -809,6 +809,42 @@ TEST_SUITE("audio-router") {
 		CHECK(r.router->stats().accessory_sounds == 3);
 	}
 
+	TEST_CASE("vehicles: a RemoteShot flagged kVehicle plays for the gunner's own slot too, and from the shot's own "
+			  "origin, not from the seated soldier the slot tracks") {
+		Rig r;
+		const ba::Vec3 at_rifle{ 0.0f, 1.6f, 10.0f };
+		host::PresentEvent rifle = remote_shot(0, kSingle, 1, r.render, at_rifle);
+		r.frame(std::span<const host::PresentEvent>(&rifle, 1));
+		r.idle(4);
+		CHECK(r.recorder.seen.empty());
+
+		host::PresentEvent own_cannon = remote_shot(0, kSingle, 2, r.render, { 0.0f, 2.0f, 30.0f });
+		own_cannon.flags = uint8_t(host::present_flags::kVehicle);
+		r.frame(std::span<const host::PresentEvent>(&own_cannon, 1));
+		r.idle(4);
+		REQUIRE(r.recorder.seen.size() == 1);
+		CHECK(r.recorder.seen[0].slot == 0);
+		CHECK(r.recorder.seen[0].distance == doctest::Approx(std::sqrt(2.0 * 2.0 + 30.0 * 30.0)).epsilon(1e-4));
+
+		Shooter seated;
+		seated.def = kSingle;
+		const std::vector<host::PresentedSoldier> soldiers{ seated.soldier() };
+		r.frame({}, soldiers, std::vector<host::PresentedOtherWeapon>{ seated.weapon(r.render) });
+		host::PresentEvent cannon = remote_shot(seated.slot, kSingle, 7, r.render, { 40.0f, 3.0f, 0.0f });
+		cannon.flags = uint8_t(host::present_flags::kVehicle);
+		r.frame(std::span<const host::PresentEvent>(&cannon, 1), soldiers,
+				std::vector<host::PresentedOtherWeapon>{ seated.weapon(r.render) });
+		r.frame({}, soldiers, std::vector<host::PresentedOtherWeapon>{ seated.weapon(r.render) });
+		host::PresentEvent shot = remote_shot(seated.slot, kSingle, 8, r.render, { 40.0f, 3.0f, 0.0f });
+		r.frame(std::span<const host::PresentEvent>(&shot, 1), soldiers,
+				std::vector<host::PresentedOtherWeapon>{ seated.weapon(r.render) });
+		r.idle(4);
+		REQUIRE(r.recorder.seen.size() == 3);
+		CHECK(r.recorder.seen[1].slot == seated.slot);
+		CHECK(r.recorder.seen[1].distance == doctest::Approx(std::sqrt(40.0 * 40.0 + 3.0 * 3.0)).epsilon(1e-4));
+		CHECK(r.recorder.seen[2].slot == seated.slot);
+		CHECK(r.recorder.seen[2].distance == doctest::Approx(std::sqrt(1.6 * 1.6 + 49.5 * 49.5)).epsilon(1e-4));
+	}
 	TEST_CASE("others: RemoteShots start the burst on its frame and place its rounds, the records keep it, the hold ends it") {
 		Rig r;
 		std::vector<Shooter> shooters(1);

@@ -920,7 +920,8 @@ struct WeaponAudioRouter::Impl {
 	}
 
 	void remote_shot(const present::PresentEvent &p_e, SimMixerClock &r_clock) {
-		if (p_e.slot == own_slot) {
+		const bool vehicle = (p_e.flags & present::flags::kVehicle) != 0;
+		if (p_e.slot == own_slot && !vehicle) {
 			return;
 		}
 		Track &t = tracks[p_e.slot];
@@ -930,7 +931,7 @@ struct WeaponAudioRouter::Impl {
 			return;
 		}
 		EmitterState em = event_emitter(p_e);
-		if (t.seen && t.present_frame + 2 >= frame_counter) {
+		if (!vehicle && t.seen && t.present_frame + 2 >= frame_counter) {
 			em = t.emitter;
 		}
 		const float dist = distance(em.position, listener.position);

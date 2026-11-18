@@ -264,7 +264,11 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 	m.library = std::make_unique<fx::EffectLibrary>(s);
 
 	if (p_in.shared->gunplay) {
-		core::Result<fx::FireEffectTable> fire = fx::load_fire_effects(lib, p_in.shared->gunplay->defs);
+		std::vector<core::gameplay::WeaponDef> fired = p_in.shared->gunplay->defs;
+		if (p_in.shared->vehicles != nullptr) {
+			fired.insert(fired.end(), p_in.shared->vehicles->weapons.begin(), p_in.shared->vehicles->weapons.end());
+		}
+		core::Result<fx::FireEffectTable> fire = fx::load_fire_effects(lib, fired);
 		if (!fire) {
 			return core::Error{ "Bf3GameFx::load: fire effects: " + fire.error().message };
 		}
