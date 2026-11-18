@@ -1145,39 +1145,42 @@ TEST_SUITE("host-client-stream") {
 
 namespace {
 
-uint32_t drive_predicted(tt::TdmLevel &r_level, const char *p_blueprint, const char *p_name, const char *p_row,
-		const std::function<float(uint32_t)> &p_steer, float p_least_travel_m) {
-	const host::LevelVehicles &lv = *r_level.shared->vehicles;
-	host::GameServerConfig cfg;
-	cfg.level = r_level.shared;
-	cfg.max_slots = 8;
-	cfg.game_build = kStreamGameBuild;
-	cfg.dev_commands = true;
-	cfg.seed = 65;
-	cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
-	cfg.rules.mode = host::MatchRulesConfig::Mode::Tdm;
-	cfg.rules.deploy_screen = false;
-	cfg.rules.revive = true;
-	cfg.rules.preround_override_s = 0.0f;
-	cfg.rules.min_players_override = 1;
+struct VehicleMatch {
+	tt::TdmLevel &level;
 	host::GameServer server;
-	const core::Status st = server.init(cfg);
-	REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
-	core::Result<std::unique_ptr<sim::CollisionWorld>> world =
-			sim::CollisionWorld::create(r_level.shared->static_world);
-	REQUIRE(world.ok());
-	{
-		const auto start = std::chrono::steady_clock::now();
-		host::ClientVehiclePrediction built;
-		REQUIRE(built.init(*r_level.shared).ok());
-		std::printf("%s: a client's vehicle world over MP_007's static shapes builds in %.1f ms\n", p_row,
-				core::ms_since(start));
-	}
-
+	std::unique_ptr<sim::CollisionWorld> world;
 	uint64_t now = 1'000'000'000'000ull;
-	const host::MonotonicClock clock = [&] { return now; };
+	host::MonotonicClock clock;
 	std::vector<std::unique_ptr<StreamClient>> clients;
-	const auto add = [&](const char *p_name, uint32_t p_peer, const char *p_netsim) -> StreamClient & {
+	std::vector<host::OutDatagram> out;
+	uint64_t others = 0, step = 0;
+	std::function<void(std::span<const host::OutDatagram>)> on_out;
+
+	VehicleMatch(tt::TdmLevel &r_level, uint64_t p_seed) : level(r_level) {
+		host::GameServerConfig cfg;
+		cfg.level = r_level.shared;
+		cfg.max_slots = 8;
+		cfg.game_build = kStreamGameBuild;
+		cfg.dev_commands = true;
+		cfg.seed = p_seed;
+		cfg.gunplay.mechanics_cfg = OPENBF3_MECHANICS_CFG;
+		cfg.rules.mode = host::MatchRulesConfig::Mode::Tdm;
+		cfg.rules.deploy_screen = false;
+		cfg.rules.revive = true;
+		cfg.rules.preround_override_s = 0.0f;
+		cfg.rules.min_players_override = 1;
+		const core::Status st = server.init(cfg);
+		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
+		core::Result<std::unique_ptr<sim::CollisionWorld>> made =
+				sim::CollisionWorld::create(r_level.shared->static_world);
+		REQUIRE(made.ok());
+		world = std::move(*made);
+		clock = [this] { return now; };
+	}
+	VehicleMatch(const VehicleMatch &) = delete;
+	VehicleMatch &operator=(const VehicleMatch &) = delete;
+
+	StreamClient &add(const char *p_name, uint32_t p_peer, const char *p_netsim) {
 		auto c = std::make_unique<StreamClient>();
 		c->name = p_name;
 		c->peer = p_peer;
@@ -1191,22 +1194,15 @@ uint32_t drive_predicted(tt::TdmLevel &r_level, const char *p_blueprint, const c
 		cc.game_build = kStreamGameBuild;
 		cc.mechanics_cfg = OPENBF3_MECHANICS_CFG;
 		cc.request_dev_commands = true;
-		const core::Status init = c->loop.init(cc, r_level.shared);
+		const core::Status init = c->loop.init(cc, level.shared);
 		REQUIRE_MESSAGE(init.ok(), (init.ok() ? std::string() : init.error().message));
 		server.on_connect(p_peer);
 		c->loop.begin(std::make_unique<ServerTransport>(server, *c), clock);
 		clients.push_back(std::move(c));
 		return *clients.back();
-	};
-	StreamClient &driver = add("driver", 1u, "lat=40-60,loss=2,seed=3");
-	StreamClient &watcher = add("watcher", 2u, "lat=20,seed=4");
+	}
 
-	std::optional<uint16_t> spawner;
-	std::map<sim::Tick, sim::Vec3> server_at;
-	uint64_t others = 0, step = 0;
-	uint32_t steered = 0;
-	std::vector<host::OutDatagram> out;
-	const auto tick = [&] {
+	void tick() {
 		for (uint32_t k = 0; k < kStepsPerTick; ++k, ++step) {
 			now += kStepNs;
 			for (const std::unique_ptr<StreamClient> &c : clients) {
@@ -1216,60 +1212,125 @@ uint32_t drive_predicted(tt::TdmLevel &r_level, const char *p_blueprint, const c
 		out.clear();
 		server.tick(out);
 		deliver(out, clients, {}, others);
-		for (const host::OutDatagram &d : out) {
+		if (on_out) {
+			on_out(out);
+		}
+		for (const std::unique_ptr<StreamClient> &c : clients) {
+			if (!alive(*c) && server.current_tick() % 30u == 0u) {
+				c->loop.send_spawn_request(0);
+			}
+		}
+	}
+
+	void ticks(uint32_t p_count) {
+		for (uint32_t t = 0; t < p_count; ++t) {
+			tick();
+		}
+	}
+
+	static bool alive(const StreamClient &p_c) {
+		return p_c.frame->valid && (p_c.frame->own_curr.flags & sim::soldier_flags::kAlive) != 0;
+	}
+
+	static const host::PresentedVehicle *vehicle(const host::PresentationFrame &p_f, uint16_t p_spawner) {
+		for (uint8_t i = 0; i < p_f.vehicle_count; ++i) {
+			if (p_f.vehicles[i].spawner == p_spawner) {
+				return &p_f.vehicles[i];
+			}
+		}
+		return nullptr;
+	}
+
+	const host::PresentedVehicle *parked(const host::PresentationFrame &p_f, std::string_view p_blueprint) const {
+		const host::LevelVehicles &lv = *level.shared->vehicles;
+		const host::PresentedVehicle *best = nullptr;
+		for (uint8_t i = 0; i < p_f.vehicle_count; ++i) {
+			const host::PresentedVehicle &v = p_f.vehicles[i];
+			if (v.spawner < lv.spawners.size() && lv.kinds[lv.spawners[v.spawner].kind].blueprint == p_blueprint &&
+					tt::up_y_of(v.rotation) > 0.95f && (best == nullptr || v.spawner < best->spawner)) {
+				best = &v;
+			}
+		}
+		return best;
+	}
+
+	std::optional<sim::Vec3> beside(const sim::Vec3 &p_com, float p_entry_radius) const {
+		for (int k = 0; k < 16; ++k) {
+			const float a = 0.3926991f * float(k);
+			sim::StaticHit ground;
+			if (world->ground_below({ p_com[0] + 0.5f * p_entry_radius * std::cos(a), p_com[1] + 5.0f,
+											p_com[2] + 0.5f * p_entry_radius * std::sin(a) },
+						12.0f, sim::query_mask::kMovement, &ground) &&
+					!world->overlap_capsule({ ground.position[0], ground.position[1] + 0.05f, ground.position[2] },
+							0.4f, 1.8f, sim::query_mask::kMovement)) {
+				return ground.position;
+			}
+		}
+		return std::nullopt;
+	}
+
+	bool board(StreamClient &r_client, uint16_t p_spawner, uint8_t p_slot) {
+		bool seated = false;
+		for (uint32_t waited = 0; waited < 240 && !seated; ++waited) {
+			r_client.input.held_buttons = (waited / 8u) % 2u == 0u ? sim::buttons::kUse : 0u;
+			tick();
+			const host::PresentedVehicle *v = vehicle(*r_client.frame, p_spawner);
+			seated = v != nullptr && v->occupants[0] == p_slot;
+		}
+		r_client.input.held_buttons = 0;
+		return seated;
+	}
+
+	void close() {
+		for (const std::unique_ptr<StreamClient> &c : clients) {
+			c->loop.shutdown();
+			c->loop.close();
+		}
+	}
+};
+
+uint32_t drive_predicted(tt::TdmLevel &r_level, const char *p_blueprint, const char *p_name, const char *p_row,
+		const std::function<float(uint32_t)> &p_steer, float p_least_travel_m) {
+	const host::LevelVehicles &lv = *r_level.shared->vehicles;
+	VehicleMatch m(r_level, 65);
+	{
+		const auto start = std::chrono::steady_clock::now();
+		host::ClientVehiclePrediction built;
+		REQUIRE(built.init(*r_level.shared).ok());
+		std::printf("%s: a client's vehicle world over MP_007's static shapes builds in %.1f ms\n", p_row,
+				core::ms_since(start));
+	}
+	StreamClient &driver = m.add("driver", 1u, "lat=40-60,loss=2,seed=3");
+	StreamClient &watcher = m.add("watcher", 2u, "lat=20,seed=4");
+
+	std::optional<uint16_t> spawner;
+	std::map<sim::Tick, sim::Vec3> server_at;
+	uint32_t steered = 0;
+	m.on_out = [&](std::span<const host::OutDatagram> p_out) {
+		for (const host::OutDatagram &d : p_out) {
 			if (d.peer != driver.peer || net::peek_type(d.bytes) != net::MessageType::VehicleStates) {
 				continue;
 			}
-			core::Result<net::VehicleStates> m = net::decode_vehicle_states(d.bytes);
-			REQUIRE(m.ok());
-			for (const net::VehicleWire &w : m->vehicles) {
+			core::Result<net::VehicleStates> states = net::decode_vehicle_states(d.bytes);
+			REQUIRE(states.ok());
+			for (const net::VehicleWire &w : states->vehicles) {
 				if (spawner && w.spawner == *spawner) {
-					server_at[m->server_tick] = w.state.body.com_position;
+					server_at[states->server_tick] = w.state.body.com_position;
 					steered += w.state.driver.track_steer[0] != 0.0f || w.state.driver.track_steer[1] != 0.0f ? 1u : 0u;
 				}
 			}
 		}
-		for (const std::unique_ptr<StreamClient> &c : clients) {
-			const host::PresentationFrame &f = *c->frame;
-			if (!(f.valid && (f.own_curr.flags & sim::soldier_flags::kAlive) != 0) &&
-					server.current_tick() % 30u == 0u) {
-				c->loop.send_spawn_request(0);
-			}
-		}
 	};
-	const auto alive = [](const StreamClient &p_c) {
-		return p_c.frame->valid && (p_c.frame->own_curr.flags & sim::soldier_flags::kAlive) != 0;
-	};
-	for (uint32_t t = 0; t < sim::seconds_to_ticks(tt::latest_initial_delay(lv)) + 300u; ++t) {
-		tick();
-	}
-	REQUIRE(alive(driver));
-	REQUIRE(alive(watcher));
+	const auto tick = [&] { m.tick(); };
+	m.ticks(sim::seconds_to_ticks(tt::latest_initial_delay(lv)) + 300u);
+	REQUIRE(VehicleMatch::alive(driver));
+	REQUIRE(VehicleMatch::alive(watcher));
 	const host::PresentationFrame &df = *driver.frame;
-	const host::PresentedVehicle *parked = nullptr;
-	for (uint8_t i = 0; i < df.vehicle_count; ++i) {
-		const host::PresentedVehicle &v = df.vehicles[i];
-		if (v.spawner < lv.spawners.size() && lv.kinds[lv.spawners[v.spawner].kind].blueprint == p_blueprint &&
-				tt::up_y_of(v.rotation) > 0.95f && (parked == nullptr || v.spawner < parked->spawner)) {
-			parked = &v;
-		}
-	}
+	const host::PresentedVehicle *parked = m.parked(df, p_blueprint);
 	REQUIRE(parked != nullptr);
 	spawner = parked->spawner;
 	const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[*spawner].kind];
-	const sim::Vec3 com = parked->com_position;
-	std::optional<sim::Vec3> beside;
-	for (int k = 0; k < 16 && !beside; ++k) {
-		const float a = 0.3926991f * float(k);
-		sim::StaticHit ground;
-		if ((*world)->ground_below({ com[0] + 0.5f * kind.entry_radius * std::cos(a), com[1] + 5.0f,
-										   com[2] + 0.5f * kind.entry_radius * std::sin(a) },
-					12.0f, sim::query_mask::kMovement, &ground) &&
-				!(*world)->overlap_capsule({ ground.position[0], ground.position[1] + 0.05f, ground.position[2] }, 0.4f,
-						1.8f, sim::query_mask::kMovement)) {
-			beside = ground.position;
-		}
-	}
+	const std::optional<sim::Vec3> beside = m.beside(parked->com_position, kind.entry_radius);
 	REQUIRE(beside.has_value());
 	net::DebugRequest teleport;
 	teleport.kind = net::DebugKind::Teleport;
@@ -1277,32 +1338,11 @@ uint32_t drive_predicted(tt::TdmLevel &r_level, const char *p_blueprint, const c
 	teleport.position = *beside;
 	driver.loop.send_debug(teleport);
 	const uint8_t slot = df.stats.slot;
-	const auto own_vehicle = [&](const host::PresentationFrame &p_f) -> const host::PresentedVehicle * {
-		for (uint8_t i = 0; i < p_f.vehicle_count; ++i) {
-			if (p_f.vehicles[i].spawner == *spawner) {
-				return &p_f.vehicles[i];
-			}
-		}
-		return nullptr;
-	};
-	for (uint32_t t = 0; t < 30; ++t) {
-		tick();
-	}
+	const auto own_vehicle = [&](const host::PresentationFrame &p_f) { return VehicleMatch::vehicle(p_f, *spawner); };
+	m.ticks(30);
 	const uint64_t entry_before = df.stats.reconciliations;
-	uint32_t waited = 0;
-	for (; waited < 240; ++waited) {
-		driver.input.held_buttons = (waited / 8u) % 2u == 0u ? sim::buttons::kUse : 0u;
-		tick();
-		const host::PresentedVehicle *v = own_vehicle(df);
-		if (v != nullptr && v->occupants[0] == slot) {
-			break;
-		}
-	}
-	driver.input.held_buttons = 0;
-	REQUIRE(waited < 240);
-	for (uint32_t t = 0; t < 30; ++t) {
-		tick();
-	}
+	REQUIRE(m.board(driver, *spawner, slot));
+	m.ticks(30);
 	const uint64_t reconciled_before = df.stats.reconciliations;
 	const uint64_t entry_reconciled = reconciled_before - entry_before;
 	std::map<sim::Tick, sim::Vec3> drawn_at;
@@ -1367,10 +1407,7 @@ uint32_t drive_predicted(tt::TdmLevel &r_level, const char *p_blueprint, const c
 	const host::PresentedVehicle *seen = own_vehicle(*watcher.frame);
 	REQUIRE(seen != nullptr);
 	CHECK(seen->predicted == 0);
-	for (const std::unique_ptr<StreamClient> &c : clients) {
-		c->loop.shutdown();
-		c->loop.close();
-	}
+	m.close();
 	return steered;
 }
 
@@ -1895,5 +1932,82 @@ TEST_SUITE("host-gadgets-guided-client") {
 		CHECK(rs.remote_homing_ticks > 0u);
 		CHECK(rs.live_remote == 0u);
 		stream.finish();
+	}
+}
+
+TEST_SUITE("host-vehicles-gunnery") {
+	TEST_CASE("vehicles: a client fires an M1A2's cannon on MP_007 ConquestSmall0; a second client presents the shot, "
+			  "the shell in flight and where it ends, and the gunner's own client presents the shot too") {
+		tt::TdmLevel *level = tt::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		VehicleMatch m(*level, 66);
+		StreamClient &gunner = m.add("gunner", 1u, "lat=40-60,loss=2,seed=3");
+		StreamClient &watcher = m.add("watcher", 2u, "lat=20,seed=4");
+		m.ticks(sim::seconds_to_ticks(tt::latest_initial_delay(lv)) + 300u);
+		REQUIRE(VehicleMatch::alive(gunner));
+		REQUIRE(VehicleMatch::alive(watcher));
+		const host::PresentedVehicle *tank = m.parked(*gunner.frame, "vehicles/m1a2/m1abrams");
+		REQUIRE(tank != nullptr);
+		const uint16_t spawner = tank->spawner;
+		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[spawner].kind];
+		const std::optional<sim::Vec3> beside = m.beside(tank->com_position, kind.entry_radius);
+		REQUIRE(beside.has_value());
+		net::DebugRequest teleport;
+		teleport.kind = net::DebugKind::Teleport;
+		teleport.id = 1;
+		teleport.position = *beside;
+		gunner.loop.send_debug(teleport);
+		const uint8_t slot = gunner.frame->stats.slot;
+		m.ticks(30);
+		REQUIRE(m.board(gunner, spawner, slot));
+		const host::PresentedVehicle *seated = VehicleMatch::vehicle(*gunner.frame, spawner);
+		REQUIRE(seated != nullptr);
+		const std::array<float, 4> &q = seated->rotation;
+		gunner.input.yaw = std::atan2(2.0f * (q[0] * q[2] + q[3] * q[1]), 1.0f - 2.0f * (q[0] * q[0] + q[1] * q[1]));
+		gunner.input.pitch = -0.05f;
+		m.ticks(120);
+		gunner.keep_events = true;
+		watcher.keep_events = true;
+		const uint64_t shots_before = m.server.stats().vehicle_shots;
+		uint32_t shells_seen = 0;
+		for (uint32_t t = 0; t < 300; ++t) {
+			gunner.input.held_buttons = t < 6u ? sim::buttons::kFire : 0u;
+			m.tick();
+			const host::PresentationFrame &wf = *watcher.frame;
+			for (uint16_t b = 0; b < wf.bullet_count; ++b) {
+				shells_seen += wf.bullets[b].slot == slot ? 1u : 0u;
+			}
+		}
+		const auto count = [&](const StreamClient &p_c, host::PresentKind p_kind) {
+			return std::count_if(p_c.kept.begin(), p_c.kept.end(),
+					[&](const host::PresentEvent &e) { return e.kind == p_kind && e.slot == slot; });
+		};
+		const uint64_t fired = m.server.stats().vehicle_shots - shots_before;
+		const auto watcher_shots = count(watcher, host::PresentKind::RemoteShot);
+		const auto watcher_ends =
+				count(watcher, host::PresentKind::Impact) + count(watcher, host::PresentKind::Detonation);
+		const auto gunner_shots = count(gunner, host::PresentKind::RemoteShot);
+		std::printf("host.vehicles.gunnery: the server fired %llu vehicle shots from the %s of spawner %u; the watcher "
+					"presented %lld remote shots and %lld impacts or detonations of the gunner's slot and drew his "
+					"shell on %u frames; the gunner's client presented %lld of his own vehicle shots\n",
+				(unsigned long long)fired, kind.blueprint.c_str(), unsigned(spawner), (long long)watcher_shots,
+				(long long)watcher_ends, unsigned(shells_seen), (long long)gunner_shots);
+		CHECK(fired >= 1u);
+		CHECK(watcher_shots == int64_t(fired));
+		CHECK(watcher_ends >= 1);
+		CHECK(shells_seen >= 1u);
+		CHECK(gunner_shots == int64_t(fired));
+		for (const host::PresentEvent &e : watcher.kept) {
+			if (e.slot == slot &&
+					(e.kind == host::PresentKind::RemoteShot || e.kind == host::PresentKind::Detonation)) {
+				CHECK((e.flags & host::present_flags::kVehicle) != 0);
+				CHECK(e.def >= level->shared->gunplay->defs.size());
+				CHECK(e.def < level->shared->gunplay->defs.size() + lv.weapons.size());
+			}
+		}
+		m.close();
 	}
 }

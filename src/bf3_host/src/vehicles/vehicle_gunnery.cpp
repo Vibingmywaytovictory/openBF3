@@ -10,20 +10,14 @@ namespace bf3::host {
 namespace sw = sim::weapons;
 namespace vec = core::vec;
 
-core::Status VehicleGunnery::configure(const LevelVehicles &p_level,
+core::Result<std::shared_ptr<const sw::WeaponTable>> make_vehicle_weapon_table(const LevelVehicles &p_level,
 		std::shared_ptr<const sw::SurfaceMaterialTable> p_materials, const sw::Mechanics &p_mechanics) {
-	table_.reset();
-	projectiles_.reset();
-	mounts_.clear();
-	if (p_level.weapons.empty() || p_materials == nullptr) {
-		return core::Status::success();
-	}
 	sw::WeaponTableOptions options;
 	options.mechanics = p_mechanics;
 	core::Result<std::shared_ptr<const sw::WeaponTable>> table =
 			sw::make_weapon_table(p_level.weapons, std::move(p_materials), options);
 	if (!table) {
-		return core::error_at("vehicle weapons", table.error());
+		return table.error();
 	}
 	auto armed = std::make_shared<sw::WeaponTable>(**table);
 	for (size_t i = 0; i < armed->defs.size() && i < p_level.weapons.size(); ++i) {
@@ -34,13 +28,53 @@ core::Status VehicleGunnery::configure(const LevelVehicles &p_level,
 		}
 	}
 	armed->hash = sw::weapon_table_hash(*armed);
-	table_ = std::move(armed);
+	return std::shared_ptr<const sw::WeaponTable>(std::move(armed));
+}
+
+std::shared_ptr<const sw::WeaponTable> with_vehicle_weapons(
+		const sw::WeaponTable &p_soldier, const sw::WeaponTable &p_vehicle) {
+	auto out = std::make_shared<sw::WeaponTable>(p_soldier);
+	out->variants.resize(out->defs.size());
+	out->defs.insert(out->defs.end(), p_vehicle.defs.begin(), p_vehicle.defs.end());
+	out->variants.resize(out->defs.size());
+	return out;
+}
+
+net::DetonationWire vehicle_detonation_wire(const sw::DetonationEvent &p_event) {
+	net::DetonationWire w;
+	w.shooter = uint8_t(std::min<uint32_t>(p_event.player_slot, 255u));
+	w.shot_index = p_event.shot_index;
+	w.def = p_event.def;
+	w.time = p_event.time;
+	w.position = p_event.position;
+	w.normal = p_event.normal;
+	w.dud = p_event.dud;
+	w.vehicle = true;
+	return w;
+}
+
+core::Status VehicleGunnery::configure(const LevelVehicles &p_level,
+		std::shared_ptr<const sw::SurfaceMaterialTable> p_materials, const sw::Mechanics &p_mechanics) {
+	table_.reset();
+	projectiles_.reset();
+	mounts_.clear();
+	interval_shots_.clear();
+	if (p_level.weapons.empty() || p_materials == nullptr) {
+		return core::Status::success();
+	}
+	core::Result<std::shared_ptr<const sw::WeaponTable>> table =
+			make_vehicle_weapon_table(p_level, std::move(p_materials), p_mechanics);
+	if (!table) {
+		return core::error_at("vehicle weapons", table.error());
+	}
+	table_ = std::move(*table);
 	projectiles_ = std::make_unique<sw::ProjectileWorld>(table_);
 	return core::Status::success();
 }
 
 void VehicleGunnery::reset(size_t p_vehicles) {
 	mounts_.assign(p_vehicles, {});
+	interval_shots_.clear();
 	if (table_ != nullptr) {
 		projectiles_ = std::make_unique<sw::ProjectileWorld>(table_);
 	}
@@ -98,6 +132,7 @@ void VehicleGunnery::fire(sim::Tick p_tick, size_t p_vehicle, const LevelVehicle
 		sw::step_soldier_weapons(*table_, mount.state, c, context, p_seed, tick_out_);
 		for (uint8_t i = 0; i < tick_out_.shot_count; ++i) {
 			++stats_.shots;
+			interval_shots_.push_back(tick_out_.shots[i]);
 			if (!projectiles_->spawn(tick_out_.shots[i]).ok()) {
 				++stats_.refused;
 			}

@@ -38,6 +38,14 @@ struct VehicleBlastHits {
 	uint32_t vehicles = 0;
 };
 
+core::Result<std::shared_ptr<const sim::weapons::WeaponTable>> make_vehicle_weapon_table(const LevelVehicles &p_level,
+		std::shared_ptr<const sim::weapons::SurfaceMaterialTable> p_materials,
+		const sim::weapons::Mechanics &p_mechanics);
+
+std::shared_ptr<const sim::weapons::WeaponTable> with_vehicle_weapons(
+		const sim::weapons::WeaponTable &p_soldier, const sim::weapons::WeaponTable &p_vehicle);
+net::DetonationWire vehicle_detonation_wire(const sim::weapons::DetonationEvent &p_event);
+
 class VehicleGunnery {
 public:
 	core::Status configure(const LevelVehicles &p_level,
@@ -62,6 +70,8 @@ public:
 	const sim::weapons::ProjectileStepOutput &step_output() const { return out_; }
 	std::span<const sim::weapons::DamageEvent> vehicle_damage() const { return vehicle_damage_; }
 	const VehicleGunneryStats &stats() const { return stats_; }
+	std::span<const sim::weapons::ShotEvent> interval_shots() const { return interval_shots_; }
+	void end_snapshot_interval() { interval_shots_.clear(); }
 
 private:
 	struct Mount {
@@ -75,6 +85,7 @@ private:
 	sim::weapons::ProjectileStepOutput out_;
 	std::vector<sim::weapons::DamageEvent> vehicle_damage_;
 	sim::weapons::WeaponTickOutput tick_out_;
+	std::vector<sim::weapons::ShotEvent> interval_shots_;
 	VehicleGunneryStats stats_;
 };
 

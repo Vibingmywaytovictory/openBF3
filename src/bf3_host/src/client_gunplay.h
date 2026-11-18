@@ -125,6 +125,7 @@ private:
 	bool fire_needs_lock(const sim::Command &p_command) const;
 	uint32_t launch_target(const sim::weapons::ShotEvent &p_shot) const;
 	uint8_t round_flag(uint16_t p_def, uint8_t p_variant) const;
+	void vehicle_shot(const net::RemoteShot &p_shot);
 	bool wire_at(sim::Tick p_tick) const { return on_ && wire_valid_ && wire_tick_ == p_tick; }
 	bool put_wire(const sim::SoldierState &p_s, sim::Tick p_spawn_tick);
 	uint8_t gear_variant(uint8_t p_slot, uint16_t p_def) const;
@@ -139,6 +140,8 @@ private:
 	bool on_ = false;
 	std::shared_ptr<const ClientGunplayInputs> inputs_;
 	std::shared_ptr<const sim::weapons::WeaponTable> table_;
+	std::shared_ptr<const sim::weapons::WeaponTable> presented_;
+	uint16_t vehicle_defs_ = 0;
 	std::unique_ptr<sim::WeaponLane> lane_;
 	std::unique_ptr<ClientProjectiles> projectiles_;
 	Records records_;
@@ -178,6 +181,7 @@ private:
 	uint64_t no_view_shots_ = 0;
 	uint64_t snapshot_others_received_ = 0;
 	uint64_t remote_shots_ = 0;
+	uint64_t vehicle_shots_ = 0;
 	uint64_t combat_hits_ = 0;
 	uint64_t combat_deaths_ = 0;
 	uint64_t combat_detonations_ = 0;

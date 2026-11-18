@@ -11,6 +11,7 @@
 #include "server_outbox.h"
 #include "server_slots.h"
 #include "server_soldiers.h"
+#include "vehicles/server_vehicles.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -41,6 +42,7 @@ public:
 	const SnapshotIntervals &intervals(size_t p_slot) const { return intervals_[p_slot]; }
 	void ack(size_t p_slot, const net::CommandPacket &p_packet) { ghosts_.ack(p_slot, p_packet); }
 	void set_fly_by(std::vector<FlyBy> p_fly_by) { fly_by_ = std::move(p_fly_by); }
+	void set_vehicles(ServerVehicles *p_vehicles) { vehicles_ = p_vehicles; }
 
 	void send(sim::Tick p_tick, uint64_t p_now_ns, GameServerTickTimes &r_times);
 	void stats(GameServerStats &r_stats) const;
@@ -76,6 +78,7 @@ private:
 	std::vector<int> candidate_of_;
 	GhostPlan plan_;
 	std::vector<FlyBy> fly_by_;
+	ServerVehicles *vehicles_ = nullptr;
 	std::vector<net::RemoteShot> remote_;
 
 	uint64_t sent_ = 0;

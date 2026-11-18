@@ -1222,6 +1222,7 @@ struct ShotCodes {
 	uint32_t power = 0;
 	bool has_target = false;
 	uint16_t target = 0;
+	bool vehicle = false;
 };
 
 struct ShotIndexChain {
@@ -1251,6 +1252,7 @@ constexpr void serialize(A &r_a, C &r_c, ShotIndexChain &r_chain, sim::Tick p_se
 		}
 	}
 	r_a.bits(r_c.def, 8);
+	r_a.bits(r_c.vehicle, 1);
 	r_a.bits(r_c.time.back, kShotBackBits);
 	r_a.bits(r_c.time.fraction, kTickFractionBits);
 	frame(r_a, r_c.origin, p_position_bits);
@@ -1286,7 +1288,7 @@ constexpr size_t kShotMinBits = count_bits([](auto &r_a) {
 	chain.prev[codes.slot] = codes.index - 1;
 	serialize(r_a, codes, chain, sim::Tick(0), kMinShotFrameBits);
 });
-static_assert(kShotMinBits == 139);
+static_assert(kShotMinBits == 140);
 
 size_t shot_bits(const ShotCodes &p_codes, ShotIndexChain &r_chain, unsigned p_position_bits) {
 	return count_bits([&](auto &r_a) { serialize(r_a, p_codes, r_chain, sim::Tick(0), p_position_bits); });
@@ -1338,6 +1340,7 @@ std::optional<ShotCodes> shot_codes(const RemoteShot &p_shot, const ShotQuantiza
 	c.slot = p_shot.slot;
 	c.index = p_shot.shot_index;
 	c.def = uint8_t(p_shot.def);
+	c.vehicle = p_shot.vehicle;
 	c.direction = octa_encode(p_shot.direction, kShotDirBits);
 	c.pellets = p_shot.pellets;
 	c.tracer = p_shot.tracer;
@@ -1364,6 +1367,7 @@ RemoteShot shot_from_codes(const ShotCodes &p_c, const ShotQuantization &p_frame
 	s.slot = p_c.slot;
 	s.shot_index = p_c.index;
 	s.def = p_c.def;
+	s.vehicle = p_c.vehicle;
 	s.time = time_of(p_c.time, p_server_tick);
 	s.origin = frame_decode(p_c.origin, p_frame);
 	s.direction = octa_decode(p_c.direction, kShotDirBits);
@@ -1505,6 +1509,7 @@ void serialize(A &r_a, D &r_d, CombatFrame &r_f) {
 	frame_position(r_a, r_d.position, r_f);
 	octa(r_a, r_d.normal, kNormalBits);
 	r_a.bits(r_d.dud, 1);
+	r_a.bits(r_d.vehicle, 1);
 	event_time(r_a, r_d.time, r_f, "detonation time out of range");
 	r_a.check("detonation without a weapon def", [&] { return r_d.def < kMaxWireDefs; });
 }

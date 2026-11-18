@@ -3,6 +3,7 @@
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/host/spawn_effects.h"
+#include "vehicles/vehicle_gunnery.h"
 
 #include <algorithm>
 #include <cmath>
@@ -227,7 +228,20 @@ std::optional<GunplayRefusal> ClientGunplay::match_info(const net::MatchInfo &p_
 		pc.pose_eye_heights[k] = p_level.motor.poses[k].eye_height;
 	}
 	pc.extrapolate_max_ms = config_.extrapolate_max_ms;
-	core::Result<std::unique_ptr<ClientProjectiles>> p = ClientProjectiles::create(table_, gp->capsules, match_seed_, pc);
+	presented_ = table_;
+	vehicle_defs_ = 0;
+	if (gp->vehicles != nullptr && !gp->vehicles->weapons.empty()) {
+		core::Result<std::shared_ptr<const sim::weapons::WeaponTable>> vehicle =
+				make_vehicle_weapon_table(*gp->vehicles, table_->materials, table_->mechanics);
+		if (!vehicle) {
+			return GunplayRefusal{ net::mismatch_bits::kWeapon,
+				"vehicle weapon table (" + vehicle.error().message + ")" };
+		}
+		presented_ = with_vehicle_weapons(*table_, **vehicle);
+		vehicle_defs_ = uint16_t((*vehicle)->defs.size());
+	}
+	core::Result<std::unique_ptr<ClientProjectiles>> p =
+			ClientProjectiles::create(presented_, gp->capsules, match_seed_, pc);
 	if (!p) {
 		return GunplayRefusal{ net::mismatch_bits::kWeapon, "weapon table mismatch (" + p.error().message + ")" };
 	}
@@ -342,6 +356,10 @@ void ClientGunplay::shot_events(const net::NetSim::Datagram &p_d) {
 		return;
 	}
 	for (const net::RemoteShot &r : e->shots) {
+		if (r.vehicle) {
+			vehicle_shot(r);
+			continue;
+		}
 		if (r.slot == own_slot_) {
 			continue;
 		}
@@ -368,6 +386,34 @@ void ClientGunplay::shot_events(const net::NetSim::Datagram &p_d) {
 		if (projectiles_ != nullptr && (ev.flags & present_flags::kNoRound) == 0) {
 			projectiles_->queue_remote(r, variant);
 		}
+	}
+}
+
+void ClientGunplay::vehicle_shot(const net::RemoteShot &p_shot) {
+	if (!valid_slot(p_shot.slot) || p_shot.def >= vehicle_defs_) {
+		++bad_events_;
+		return;
+	}
+	net::RemoteShot r = p_shot;
+	r.def = uint16_t(table_->defs.size() + p_shot.def);
+	PresentEvent ev;
+	ev.kind = PresentKind::RemoteShot;
+	ev.timeline = PresentTimeline::Render;
+	ev.slot = r.slot;
+	ev.id = r.shot_index;
+	ev.def = r.def;
+	copy3(ev.pos, r.origin);
+	copy3(ev.dir, r.direction);
+	ev.flags = uint8_t((r.tracer ? present_flags::kTracer : 0u) | present_flags::kVehicle |
+			shot_round_flag(*presented_, r.def, 0));
+	ev.seed = effect_seed(match_seed_, r.slot, r.shot_index);
+	ev.value = r.power;
+	ev.extra = r.pellets;
+	ev.time = r.time;
+	events_.push(ev);
+	++vehicle_shots_;
+	if (projectiles_ != nullptr && (ev.flags & present_flags::kNoRound) == 0) {
+		projectiles_->queue_remote(r, 0);
 	}
 }
 
@@ -424,17 +470,17 @@ bool ClientGunplay::combat(const net::NetSim::Datagram &p_d, net::CombatEvents &
 		++combat_deaths_;
 	}
 	for (const net::DetonationWire &d : e->detonations) {
-		if (!valid_slot(d.shooter) || !def_ok(d.def)) {
+		if (!valid_slot(d.shooter) || (d.vehicle ? d.def >= vehicle_defs_ : !def_ok(d.def))) {
 			++bad_events_;
 			continue;
 		}
 		PresentEvent ev;
 		ev.kind = PresentKind::Detonation;
 		ev.timeline = PresentTimeline::Render;
-		ev.flags = d.dud ? present_flags::kDud : uint8_t(0);
+		ev.flags = uint8_t((d.dud ? present_flags::kDud : 0u) | (d.vehicle ? present_flags::kVehicle : 0u));
 		ev.slot = d.shooter;
 		ev.id = d.shot_index;
-		ev.def = d.def;
+		ev.def = d.vehicle ? uint16_t(table_->defs.size() + d.def) : d.def;
 		copy3(ev.pos, d.position);
 		copy3(ev.dir, d.normal);
 		ev.time = d.time;
@@ -728,6 +774,7 @@ void ClientGunplay::stats(ClientStats &r_stats) const {
 	r_stats.no_view_shots = no_view_shots_;
 	r_stats.snapshot_others_received = snapshot_others_received_;
 	r_stats.remote_shots = remote_shots_;
+	r_stats.vehicle_shots = vehicle_shots_;
 	r_stats.combat_hits = combat_hits_;
 	r_stats.combat_deaths = combat_deaths_;
 	r_stats.combat_detonations = combat_detonations_;

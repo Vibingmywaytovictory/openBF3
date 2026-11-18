@@ -129,6 +129,7 @@ public:
 	std::span<const sim::weapons::LockCandidate> lock_candidates() const { return lock_candidates_; }
 	bool hidden_crew(size_t p_slot) const;
 	const VehicleGunnery &gunnery() const { return gunnery_; }
+	void end_gunnery_interval() { gunnery_.end_snapshot_interval(); }
 	core::Transform hull(size_t p_vehicle) const;
 	std::optional<float> health(size_t p_vehicle) const;
 

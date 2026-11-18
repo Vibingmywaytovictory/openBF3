@@ -26,7 +26,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 16;
+inline constexpr uint16_t kProtocolVersion = 17;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -491,6 +491,7 @@ struct RemoteShot {
 	float pellet_cone = 0;
 	float power = 1;
 	uint32_t lock_target = sim::weapons::kNoLockTarget;
+	bool vehicle = false;
 };
 inline constexpr size_t kMaxShotsPerDatagram = 128;
 inline constexpr uint8_t kMinShotFrameBits = 20;
@@ -550,6 +551,7 @@ struct DetonationWire {
 	sim::Vec3 position{};
 	sim::Vec3 normal{};
 	bool dud = false;
+	bool vehicle = false;
 };
 
 struct ReviveEvent {

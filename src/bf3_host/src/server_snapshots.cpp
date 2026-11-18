@@ -144,6 +144,9 @@ void SnapshotWriter::send(sim::Tick p_tick, uint64_t p_now_ns, GameServerTickTim
 	if (combat_.on()) {
 		combat_.gunplay()->end_snapshot_interval();
 	}
+	if (vehicles_ != nullptr) {
+		vehicles_->end_gunnery_interval();
+	}
 	last_encode_ms_ = core::ms_since(start);
 	r_times.encode_ms = last_encode_ms_;
 	r_times.snapshots = uint32_t(sent_ - sent_before);
@@ -217,6 +220,15 @@ std::vector<uint8_t> SnapshotWriter::shot_events(
 				v.spawned && e.def < fly_by_.size() && shot_passes_by(e.origin, e.direction, fly_by_[e.def], v.eye);
 		if (in_scope || passes) {
 			ev.shots.push_back(net::remote_shot_of(e));
+		}
+	}
+	if (vehicles_ != nullptr) {
+		for (const sim::weapons::ShotEvent &e : vehicles_->gunnery().interval_shots()) {
+			if (e.player_slot == p_slot || (e.player_slot < scoped.size() && scoped[e.player_slot])) {
+				net::RemoteShot r = net::remote_shot_of(e);
+				r.vehicle = true;
+				ev.shots.push_back(r);
+			}
 		}
 	}
 	if (ev.shots.empty()) {

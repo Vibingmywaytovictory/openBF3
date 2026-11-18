@@ -35,6 +35,7 @@ inline constexpr uint8_t kOwnVictim = 1u << 3;
 inline constexpr uint8_t kOwnShooter = 1u << 4;
 inline constexpr uint8_t kRevived = 1u << 5;
 inline constexpr uint8_t kNoRound = 1u << 6;
+inline constexpr uint8_t kVehicle = 1u << 7;
 }
 
 struct PresentEvent {

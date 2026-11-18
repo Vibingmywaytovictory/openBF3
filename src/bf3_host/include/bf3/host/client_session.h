@@ -165,6 +165,7 @@ struct ClientStats {
 	uint64_t no_view_shots = 0;
 	uint64_t snapshot_others_received = 0;
 	uint64_t remote_shots = 0;
+	uint64_t vehicle_shots = 0;
 	uint64_t combat_hits = 0, combat_deaths = 0, combat_detonations = 0;
 	uint64_t bad_gunplay_datagrams = 0;
 	uint64_t bad_weapon_wires = 0;

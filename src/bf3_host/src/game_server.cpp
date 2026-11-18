@@ -1018,6 +1018,7 @@ core::Status GameServer::Impl::init_gameplay() {
 		fly_by.push_back({ d.projectile.fly_by_radius, float(core::gameplay::max_range(d)) });
 	}
 	snapshots.set_fly_by(std::move(fly_by));
+	snapshots.set_vehicles(&vehicles);
 	if (tdm) {
 		BF3_TRY(match.create_rules(config, combat.gunplay()->match_seed()));
 		combat.gunplay()->set_squads(&match.rules()->squads());
@@ -1045,6 +1046,11 @@ void GameServer::Impl::step_rules(sim::Tick p_tick) {
 				[&](const sim::weapons::HitTargetProvider &p_targets,
 						std::vector<sim::weapons::DamageEvent> &r_damage) {
 					vehicles.resolve_weapons(p_tick, *world, p_targets, r_damage);
+					for (const sim::weapons::DetonationEvent &d : vehicles.gunnery().step_output().detonations) {
+						if (d.shot_index < kWreckShotIndexBase && d.player_slot < slots.size()) {
+							combat_log.detonation(vehicle_detonation_wire(d));
+						}
+					}
 					vehicles.take_hits(*combat.gunplay(), r_damage);
 				});
 		match.step(p_tick, view, *combat.gunplay(), combat.tick_states());
