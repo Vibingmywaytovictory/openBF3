@@ -1647,13 +1647,13 @@ add_test(NAME audio.vehicles.drive COMMAND test_audio_vehicle --test-suite=audio
 add_test(NAME audio.vehicles.weapons COMMAND test_audio_vehicle --test-suite=audio-vehicles-weapons)
 set_tests_properties(core.audio.vehicles audio.vehicles.drive audio.vehicles.weapons PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 
+add_test(NAME test.scratch.before COMMAND test_scratch_tests --test-suite=test-scratch-pass-before)
+add_test(NAME test.scratch.after COMMAND test_scratch_tests --test-suite=test-scratch-pass-after)
+set_tests_properties(test.scratch.before PROPERTIES FIXTURES_SETUP openbf3_scratch_pass TIMEOUT 60 LABELS "unit"
+    ENVIRONMENT "OPENBF3_SCRATCH_LISTING=${CMAKE_BINARY_DIR}/scratch-listing.txt")
+set_tests_properties(test.scratch.after PROPERTIES FIXTURES_CLEANUP openbf3_scratch_pass TIMEOUT 60 LABELS "unit"
+    ENVIRONMENT "OPENBF3_SCRATCH_LISTING=${CMAKE_BINARY_DIR}/scratch-listing.txt")
 function(openbf3_scratch_pass_rows)
-    add_test(NAME test.scratch.before COMMAND test_scratch_tests --test-suite=test-scratch-pass-before)
-    add_test(NAME test.scratch.after COMMAND test_scratch_tests --test-suite=test-scratch-pass-after)
-    set_tests_properties(test.scratch.before PROPERTIES FIXTURES_SETUP openbf3_scratch_pass TIMEOUT 60 LABELS "unit"
-        ENVIRONMENT "OPENBF3_SCRATCH_LISTING=${CMAKE_BINARY_DIR}/scratch-listing.txt")
-    set_tests_properties(test.scratch.after PROPERTIES FIXTURES_CLEANUP openbf3_scratch_pass TIMEOUT 60 LABELS "unit"
-        ENVIRONMENT "OPENBF3_SCRATCH_LISTING=${CMAKE_BINARY_DIR}/scratch-listing.txt")
     string(SHA1 tag "${CMAKE_BINARY_DIR}")
     string(SUBSTRING "${tag}" 0 8 tag)
     get_property(rows DIRECTORY PROPERTY TESTS)
