@@ -91,6 +91,24 @@ void check_requests_match_m0(const level::MeshCensus &p_census, const std::vecto
 	CHECK(variants == kept);
 }
 
+std::vector<SceneMeshRequest> census_requests(const LevelScenePlan &p_plan, size_t &r_scattered) {
+	std::set<uint32_t> scattered;
+	r_scattered = 0;
+	for (const SceneMeshPlan &m : p_plan.meshes) {
+		if (m.census_mesh == UINT32_MAX) {
+			scattered.insert(m.request);
+			++r_scattered;
+		}
+	}
+	std::vector<SceneMeshRequest> out;
+	for (uint32_t i = 0; i < p_plan.requests.size(); ++i) {
+		if (!scattered.contains(i) || !p_plan.requests[i].variants.empty()) {
+			out.push_back(p_plan.requests[i]);
+		}
+	}
+	return out;
+}
+
 level::SceneMesh census_mesh(const char *p_name, bool p_kept, size_t p_lods, bool p_world) {
 	level::SceneMesh m;
 	m.name = p_name;
@@ -565,8 +583,10 @@ TEST_SUITE("render-scene") {
 		const LevelScenePlan &p = *plan;
 		std::printf("render.scene plan: load + traverse %.3f s, census %.3f s, plan %.3f s\n", seconds_load, seconds_census, p.seconds);
 
-		check_requests_match_m0(*census, p.requests);
-		CHECK(p.requests.size() == 623);
+		size_t scattered = 0;
+		check_requests_match_m0(*census, census_requests(p, scattered));
+		CHECK(scattered == 17);
+		CHECK(p.requests.size() == 640);
 
 		size_t kept = 0, start_hidden = 0;
 		std::vector<size_t> shown(census->meshes.size(), 0);
@@ -592,8 +612,8 @@ TEST_SUITE("render-scene") {
 		CHECK(kept == 894);
 		CHECK(census->instances.size() == 10628);
 		CHECK(start_hidden == 64);
-		CHECK(p.meshes.size() == expected_meshes);
-		CHECK(p.meshes.size() <= 894);
+		CHECK(p.meshes.size() == expected_meshes + scattered);
+		CHECK(p.meshes.size() <= 894 + scattered);
 		CHECK(p.instances.size() == census->instances.size());
 		size_t hidden_at_start = 0, driven = 0, hidden_undriven = 0;
 		for (const SceneInstancePlan &inst : p.instances) {
@@ -721,6 +741,9 @@ TEST_SUITE("render-scene") {
 			size_t untextured_meshes = 0, untextured_without_entry = 0, meshes_without_entry = 0, untextured_instances = 0;
 			std::map<std::string, size_t> untextured_shaders;
 			for (const SceneMeshPlan &m : p.meshes) {
+				if (m.census_mesh == UINT32_MAX) {
+					continue;
+				}
 				const bool entry = census->meshes[m.census_mesh].entry.has_value();
 				meshes_without_entry += entry ? 0 : 1;
 				bool any = false;

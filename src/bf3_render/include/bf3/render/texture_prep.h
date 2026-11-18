@@ -5,12 +5,17 @@
 #include "bf3/core/result.h"
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <span>
 #include <string>
 #include <vector>
 
 namespace bf3::render {
+
+template <typename T> T srgb_to_linear(T p_c) {
+	return p_c <= T(0.04045) ? p_c / T(12.92) : std::pow((p_c + T(0.055)) / T(1.055), T(2.4));
+}
 
 enum class GpuFormat : uint8_t {
 	Bc1,

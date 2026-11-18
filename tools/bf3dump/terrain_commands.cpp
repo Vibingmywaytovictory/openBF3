@@ -7,6 +7,7 @@
 #include "bf3/core/util/elapsed.h"
 #include "bf3/render/look_materials.h"
 #include "bf3/render/terrain_look.h"
+#include "bf3/render/terrain_scatter.h"
 
 #include <cstdio>
 #include <map>
@@ -17,11 +18,18 @@ using namespace bf3::core;
 
 int cmd_terrain(const std::shared_ptr<Install> &p_install, const std::vector<std::string> &p_args) {
 	if (p_args.empty()) {
-		std::fprintf(stderr, "usage: bf3dump terrain <LEVEL>...\n");
+		std::fprintf(stderr, "usage: bf3dump terrain [--scatter] <LEVEL>...\n");
 		return 2;
 	}
 	int failures = 0;
+	bool list_scatter = false;
+	for (const std::string &arg : p_args) {
+		list_scatter = list_scatter || arg == "--scatter";
+	}
 	for (const std::string &level : p_args) {
+		if (level.starts_with("--")) {
+			continue;
+		}
 		const auto start = std::chrono::steady_clock::now();
 		const std::string sb = "Win32/Levels/" + level + "/" + level;
 		Result<LevelMount> mount = p_install->mount_superbundle(sb);
@@ -122,6 +130,60 @@ int cmd_terrain(const std::shared_ptr<Install> &p_install, const std::vector<std
 				std::printf("\tmissed layers %s\n", text.c_str());
 			}
 			failures += s.misses > 0 ? 1 : 0;
+			std::vector<std::pair<std::string, std::string>> scatter_failures;
+			uint32_t scatter_meshes = 0;
+			const bf3::render::SceneScatterPlan scatter_plan = bf3::render::plan_terrain_scatter(
+					*mount, resolver->shaders(), name, [&](const std::string &) { return int32_t(scatter_meshes++); },
+					scatter_failures);
+			if (scatter_plan.types.empty() && scatter_failures.empty()) {
+				continue;
+			}
+			bf3::render::TerrainScatter::Input scatter_input;
+			scatter_input.plan = &scatter_plan;
+			scatter_input.tree = &tree;
+			scatter_input.heights = &heights;
+			scatter_input.fetch = fetch;
+			scatter_input.image = [&](const std::string &p_name) {
+				return bf3::render::load_scatter_image(*mount, p_name);
+			};
+			const auto scatter_start = std::chrono::steady_clock::now();
+			Result<std::shared_ptr<const bf3::render::TerrainScatter>> scatter =
+					bf3::render::TerrainScatter::build(scatter_input, scatter_failures);
+			if (!scatter) {
+				std::printf("\tscatter: %s\n", scatter.error().message.c_str());
+				++failures;
+				continue;
+			}
+			std::string levels;
+			for (uint8_t l : (*scatter)->levels()) {
+				levels += std::to_string(l) + " ";
+			}
+			std::printf("\tscatter %zu types on %u meshes, %zu of %zu mask programs, cell cap %u, tree levels %s, %.1f "
+						"MiB, "
+						"%zu failures, %.2f s\n",
+					scatter_plan.types.size(), scatter_meshes, (*scatter)->programs(), scatter_plan.combos.size(),
+					scatter_plan.cell_instances, levels.c_str(), double((*scatter)->bytes()) / 1048576.0,
+					scatter_failures.size(), seconds_since(scatter_start));
+			for (const auto &[item, error] : scatter_failures) {
+				std::printf("\t  [%s: %s]\n", item.c_str(), error.c_str());
+			}
+			failures += scatter_failures.empty() ? 0 : 1;
+			if (list_scatter) {
+				for (const bf3::render::ScatterType &type : (*scatter)->types()) {
+					const res::TerrainScatterType &data = scatter_plan.types[type.source].data;
+					std::string record;
+					for (uint8_t b : data.record) {
+						char hex[4];
+						std::snprintf(hex, sizeof(hex), "%02x", unsigned(b));
+						record += hex;
+					}
+					std::printf("\t  layer %u level %u cell %.0f m density %g candidates %u scale %g,%g to %g,%g %s "
+								"record %s\n",
+							unsigned(type.layer), unsigned(type.tree_level), double(type.cell), double(type.density),
+							type.candidates, double(type.scale_min[0]), double(type.scale_min[1]),
+							double(type.scale_max[0]), double(type.scale_max[1]), data.mesh.c_str(), record.c_str());
+				}
+			}
 		}
 	}
 	return failures == 0 ? 0 : 1;

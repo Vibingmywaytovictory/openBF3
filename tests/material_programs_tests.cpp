@@ -613,6 +613,9 @@ constexpr float kEnvmapSunDegrees = 15.0f;
 constexpr unsigned kCensusLanes = 4;
 constexpr std::string_view kMaskColourLedger[] = {
 	"architecture/shaders/facadepresetinterior_destrvolume_colorcontrol",
+	"levels/mp_subway/messscattering/shader/mp_subway_grass_01",
+	"levels/xp4_earthquake/terrain/shaders/asphalt_ms_ss",
+	"levels/xp5_001/meshscatteringtypes/shaders/xp5_001_moorlandgrass01_",
 	"levels/xp5_001/objects/forestledge_01_top_alpha_normalfix",
 	"levels/xp5_002/architecture/warehouse_02_xp5_002/ss_warehouse_02_destrvolume_xp5_002",
 };

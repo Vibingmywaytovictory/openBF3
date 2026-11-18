@@ -98,8 +98,13 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 		std::fprintf(stderr, "looks: plan: %s\n", (!m1 ? m1.error() : l1.error()).message.c_str());
 		return 1;
 	}
-	if (m1->meshes.size() != l1->meshes.size()) {
-		std::fprintf(stderr, "looks: M1 and L1 plans differ in meshes (%zu, %zu)\n", m1->meshes.size(), l1->meshes.size());
+	const auto census_meshes = [](const render::LevelScenePlan &p_plan) {
+		return size_t(std::count_if(p_plan.meshes.begin(), p_plan.meshes.end(),
+				[](const render::SceneMeshPlan &p_mesh) { return p_mesh.census_mesh != UINT32_MAX; }));
+	};
+	if (census_meshes(*m1) != census_meshes(*l1)) {
+		std::fprintf(stderr, "looks: M1 and L1 plans differ in census meshes (%zu, %zu)\n", census_meshes(*m1),
+				census_meshes(*l1));
 		return 1;
 	}
 
@@ -127,6 +132,13 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 	std::map<std::string, uint64_t> tier_totals;
 	for (size_t m = 0; m < l1->meshes.size(); ++m) {
 		const render::SceneMeshPlan &lm = l1->meshes[m];
+		if (lm.census_mesh == UINT32_MAX) {
+			continue;
+		}
+		if (m >= m1->meshes.size() || m1->meshes[m].census_mesh != lm.census_mesh) {
+			std::fprintf(stderr, "looks: M1 and L1 plans order mesh %zu differently\n", m);
+			return 1;
+		}
 		const render::SceneMeshPlan &mm = m1->meshes[m];
 		const uint64_t weight = lm.instances;
 		std::set<uint32_t> slots;

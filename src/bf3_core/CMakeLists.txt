@@ -190,6 +190,10 @@ target_sources(bf3_core PRIVATE
     src/level/soup_terrain_internal.h
     src/res/terrain.cpp
     include/bf3/core/res/terrain.h
+    src/res/terrain_mask_field.cpp
+    include/bf3/core/res/terrain_mask_field.h
+    src/res/terrain_visual.cpp
+    include/bf3/core/res/terrain_visual.h
 )
 
 get_filename_component(OPENBF3_ENGINE_ID "${OPENBF3_ENGINE_API}" NAME)

@@ -477,6 +477,28 @@ struct PlanBuilder {
 		return at;
 	}
 
+	int32_t scatter_mesh(
+			const EbxResolver &p_db, const std::vector<std::string> &p_databases, const std::string &p_mesh) {
+		core::Result<MeshMaterials> materials = mesh_materials(p_db, p_mesh, 0, p_databases);
+		if (!materials) {
+			plan.failures.emplace_back("scattering mesh " + p_mesh, materials.error().message);
+			return -1;
+		}
+		SceneMeshPlan mesh;
+		const auto placed = std::find_if(plan.requests.begin(), plan.requests.end(),
+				[&](const SceneMeshRequest &p_r) { return core::to_lower_ascii(p_r.res) == p_mesh; });
+		mesh.request = uint32_t(placed - plan.requests.begin());
+		mesh.census_mesh = UINT32_MAX;
+		if (placed == plan.requests.end()) {
+			plan.requests.push_back(SceneMeshRequest{ p_mesh, MeshRequest{}, {} });
+		}
+		for (const MaterialSlot &slot : materials->slots) {
+			mesh.surface_materials.push_back(look_material(slot, p_mesh));
+		}
+		plan.meshes.push_back(std::move(mesh));
+		return int32_t(plan.meshes.size() - 1);
+	}
+
 	uint32_t texture(const std::string &p_name, TextureRole p_role) {
 		const auto found = texture_by_name.find(p_name);
 		if (found != texture_by_name.end()) {
@@ -992,6 +1014,11 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 						*p_options.mount, resolver->shaders(), terrain.asset,
 						[&](const std::string &p_name) { return int32_t(builder.texture(p_name, TextureRole::Data)); },
 						plan.failures);
+				const std::vector<std::string> databases = variation_database_names(*p_options.mount);
+				terrain.scatter = plan_terrain_scatter(
+						*p_options.mount, resolver->shaders(), terrain.asset,
+						[&](const std::string &p_mesh) { return builder.scatter_mesh(p_resolver, databases, p_mesh); },
+						plan.failures);
 			}
 			plan.terrains.push_back(std::move(terrain));
 		}
@@ -1201,6 +1228,22 @@ core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mo
 	}
 	out.mesh = std::move(*mesh);
 	out.look = std::move(*look);
+	if (!plan.scatter.types.empty()) {
+		TerrainScatter::Input scatter;
+		scatter.plan = &plan.scatter;
+		scatter.tree = &tree;
+		scatter.heights = &grid;
+		scatter.crop = crop;
+		scatter.fetch = fetch;
+		scatter.image = [&](const std::string &p_name) { return load_scatter_image(p_mount, p_name); };
+		core::Result<std::shared_ptr<const TerrainScatter>> built =
+				TerrainScatter::build(scatter, out.scatter_failures);
+		if (built) {
+			out.scatter = std::move(*built);
+		} else {
+			out.scatter_failures.emplace_back(where, built.error().message);
+		}
+	}
 	return out;
 }
 

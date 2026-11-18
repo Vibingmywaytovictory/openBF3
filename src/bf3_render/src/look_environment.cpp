@@ -7,6 +7,7 @@
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/core/util/text.h"
+#include "bf3/render/texture_prep.h"
 
 #include <algorithm>
 #include <cctype>
@@ -270,10 +271,6 @@ std::optional<LookArea> area_shape(const World &p_world, uint32_t p_scope, const
 	return std::nullopt;
 }
 
-double srgb_to_linear(double p_c) {
-	return p_c <= 0.04045 ? p_c / 12.92 : std::pow((p_c + 0.055) / 1.055, 2.4);
-}
-
 std::optional<LookVec3> horizon_of(const core::LevelMount &p_mount, const std::string &p_name, std::string &r_note) {
 	core::Result<core::res::LoadedTexture> t = core::res::load_texture(p_mount, p_name);
 	if (!t) {
@@ -304,7 +301,7 @@ std::optional<LookVec3> horizon_of(const core::LevelMount &p_mount, const std::s
 		for (uint32_t x = 0; x < pick->width; ++x) {
 			const std::array<float, 4> &c = texels[size_t(y) * pick->width + x];
 			for (int k = 0; k < 3; ++k) {
-				sum[k] += srgb ? srgb_to_linear(c[size_t(k)]) : double(c[size_t(k)]);
+				sum[k] += srgb ? srgb_to_linear(double(c[size_t(k)])) : double(c[size_t(k)]);
 			}
 			++n;
 		}
