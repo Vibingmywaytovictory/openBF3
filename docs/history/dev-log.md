@@ -3463,3 +3463,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Test scratch: test.scratch.before and .after are registered above the asan block again (only the tag and fixture application is deferred), so the asan preset's PATH prepend reaches the pass rows every row depends on.
 * Test scratch: core.install's write-guard probe path is a ScratchDir folder instead of a name built from the helper's temp_dir().
 * Test scratch: test.scratch.paths also fails a path built from the helper's temp_dir() or scratch_root() outside the helper and its own tests, and Python's tempfile module and os.environ TEMP/TMP.
+* host.server.stream and host.client.stream pins re-recorded on the merged wave 24 head: protocol 17 (vehicles-alive's vehicle bit on ShotEvents and CombatEvents, the version in Hello and MatchInfo) moves the TDM and dev stream hashes and alpha, bravo, charlie and delta's sent hashes; no other track moved them.
