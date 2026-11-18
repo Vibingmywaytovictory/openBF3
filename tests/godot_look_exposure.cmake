@@ -39,7 +39,7 @@ foreach(level MP_007 MP_003)
     string(REPLACE ";" "\\;" views "${views}")
     godot_run(QUIET SKIP_WITHOUT_INSTALL TIMEOUT 300
         ARGS --resolution 1280x720 --path "${PROJECT_DIR}" res://scenes/metro_tdm.tscn -- "--level=${level}" "--mode=${mode}"
-            --bots=0 --deploy-screen=0 --no-hud "--bf3-cache=${cache}" --shot-settle=3 "--shots=${views}")
+            --bots=0 --deploy-screen=0 --no-hud "--bf3-cache=${cache}" --shot-settle=5 "--shots=${views}")
     string(REPLACE ";" "," text "${out}")
     string(REGEX MATCHALL "\\[m1\\] shot look L1:[^\n]*" looks "${text}")
     list(LENGTH looks n)
