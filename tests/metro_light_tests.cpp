@@ -4,6 +4,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
 #include "bf3/render/level_scene.h"
+#include "bf3/render/look_environment.h"
 #include "test_support.h"
 
 #include <array>
@@ -197,6 +198,74 @@ TEST_SUITE("render-metro-light") {
 		CHECK(!bazaar_wall->flat_colour);
 		CHECK(quake_wall->color.has_value());
 		CHECK(!quake_wall->flat_colour);
+		check_install_unchanged(*m);
+	}
+
+	TEST_CASE(
+			"render.metro_light: a visual environment whose data says Enabled false is still the level's environment") {
+		bf3::test::Mounted *m = bf3::test::shared_mount_or_skip();
+		if (m == nullptr) {
+			return;
+		}
+		struct Tally {
+			size_t environments = 0, disabled = 0, switches = 0;
+		};
+		const auto tally = [](const level::World &p_world) {
+			Tally out;
+			const int32_t enabled_field = level::field_id("Enabled");
+			for (const level::PlacedObject &object : p_world.objects) {
+				if (object.kind != level::ObjectKind::VisualEnvironment ||
+						!object.entity.is_a("VisualEnvironmentEntityData")) {
+					continue;
+				}
+				++out.environments;
+				const std::optional<EbxValue> enabled = object.entity.get("Enabled");
+				if (!enabled || enabled->as_bool() != false) {
+					continue;
+				}
+				++out.disabled;
+				const level::Connections &connections = p_world.scopes.connections(object.scope);
+				const auto targets = [&](const level::Connection &p_c) {
+					return p_c.target == object.entity || (object.reference && p_c.target == *object.reference);
+				};
+				for (const level::Connection &c : connections.property) {
+					out.switches += targets(c) && c.target_field == enabled_field ? 1 : 0;
+				}
+				for (const level::Connection &c : connections.event) {
+					out.switches += targets(c) ? 1 : 0;
+				}
+			}
+			return out;
+		};
+		LevelCase canals, metro;
+		load_case(*m, "MP_017", "ConquestLarge0", canals);
+		load_case(*m, "MP_Subway", "ConquestLarge0", metro);
+		const Tally canals_tally = tally(*canals.world), metro_tally = tally(*metro.world);
+		const LevelScenePlan plan = plan_case(canals, SceneLook::L1);
+		const LevelScenePlan metro_plan = plan_case(metro, SceneLook::L1);
+		size_t city_areas = 0;
+		for (const LookArea &area : metro_plan.look_environment.areas) {
+			city_areas += area.name == "levels/mp_subway/lighting/ve_mp_subway_city_01" ? 1 : 0;
+		}
+		std::printf("render.metro_light Enabled false: MP_017 %zu of %zu visual environments, %zu Enabled or event "
+					"connections "
+					"into them, look base %s, plain environment from data %d; MP_Subway %zu of %zu, %zu connections, "
+					"city_01 an "
+					"area %zu\n",
+				canals_tally.disabled, canals_tally.environments, canals_tally.switches,
+				plan.look_environment.base.source.substr(0, 64).c_str(), int(plan.environment.from_data),
+				metro_tally.disabled, metro_tally.environments, metro_tally.switches, city_areas);
+		CHECK(canals_tally.environments == 2);
+		CHECK(canals_tally.disabled == 1);
+		CHECK(canals_tally.switches == 0);
+		CHECK(plan.look_environment.from_data);
+		CHECK(plan.look_environment.base.source.find("OutdoorLightComponentData<levels/mp_017/lighting/ve_mp_017_02") !=
+				std::string::npos);
+		CHECK(plan.environment.from_data);
+		CHECK(metro_tally.environments == 5);
+		CHECK(metro_tally.disabled == 1);
+		CHECK(metro_tally.switches == 0);
+		CHECK(city_areas == 1);
 		check_install_unchanged(*m);
 	}
 }

@@ -245,9 +245,6 @@ SceneEnvironment read_environment(const EbxResolver &p_db, const World &p_world)
 			continue;
 		}
 		const EbxInstance &entity = object.entity;
-		if (!bool_field(entity, "Enabled", true)) {
-			continue;
-		}
 		Candidate c;
 		bool outdoor = false;
 		size_t seen = 0;
