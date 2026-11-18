@@ -137,7 +137,6 @@ bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::
 		r_state.enlighten = true;
 		r_state.sky_color = vec3(p_c, "SkyBoxSkyColor").value_or(r_state.sky_color);
 		r_state.ground_color = vec3(p_c, "SkyBoxGroundColor").value_or(r_state.ground_color);
-		r_state.bounce_scale = number(p_c, "BounceScale").value_or(1.0f);
 		r_state.enlighten_sun_scale = number(p_c, "SunScale").value_or(1.0f);
 		r_state.skybox_sun = vec3(p_c, "SkyBoxSunLightColor").value_or(LookVec3{});
 		r_state.skybox_sun_size = std::clamp(number(p_c, "SkyBoxSunLightColorSize").value_or(0.0f), 0.0f, kPi * 0.5f);
@@ -352,7 +351,6 @@ void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 		r_state.enlighten = true;
 		r_state.sky_color = lerp3(r_state.sky_color, p_a.sky_color, p_w);
 		r_state.ground_color = lerp3(r_state.ground_color, p_a.ground_color, p_w);
-		r_state.bounce_scale = lerp1(r_state.bounce_scale, p_a.bounce_scale, p_w);
 		r_state.enlighten_sun_scale = lerp1(r_state.enlighten_sun_scale, p_a.enlighten_sun_scale, p_w);
 		r_state.skybox_sun = lerp3(r_state.skybox_sun, p_a.skybox_sun, p_w);
 		r_state.skybox_sun_size = lerp1(r_state.skybox_sun_size, p_a.skybox_sun_size, p_w);
@@ -803,12 +801,9 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 	}
 	const LookVec3 sky = p_s.enlighten && max3(p_s.sky_color) > 1e-6f ? p_s.sky_color : p_s.outdoor_sky;
 	const LookVec3 ground = p_s.enlighten && max3(p_s.ground_color) > 1e-6f ? p_s.ground_color : p_s.outdoor_ground;
-	const LookVec3 bounce = p_s.enlighten
-			? scaled(p_s.sun_color, std::fmax(std::sin(el), 0.0f) * kBounceAlbedo * std::fmax(p_s.bounce_scale, 0.0f))
-			: LookVec3{};
-	f.ambient_up = added(sky, scaled(bounce, 0.25f));
-	f.ambient_horizon = added(scaled(added(sky, ground), 0.5f), scaled(bounce, 0.5f));
-	f.ambient_down = added(ground, bounce);
+	f.ambient_up = sky;
+	f.ambient_horizon = scaled(added(sky, ground), 0.5f);
+	f.ambient_down = ground;
 	f.sky_brightness = p_s.sky_brightness;
 	f.sky_rotation = p_s.sky_rotation;
 	f.uv_min_y = p_s.uv_min_y;

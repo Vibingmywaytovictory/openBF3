@@ -8,6 +8,7 @@
 #include "test_support.h"
 
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -266,6 +267,41 @@ TEST_SUITE("render-metro-light") {
 		CHECK(metro_tally.disabled == 1);
 		CHECK(metro_tally.switches == 0);
 		CHECK(city_areas == 1);
+		check_install_unchanged(*m);
+	}
+
+	TEST_CASE("render.metro_light: the ambient at Metro's cameras is the area's sky box colours, with no sun bounce") {
+		bf3::test::Mounted *m = bf3::test::shared_mount_or_skip();
+		if (m == nullptr) {
+			return;
+		}
+		LevelCase metro;
+		load_case(*m, "MP_Subway", "ConquestLarge0", metro);
+		const LevelScenePlan plan = plan_case(metro, SceneLook::L1);
+		REQUIRE(plan.look_environment.from_data);
+		struct Camera {
+			const char *name;
+			LookVec3 at, sky, ground;
+		};
+		const LookVec3 station_sky{ 0.048f, 0.09f, 0.17f }, station_ground{ 0.036f, 0.036f, 0.036f };
+		const Camera cameras[] = {
+			{ "hall strip", { -167.76f, 66.2f, -475.19f }, station_sky, station_ground },
+			{ "deep tunnel", { -190.0f, 61.0f, -356.3f }, station_sky, station_ground },
+			{ "street", { -154.3f, 66.1f, -493.9f }, station_sky, station_ground },
+			{ "park", { -40.0f, 110.0f, -230.0f }, { 0.06f, 0.116f, 0.157f }, { 0.167f, 0.135f, 0.059f } },
+		};
+		const auto near3 = [](const LookVec3 &p_a, const LookVec3 &p_b) {
+			return std::fabs(p_a[0] - p_b[0]) < 1e-3f && std::fabs(p_a[1] - p_b[1]) < 1e-3f &&
+					std::fabs(p_a[2] - p_b[2]) < 1e-3f;
+		};
+		for (const Camera &c : cameras) {
+			const LookFrame f = look_frame(plan.look_environment, c.at);
+			std::printf("render.metro_light ambient %s: sun x %.2f, up (%.3f %.3f %.3f) down (%.3f %.3f %.3f)\n",
+					c.name, f.sun_energy, f.ambient_up[0], f.ambient_up[1], f.ambient_up[2], f.ambient_down[0],
+					f.ambient_down[1], f.ambient_down[2]);
+			CHECK_MESSAGE(near3(f.ambient_up, c.sky), c.name);
+			CHECK_MESSAGE(near3(f.ambient_down, c.ground), c.name);
+		}
 		check_install_unchanged(*m);
 	}
 }

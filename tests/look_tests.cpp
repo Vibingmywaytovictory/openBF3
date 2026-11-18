@@ -536,7 +536,6 @@ TEST_SUITE("render-look-unit") {
 		env.base.enlighten = true;
 		env.base.sky_color = { 0.1f, 0.2f, 0.3f };
 		env.base.ground_color = { 0.1f, 0.1f, 0.1f };
-		env.base.bounce_scale = 1.0f;
 		env.base.tonemap = true;
 		env.base.middle_gray = 0.2f;
 		env.base.min_exposure = 0.5f;
@@ -559,8 +558,10 @@ TEST_SUITE("render-look-unit") {
 		CHECK(near(out.sun_color[1], 0.75f));
 		CHECK(near(out.sun_direction[1], -1.0f));
 
-		CHECK(near(out.ambient_up[0], 0.1f + 0.25f * 4.0f * kBounceAlbedo));
-		CHECK(near(out.ambient_down[2], 0.1f + 2.0f * kBounceAlbedo));
+		CHECK(near(out.ambient_up[0], 0.1f));
+		CHECK(near(out.ambient_up[2], 0.3f));
+		CHECK(near(out.ambient_horizon[1], 0.15f));
+		CHECK(near(out.ambient_down[2], 0.1f));
 		CHECK(out.exposure >= 0.5f);
 		CHECK(out.exposure <= 4.0f);
 		CHECK(out.lut == -1);

@@ -27,7 +27,6 @@ using LookCubic = std::array<float, 4>;
 inline constexpr size_t kMaxVisualEnvironments = 64;
 inline constexpr uint32_t kGradeLutSide = 32;
 inline constexpr uint32_t kHorizonWidth = 256;
-inline constexpr float kBounceAlbedo = 0.25f;
 inline constexpr float kReferenceAlbedo = 0.3f;
 inline constexpr float kSunlitShare = 0.1f;
 
@@ -46,7 +45,7 @@ struct LookEnvState {
 	LookVec3 outdoor_sky{}, outdoor_ground{};
 
 	LookVec3 sky_color{ 0.06f, 0.1f, 0.15f }, ground_color{ 0.1f, 0.1f, 0.1f };
-	float bounce_scale = 1.0f, enlighten_sun_scale = 1.0f;
+	float enlighten_sun_scale = 1.0f;
 	LookVec3 skybox_sun{}, skybox_back{};
 	float skybox_sun_size = 0.0f, skybox_back_size = 0.0f;
 	float back_rotation_x = 0.0f, back_rotation_y = 0.0f;
