@@ -15,7 +15,7 @@
 
 namespace bf3::host {
 
-inline constexpr size_t kMaxPresentedVehicles = 32;
+inline constexpr size_t kMaxPresentedVehicles = 64;
 inline constexpr double kVehicleExtrapolateTicks = 6.0;
 inline constexpr size_t kVehicleWindow = 3;
 inline constexpr size_t kVehicleHistory = 8;

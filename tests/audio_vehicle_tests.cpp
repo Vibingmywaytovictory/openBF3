@@ -355,6 +355,20 @@ TEST_SUITE("audio-vehicles-install") {
 			{ "vehicles/xp5/humvee_asrad/humvee_asrad", "sound/vehicles/land/xp5/humvee_asrad_xp5_noboost", jeep,
 					"3ea2059a event,1163a458 event", 0 },
 			{ "vehicles/xp5/bmp2_paradrop/bmp2_paradrop", "sound/vehicles/land/bmp2/bmp2_02", tracked, "", 0 },
+			{ "vehicles/lav25/lav25", "sound/vehicles/land/lav_25/lav_25", tracked, "", 0 },
+			{ "vehicles/lav25/lav_ad", "sound/vehicles/land/lav_25/lav_25", tracked, "", 0 },
+			{ "vehicles/xp5/lav_paradrop/lav25_paradrop", "sound/vehicles/land/lav_25/lav_25", tracked, "", 0 },
+			{ "vehicles/xp3/m1128-stryker/m1128-stryker", "sound/vehicles/land/lav_25/lav_25", tracked, "", 0 },
+			{ "vehicles/xpack01/btr-90/btr90", "sound/vehicles/land/btr90/btr90", tracked, "", 0 },
+			{ "vehicles/gaz-3937_vodnik/gaz-3937_vodnik", "sound/vehicles/land/vodnik/vodnik_03_noboost", jeep, "", 0 },
+			{ "vehicles/xp5/vodnikphoenix/vodnikphoenix", "sound/vehicles/land/xp5/vodnikphoenix_xp5", jeep,
+					"3ea2059a event,1163a458 event", 0 },
+			{ "vehicles/xp3/star_1466/star_1466", "sound/vehicles/land/bm23/bm23",
+					"0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16", "", 1 },
+			{ "vehicles/xp3/himars/himars", "sound/vehicles/land/himars/himars",
+					"0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16", "", 1 },
+			{ "vehicles/xp5/klr650/klr650", "sound/vehicles/land/motorcycle/dirtbike", jeep,
+					"40db8171,255c4d9f event,d19f5904 event", 0 },
 		};
 		const char *levels[] = { "MP_001", "MP_012", "MP_017", "XP1_002", "XP3_Desert", "XP4_Quake", "XP5_001" };
 		std::vector<std::string> seen;

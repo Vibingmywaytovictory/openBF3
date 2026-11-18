@@ -441,6 +441,19 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	return std::shared_ptr<const VehicleModel>(std::move(m));
 }
 
+namespace {
+
+size_t collision_body_index(std::span<const core::gameplay::DriveRigidBodyDef> p_bodies) {
+	for (size_t i = 0; i < p_bodies.size(); ++i) {
+		if (p_bodies[i].body_type == "RBTypeCollision") {
+			return i;
+		}
+	}
+	return 0;
+}
+
+}
+
 core::Result<std::shared_ptr<const VehicleModel>> load_vehicle_model(const core::EbxResolver &p_db, const core::LevelMount &p_mount, std::string_view p_blueprint,
 		const VehicleTuning &p_tuning, core::gameplay::WorkBudget *p_budget) {
 	core::Result<core::gameplay::VehicleDriveDef> def = core::gameplay::read_vehicle_drive_def(p_db, p_blueprint, p_budget);
@@ -457,8 +470,15 @@ core::Result<std::shared_ptr<const VehicleModel>> load_vehicle_model(const core:
 	if (havok->shapes.empty()) {
 		return core::make_error("vehicle model " + def->blueprint + ": " + def->physics_asset + " has no rigid body shape");
 	}
+	const size_t chassis = collision_body_index(def->rigid_bodies);
+	if (chassis >= havok->shapes.size()) {
+		return core::make_error("vehicle model " + def->blueprint + ": " + def->physics_asset + " has " +
+				std::to_string(havok->shapes.size()) + " rigid body shapes, none for collision body " +
+				std::to_string(chassis));
+	}
 
-	const std::vector<core::res::ConvexPiece> pieces = core::res::havok_convex_pieces(havok->shapes[0], core::res::Transform::identity());
+	const std::vector<core::res::ConvexPiece> pieces =
+			core::res::havok_convex_pieces(havok->shapes[chassis], core::res::Transform::identity());
 	if (pieces.size() > kMaxChassisPieces) {
 		return core::make_error("vehicle model " + def->blueprint + ": " + std::to_string(pieces.size()) + " chassis pieces (at most " +
 				std::to_string(kMaxChassisPieces) + ")");

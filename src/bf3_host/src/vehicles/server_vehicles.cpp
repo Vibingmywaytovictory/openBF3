@@ -847,16 +847,17 @@ net::VehicleWire ServerVehicles::wire_of(size_t p_vehicle, const sim::VehicleSta
 	return w;
 }
 
-namespace {
-
-void pack(std::vector<net::VehicleStates> &r_out, sim::Tick p_tick, net::VehicleWire &&p_wire) {
-	if (r_out.empty() || r_out.back().vehicles.size() >= net::kMaxVehiclesPerDatagram) {
-		r_out.emplace_back();
-		r_out.back().server_tick = p_tick;
+void pack_vehicle_wire(std::vector<net::VehicleStates> &r_out, sim::Tick p_tick, net::VehicleWire &&p_wire) {
+	if (!r_out.empty() && r_out.back().vehicles.size() < net::kMaxVehiclesPerDatagram) {
+		r_out.back().vehicles.push_back(p_wire);
+		if (net::vehicle_states_bits(r_out.back()) <= net::kMaxDatagramBytes * 8) {
+			return;
+		}
+		r_out.back().vehicles.pop_back();
 	}
+	r_out.emplace_back();
+	r_out.back().server_tick = p_tick;
 	r_out.back().vehicles.push_back(std::move(p_wire));
-}
-
 }
 
 std::vector<net::VehicleStates> ServerVehicles::wire_for(size_t p_slot, const GhostViewer &p_viewer, sim::Tick p_tick) {
@@ -890,7 +891,7 @@ std::vector<net::VehicleStates> ServerVehicles::wire_for(size_t p_slot, const Gh
 		});
 		c.generation = v.generation;
 		if (!v.live || scope_.due(p_slot, p_viewer, i, c)) {
-			pack(out, p_tick, wire_of(i, s));
+			pack_vehicle_wire(out, p_tick, wire_of(i, s));
 		}
 	}
 	return out;

@@ -94,6 +94,7 @@ float wreck_blast_amount(const sim::weapons::SurfaceMaterialTable *p_materials, 
 		uint8_t p_hull_property, float p_base);
 sim::VehicleCommand disabled_command(
 		const sim::VehicleCommand &p_command, std::span<const core::gameplay::VehicleInputModifierDef> p_modifiers);
+void pack_vehicle_wire(std::vector<net::VehicleStates> &r_out, sim::Tick p_tick, net::VehicleWire &&p_wire);
 
 class ServerVehicles {
 public:

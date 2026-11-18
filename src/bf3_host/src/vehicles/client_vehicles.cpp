@@ -1,9 +1,13 @@
 #include "client_vehicles.h"
 
+#include "bf3/sim/vehicle_world.h"
+
 #include <algorithm>
 #include <cmath>
 
 namespace bf3::host {
+
+static_assert(kMaxPresentedVehicles >= sim::kMaxVehicleSlots);
 
 PresentedVehicle present_vehicle(const net::VehicleWire &p_wire, sim::Tick p_tick) {
 	PresentedVehicle v;

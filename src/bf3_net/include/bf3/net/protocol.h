@@ -962,4 +962,5 @@ struct VehicleStates {
 
 std::vector<uint8_t> encode_vehicle_states(const VehicleStates &p_message);
 core::Result<VehicleStates> decode_vehicle_states(std::span<const uint8_t> p_datagram);
+size_t vehicle_states_bits(const VehicleStates &p_message);
 }

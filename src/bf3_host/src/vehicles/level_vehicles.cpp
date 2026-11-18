@@ -168,12 +168,6 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 				refused.push_back(s.blueprint);
 				continue;
 			}
-			if (!land_jeep(**model) && !land_tracked(**model)) {
-				out->notes.push_back("vehicle " + s.blueprint + " has " + std::to_string((*model)->wheel_count) +
-						" wheels, not a jeep or a tracked vehicle");
-				refused.push_back(s.blueprint);
-				continue;
-			}
 			core::Result<core::gameplay::VehicleDef> def =
 					core::gameplay::read_vehicle_def(p_db.level->db(), s.blueprint);
 			if (!def) {

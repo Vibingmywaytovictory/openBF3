@@ -2901,4 +2901,8 @@ std::vector<uint8_t> encode_vehicle_states(const VehicleStates &p_message) {
 core::Result<VehicleStates> decode_vehicle_states(std::span<const uint8_t> p_datagram) {
 	return decode_as<VehicleStates>(p_datagram, { MessageType::VehicleStates, "VehicleStates", kMaxDatagramBytes });
 }
+
+size_t vehicle_states_bits(const VehicleStates &p_message) {
+	return kTypeBits + count_bits([&](auto &r_a) { serialize(r_a, p_message); });
+}
 }
