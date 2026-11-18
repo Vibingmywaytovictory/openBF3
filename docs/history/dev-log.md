@@ -3462,3 +3462,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Test scratch: the pass tag and the openbf3_scratch_pass fixture are applied by a deferred call at the end of tests/CMakeLists.txt, so a row the other tracks append after the old block still gets both; test.scratch.rows (ctest --show-only) fails any row without them.
 * Test scratch: test.scratch.before and .after are registered above the asan block again (only the tag and fixture application is deferred), so the asan preset's PATH prepend reaches the pass rows every row depends on.
 * Test scratch: core.install's write-guard probe path is a ScratchDir folder instead of a name built from the helper's temp_dir().
+* Test scratch: test.scratch.paths also fails a path built from the helper's temp_dir() or scratch_root() outside the helper and its own tests, and Python's tempfile module and os.environ TEMP/TMP.
