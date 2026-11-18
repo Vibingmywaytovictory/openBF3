@@ -45,6 +45,7 @@ struct UploadStats {
 	uint64_t terrain_layer_materials = 0;
 	uint64_t texture_bindings = 0;
 	uint64_t instances = 0;
+	uint64_t double_sided_casters = 0;
 	uint64_t program_materials = 0;
 	uint64_t program_instances = 0;
 

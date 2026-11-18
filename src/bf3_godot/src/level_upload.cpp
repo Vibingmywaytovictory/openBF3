@@ -776,7 +776,7 @@ void LevelUpload::create_terrain_look(const Done &p_done) {
 void LevelUpload::create_instances(double p_deadline_us) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const render::LevelScenePlan &plan = *plan_;
-	uint64_t made = 0, program_made = 0;
+	uint64_t made = 0, program_made = 0, double_sided = 0;
 	while (!pending_terrains_.empty()) {
 		const uint32_t t = pending_terrains_.front();
 		pending_terrains_.pop_front();
@@ -792,6 +792,8 @@ void LevelUpload::create_instances(double p_deadline_us) {
 		for (int k = 0; k < 32 && next < list.size(); ++k, ++next) {
 			const RID inst = rs->instance_create2(meshes_[mesh], scenario_);
 			rs->instance_set_transform(inst, instance_transform(plan.instances[list[next]].transform));
+			rs->instance_geometry_set_cast_shadows_setting(inst, RenderingServer::SHADOW_CASTING_SETTING_DOUBLE_SIDED);
+			++double_sided;
 			if (instance_visible_[list[next]] == 0) {
 				rs->instance_set_visible(inst, false);
 			}
@@ -813,6 +815,7 @@ void LevelUpload::create_instances(double p_deadline_us) {
 		}
 		std::lock_guard lock(stats_mutex_);
 		stats_.instances += made;
+		stats_.double_sided_casters += double_sided;
 		stats_.program_instances += program_made;
 	}
 }

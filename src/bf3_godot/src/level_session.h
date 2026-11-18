@@ -120,7 +120,7 @@ public:
 	const LevelUpload &upload() const { return upload_; }
 	std::optional<bf3::render::SceneLaneStats> lane_stats() const;
 	std::string cache_summary() const;
-	std::string look_summary() const { return look_.built() ? look_.describe() : std::string("look M1"); }
+	std::string look_summary() const;
 	const std::vector<float> &frame_ms_after_done() const { return frame_ms_after_done_; }
 	uint64_t others_presented() const { return others_presented_; }
 	uint64_t others_extrapolated() const { return others_extrapolated_; }

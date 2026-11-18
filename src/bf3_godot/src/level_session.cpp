@@ -13,6 +13,7 @@
 #include "bf3/core/level/census.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/util/format.h"
 #include "bf3/core/util/key_values.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/prediction_tally.h"
@@ -703,6 +704,15 @@ std::shared_ptr<const render::LevelScenePlan> Bf3LevelSession::scene_plan() cons
 std::optional<render::SceneLaneStats> Bf3LevelSession::lane_stats() const {
 	std::lock_guard lock(loader_mutex_);
 	return lane_stats_;
+}
+
+std::string Bf3LevelSession::look_summary() const {
+	const uint64_t casters = upload_.stats().double_sided_casters;
+	const std::shared_ptr<const render::LevelScenePlan> plan = scene_plan();
+	const size_t instances = plan != nullptr ? plan->instances.size() : 0;
+	return (look_.built() ? look_.describe() : std::string("look M1")) +
+			bf3::core::fmt(
+					"; shadow casters %llu of %zu instances double-sided", (unsigned long long)casters, instances);
 }
 
 std::string Bf3LevelSession::cache_summary() const {
