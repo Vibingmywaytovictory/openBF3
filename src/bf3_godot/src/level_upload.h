@@ -3,6 +3,7 @@
 #include "bf3/core/level/level_transform.h"
 #include "bf3/host/level_load.h"
 #include "bf3/render/level_scene.h"
+#include "terrain_scatter.h"
 
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -104,6 +105,7 @@ public:
 	godot::RID mesh_rid(uint32_t p_mesh) const;
 	godot::RID material_rid(uint32_t p_material) const;
 	godot::RID texture_rid(uint32_t p_texture) const;
+	ScatterDrawStats scatter_stats() const;
 
 private:
 	enum class Kind : uint8_t { Mesh, Texture, Terrain };
@@ -129,6 +131,7 @@ private:
 	void apply_done(double p_deadline_us);
 	void create_instances(double p_deadline_us);
 	void create_terrain_look(const Done &p_done);
+	void update_scatter();
 
 	std::shared_ptr<const bf3::render::LevelScenePlan> plan_;
 	bf3::render::SceneLanes *lanes_ = nullptr;
@@ -162,6 +165,9 @@ private:
 	std::vector<uint8_t> mesh_programs_;
 	std::deque<std::pair<uint32_t, size_t>> pending_instances_;
 	std::deque<uint32_t> pending_terrains_;
+	std::vector<std::pair<uint32_t, std::shared_ptr<const bf3::render::TerrainScatter>>> scatters_;
+	std::vector<std::unique_ptr<TerrainScatterDraw>> scatter_draws_;
+	bool scatter_checked_ = false;
 	std::vector<godot::RID> instances_;
 	std::vector<godot::RID> plan_instances_;
 	std::vector<uint8_t> instance_visible_;

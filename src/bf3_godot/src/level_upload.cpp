@@ -3,8 +3,12 @@
 #include "godot_util.h"
 #include "texture_ledger.h"
 
+#include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/scene_tree.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/classes/worker_thread_pool.hpp>
 #include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/basis.hpp>
@@ -445,6 +449,17 @@ void LevelUpload::terrain(uint32_t p_terrain, render::PreparedTerrain &&p_terrai
 	item.kind = Kind::Terrain;
 	item.index = p_terrain;
 	item.bytes = p_bytes;
+	{
+		std::lock_guard lock(queue_mutex_);
+		for (const auto &[what, error] : p_terrain_data.scatter_failures) {
+			failures_.emplace_back(what, error);
+		}
+		if (p_terrain_data.scatter != nullptr) {
+			scatters_.emplace_back(p_terrain, p_terrain_data.scatter);
+		}
+		std::lock_guard stats_lock(stats_mutex_);
+		stats_.failures += p_terrain_data.scatter_failures.size();
+	}
 	item.terrain = std::make_unique<render::PreparedTerrain>(std::move(p_terrain_data));
 	push(std::move(item));
 }
@@ -872,7 +887,59 @@ double LevelUpload::pump(const Callable &p_task, double p_budget_ms) {
 	if (ms > 0.05) {
 		stats_.last_c2_us = end;
 	}
+	update_scatter();
 	return ms;
+}
+
+void LevelUpload::update_scatter() {
+	static const bool scatter_off = ("," + user_arg_value("look-off") + ",").find(",scatter,") != std::string::npos;
+	if (scatter_off) {
+		return;
+	}
+	if (scatter_draws_.empty()) {
+		if (scatter_checked_ || !finished()) {
+			return;
+		}
+		scatter_checked_ = true;
+		std::vector<std::pair<uint32_t, std::shared_ptr<const render::TerrainScatter>>> ready;
+		{
+			std::lock_guard lock(queue_mutex_);
+			ready = scatters_;
+		}
+		for (const auto &[terrain, scatter] : ready) {
+			if (terrain >= plan_->terrains.size()) {
+				continue;
+			}
+			std::unique_ptr<TerrainScatterDraw> draw = std::make_unique<TerrainScatterDraw>();
+			draw->begin(plan_->terrains[terrain].asset, scatter, scenario_,
+					instance_transform(plan_->terrains[terrain].transform),
+					[this](uint32_t p_mesh) { return mesh_rid(p_mesh); });
+			scatter_draws_.push_back(std::move(draw));
+		}
+	}
+	const SceneTree *tree = Object::cast_to<SceneTree>(Engine::get_singleton()->get_main_loop());
+	const Camera3D *camera =
+			tree != nullptr && tree->get_root() != nullptr ? tree->get_root()->get_camera_3d() : nullptr;
+	if (camera == nullptr) {
+		return;
+	}
+	for (const std::unique_ptr<TerrainScatterDraw> &draw : scatter_draws_) {
+		draw->update(camera->get_global_position(), 1.0);
+	}
+}
+
+ScatterDrawStats LevelUpload::scatter_stats() const {
+	ScatterDrawStats total;
+	for (const std::unique_ptr<TerrainScatterDraw> &draw : scatter_draws_) {
+		const ScatterDrawStats s = draw->stats();
+		total.cells_generated += s.cells_generated;
+		total.cells_drawn += s.cells_drawn;
+		total.multimeshes += s.multimeshes;
+		total.instances += s.instances;
+		total.instances_drawn += s.instances_drawn;
+		total.types_drawn += s.types_drawn;
+	}
+	return total;
 }
 
 bool LevelUpload::finished() const {
@@ -912,6 +979,12 @@ void LevelUpload::free_all() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (rs == nullptr) {
 		return;
+	}
+	scatter_draws_.clear();
+	scatter_checked_ = false;
+	{
+		std::lock_guard lock(queue_mutex_);
+		scatters_.clear();
 	}
 	std::vector<Done> done;
 	{

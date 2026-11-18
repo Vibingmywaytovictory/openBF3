@@ -397,6 +397,8 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     set_tests_properties(godot.l1_look PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.terrain_look godot_terrain_look.cmake WINDOW TIMEOUT 300)
     set_tests_properties(godot.terrain_look PROPERTIES RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.ground_cover godot_ground_cover.cmake WINDOW TIMEOUT 700)
+    set_tests_properties(godot.ground_cover PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.look.exposure godot_look_exposure.cmake WINDOW TIMEOUT 900)
     set_tests_properties(godot.look.exposure PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.metro_light godot_metro_light.cmake WINDOW TIMEOUT 300)

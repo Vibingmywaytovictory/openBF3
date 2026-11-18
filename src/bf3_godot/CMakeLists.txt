@@ -64,6 +64,8 @@ target_sources(bf3_godot PRIVATE
 target_sources(bf3_godot PRIVATE
     src/look_bridge.cpp
     src/look_bridge.h
+    src/terrain_scatter.cpp
+    src/terrain_scatter.h
     src/exposure_effect.cpp
     src/exposure_effect.h
     src/memory_report.cpp
