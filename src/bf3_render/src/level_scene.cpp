@@ -997,6 +997,11 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 		}
 	}
 	plan.environment = read_environment(p_resolver, p_world);
+	if (core::Result<SceneLightPlan> lights = plan_level_lights(p_resolver, p_world)) {
+		plan.lights = std::move(*lights);
+	} else {
+		plan.failures.emplace_back("level lights", lights.error().message);
+	}
 	if (resolver != nullptr) {
 		plan.look_stats = resolver->stats();
 		core::Result<LookEnvironment> env = read_look_environment(p_resolver, p_world);

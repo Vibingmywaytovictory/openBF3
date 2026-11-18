@@ -81,6 +81,11 @@ target_sources(bf3_render PRIVATE
 )
 
 target_sources(bf3_render PRIVATE
+    include/bf3/render/level_lights.h
+    src/level_lights.cpp
+)
+
+target_sources(bf3_render PRIVATE
     include/bf3/render/deployed_gadgets.h
     src/deployed_gadgets.cpp
     include/bf3/render/slot_textures.h

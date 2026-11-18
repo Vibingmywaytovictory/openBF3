@@ -5,6 +5,7 @@
 #include "bf3/core/level/level_transform.h"
 #include "bf3/core/math.h"
 #include "bf3/core/result.h"
+#include "bf3/render/level_lights.h"
 #include "bf3/render/look_environment.h"
 #include "bf3/render/look_materials.h"
 #include "bf3/render/material_lookup.h"
@@ -148,6 +149,7 @@ struct LevelScenePlan {
 
 	LookEnvironment look_environment;
 	int32_t sky_panorama = -1, sky_panorama_alpha = -1, sky_gradient = -1;
+	SceneLightPlan lights;
 };
 
 core::Result<LevelScenePlan> plan_level_scene(const core::EbxResolver &p_resolver, const core::level::World &p_world,

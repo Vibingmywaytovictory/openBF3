@@ -710,7 +710,7 @@ std::string Bf3LevelSession::look_summary() const {
 	const uint64_t casters = upload_.stats().double_sided_casters;
 	const std::shared_ptr<const render::LevelScenePlan> plan = scene_plan();
 	const size_t instances = plan != nullptr ? plan->instances.size() : 0;
-	return (look_.built() ? look_.describe() : std::string("look M1")) +
+	return (look_.built() ? look_.describe() : std::string("look M1")) + "; " + lights_.describe() +
 			bf3::core::fmt(
 					"; shadow casters %llu of %zu instances double-sided", (unsigned long long)casters, instances);
 }
@@ -745,6 +745,8 @@ void Bf3LevelSession::on_plan_ready() {
 	std::shared_ptr<const render::LevelScenePlan> plan = scene_plan();
 	LevelUpload::Options options;
 	upload_.begin(plan, get_world_3d()->get_scenario(), &progress_, options);
+	lights_.build(plan->lights, get_world_3d()->get_scenario());
+	UtilityFunctions::print(to_godot("[level] " + lights_.describe()));
 	if (plan->look == render::SceneLook::L1) {
 		look_.build(this, plan);
 		UtilityFunctions::print(to_godot("[level] " + look_.describe()));
@@ -1080,6 +1082,10 @@ void Bf3LevelSession::_process(double p_delta) {
 
 		const Camera3D *camera = get_viewport() != nullptr ? get_viewport()->get_camera_3d() : nullptr;
 		look_.update(upload_, camera != nullptr ? camera->get_global_position() : Vector3());
+	}
+	if (upload_.begun()) {
+		const Camera3D *camera = get_viewport() != nullptr ? get_viewport()->get_camera_3d() : nullptr;
+		lights_.update(camera != nullptr ? camera->get_global_position() : Vector3());
 	}
 	report_load();
 	if (session_ready_.load(std::memory_order_acquire) && client_ != nullptr) {

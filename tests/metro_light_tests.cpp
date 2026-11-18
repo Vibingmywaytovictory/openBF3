@@ -337,4 +337,67 @@ TEST_SUITE("render-metro-light") {
 		CHECK(canals_frame.sun_shadow_distance == 0.0f);
 		check_install_unchanged(*m);
 	}
+
+	TEST_CASE("render.metro_light: the scene's lights are the lights the data places and enables") {
+		bf3::test::Mounted *m = bf3::test::shared_mount_or_skip();
+		if (m == nullptr) {
+			return;
+		}
+		LevelCase metro, caspian;
+		load_case(*m, "MP_Subway", "ConquestLarge0", metro);
+		load_case(*m, "MP_007", "ConquestLarge0", caspian);
+		const LevelScenePlan plan = plan_case(metro, SceneLook::L1);
+		const LevelScenePlan caspian_plan = plan_case(caspian, SceneLook::L1);
+		const auto report = [](const char *p_level, const SceneLightPlan &p_lights) {
+			const SceneLightStats &s = p_lights.stats;
+			std::printf(
+					"render.metro_light lights %s: created %zu (%zu point, %zu spot) of %zu: placed %zu point %zu "
+					"spot, "
+					"in intact health states %zu point %zu spot; left out %zu invisible, %zu switched off, %zu unlit, "
+					"%zu end of round, %zu unusable\n",
+					p_level, p_lights.lights.size(), p_lights.points(), p_lights.spots(), s.found(), s.placed_point,
+					s.placed_spot, s.health_state_point, s.health_state_spot, s.invisible, s.switched_off, s.unlit,
+					s.end_of_round, s.unusable);
+			for (const std::string &note : p_lights.notes) {
+				std::printf("render.metro_light lights %s note: %s\n", p_level, note.c_str());
+			}
+		};
+		report("MP_Subway", plan.lights);
+		report("MP_007", caspian_plan.lights);
+		const SceneLightStats &s = plan.lights.stats;
+		CHECK(s.placed_point == 296);
+		CHECK(s.placed_spot == 27);
+		CHECK(s.health_state_point == 318);
+		CHECK(s.health_state_spot == 71);
+		CHECK(s.invisible == 28 + 71);
+		CHECK(s.end_of_round == 1);
+		CHECK(s.switched_off == 0);
+		CHECK(s.unlit == 0);
+		CHECK(s.unusable == 0);
+		CHECK(plan.lights.lights.size() == s.found() - s.excluded());
+		CHECK(plan.lights.points() == 268 + 318);
+		CHECK(plan.lights.spots() == 26);
+		const SceneLightStats &c = caspian_plan.lights.stats;
+		CHECK(c.placed_point == 61);
+		CHECK(c.placed_spot == 1);
+		CHECK(c.health_state_point + c.health_state_spot == 0);
+		CHECK(c.end_of_round == 1);
+		CHECK(caspian_plan.lights.lights.size() == 61);
+
+		const LookArea *deep = nullptr;
+		for (const LookArea &area : plan.look_environment.areas) {
+			deep = area.name == "levels/mp_subway/lighting/ve_mp_subway_subway_02" ? &area : deep;
+		}
+		REQUIRE(deep != nullptr);
+		size_t placed_inside = 0;
+		for (uint32_t at = 0; at < metro.world->objects.size(); ++at) {
+			const level::PlacedObject &object = metro.world->objects[at];
+			if (object.kind == level::ObjectKind::Light && deep->volume.distance(object.transform.trans) <= 0.0f) {
+				++placed_inside;
+			}
+		}
+		std::printf("render.metro_light lights MP_Subway: %zu of the placed lights inside subway_02\n", placed_inside);
+		CHECK(placed_inside == 221);
+		check_install_unchanged(*m);
+	}
 }

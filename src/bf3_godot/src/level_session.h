@@ -2,6 +2,7 @@
 
 #include "fp_camera.h"
 #include "input_mapper.h"
+#include "level_lights.h"
 #include "level_upload.h"
 #include "look_bridge.h"
 #include "memory_report.h"
@@ -118,6 +119,7 @@ public:
 	const bf3::host::LoadProgress &progress() const { return progress_; }
 	const SessionTimings &timings() const { return timings_; }
 	const LevelUpload &upload() const { return upload_; }
+	LevelLights &level_lights() { return lights_; }
 	std::optional<bf3::render::SceneLaneStats> lane_stats() const;
 	std::string cache_summary() const;
 	std::string look_summary() const;
@@ -216,6 +218,7 @@ private:
 	std::unique_ptr<bf3::host::PresentationFrame> frame_;
 
 	LevelUpload upload_;
+	LevelLights lights_;
 	godot::Callable upload_task_;
 	InputMapper mapper_;
 	FpCamera cameras_;

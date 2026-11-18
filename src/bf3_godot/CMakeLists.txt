@@ -40,6 +40,8 @@ target_sources(bf3_godot PRIVATE
     src/level_session.h
     src/level_upload.cpp
     src/level_upload.h
+    src/level_lights.cpp
+    src/level_lights.h
     src/fp_camera.cpp
     src/fp_camera.h
     src/input_mapper.cpp
