@@ -227,6 +227,7 @@ void SoldierMotor::Impl::step_vault(SoldierState &r_s, bool p_blocked, MotorStep
 	const SpecialMoveParams &move = vault_move(params.vault, kind, s.vault.variant);
 	const std::span<const MoveKey> keys(move.motion.data(), std::min<size_t>(move.motion_count, kMaxMoveKeys));
 	const float t0 = float(s.vault.ticks) * dt;
+	const Vec3 fall = vault_fall_velocity(move, s.vault.ticks, s.air_ticks);
 	s.vault.ticks = uint16_t(std::min<uint32_t>(uint32_t(s.vault.ticks) + 1u, 0xFFFFu));
 	const float t1 = float(s.vault.ticks) * dt;
 	const std::optional<Vec3> from = sample_move_keys(keys, t0);
@@ -243,9 +244,10 @@ void SoldierMotor::Impl::step_vault(SoldierState &r_s, bool p_blocked, MotorStep
 	const float sh = vault_horizontal_scale(scales, measure, s.vault.moved);
 	const float sv = scales.on ? scales.height : 1.0f;
 	const JPH::Vec3 motion((sy * local[2] - cy * local[0]) * sh, local[1] * sv, (cy * local[2] + sy * local[0]) * sh);
+	const JPH::Vec3 wanted = motion + (to_jolt(fall) + 0.5f * dt * to_jolt(vault_gravity(move, s.vault.ticks))) * dt;
 
 	const JPH::Vec3 p0 = JPH::Vec3(ch.GetPosition());
-	ch.SetLinearVelocity(motion / dt);
+	ch.SetLinearVelocity(wanted / dt);
 	JPH::CharacterVirtual::ExtendedUpdateSettings update;
 	update.mStickToFloorStepDown = JPH::Vec3::sZero();
 	update.mWalkStairsStepUp = JPH::Vec3::sZero();
@@ -260,7 +262,7 @@ void SoldierMotor::Impl::step_vault(SoldierState &r_s, bool p_blocked, MotorStep
 	for (const JPH::CharacterContact &c : ch.GetActiveContacts()) {
 		if (c.mHadCollision &&
 				vault_contact_aborts(
-						from_jolt(JPH::Vec3(c.mPosition) - p1), from_jolt(c.mContactNormal), from_jolt(motion))) {
+						from_jolt(JPH::Vec3(c.mPosition) - p1), from_jolt(c.mContactNormal), from_jolt(wanted))) {
 			aborted = true;
 			break;
 		}

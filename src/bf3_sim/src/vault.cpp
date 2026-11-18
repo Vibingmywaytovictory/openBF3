@@ -140,6 +140,26 @@ float move_duration(const SpecialMoveParams &p_move) {
 	return n == 0 ? 0.0f : p_move.motion[n - 1].time;
 }
 
+Vec3 vault_gravity(const SpecialMoveParams &p_move, uint32_t p_tick) {
+	const size_t n = std::min<size_t>(p_move.gravity_count, kMaxMoveKeys);
+	const float time = float(p_tick) * kTickSeconds;
+	if (n == 0 || time > p_move.gravity[n - 1].time) {
+		return {};
+	}
+	return *sample_move_keys(std::span<const MoveKey>(p_move.gravity.data(), n), time);
+}
+
+Vec3 vault_fall_velocity(const SpecialMoveParams &p_move, uint32_t p_ticks, uint32_t p_airborne) {
+	Vec3 fall{};
+	for (uint32_t tick = p_ticks - std::min(p_airborne, p_ticks) + 1; tick <= p_ticks; ++tick) {
+		const Vec3 g = vault_gravity(p_move, tick);
+		for (size_t k = 0; k < 3; ++k) {
+			fall[k] += g[k] * kTickSeconds;
+		}
+	}
+	return fall;
+}
+
 bool vault_contact_aborts(const Vec3 &p_contact_offset, const Vec3 &p_normal, const Vec3 &p_motion) {
 	const float d2 = p_contact_offset[0] * p_contact_offset[0] + p_contact_offset[1] * p_contact_offset[1] +
 			p_contact_offset[2] * p_contact_offset[2];

@@ -2010,7 +2010,7 @@ TEST_SUITE("sim-motor-unit") {
 
 	TEST_CASE("sim.motor: vault detection reach: 0.5 m x the speed clamped to 1.2..5; every state of the data is "
 			  "chosen by its "
-			  "distance band") {
+			  "distance band; GravityPoints fall while airborne") {
 		CHECK(vault_probe_reach(0.0f) == doctest::Approx(0.6f));
 		CHECK(vault_probe_reach(1.0f) == doctest::Approx(0.6f));
 		CHECK(vault_probe_reach(3.0f) == doctest::Approx(1.5f));
@@ -2043,6 +2043,22 @@ TEST_SUITE("sim-motor-unit") {
 		}
 		CHECK(chosen.size() == 9);
 		CHECK(choose_vault_variant(params.vault, VaultKind::OverLow, { 0.7f, 0.45f, 2.5f }) == kPlainVaultMove);
+
+		const SpecialMoveParams &standing_high = vault_move(params.vault, VaultKind::OverHigh, 0);
+		CHECK(std::fabs(vault_gravity(standing_high, 12)[1]) < 1e-3f);
+		CHECK(vault_gravity(standing_high, 13)[1] == doctest::Approx(-9.81f).epsilon(1e-4));
+		CHECK(vault_gravity(standing_high, 44)[1] == doctest::Approx(-9.81f).epsilon(1e-4));
+		CHECK(vault_gravity(standing_high, 47) == Vec3{ 0.0f, 0.0f, 0.0f });
+		CHECK(std::fabs(vault_fall_velocity(standing_high, 12, 12)[1]) < 1e-3f);
+		CHECK(vault_fall_velocity(standing_high, 24, 24)[1] == doctest::Approx(-9.81f * 12.0f / 60.0f).epsilon(1e-4));
+		CHECK(vault_fall_velocity(standing_high, 24, 6)[1] == doctest::Approx(-9.81f * 6.0f / 60.0f).epsilon(1e-4));
+		CHECK(vault_fall_velocity(standing_high, 24, 0) == Vec3{ 0.0f, 0.0f, 0.0f });
+		CHECK(vault_fall_velocity(standing_high, 24, 500)[1] == doctest::Approx(-9.81f * 12.0f / 60.0f).epsilon(1e-4));
+		const SpecialMoveParams &standing_low = vault_move(params.vault, VaultKind::OverLow, 0);
+		CHECK(standing_low.gravity_count == 0);
+		CHECK(vault_fall_velocity(standing_low, 30, 30) == Vec3{ 0.0f, 0.0f, 0.0f });
+		const SpecialMoveParams &hurdle = vault_move(params.vault, VaultKind::OverLow, kPlainVaultMove);
+		CHECK(vault_gravity(hurdle, 36)[1] == doctest::Approx(-9.81f * 0.5f).epsilon(1e-3));
 	}
 
 	TEST_CASE("sim.motor: a soldier running at an obstacle vaults from where jump is pressed: each kind and each of "
@@ -2156,6 +2172,58 @@ TEST_SUITE("sim-motor-unit") {
 				REQUIRE_MESSAGE(soldier_state_hash(e->state) == soldier_state_hash(trace[i]), "resimulated tick " << i);
 			}
 		}
+	}
+
+	TEST_CASE("sim.motor: a vault's GravityPoints pull the soldier down while he is off the ground: over a 1 m wall "
+			  "the vault's arc "
+			  "sinks below the same moves' without them") {
+		const MotorParams data = params_with(shipped_tuning());
+		MotorParams stripped = data;
+		for (size_t k = 0; k < kVaultKindCount; ++k) {
+			stripped.vault.plain[k].gravity_count = 0;
+			for (VaultVariant &v : stripped.vault.variants[k]) {
+				v.move.gravity_count = 0;
+			}
+		}
+		std::vector<StaticTriangle> t = flat_world(50.0f);
+		add_box(t, { -3.0f, 0.0f, 2.0f }, { 3.0f, 1.0f, 2.2f });
+		const auto heights = [&](const MotorParams &p_params) {
+			Rig rig = rig_of(t, p_params);
+			SoldierState s = at_rest(*rig.motor, { 0.0f, 0.0f, -8.0f });
+			bool pressed = false, vaulted = false;
+			std::vector<float> ys;
+			for (uint32_t i = 0; ys.size() < 90 && i < 900; ++i) {
+				uint32_t held = 0;
+				if (!pressed && 2.0f - s.position[2] <= 1.0f) {
+					held = buttons::kJump;
+					pressed = true;
+				}
+				rig.motor->step(s, move_command(s.tick + 1, kAxisMax, 0, 0, Pose::Stand, held));
+				vaulted = vaulted || (s.events & soldier_events::kVaulted) != 0;
+				if (vaulted) {
+					ys.push_back(s.position[1]);
+				}
+				if ((s.events & soldier_events::kVaultEnded) != 0) {
+					break;
+				}
+			}
+			REQUIRE(vaulted);
+			return ys;
+		};
+		const std::vector<float> fall = heights(data);
+		const std::vector<float> glide = heights(stripped);
+		size_t lower = 0, higher = 0;
+		float most = 0.0f;
+		for (size_t i = 0; i < std::min(fall.size(), glide.size()); ++i) {
+			lower += fall[i] < glide[i] ? 1 : 0;
+			higher += fall[i] > glide[i] ? 1 : 0;
+			most = std::max(most, glide[i] - fall[i]);
+		}
+		std::printf("vault over a 1 m wall: feet up to %.2f m with GravityPoints, %.2f m without; lower on %zu and "
+					"higher on %zu of %zu vault ticks, by up to %.2f m\n",
+				double(*std::max_element(fall.begin(), fall.end())),
+				double(*std::max_element(glide.begin(), glide.end())), lower, higher, fall.size(), double(most));
+		CHECK(lower > 0);
 	}
 
 	TEST_CASE("sim.motor: a walker bot crosses a 1 m wall over its vault link: the path's kVault corner, the jump, the "

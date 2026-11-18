@@ -109,6 +109,9 @@ float vault_horizontal_scale(const VaultScales &p_scales, const VaultMeasure &p_
 std::optional<Vec3> sample_move_keys(std::span<const MoveKey> p_keys, float p_time);
 float move_duration(const SpecialMoveParams &p_move);
 
+Vec3 vault_gravity(const SpecialMoveParams &p_move, uint32_t p_tick);
+Vec3 vault_fall_velocity(const SpecialMoveParams &p_move, uint32_t p_ticks, uint32_t p_airborne);
+
 bool vault_contact_aborts(const Vec3 &p_contact_offset, const Vec3 &p_normal, const Vec3 &p_motion);
 
 std::optional<VaultStart> probe_vault(const CollisionWorld &p_world, const Vec3 &p_feet, const Vec3 &p_forward,
