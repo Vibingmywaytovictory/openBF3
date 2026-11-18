@@ -7,6 +7,7 @@
 #include "bf3/core/level/vehicle_spawns.h"
 #include "bf3/host/level_load.h"
 #include "bf3/net/protocol.h"
+#include "bf3/sim/logic/conquest_data.h"
 #include "bf3/sim/vehicles/vehicle_armament.h"
 #include "bf3/sim/vehicles/vehicle_targets.h"
 #include "bf3/sim/vehicles/vehicle_weapon_rules.h"
@@ -141,7 +142,7 @@ sim::vehicles::VehicleDamageRule vehicle_damage_rule(const core::gameplay::Vehic
 }
 
 core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
-		const LevelDatabase &p_db, const sim::VehicleTuning &p_tuning) {
+		const LevelDatabase &p_db, const sim::VehicleTuning &p_tuning, const core::gameplay::LogicGraph *p_graph) {
 	if (p_db.level == nullptr || p_db.world == nullptr) {
 		return core::make_error("level vehicles: no level database");
 	}
@@ -229,6 +230,12 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 		sp.placement = vehicle_spawn_placement(s.transform, kVehicleSpawnLift);
 		sp.team = uint8_t(std::clamp(s.team, 0, int(net::kMaxTeam)));
 		sp.enabled = s.enabled;
+		sp.auto_spawn = s.auto_spawn;
+		if (p_graph != nullptr) {
+			sp.logic_node = sim::logic::placed_logic_node(
+					*p_graph, *p_db.world, s.object, core::gameplay::LogicTypeId::VehicleSpawn)
+									.value_or(core::gameplay::kNoLogicIndex);
+		}
 		sp.initial_spawn_delay = std::max(s.initial_spawn_delay, 0.0f);
 		sp.spawn_delay = std::max(s.spawn_delay, 0.0f);
 		sp.apply_damage_to_abandoned = s.apply_damage_to_abandoned;

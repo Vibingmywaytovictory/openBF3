@@ -25,7 +25,7 @@
 #include <vector>
 
 namespace bf3::sim::logic {
-class ConquestNatives;
+class RoundNatives;
 }
 
 namespace bf3::host {
@@ -68,6 +68,7 @@ struct ServerVehicle {
 	uint32_t spawned = 0;
 	sim::Tick due = 0;
 	bool counting = false;
+	uint32_t spawn_requests = 0;
 	std::array<uint8_t, net::kMaxVehicleSeats> occupants{};
 	sim::VehicleCommand command;
 	std::array<sim::Command, net::kMaxVehicleSeats> seat_commands{};
@@ -106,7 +107,8 @@ public:
 	bool on() const { return world_ != nullptr; }
 	void restart();
 
-	void spawn_due(sim::Tick p_tick, const sim::logic::ConquestNatives *p_conquest);
+	void spawn_due(sim::Tick p_tick, const sim::logic::RoundNatives *p_natives);
+	std::vector<uint32_t> take_destroyed_spawners();
 	std::optional<sim::Vec3> use(size_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_soldier,
 			const sim::SoldierMotor &p_motor);
 	void drive(size_t p_slot, const sim::Command &p_command);
@@ -145,7 +147,7 @@ public:
 	const ServerVehicleStats &stats() const { return stats_; }
 
 private:
-	std::optional<uint8_t> spawner_team(size_t p_spawner, const sim::logic::ConquestNatives *p_conquest) const;
+	std::optional<uint8_t> spawner_team(size_t p_spawner, const sim::logic::RoundNatives *p_natives) const;
 	void vacate(const VehicleSeat &p_seat);
 	void exit(const VehicleSeat &p_seat);
 	void switch_seat(size_t p_slot, std::optional<uint8_t> p_wanted);
@@ -196,6 +198,7 @@ private:
 		sim::Vec3 at{};
 	};
 	std::vector<WreckBlast> wrecks_;
+	std::vector<uint32_t> destroyed_spawners_;
 	std::shared_ptr<const sim::weapons::SurfaceMaterialTable> materials_;
 	std::vector<std::optional<sim::weapons::ExplosionSimDef>> kind_explosion_;
 	std::vector<std::optional<uint8_t>> kind_blast_property_;

@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -96,6 +97,8 @@ public:
 	float player_killed_delay_s() const;
 	bool killer_camera() const;
 	std::span<const NativeTimelineEntry> timeline() const;
+	std::optional<NativeStubState> native_state(uint32_t p_node) const;
+	core::Status native_destroyed(uint32_t p_node, LogicRuntime &r_runtime);
 
 	uint32_t balance_moves() const;
 	bool moves_at_death(uint8_t p_slot) const;

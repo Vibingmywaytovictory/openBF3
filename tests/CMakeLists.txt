@@ -1168,6 +1168,8 @@ set_tests_properties(host.vehicles.census host.vehicles.census.all host.vehicles
 add_test(NAME host.vehicles.placed.unit COMMAND test_host_tdm --test-suite=host-vehicles-placed-unit)
 set_tests_properties(host.vehicles.placed.unit PROPERTIES TIMEOUT 60)
 openbf3_cost(host.vehicles.census.all 8 22)
+add_test(NAME host.vehicles.modes COMMAND test_host_tdm --test-suite=host-vehicles-modes)
+set_tests_properties(host.vehicles.modes PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 target_sources(test_host_tdm PRIVATE host_conquest_bots_tests.cpp)
 target_sources(test_host_tdm PRIVATE host_bots_templates_tests.cpp)
 add_test(NAME host.bots.templates COMMAND test_host_tdm --test-suite=host-bots-templates)

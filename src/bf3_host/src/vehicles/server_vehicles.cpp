@@ -1,7 +1,7 @@
 #include "server_vehicles.h"
 
 #include "bf3/host/gunplay.h"
-#include "bf3/sim/logic/conquest_natives.h"
+#include "bf3/sim/logic/round_natives.h"
 #include "bf3/sim/vehicles/vehicle_input.h"
 #include "bf3/sim/vehicles/vehicle_spawning.h"
 #include "bf3/sim/weapons/spread_recoil.h"
@@ -55,6 +55,7 @@ core::Status ServerVehicles::rebuild() {
 	run_overs_.clear();
 	obstacles_.clear();
 	wrecks_.clear();
+	destroyed_spawners_.clear();
 	use_held_.fill(0);
 	seat_held_.fill(0);
 	sent_tick_.reset();
@@ -85,35 +86,62 @@ void ServerVehicles::configure_scope(size_t p_viewers, bool p_scoped) {
 	scope_.configure(scope_viewers_, vehicles_.size(), scoped_);
 }
 
-std::optional<uint8_t> ServerVehicles::spawner_team(
-		size_t p_spawner, const sim::logic::ConquestNatives *p_conquest) const {
+std::optional<uint8_t> ServerVehicles::spawner_team(size_t p_spawner, const sim::logic::RoundNatives *p_natives) const {
 	const LevelVehicleSpawner &s = level_->spawners[p_spawner];
-	if (!s.enabled) {
-		return std::nullopt;
-	}
-	if (p_conquest != nullptr) {
-		if (const std::optional<uint8_t> gated = p_conquest->vehicle_spawner_team(s.object)) {
+	const sim::logic::ConquestNatives *conquest = p_natives != nullptr ? p_natives->conquest() : nullptr;
+	if (conquest != nullptr) {
+		if (const std::optional<uint8_t> gated = conquest->vehicle_spawner_team(s.object)) {
 			return *gated == 0 ? std::nullopt : gated;
 		}
+	}
+	bool enabled = s.enabled;
+	if (p_natives != nullptr && s.logic_node != core::gameplay::kNoLogicIndex) {
+		if (const std::optional<sim::logic::NativeStubState> native = p_natives->native_state(s.logic_node)) {
+			enabled = native->enabled;
+		}
+	}
+	if (!enabled) {
+		return std::nullopt;
 	}
 	return s.team;
 }
 
-void ServerVehicles::spawn_due(sim::Tick p_tick, const sim::logic::ConquestNatives *p_conquest) {
+std::vector<uint32_t> ServerVehicles::take_destroyed_spawners() {
+	std::vector<uint32_t> out;
+	out.swap(destroyed_spawners_);
+	return out;
+}
+
+void ServerVehicles::spawn_due(sim::Tick p_tick, const sim::logic::RoundNatives *p_natives) {
 	if (!on()) {
 		return;
 	}
 	for (size_t i = 0; i < vehicles_.size(); ++i) {
 		ServerVehicle &v = vehicles_[i];
+		const LevelVehicleSpawner &s = level_->spawners[i];
+		uint32_t requests = 0;
+		if (p_natives != nullptr && s.logic_node != core::gameplay::kNoLogicIndex) {
+			if (const std::optional<sim::logic::NativeStubState> native = p_natives->native_state(s.logic_node)) {
+				requests = native->spawn_requests;
+			}
+		}
+		const bool requested = requests > v.spawn_requests;
+		v.spawn_requests = requests;
 		if (v.live) {
 			continue;
 		}
-		const std::optional<uint8_t> team = spawner_team(i, p_conquest);
+		const std::optional<uint8_t> team = spawner_team(i, p_natives);
 		if (!team) {
 			v.counting = false;
 			continue;
 		}
-		const LevelVehicleSpawner &s = level_->spawners[i];
+		if (!s.auto_spawn) {
+			if (!requested) {
+				continue;
+			}
+			v.counting = true;
+			v.due = p_tick;
+		}
 		if (!v.counting) {
 			v.counting = true;
 			v.due = p_tick +
@@ -402,6 +430,9 @@ void ServerVehicles::explode(size_t p_vehicle, sim::Tick p_tick) {
 	const uint16_t kind = level_->spawners[p_vehicle].kind;
 	if (kind < kind_explosion_.size() && kind_explosion_[kind]) {
 		wrecks_.push_back(WreckBlast{ p_vehicle, v.last_attacker, p_tick, hull_centre(p_vehicle) });
+	}
+	if (level_->spawners[p_vehicle].logic_node != core::gameplay::kNoLogicIndex) {
+		destroyed_spawners_.push_back(level_->spawners[p_vehicle].logic_node);
 	}
 	v.wreck = world_->state(sim::VehicleSlot(p_vehicle));
 	v.wreck_on_wire = true;

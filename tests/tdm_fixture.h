@@ -118,6 +118,10 @@ struct LockStand {
 std::optional<LockStand> mbt_lock_stand(const host::SharedLevel &p_level, const sim::CollisionWorld &p_world,
 		const sim::SoldierMotor &p_motor, std::span<const net::VehicleWire> p_vehicles, uint8_t p_team);
 
+std::optional<LockStand> enemy_mbt_taking_flags(host::GameServer &r_server, const host::SharedLevel &p_level,
+		const sim::CollisionWorld &p_world, const sim::SoldierMotor &p_motor, const VehicleWatch &p_vehicles,
+		uint8_t p_team, const std::function<bool(const std::function<bool()> &, uint32_t)> &p_until);
+
 class ScriptedPeer {
 public:
 	ScriptedPeer(host::GameServer &r_server, uint32_t p_peer, std::string p_name = "peer");

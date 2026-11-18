@@ -86,6 +86,7 @@ struct NativeStubState {
 	bool destroyed = false;
 	uint8_t owner = 0;
 	int64_t tickets = 0;
+	uint32_t spawn_requests = 0;
 };
 
 class LogicNativeStubs {

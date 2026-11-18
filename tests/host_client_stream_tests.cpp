@@ -1776,13 +1776,9 @@ TEST_SUITE("host-gadgets-guided-client") {
 				900));
 		REQUIRE(server.gunplay()->weapons(slot).slots[launcher_slot].def == javelin);
 
-		std::optional<tt::LockStand> found;
-		REQUIRE(until(
-				[&] {
-					found = tt::mbt_lock_stand(*level->shared, **world, motor, vehicles.latest, team);
-					return found.has_value();
-				},
-				sim::seconds_to_ticks(tt::latest_initial_delay(lv)) + 600u));
+		const std::optional<tt::LockStand> found =
+				tt::enemy_mbt_taking_flags(server, *level->shared, **world, motor, vehicles, team, until);
+		REQUIRE(found.has_value());
 		const uint16_t tank = found->spawner;
 		const uint32_t tank_id = sim::vehicles::kVehicleTargetIdBase + uint32_t(tank);
 		net::DebugRequest teleport;

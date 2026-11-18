@@ -958,6 +958,17 @@ void TdmRules::on_disconnect(uint8_t p_slot) {
 	m.slots[p_slot] = Impl::Slot();
 }
 
+void TdmRules::vehicle_spawner_destroyed(uint32_t p_logic_node) {
+	Impl &m = *impl_;
+	if (m.faulted) {
+		return;
+	}
+	const core::Status st = m.natives->native_destroyed(p_logic_node, *m.runtime);
+	if (!st.ok()) {
+		m.fault(st.error());
+	}
+}
+
 void TdmRules::on_spawned(uint8_t p_slot, uint32_t p_tick, bool p_revived) {
 	Impl &m = *impl_;
 	if (p_slot >= m.slots.size() || !m.slots[p_slot].connected) {

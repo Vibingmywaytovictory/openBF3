@@ -332,7 +332,7 @@ struct GameServer::Impl {
 		const auto rules_start = std::chrono::steady_clock::now();
 
 		step_rules(n);
-		vehicles.spawn_due(n, conquest());
+		vehicles.spawn_due(n, match.rules() != nullptr ? &match.rules()->natives() : nullptr);
 		spawner.spawn_due(n);
 		dev.apply_debug(n);
 		dev.run_sweep(n);
@@ -360,11 +360,6 @@ struct GameServer::Impl {
 		times.tick_ms = ms_since(tick_start);
 	}
 
-	const sim::logic::ConquestNatives *conquest() const {
-		const TdmRules *rules = match.rules();
-		return rules != nullptr ? rules->natives().conquest() : nullptr;
-	}
-
 	void step_vehicles(sim::Tick p_tick) {
 		if (!vehicles.on()) {
 			return;
@@ -378,6 +373,11 @@ struct GameServer::Impl {
 			}
 		}
 		vehicles.step_health(p_tick, alive_at);
+		for (const uint32_t node : vehicles.take_destroyed_spawners()) {
+			if (TdmRules *rules = match.rules()) {
+				rules->vehicle_spawner_destroyed(node);
+			}
+		}
 		for (size_t i = 0; i < slots.size(); ++i) {
 			if (!slots[i].used || !soldiers.alive(i)) {
 				vehicles.leave(i);

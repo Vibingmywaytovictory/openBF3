@@ -4898,12 +4898,24 @@ TEST_SUITE("host-vehicles-net") {
 		for (const host::LevelVehicleSpawner &s : lv.spawners) {
 			latest_delay = std::max(latest_delay, s.initial_spawn_delay);
 		}
+		const auto enabled_spawners = [&] {
+			size_t n = 0;
+			for (const host::LevelVehicleSpawner &s : lv.spawners) {
+				const std::optional<sim::logic::NativeStubState> native =
+						m->rules().natives().native_state(s.logic_node);
+				n += native && native->enabled ? 1u : 0u;
+			}
+			return n;
+		};
 		REQUIRE(m->until(
 				[&] {
 					feed();
-					return frame->vehicle_count == lv.spawners.size();
+					return frame->vehicle_count == enabled_spawners();
 				},
 				sim::seconds_to_ticks(latest_delay) + 120u));
+		std::printf("vehicles: %zu of the %zu spawners are enabled by the level logic and present\n",
+				enabled_spawners(), lv.spawners.size());
+		CHECK(enabled_spawners() > 0u);
 		m->until(
 				[&] {
 					feed();
@@ -4917,6 +4929,11 @@ TEST_SUITE("host-vehicles-net") {
 				parked.com_position[1] + 5.0f);
 		m->teleport(driver, beside);
 		REQUIRE(m->until([&] { return horizontal(m->state(driver.slot())->position, beside) < 0.5f; }, 30));
+		const std::array<float, 2> heading = heading_of(parked.rotation);
+		const sim::Vec3 behind = ground_at(*m->world, parked.com_position[0] - 12.0f * heading[0] + 6.0f * heading[1],
+				parked.com_position[2] - 12.0f * heading[1] - 6.0f * heading[0], parked.com_position[1] + 5.0f);
+		m->teleport(watcher, behind);
+		REQUIRE(m->until([&] { return horizontal(m->state(watcher.slot())->position, behind) < 0.5f; }, 30));
 		const sim::Tick use_at = m->now() + 2u;
 		int8_t forward = 0;
 		m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
@@ -8002,6 +8019,69 @@ std::optional<LockStand> mbt_lock_stand(const host::SharedLevel &p_level, const 
 	return std::nullopt;
 }
 
+std::optional<LockStand> enemy_mbt_taking_flags(host::GameServer &r_server, const host::SharedLevel &p_level,
+		const sim::CollisionWorld &p_world, const sim::SoldierMotor &p_motor, const VehicleWatch &p_vehicles,
+		uint8_t p_team, const std::function<bool(const std::function<bool()> &, uint32_t)> &p_until) {
+	std::optional<LockStand> found;
+	const auto look = [&] {
+		return p_until(
+				[&] {
+					found = mbt_lock_stand(p_level, p_world, p_motor, p_vehicles.latest, p_team);
+					return found.has_value();
+				},
+				sim::seconds_to_ticks(latest_initial_delay(*p_level.vehicles)) + 600u);
+	};
+	if (look()) {
+		return found;
+	}
+	const int taker = r_server.add_local_soldier(std::make_unique<Script>(), p_team == 1 ? 2 : 1);
+	REQUIRE(taker >= 0);
+	REQUIRE(p_until([&] { return is_alive(r_server.soldier(uint32_t(taker))); }, 600));
+	const sim::logic::ConquestNatives *cq = r_server.rules()->natives().conquest();
+	REQUIRE(cq != nullptr);
+	std::vector<uint32_t> neutral;
+	for (const sim::logic::ConquestPointView &v : cq->points()) {
+		if (!v.hq && v.team == 0) {
+			neutral.push_back(v.node);
+		}
+	}
+	for (const uint32_t node : neutral) {
+		const auto point = [&]() -> const sim::logic::ConquestPointView * {
+			for (const sim::logic::ConquestPointView &v : cq->points()) {
+				if (v.node == node) {
+					return &v;
+				}
+			}
+			return nullptr;
+		};
+		REQUIRE(point() != nullptr);
+		const sim::Vec3 flag = point()->position;
+		const core::Status placed = r_server.place_soldier(
+				uint32_t(taker), ground_at(p_world, flag[0], flag[2], flag[1] + 50.0f), 0, sim::Pose::Stand);
+		REQUIRE_MESSAGE(placed.ok(), (placed.ok() ? std::string() : placed.error().message));
+		REQUIRE(p_until([&] { return point()->controlled && point()->team != p_team; }, 1500));
+		std::printf("gadgets: the enemy soldier took flag node %u for the logic to open its vehicle spawners\n",
+				unsigned(node));
+		if (look()) {
+			return found;
+		}
+	}
+	return std::nullopt;
+}
+
+}
+
+std::optional<tdm::LockStand> enemy_mbt_stand(
+		Match &r_m, const host::SharedLevel &p_level, VehicleWatch &r_vehicles, uint32_t p_peer, uint8_t p_team) {
+	return tdm::enemy_mbt_taking_flags(r_m.server, p_level, *r_m.world, r_m.motor, r_vehicles, p_team,
+			[&](const std::function<bool()> &p_done, uint32_t p_max) {
+				return r_m.until(
+						[&] {
+							r_vehicles.take(r_m.out, p_peer);
+							return p_done();
+						},
+						p_max);
+			});
 }
 
 TEST_SUITE("host-gadgets-guided") {
@@ -8052,13 +8132,8 @@ TEST_SUITE("host-gadgets-guided") {
 		REQUIRE(m->server.gunplay()->weapons(uint8_t(gunner.slot())).slots[launcher_slot].def == javelin);
 		VehicleWatch vehicles;
 		std::optional<tdm::LockStand> found;
-		REQUIRE(m->until(
-				[&] {
-					vehicles.take(m->out, gunner.peer());
-					found = tdm::mbt_lock_stand(*level->shared, *m->world, m->motor, vehicles.latest, team);
-					return found.has_value();
-				},
-				sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 600u));
+		found = enemy_mbt_stand(*m, *level->shared, vehicles, gunner.peer(), team);
+		REQUIRE(found.has_value());
 		const uint16_t tank = found->spawner;
 		const sim::Vec3 stand = found->stand, aim = found->aim;
 		const float full = sim::vehicles::full_vehicle_health(lv.kinds[lv.spawners[tank].kind].damage);
@@ -8225,13 +8300,8 @@ TEST_SUITE("host-gadgets-soflam") {
 		spawn_as(host::KitRole::Recon, *soflam);
 		VehicleWatch vehicles;
 		std::optional<tdm::LockStand> found;
-		REQUIRE(m->until(
-				[&] {
-					vehicles.take(m->out, p.peer());
-					found = tdm::mbt_lock_stand(*level->shared, *m->world, m->motor, vehicles.latest, team);
-					return found.has_value();
-				},
-				sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 600u));
+		found = enemy_mbt_stand(*m, *level->shared, vehicles, p.peer(), team);
+		REQUIRE(found.has_value());
 		const uint32_t tank_id = sim::vehicles::kVehicleTargetIdBase + uint32_t(found->spawner);
 		const sim::Vec3 stand = found->stand, aim = found->aim;
 		m->teleport(p, stand);
@@ -8559,5 +8629,107 @@ TEST_SUITE("host-gunplay-m26") {
 			}
 		}
 		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+}
+
+namespace {
+
+size_t live_vehicles(const Match &p_match, const host::LevelVehicles &p_lv, std::string_view p_blueprint = {}) {
+	size_t live = 0;
+	for (size_t i = 0; i < p_lv.spawners.size(); ++i) {
+		if (p_match.server.vehicle_state(uint16_t(i)) &&
+				(p_blueprint.empty() || p_lv.kinds[p_lv.spawners[i].kind].blueprint == p_blueprint)) {
+			++live;
+		}
+	}
+	return live;
+}
+
+}
+
+TEST_SUITE("host-vehicles-modes") {
+	TEST_CASE(
+			"vehicles: MP_007 SquadDeathMatch0 loads its four BMP-2 spawners, AutoSpawn false; none spawns by "
+			"itself, the level logic's Spawn event puts one BMP-2 on one of them between 20 and 45 s into the level") {
+		std::unique_ptr<tdm::TdmLevel> level = tdm::load_tdm_level("MP_007", "SquadDeathMatch0", false);
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->shared->vehicles != nullptr);
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		REQUIRE(lv.spawners.size() == 4);
+		for (const host::LevelVehicleSpawner &s : lv.spawners) {
+			CHECK(lv.kinds[s.kind].blueprint == "vehicles/bmp2/bmp2");
+			CHECK(s.team == 0);
+			CHECK_FALSE(s.auto_spawn);
+			CHECK(s.logic_node != core::gameplay::kNoLogicIndex);
+		}
+		std::unique_ptr<Match> m = start_match(*level, false, 71u, 0, 1);
+		tdm::ScriptedPeer &p = m->join("player");
+		p.ready();
+		m->ticks(sim::seconds_to_ticks(19.0f));
+		const size_t early = live_vehicles(*m, lv);
+		std::optional<sim::Tick> spawned_at;
+		for (uint32_t t = 0; t < sim::seconds_to_ticks(30.0f) && !spawned_at; ++t) {
+			m->tick();
+			if (live_vehicles(*m, lv) > 0) {
+				spawned_at = m->now();
+			}
+		}
+		m->ticks(sim::seconds_to_ticks(5.0f));
+		const size_t late = live_vehicles(*m, lv);
+		std::printf("host.vehicles.modes: MP_007 SquadDeathMatch0: %zu BMP-2 live at 19 s, the first at tick %u "
+					"(%.1f s), %zu live 5 s later\n",
+				early, unsigned(spawned_at.value_or(0)), double(spawned_at.value_or(0)) * double(sim::kTickSeconds),
+				late);
+		CHECK(early == 0);
+		REQUIRE(spawned_at.has_value());
+		CHECK(*spawned_at >= sim::seconds_to_ticks(20.0f));
+		CHECK(*spawned_at <= sim::seconds_to_ticks(45.0f) + 2u);
+		CHECK(late == 1);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+		tdm::check_install_unchanged(*level);
+	}
+
+	TEST_CASE("vehicles: MP_007 RushLarge0 loads its 17 land vehicle spawners; 35 s into the round a vehicle stands "
+			  "on every one the level logic holds enabled and on none it holds disabled") {
+		std::unique_ptr<tdm::TdmLevel> level = tdm::load_tdm_level("MP_007", "RushLarge0", false);
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->shared->vehicles != nullptr);
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		size_t disabled_in_data = 0, bound = 0;
+		for (const host::LevelVehicleSpawner &s : lv.spawners) {
+			disabled_in_data += s.enabled ? 0u : 1u;
+			bound += s.logic_node != core::gameplay::kNoLogicIndex ? 1u : 0u;
+		}
+		CHECK(lv.spawners.size() == 17);
+		CHECK(bound == lv.spawners.size());
+		std::unique_ptr<Match> m = start_match(*level, false, 72u, 0, 1);
+		tdm::ScriptedPeer &p = m->join("player");
+		p.ready();
+		m->ticks(sim::seconds_to_ticks(35.0f));
+		size_t enabled = 0, live_enabled = 0, live_disabled = 0;
+		for (size_t i = 0; i < lv.spawners.size(); ++i) {
+			const std::optional<sim::logic::NativeStubState> native =
+					m->rules().natives().native_state(lv.spawners[i].logic_node);
+			REQUIRE(native.has_value());
+			const bool live = m->server.vehicle_state(uint16_t(i)).has_value();
+			enabled += native->enabled ? 1u : 0u;
+			live_enabled += native->enabled && live ? 1u : 0u;
+			live_disabled += !native->enabled && live ? 1u : 0u;
+		}
+		std::printf("host.vehicles.modes: MP_007 RushLarge0: %zu land spawners, %zu disabled in the data, %zu enabled "
+					"by the logic at 35 s, %zu of those live, %zu live on disabled ones (%zu tanks, %zu Humvees)\n",
+				lv.spawners.size(), disabled_in_data, enabled, live_enabled, live_disabled,
+				live_vehicles(*m, lv, "vehicles/m1a2/m1abrams") + live_vehicles(*m, lv, "vehicles/t90/t90"),
+				live_vehicles(*m, lv, "vehicles/humveearmored/humveearmored"));
+		CHECK(enabled > 0);
+		CHECK(enabled < lv.spawners.size());
+		CHECK(live_enabled == enabled);
+		CHECK(live_disabled == 0);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+		tdm::check_install_unchanged(*level);
 	}
 }

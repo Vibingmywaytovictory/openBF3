@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -59,5 +60,8 @@ struct ConquestParams {
 
 core::Result<std::shared_ptr<const ConquestParams>> read_conquest_params(const core::gameplay::LogicWorld &p_world,
 		const core::gameplay::LogicGraph &p_graph, const core::level::World *p_level);
+
+std::optional<uint32_t> placed_logic_node(const core::gameplay::LogicGraph &p_graph, const core::level::World &p_level,
+		uint32_t p_object, core::gameplay::LogicTypeId p_type);
 
 }

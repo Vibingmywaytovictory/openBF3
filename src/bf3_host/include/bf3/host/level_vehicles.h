@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/gameplay/vehicle_def.h"
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/result.h"
@@ -62,6 +63,8 @@ struct LevelVehicleSpawner {
 	sim::VehiclePlacement placement;
 	uint8_t team = 0;
 	bool enabled = true;
+	bool auto_spawn = true;
+	uint32_t logic_node = core::gameplay::kNoLogicIndex;
 	float initial_spawn_delay = 0;
 	float spawn_delay = 0;
 	bool apply_damage_to_abandoned = false;
@@ -99,7 +102,7 @@ sim::vehicles::VehicleDamageRule vehicle_damage_rule(const core::gameplay::Vehic
 
 inline constexpr uint16_t kNoVehicleWeapon = 0xFFFF;
 
-core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
-		const LevelDatabase &p_db, const sim::VehicleTuning &p_tuning);
+core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(const LevelDatabase &p_db,
+		const sim::VehicleTuning &p_tuning, const core::gameplay::LogicGraph *p_graph = nullptr);
 
 }

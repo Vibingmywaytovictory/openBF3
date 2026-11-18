@@ -241,6 +241,7 @@ core::Status LogicNativeStubs::apply(Tick p_tick, std::span<const LogicEffect> p
 				s.set_enabled(e.node, false);
 				break;
 			case M::Spawn:
+				++st.spawn_requests;
 				s.note(e.node, NativeTimelineEntry::What::Spawned, 1);
 				BF3_TRY(r_runtime.force_event(e.node, id("OnSpawned"), e.context));
 				break;

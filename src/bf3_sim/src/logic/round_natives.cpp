@@ -662,6 +662,17 @@ bool RoundNatives::killer_camera() const {
 	return state_->config.killer_camera;
 }
 
+std::optional<NativeStubState> RoundNatives::native_state(uint32_t p_node) const {
+	return state_->stubs ? state_->stubs->state(p_node) : std::nullopt;
+}
+
+core::Status RoundNatives::native_destroyed(uint32_t p_node, LogicRuntime &r_runtime) {
+	if (!state_->stubs) {
+		return core::make_error("round natives: no native stubs");
+	}
+	return state_->stubs->destroy(p_node, r_runtime);
+}
+
 std::span<const NativeTimelineEntry> RoundNatives::timeline() const {
 	return state_->timeline;
 }

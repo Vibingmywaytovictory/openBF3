@@ -105,6 +105,15 @@ std::optional<uint32_t> node_of_placed(
 	return std::nullopt;
 }
 
+}
+
+std::optional<uint32_t> placed_logic_node(
+		const gp::LogicGraph &p_graph, const core::level::World &p_level, uint32_t p_object, T p_type) {
+	return node_of_placed(p_graph, p_level, p_object, p_type);
+}
+
+namespace {
+
 CapturableType capturable(const std::string &p_name) {
 	if (p_name == "CTUnableToChangeTeam") {
 		return CapturableType::UnableToChangeTeam;
