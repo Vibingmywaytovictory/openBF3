@@ -8747,7 +8747,11 @@ TEST_SUITE("host-vehicles-modes") {
 			if (after[i] && !before[i]) {
 				opened.push_back(i);
 			}
-			closed += before[i] && !after[i] ? 1u : 0u;
+			if (before[i] && !after[i]) {
+				++closed;
+				std::printf("host.vehicles.modes: MP_007 ConquestSmall0: the capture shut spawner %zu (%s, team %u)\n",
+						i, lv.kinds[lv.spawners[i].kind].blueprint.c_str(), unsigned(lv.spawners[i].team));
+			}
 		}
 		float latest_delay = 0.0f;
 		for (const size_t i : opened) {
@@ -8771,6 +8775,47 @@ TEST_SUITE("host-vehicles-modes") {
 		CHECK_FALSE(opened.empty());
 		CHECK(live_opened == opened.size());
 		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+	TEST_CASE("vehicles: on MP_007 ConquestLarge0, 35 s into the round, a vehicle stands on every land spawner the "
+			  "level logic holds open and on none it holds shut; the LAV-AD's spawner is open and its vehicle live") {
+		std::unique_ptr<tdm::TdmLevel> level = tdm::load_tdm_level("MP_007", "ConquestLarge0", false);
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->shared->vehicles != nullptr);
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::unique_ptr<Match> m = start_match(*level, false, 74u, 0, 1);
+		tdm::ScriptedPeer &p = m->join("player");
+		p.ready();
+		m->ticks(sim::seconds_to_ticks(35.0f));
+		size_t open = 0, live_open = 0, live_shut = 0, lav = 0, lav_live = 0;
+		for (size_t i = 0; i < lv.spawners.size(); ++i) {
+			const std::optional<sim::logic::NativeStubState> native =
+					m->rules().natives().native_state(lv.spawners[i].logic_node);
+			const bool on = native.has_value() && native->enabled;
+			const bool live = m->server.vehicle_state(uint16_t(i)).has_value();
+			const std::string &blueprint = lv.kinds[lv.spawners[i].kind].blueprint;
+			open += on ? 1u : 0u;
+			live_open += on && live ? 1u : 0u;
+			live_shut += !on && live ? 1u : 0u;
+			if (blueprint == "vehicles/lav25/lav_ad") {
+				++lav;
+				lav_live += live ? 1u : 0u;
+			}
+			std::printf("host.vehicles.modes: MP_007 ConquestLarge0 spawner %zu %s team %u: %s, %s\n", i,
+					blueprint.c_str(), unsigned(lv.spawners[i].team), on ? "open" : "shut", live ? "live" : "empty");
+		}
+		std::printf("host.vehicles.modes: MP_007 ConquestLarge0: %zu land spawners, %zu open at 35 s, %zu of those "
+					"live, %zu live on shut ones; LAV-AD spawners %zu, live %zu\n",
+				lv.spawners.size(), open, live_open, live_shut, lav, lav_live);
+		CHECK(lv.spawners.size() == 20);
+		CHECK(open > 0);
+		CHECK(live_open == open);
+		CHECK(live_shut == 0);
+		CHECK(lav == 1);
+		CHECK(lav_live == 1);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+		tdm::check_install_unchanged(*level);
 	}
 	TEST_CASE("vehicles: MP_007 RushLarge0 loads its 17 land vehicle spawners; 35 s into the round a vehicle stands "
 			  "on every one the level logic holds enabled and on none it holds disabled") {
