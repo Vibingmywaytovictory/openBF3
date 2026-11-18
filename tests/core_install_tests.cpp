@@ -81,7 +81,8 @@ TEST_SUITE("install") {
 			MESSAGE("8.3 alias exercised");
 			CHECK(guard.check_write_target(std::wstring(shortp) + L"\\Data\\x.bin") == Verdict::UnderProtectedRoot);
 		}
-		CHECK(guard.check_write_target(bf3::test::temp_dir() / L"openbf3-cache-probe.bin") == Verdict::Allowed);
+		const bf3::test::ScratchDir probe("install-guard");
+		CHECK(guard.check_write_target(probe.path() / L"openbf3-cache-probe.bin") == Verdict::Allowed);
 	}
 
 	TEST_CASE("install: snapshot is stable across reads") {
