@@ -21,7 +21,9 @@ Vec3 at(const Vec3 &p_feet, const Vec3 &p_forward, float p_ahead, float p_up) {
 	return { p_feet[0] + p_forward[0] * p_ahead, p_feet[1] + p_up, p_feet[2] + p_forward[2] * p_ahead };
 }
 
-float height_at(
+}
+
+float vault_height_at(
 		const CollisionWorld &p_world, const Vec3 &p_feet, const Vec3 &p_forward, float p_ahead, uint32_t p_mask) {
 	StaticHit hit;
 	const Vec3 top = at(p_feet, p_forward, p_ahead, vault_rules::kDownProbe);
@@ -30,7 +32,7 @@ float height_at(
 	return vault_probe_height(fraction);
 }
 
-std::optional<float> face_distance(
+std::optional<float> vault_face_distance(
 		const CollisionWorld &p_world, const Vec3 &p_origin, const Vec3 &p_forward, uint32_t p_mask, float p_reach) {
 	StaticHit hit;
 	const Vec3 reach = { p_forward[0] * p_reach, 0.0f, p_forward[2] * p_reach };
@@ -40,6 +42,16 @@ std::optional<float> face_distance(
 	return hit.fraction * p_reach;
 }
 
+const char *vault_kind_name(VaultKind p_kind) {
+	switch (p_kind) {
+		case VaultKind::OverHigh:
+			return "over high";
+		case VaultKind::UpHigh:
+			return "up";
+		case VaultKind::OverLow:
+			return "over low";
+	}
+	return "unknown";
 }
 
 bool vault_input_allows(float p_forward) {
@@ -180,29 +192,30 @@ std::optional<VaultStart> probe_vault(
 	using namespace vault_rules;
 	const Vec3 &forward = p_forward;
 	const Vec3 right{ -forward[2], 0.0f, forward[0] };
-	if (face_distance(p_world, at(p_feet, forward, 0.0f, kMiddleHeight + kHighOffset), forward, p_mask, p_reach)) {
+	if (vault_face_distance(
+				p_world, at(p_feet, forward, 0.0f, kMiddleHeight + kHighOffset), forward, p_mask, p_reach)) {
 		return std::nullopt;
 	}
 	VaultStart out;
 	float probe_up = kMiddleHeight + kMiddleOffset;
 	std::optional<float> distance =
-			face_distance(p_world, at(p_feet, forward, 0.0f, probe_up), forward, p_mask, p_reach);
+			vault_face_distance(p_world, at(p_feet, forward, 0.0f, probe_up), forward, p_mask, p_reach);
 	if (!distance) {
 		probe_up = kMiddleHeight + kLowOffset;
-		distance = face_distance(p_world, at(p_feet, forward, 0.0f, probe_up), forward, p_mask, p_reach);
+		distance = vault_face_distance(p_world, at(p_feet, forward, 0.0f, probe_up), forward, p_mask, p_reach);
 		if (!distance) {
 			return std::nullopt;
 		}
 		out.kind = VaultKind::OverLow;
 	}
 	const float d = *distance;
-	const float front = height_at(p_world, p_feet, forward, d + kFrontEpsilon, p_mask);
-	const float further = height_at(p_world, p_feet, forward, d + kUpLength, p_mask);
+	const float front = vault_height_at(p_world, p_feet, forward, d + kFrontEpsilon, p_mask);
+	const float further = vault_height_at(p_world, p_feet, forward, d + kUpLength, p_mask);
 	out.kind = vault_up_or_over(out.kind, front, further);
 	float nearest = d;
 	for (const float side : { kSideOffset, -kSideOffset }) {
 		const Vec3 origin{ p_feet[0] + right[0] * side, p_feet[1] + probe_up, p_feet[2] + right[2] * side };
-		if (const std::optional<float> s = face_distance(p_world, origin, forward, p_mask, p_reach)) {
+		if (const std::optional<float> s = vault_face_distance(p_world, origin, forward, p_mask, p_reach)) {
 			nearest = std::fmin(nearest, *s);
 		}
 	}
@@ -215,7 +228,7 @@ std::optional<VaultStart> probe_vault(
 				? std::fmax(kBackSearch * (1.0f - back.fraction), kMinLength)
 				: kMinLength;
 	}
-	const float middle = height_at(p_world, p_feet, forward, d + 0.5f * length, p_mask);
+	const float middle = vault_height_at(p_world, p_feet, forward, d + 0.5f * length, p_mask);
 	out.measure.distance = nearest;
 	out.measure.height = std::fmax(std::fmax(front, further), middle);
 	out.measure.length = length;

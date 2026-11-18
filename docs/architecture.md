@@ -34,7 +34,7 @@ bf3_sim      -> Jolt, Recast, Detour (hidden behind *_internal.h; no engine type
   ^                            collision and physics worlds, soldier motor, prediction, weapons, vehicles,
   |                            navigation, bot perception and walking, level logic runtime
   |  bf3_sim_harness           gate code over bf3_sim (logic harness, vehicle courses and replays, shooting range,
-  |                            weapon checks and W4 tables, nav input check); tests, tools and the checks link it
+  |                            weapon checks and W4 tables, nav input check, vault spots); tests, tools and the checks link it
   |  bf3_present               presentation PODs: PresentEvent and its ring, PresentClock, presented soldiers and
   |    ^                       weapons, effect seeds
   |    |

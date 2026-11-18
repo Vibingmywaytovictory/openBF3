@@ -18,6 +18,7 @@
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
+#include "bf3/sim_harness/vault_spots.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -2298,16 +2299,16 @@ struct Metro {
 
 using bf3::core::seconds_since;
 
-Metro *metro() {
-	static std::unique_ptr<Metro> s_metro;
-	static bool s_tried = false;
-	if (s_tried) {
-		if (s_metro == nullptr) {
-			bf3::test::skip_install_case("no BF3 install (see the first sim-motor case)");
+Metro *loaded_level(const char *p_level, const char *p_mode) {
+	static std::map<std::string, std::unique_ptr<Metro>> s_levels;
+	const std::string key = std::string(p_level) + "/" + p_mode;
+	if (const auto found = s_levels.find(key); found != s_levels.end()) {
+		if (found->second == nullptr) {
+			bf3::test::skip_install_case("no BF3 install (see the first case of the suite)");
 		}
-		return s_metro.get();
+		return found->second.get();
 	}
-	s_tried = true;
+	std::unique_ptr<Metro> &slot = s_levels[key];
 	auto m = std::make_unique<Metro>();
 	m->reader = std::make_unique<core::InstallReader>();
 	if (!m->reader->locate({})) {
@@ -2319,7 +2320,7 @@ Metro *metro() {
 	REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
 	m->install = *opened;
 	auto start = std::chrono::steady_clock::now();
-	core::Result<core::level::LevelCollision> c = core::level::load_level_collision(m->install, "MP_Subway", "TeamDeathMatch0");
+	core::Result<core::level::LevelCollision> c = core::level::load_level_collision(m->install, p_level, p_mode);
 	REQUIRE_MESSAGE(c.ok(), (c.ok() ? std::string() : c.error().message));
 	m->collision = std::move(*c);
 	m->seconds_soup = seconds_since(start);
@@ -2343,11 +2344,17 @@ Metro *metro() {
 	m->spawns = std::move(*spawns);
 	m->points = to_spawn_points(m->spawns);
 	const Vec3 lo = m->shapes->min(), hi = m->shapes->max();
-	std::printf("Metro: soup %.2f s, shapes %.2f s, %zu tiles, bounds (%.1f, %.1f, %.1f)..(%.1f, %.1f, %.1f), %zu spawn points\n", m->seconds_soup,
-			m->seconds_shapes, m->shapes->tile_count(), double(lo[0]), double(lo[1]), double(lo[2]), double(hi[0]), double(hi[1]), double(hi[2]),
-			m->points.size());
-	s_metro = std::move(m);
-	return s_metro.get();
+	std::printf("%s: soup %.2f s, shapes %.2f s, %zu tiles, bounds (%.1f, %.1f, %.1f)..(%.1f, %.1f, %.1f), %zu spawn "
+				"points\n",
+			std::string_view(p_level) == "MP_Subway" ? "Metro" : p_level, m->seconds_soup, m->seconds_shapes,
+			m->shapes->tile_count(), double(lo[0]), double(lo[1]), double(lo[2]), double(hi[0]), double(hi[1]),
+			double(hi[2]), m->points.size());
+	slot = std::move(m);
+	return slot.get();
+}
+
+Metro *metro() {
+	return loaded_level("MP_Subway", "TeamDeathMatch0");
 }
 
 float heading_distance(const Vec3 &p_from, const Vec3 &p_to, uint16_t p_yaw) {
@@ -2757,5 +2764,99 @@ TEST_SUITE("sim-motor") {
 		const core::SnapshotDiff diff = core::diff_snapshots(m->before, m->reader->snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 		std::printf("install.unchanged: %s\n", diff.clean() ? "clean" : diff.summary().c_str());
+	}
+}
+
+namespace {
+
+struct VaultSpotTally {
+	size_t vaults = 0;
+	size_t on_foot = 0;
+};
+
+void vault_spot_case(const VaultSpot &p_spot, const VaultSpotRun &p_run, const char *p_how, float p_press_at,
+		VaultSpotTally &r_tally) {
+	const VaultSpotPress &p = p_run.press;
+	std::printf("    %s, jump at %.1f m: %s %s variant %u D %.2f H %.2f L %.2f, %u ticks, feet up to %.2f m%s%s | at "
+				"the press: %s, mode %u, "
+				"pose %u, transition %u, %.2f m/s, reach %.2f m, face %.2f m, rays high %.2f middle %.2f low %.2f "
+				"sides %.2f %.2f, front "
+				"height %.2f, 0.25 m further %.2f\n",
+			p_how, double(p_press_at), p_run.vaulted ? "vault" : "no vault",
+			p_run.vaulted ? vault_kind_name(VaultKind(p_run.kind)) : "", unsigned(p_run.variant),
+			double(p_run.distance), double(p_run.height), double(p_run.length), p_run.ticks, double(p_run.highest),
+			p_run.stopped ? ", stopped by a contact" : "", p_run.crossed ? ", over the face" : ", short of the face",
+			p.grounded ? "grounded" : "not grounded", unsigned(p.mode), unsigned(p.pose), unsigned(p.transition),
+			double(p.speed), double(p.reach), double(p.face), double(p.rays[0]), double(p.rays[1]), double(p.rays[2]),
+			double(p.rays[3]), double(p.rays[4]), double(p.front), double(p.further));
+	CHECK(p_run.vaulted);
+	CHECK(p_run.ended);
+	CHECK_FALSE(p_run.stopped);
+	CHECK(p_run.crossed);
+	CHECK(std::fabs(p_run.distance - p.face) <= 0.15f);
+	const bool on_foot = p_run.height <= vault_rules::kMinHeight;
+	const bool on_top = std::fabs(p_run.height - p_spot.top) <= 0.15f;
+	CHECK_MESSAGE((on_foot || on_top), "measured height " << p_run.height << " m against a " << p_spot.top << " m top");
+	r_tally.on_foot += on_foot ? 1 : 0;
+	r_tally.vaults += p_run.vaulted && p_run.ended && !p_run.stopped && p_run.crossed ? 1 : 0;
+}
+void vault_level_case(const char *p_level, const char *p_mode, size_t p_spots, size_t p_on_foot,
+		std::array<bool, kVaultKindCount> p_kinds) {
+	Metro *m = loaded_level(p_level, p_mode);
+	if (m == nullptr) {
+		return;
+	}
+	const std::vector<VaultSpot> spots = find_vault_spots(*m->motor, *m->world, m->points, 24);
+	std::printf("%s %s: %zu vault spots (a flat, square, non-terrain face %.0f..%.0f m ahead of a settled start on or "
+				"6 m around a spawn point, top %.1f..%.1f m, "
+				"clear above for %.1f m beyond, flat run-up)\n",
+			p_level, p_mode, spots.size(), double(kVaultSpotRunUp), double(kVaultSpotReach), double(kVaultSpotLowest),
+			double(kVaultSpotHighest), double(kVaultSpotClearBeyond));
+	CHECK(spots.size() == p_spots);
+	std::array<size_t, kVaultKindCount> kinds{};
+	VaultSpotTally walks, sprints;
+	for (const VaultSpot &spot : spots) {
+		CAPTURE(spot.point);
+		CAPTURE(spot.yaw);
+		std::printf("  point %zu yaw %5u: face %.2f m ahead, top %.2f m\n", spot.point, unsigned(spot.yaw),
+				double(spot.face), double(spot.top));
+		const VaultSpotRun walk = run_at_vault_spot(*m->motor, *m->world, spot, 1.0f, false);
+		const VaultSpotRun sprint = run_at_vault_spot(*m->motor, *m->world, spot, 1.5f, true);
+		vault_spot_case(spot, walk, "walk", 1.0f, walks);
+		vault_spot_case(spot, sprint, "sprint", 1.5f, sprints);
+		for (const VaultSpotRun *run : { &walk, &sprint }) {
+			if (run->vaulted) {
+				++kinds[std::min<size_t>(run->kind, kVaultKindCount - 1)];
+			}
+		}
+	}
+	std::printf("%s %s: %zu / %zu walks and %zu / %zu sprints vault over or onto the obstacle: %zu over high, %zu up, "
+				"%zu over low\n",
+			p_level, p_mode, walks.vaults, spots.size(), sprints.vaults, spots.size(), kinds[0], kinds[1], kinds[2]);
+	std::printf("%s %s: %zu vaults measured the floor-level 0.1 m height: the front ray, 1e-6 m past the face, reached "
+				"the floor at its foot\n",
+			p_level, p_mode, walks.on_foot + sprints.on_foot);
+	CHECK(walks.on_foot + sprints.on_foot == p_on_foot);
+	for (size_t k = 0; k < kVaultKindCount; ++k) {
+		CHECK_MESSAGE((kinds[k] > 0) == p_kinds[k], vault_kind_name(VaultKind(k)));
+	}
+	const core::SnapshotDiff diff = core::diff_snapshots(m->before, m->reader->snapshot());
+	CHECK_MESSAGE(diff.clean(), diff.summary());
+	std::printf("install.unchanged: %s\n", diff.clean() ? "clean" : diff.summary().c_str());
+}
+
+}
+
+TEST_SUITE("sim-vault-levels") {
+	TEST_CASE("sim.vault: Metro: a soldier running at the level's own low obstacles vaults over or onto each with jump "
+			  "pressed 1.0 m "
+			  "(walk) and 1.5 m (sprint) from the face") {
+		vault_level_case("MP_Subway", "TeamDeathMatch0", 23, 1, { true, true, false });
+	}
+
+	TEST_CASE("sim.vault: Caspian Border: a soldier running at the level's own low obstacles vaults over or onto each "
+			  "with jump pressed "
+			  "1.0 m (walk) and 1.5 m (sprint) from the face") {
+		vault_level_case("MP_007", "ConquestLarge0", 10, 1, { true, true, true });
 	}
 }

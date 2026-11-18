@@ -90,6 +90,7 @@ inline constexpr float kContactMinSqrSpeed = 1e-6f;
 inline constexpr float kContactCos = -0.5f;
 }
 
+const char *vault_kind_name(VaultKind p_kind);
 bool vault_input_allows(float p_forward);
 float vault_probe_reach(float p_speed);
 float vault_probe_height(float p_fraction);
@@ -111,6 +112,11 @@ float move_duration(const SpecialMoveParams &p_move);
 
 Vec3 vault_gravity(const SpecialMoveParams &p_move, uint32_t p_tick);
 Vec3 vault_fall_velocity(const SpecialMoveParams &p_move, uint32_t p_ticks, uint32_t p_airborne);
+
+float vault_height_at(
+		const CollisionWorld &p_world, const Vec3 &p_feet, const Vec3 &p_forward, float p_ahead, uint32_t p_mask);
+std::optional<float> vault_face_distance(
+		const CollisionWorld &p_world, const Vec3 &p_origin, const Vec3 &p_forward, uint32_t p_mask, float p_reach);
 
 bool vault_contact_aborts(const Vec3 &p_contact_offset, const Vec3 &p_normal, const Vec3 &p_motion);
 
