@@ -43,6 +43,7 @@ public:
 	void update(const LevelUpload &p_upload, const godot::Vector3 &p_camera);
 	void cut();
 	void set_logic_environment(std::string_view p_name, float p_weight);
+	float view_distance(float p_unset) const;
 
 	std::string describe() const;
 

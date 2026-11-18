@@ -199,11 +199,21 @@ bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::
 		r_state.bloom = vec3(p_c, "BloomScale").value_or(LookVec3{});
 	} else if (p_c.is_a("CameraParamsComponentData")) {
 		const float distance = number(p_c, "SunShadowmapViewDistance").value_or(0.0f);
-		if (r_state.camera || !(distance > 0.0f)) {
+		const std::optional<float> view = number(p_c, "ViewDistance");
+		const bool has_shadow = !r_state.camera && distance > 0.0f;
+		const bool has_view = !r_state.view && view && *view > 0.0f && std::isfinite(*view);
+		if (!has_shadow && !has_view) {
 			return false;
 		}
-		r_state.camera = true;
-		r_state.sun_shadow_distance = distance;
+		if (has_shadow) {
+			r_state.camera = true;
+			r_state.sun_shadow_distance = distance;
+		}
+		if (has_view) {
+			r_state.view = true;
+			r_state.view_distance = *view;
+			r_state.view_share = 1.0f;
+		}
 	} else if (p_c.is_a("ColorCorrectionComponentData")) {
 		if (r_state.correction) {
 			return false;
@@ -416,6 +426,11 @@ void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 		r_state.sun_shadow_distance = r_state.camera ? lerp1(r_state.sun_shadow_distance, p_a.sun_shadow_distance, p_w)
 													 : p_a.sun_shadow_distance;
 		r_state.camera = true;
+	}
+	if (p_a.view) {
+		r_state.view_distance = r_state.view ? lerp1(r_state.view_distance, p_a.view_distance, p_w) : p_a.view_distance;
+		r_state.view_share = lerp1(r_state.view_share, p_a.view_share, p_w);
+		r_state.view = true;
 	}
 }
 
@@ -843,7 +858,15 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 	f.bloom = std::fmax(max3(p_s.bloom), 0.0f);
 	f.lut = p_s.lut;
 	f.sun_shadow_distance = p_s.camera ? p_s.sun_shadow_distance : 0.0f;
+	if (p_s.view) {
+		f.view_distance = p_s.view_distance;
+		f.view_share = std::clamp(p_s.view_share, 0.0f, 1.0f);
+	}
 	return f;
+}
+
+float look_view_distance(const LookFrame &p_frame, float p_unset) {
+	return p_frame.view_share > 0.0f ? lerp1(p_unset, p_frame.view_distance, p_frame.view_share) : p_unset;
 }
 
 LookFrame look_frame(

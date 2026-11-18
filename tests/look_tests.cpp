@@ -580,6 +580,29 @@ TEST_SUITE("render-look-unit") {
 		CHECK(std::isfinite(d.exposure));
 	}
 
+	TEST_CASE("render.look.unit: the camera ViewDistance blends by area weight over the drawn diagonal when the base "
+			  "has none") {
+		LookEnvironment env;
+		LookArea area;
+		area.volume.kind = bf3::core::level::AreaVolume::Kind::Box;
+		area.volume.half = { 1, 1, 1 };
+		area.fade = 2.0f;
+		area.state.view = true;
+		area.state.view_distance = 275.0f;
+		area.state.view_share = 1.0f;
+		env.areas.push_back(area);
+		CHECK(look_frame(env, { 100, 0, 0 }).view_share == 0.0f);
+		CHECK(look_view_distance(look_frame(env, { 100, 0, 0 }), 23786.0f) == 23786.0f);
+		CHECK(near(look_view_distance(look_frame(env, { 0, 0, 0 }), 23786.0f), 275.0f));
+		CHECK(near(look_view_distance(look_frame(env, { 2, 0, 0 }), 23786.0f), 0.5f * (275.0f + 23786.0f)));
+		env.base.view = true;
+		env.base.view_distance = 2900.0f;
+		env.base.view_share = 1.0f;
+		CHECK(near(look_view_distance(look_frame(env, { 100, 0, 0 }), 23786.0f), 2900.0f));
+		CHECK(near(look_view_distance(look_frame(env, { 2, 0, 0 }), 23786.0f), 0.5f * (275.0f + 2900.0f)));
+		CHECK(near(look_view_distance(look_frame(env, { 0, 0, 0 }), 23786.0f), 275.0f));
+	}
+
 	TEST_CASE("render.look.unit: the Enlighten sky box lobes light a sunless state") {
 		LookEnvState night;
 		night.light = true;
@@ -924,15 +947,25 @@ TEST_SUITE("render-look") {
 		std::printf("render.look environment: from_data %d, base %s, %zu areas, %zu LUTs, horizon decoded %d\n", int(env->from_data),
 				env->base.source.c_str(), env->areas.size(), env->luts.size(), int(env->base.horizon_decoded));
 		for (const LookArea &a : env->areas) {
-			std::printf("render.look area %s: priority %lld, %s, fade %.1f\n", a.name.c_str(), (long long)a.priority,
-					a.volume.kind == bf3::core::level::AreaVolume::Kind::Box ? "box" : "polygon", double(a.fade));
+			std::printf("render.look area %s: priority %lld, %s, fade %.1f, view distance %.0f\n", a.name.c_str(),
+					(long long)a.priority, a.volume.kind == bf3::core::level::AreaVolume::Kind::Box ? "box" : "polygon",
+					double(a.fade), double(a.state.view_distance));
 		}
+		std::printf("render.look environment: base view distance %.0f\n", double(env->base.view_distance));
 		for (const std::string &note : env->notes) {
 			std::printf("render.look note: %s\n", note.c_str());
 		}
 		CHECK(env->from_data);
 		CHECK(env->base.light);
 		CHECK(env->areas.size() == 3);
+		CHECK(env->base.view);
+		CHECK(env->base.view_distance == 2000.0f);
+		for (const LookArea &a : env->areas) {
+			const bool city = a.name == "levels/mp_subway/lighting/ve_mp_subway_city_01";
+			const bool subway = a.name == "levels/mp_subway/lighting/ve_mp_subway_subway_01";
+			CHECK(a.state.view == (city || subway));
+			CHECK(a.state.view_distance == (city ? 2900.0f : subway ? 275.0f : 0.0f));
+		}
 		const std::optional<size_t> showroom =
 				look_logic_index(*env, "levels/frontend/lighting/visualenvironment_frontendcustomize");
 		REQUIRE(showroom.has_value());
@@ -998,8 +1031,8 @@ TEST_SUITE("render-look") {
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}
 
-	TEST_CASE("render.look: the tonemap components' method, key, exposure range and adjust time: MP_007 FilmicNeutral, "
-			  "MP_018 Filmic") {
+	TEST_CASE("render.look: the tonemap components' method, key, exposure range and adjust time and the camera "
+			  "ViewDistance: MP_007 FilmicNeutral with none (-1), MP_018 Filmic at 20000 m") {
 		InstallReader reader;
 		if (!reader.locate({})) {
 			bf3::test::skip_install_case(reader.describe().c_str());
@@ -1012,11 +1045,11 @@ TEST_SUITE("render-look") {
 			const char *level;
 			const char *mode;
 			LookTonemap method;
-			float middle_gray, min_exposure, max_exposure, adjust_time;
+			float middle_gray, min_exposure, max_exposure, adjust_time, view_distance;
 		};
 		const Expected expected[] = {
-			{ "MP_007", "ConquestSmall0", LookTonemap::FilmicNeutral, 0.12f, 1.1f, 3.0f, 0.8f },
-			{ "MP_018", "TeamDeathMatch0", LookTonemap::Filmic, 0.25f, 1.25f, 3.0f, 0.5f },
+			{ "MP_007", "ConquestSmall0", LookTonemap::FilmicNeutral, 0.12f, 1.1f, 3.0f, 0.8f, 0.0f },
+			{ "MP_018", "TeamDeathMatch0", LookTonemap::Filmic, 0.25f, 1.25f, 3.0f, 0.5f, 20000.0f },
 		};
 		for (const Expected &e : expected) {
 			Result<std::unique_ptr<level::LoadedLevel>> loaded = level::load_level(*install, e.level, e.mode);
@@ -1035,6 +1068,9 @@ TEST_SUITE("render-look") {
 			CHECK(near(f.min_exposure, e.min_exposure));
 			CHECK(near(f.max_exposure, e.max_exposure));
 			CHECK(near(f.exposure_time, e.adjust_time));
+			CHECK(env->base.view == (e.view_distance > 0.0f));
+			CHECK(f.view_distance == e.view_distance);
+			CHECK(look_view_distance(f, 23786.0f) == (e.view_distance > 0.0f ? e.view_distance : 23786.0f));
 			const LookExposure x = look_exposure_of(f);
 			CHECK(near(x.adjust_time, e.adjust_time));
 		}

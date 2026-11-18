@@ -241,6 +241,8 @@ private:
 	uint8_t load_stage_ = 0;
 	uint16_t load_permille_ = 0;
 	bool done_ = false;
+	float drawn_diagonal_ = 0.0f;
+	float view_distance_ = 0.0f;
 	bool failed_ = false;
 	bool quitting_ = false;
 	bool shut_down_ = false;

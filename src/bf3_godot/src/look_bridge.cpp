@@ -364,6 +364,10 @@ void LookBridge::set_logic_environment(std::string_view p_name, float p_weight) 
 	logic_.push_back(render::LookLogicWeight{ *index, weight });
 }
 
+float LookBridge::view_distance(float p_unset) const {
+	return applied_ ? render::look_view_distance(*applied_, p_unset) : p_unset;
+}
+
 std::string LookBridge::describe() const {
 	if (!applied_) {
 		return "look: not built";

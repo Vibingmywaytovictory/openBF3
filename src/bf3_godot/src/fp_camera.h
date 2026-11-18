@@ -29,6 +29,7 @@ public:
 	bool free() const { return free_; }
 	void place_free(const godot::Vector3 &p_position, float p_yaw, float p_pitch);
 	void scale_free_speed(float p_factor);
+	void set_view_distance(float p_metres);
 	float free_speed() const { return free_speed_; }
 
 	godot::Camera3D *first_person() const { return fp_; }

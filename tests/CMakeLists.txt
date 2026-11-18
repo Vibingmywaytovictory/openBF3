@@ -1342,6 +1342,8 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_cost(godot.minimap_modes.metro_small 1 14)
     openbf3_cost(godot.minimap_modes.caspian_small 1 33)
     openbf3_cost(godot.minimap_modes.caspian_large 1 33)
+    openbf3_godot_row(godot.caspian_world godot_caspian_world.cmake WINDOW TIMEOUT 240)
+    openbf3_cost(godot.caspian_world 1 20)
     openbf3_godot_row(godot.conquest_hud godot_conquest_hud.cmake WINDOW TIMEOUT 240)
     set_tests_properties(godot.conquest_hud PROPERTIES RUN_SERIAL TRUE)
     openbf3_cost(godot.conquest_hud 1 60)

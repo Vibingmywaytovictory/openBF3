@@ -343,6 +343,9 @@ void LevelUpload::begin(std::shared_ptr<const render::LevelScenePlan> p_plan, co
 	textures_.assign(plan.textures.size(), RID());
 	meshes_.assign(plan.meshes.size(), RID());
 	terrain_meshes_.assign(plan.terrains.size(), RID());
+	mesh_bounds_.assign(plan.meshes.size(), std::nullopt);
+	terrain_bounds_.assign(plan.terrains.size(), std::nullopt);
+	world_bounds_.reset();
 	instances_by_mesh_.assign(plan.meshes.size(), {});
 	plan_instances_.assign(plan.instances.size(), RID());
 	instance_visible_.assign(plan.instances.size(), 1);
@@ -526,6 +529,14 @@ void LevelUpload::run_task() {
 					("," + user_arg_value("look-off") + ",").find(",terrain,") != std::string::npos;
 			const bool look = item.kind == Kind::Terrain && item.terrain->look.has_value() && !terrain_off;
 			if (look) {
+				const render::TerrainDecalStats &ds = item.terrain->decals;
+				std::string line = "[level] terrain decals: " + std::to_string(ds.drawn_records) + " of " +
+						std::to_string(ds.records) + " records drawn, " + std::to_string(ds.drawn_shaders) + " of " +
+						std::to_string(ds.shaders) + " shaders";
+				for (const auto &[shader, why] : ds.undrawn) {
+					line += "; not drawn: " + shader + ": " + why;
+				}
+				UtilityFunctions::print(to_godot(line));
 				for (const render::TerrainImage &img : item.terrain->look->images) {
 					done.images.push_back(terrain_image(img));
 				}
@@ -551,6 +562,8 @@ void LevelUpload::run_task() {
 					continue;
 				}
 				surfaces.push_back(surface);
+				const AABB box = surface["aabb"];
+				done.bounds = done.bounds ? done.bounds->merge(box) : box;
 				done.surface_materials.push_back(s.material_index);
 				++local.surfaces;
 				local.vertices += s.vertex_count();
@@ -726,6 +739,7 @@ void LevelUpload::apply_done(double p_deadline_us) {
 			}
 			if (d.index < meshes_.size() && d.rid.is_valid()) {
 				meshes_[d.index] = d.rid;
+				mesh_bounds_[d.index] = d.bounds;
 				pending_instances_.push_back({ d.index, 0 });
 			}
 		} else {
@@ -736,6 +750,7 @@ void LevelUpload::apply_done(double p_deadline_us) {
 			terrain_look_rids_.insert(terrain_look_rids_.end(), d.images.begin(), d.images.end());
 			if (d.index < terrain_meshes_.size() && d.rid.is_valid()) {
 				terrain_meshes_[d.index] = d.rid;
+				terrain_bounds_[d.index] = d.bounds;
 				if (d.look != nullptr) {
 					create_terrain_look(d);
 				}
@@ -789,6 +804,14 @@ void LevelUpload::create_terrain_look(const Done &p_done) {
 	stats_.terrain_layer_materials += materials.size();
 }
 
+void LevelUpload::add_world_bounds(const std::optional<AABB> &p_bounds, const Transform3D &p_transform) {
+	if (!p_bounds) {
+		return;
+	}
+	const AABB box = p_transform.xform(*p_bounds);
+	world_bounds_ = world_bounds_ ? world_bounds_->merge(box) : box;
+}
+
 void LevelUpload::create_instances(double p_deadline_us) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const render::LevelScenePlan &plan = *plan_;
@@ -798,6 +821,7 @@ void LevelUpload::create_instances(double p_deadline_us) {
 		pending_terrains_.pop_front();
 		const RID inst = rs->instance_create2(terrain_meshes_[t], scenario_);
 		rs->instance_set_transform(inst, instance_transform(plan.terrains[t].transform));
+		add_world_bounds(terrain_bounds_[t], instance_transform(plan.terrains[t].transform));
 		instances_.push_back(inst);
 		++made;
 	}
@@ -810,6 +834,7 @@ void LevelUpload::create_instances(double p_deadline_us) {
 			rs->instance_set_transform(inst, instance_transform(plan.instances[list[next]].transform));
 			rs->instance_geometry_set_cast_shadows_setting(inst, RenderingServer::SHADOW_CASTING_SETTING_DOUBLE_SIDED);
 			++double_sided;
+			add_world_bounds(mesh_bounds_[mesh], instance_transform(plan.instances[list[next]].transform));
 			if (instance_visible_[list[next]] == 0) {
 				rs->instance_set_visible(inst, false);
 			}

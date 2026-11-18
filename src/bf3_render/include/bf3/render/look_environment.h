@@ -38,7 +38,7 @@ const char *look_tonemap_name(LookTonemap p_tonemap);
 
 struct LookEnvState {
 	bool light = false, enlighten = false, sky = false, fog = false, tonemap = false, correction = false,
-		 camera = false;
+		 camera = false, view = false;
 
 	LookVec3 sun_color{ 1.0f, 1.0f, 1.0f };
 	float sun_rotation_x = 200.0f;
@@ -71,6 +71,7 @@ struct LookEnvState {
 	std::string grade_cube;
 	int32_t lut = -1;
 	float sun_shadow_distance = 0.0f;
+	float view_distance = 0.0f, view_share = 0.0f;
 	std::string source;
 };
 
@@ -128,6 +129,7 @@ struct LookFrame {
 	float bloom = 0.0f;
 	int32_t lut = -1;
 	float sun_shadow_distance = 0.0f;
+	float view_distance = 0.0f, view_share = 0.0f;
 };
 
 float look_area_weight(const LookArea &p_area, const LookVec3 &p_position);
@@ -135,6 +137,7 @@ LookFrame look_frame(
 		const LookEnvironment &p_env, const LookVec3 &p_position, std::span<const LookLogicWeight> p_logic = {});
 std::optional<size_t> look_logic_index(const LookEnvironment &p_env, std::string_view p_name);
 LookFrame look_frame_of(const LookEnvState &p_state);
+float look_view_distance(const LookFrame &p_frame, float p_unset);
 
 float look_lobe_weight(const LookSkyLobe &p_lobe, const LookVec3 &p_direction);
 float look_lobe_mean(const LookSkyLobe &p_lobe);

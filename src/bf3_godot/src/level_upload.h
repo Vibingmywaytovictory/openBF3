@@ -5,6 +5,7 @@
 #include "bf3/render/level_scene.h"
 #include "terrain_scatter.h"
 
+#include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/rid.hpp>
@@ -15,6 +16,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -98,6 +100,7 @@ public:
 	std::vector<std::pair<std::string, std::string>> failures() const;
 	size_t mesh_rids() const;
 	const std::vector<godot::RID> &instances() const { return instances_; }
+	const std::optional<godot::AABB> &world_bounds() const { return world_bounds_; }
 	void set_instance_visible(uint32_t p_instance, bool p_visible);
 	bool instance_visible(uint32_t p_instance) const {
 		return p_instance < instance_visible_.size() && instance_visible_[p_instance] != 0;
@@ -124,6 +127,7 @@ private:
 		std::shared_ptr<const bf3::render::TerrainLook> look;
 		std::vector<godot::RID> images;
 		std::vector<uint32_t> surface_materials;
+		std::optional<godot::AABB> bounds;
 	};
 
 	void push(Item &&p_item);
@@ -132,6 +136,7 @@ private:
 	void create_instances(double p_deadline_us);
 	void create_terrain_look(const Done &p_done);
 	void update_scatter();
+	void add_world_bounds(const std::optional<godot::AABB> &p_bounds, const godot::Transform3D &p_transform);
 
 	std::shared_ptr<const bf3::render::LevelScenePlan> plan_;
 	bf3::render::SceneLanes *lanes_ = nullptr;
@@ -157,6 +162,9 @@ private:
 	std::vector<godot::RID> textures_;
 	std::vector<godot::RID> meshes_;
 	std::vector<godot::RID> terrain_meshes_;
+	std::vector<std::optional<godot::AABB>> mesh_bounds_;
+	std::vector<std::optional<godot::AABB>> terrain_bounds_;
+	std::optional<godot::AABB> world_bounds_;
 	std::vector<std::vector<uint32_t>> instances_by_mesh_;
 	std::vector<std::vector<std::pair<uint32_t, std::string>>> texture_users_;
 	std::vector<std::vector<std::pair<godot::RID, std::string>>> terrain_texture_users_;

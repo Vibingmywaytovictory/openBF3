@@ -961,6 +961,21 @@ void Bf3LevelSession::try_done() {
 	}
 	if (scene_ && upload_.begun() && upload_.finished() && timings_.upload_us == 0) {
 		timings_.upload_us = now_us();
+		if (upload_.world_bounds()) {
+			drawn_diagonal_ = upload_.world_bounds()->get_size().length();
+			const float view_distance = look_.built() ? look_.view_distance(drawn_diagonal_) : drawn_diagonal_;
+			cameras_.set_view_distance(view_distance);
+			view_distance_ = view_distance;
+			const Camera3D *first_person = cameras_.first_person();
+			const Camera3D *free_camera = cameras_.free_camera();
+			char distance_line[200];
+			std::snprintf(distance_line, sizeof(distance_line),
+					"[level] view distance %.0f m at the first-person camera and %.0f m at the free camera; the "
+					"diagonal of what the level draws %.0f m",
+					first_person != nullptr ? first_person->get_far() : -1.0,
+					free_camera != nullptr ? free_camera->get_far() : -1.0, double(drawn_diagonal_));
+			UtilityFunctions::print(distance_line);
+		}
 		progress_.end(host::LoadStage::Meshes);
 		progress_.end(host::LoadStage::Textures);
 		progress_.end(host::LoadStage::Upload);
@@ -1082,6 +1097,13 @@ void Bf3LevelSession::_process(double p_delta) {
 
 		const Camera3D *camera = get_viewport() != nullptr ? get_viewport()->get_camera_3d() : nullptr;
 		look_.update(upload_, camera != nullptr ? camera->get_global_position() : Vector3());
+		if (drawn_diagonal_ > 0.0f) {
+			const float view_distance = look_.view_distance(drawn_diagonal_);
+			if (view_distance != view_distance_) {
+				cameras_.set_view_distance(view_distance);
+				view_distance_ = view_distance;
+			}
+		}
 	}
 	if (upload_.begun()) {
 		const Camera3D *camera = get_viewport() != nullptr ? get_viewport()->get_camera_3d() : nullptr;

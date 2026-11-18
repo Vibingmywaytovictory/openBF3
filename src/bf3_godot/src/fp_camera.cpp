@@ -103,6 +103,18 @@ void FpCamera::place_free(const Vector3 &p_position, float p_yaw, float p_pitch)
 	}
 }
 
+void FpCamera::set_view_distance(float p_metres) {
+	if (!(p_metres > 1.0f) || !std::isfinite(p_metres)) {
+		return;
+	}
+	if (fp_ != nullptr) {
+		fp_->set_far(p_metres);
+	}
+	if (free_cam_ != nullptr) {
+		free_cam_->set_far(p_metres);
+	}
+}
+
 void FpCamera::scale_free_speed(float p_factor) {
 	free_speed_ = std::clamp(free_speed_ * p_factor, 1.0f, 400.0f);
 }
