@@ -37,7 +37,8 @@ enum class LookTonemap : uint8_t {
 const char *look_tonemap_name(LookTonemap p_tonemap);
 
 struct LookEnvState {
-	bool light = false, enlighten = false, sky = false, fog = false, tonemap = false, correction = false;
+	bool light = false, enlighten = false, sky = false, fog = false, tonemap = false, correction = false,
+		 camera = false;
 
 	LookVec3 sun_color{ 1.0f, 1.0f, 1.0f };
 	float sun_rotation_x = 200.0f;
@@ -69,6 +70,7 @@ struct LookEnvState {
 	LookVec3 brightness{ 1.0f, 1.0f, 1.0f }, contrast{ 1.0f, 1.0f, 1.0f }, saturation{ 1.0f, 1.0f, 1.0f };
 	std::string grade_cube;
 	int32_t lut = -1;
+	float sun_shadow_distance = 0.0f;
 	std::string source;
 };
 
@@ -125,6 +127,7 @@ struct LookFrame {
 	LookTonemap tonemap = LookTonemap::FilmicNeutral;
 	float bloom = 0.0f;
 	int32_t lut = -1;
+	float sun_shadow_distance = 0.0f;
 };
 
 float look_area_weight(const LookArea &p_area, const LookVec3 &p_position);

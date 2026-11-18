@@ -107,6 +107,10 @@ bool moved_lobe(const render::LookSkyLobe &p_a, const render::LookSkyLobe &p_b) 
 	return moved3(p_a.axis, p_b.axis) || moved3(p_a.color, p_b.color) || moved(p_a.size, p_b.size);
 }
 
+float sun_shadow_distance(const render::LookFrame &p_f) {
+	return p_f.sun_shadow_distance > 0.0f ? p_f.sun_shadow_distance : kSunShadowDistance;
+}
+
 Vector3 vector3(const render::LookVec3 &p_v) {
 	return Vector3(p_v[0], p_v[1], p_v[2]);
 }
@@ -245,6 +249,11 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		s.sun_energy = p_f.sun_energy;
 	}
 
+	if (first || s.sun_shadow_distance != p_f.sun_shadow_distance) {
+		sun_->set_param(Light3D::PARAM_SHADOW_MAX_DISTANCE, sun_shadow_distance(p_f));
+		s.sun_shadow_distance = p_f.sun_shadow_distance;
+	}
+
 	if (first || moved3(s.ambient_up, p_f.ambient_up) || moved3(s.ambient_horizon, p_f.ambient_horizon) ||
 			moved3(s.ambient_down, p_f.ambient_down) || moved(s.sky_brightness, p_f.sky_brightness) ||
 			moved3(s.horizon, p_f.horizon) || s.sky_rotation != p_f.sky_rotation || s.uv_min_y != p_f.uv_min_y ||
@@ -373,20 +382,21 @@ std::string LookBridge::describe() const {
 	} else if (!failure.empty()) {
 		measured_text = "; exposure effect failed: " + failure;
 	}
-	char line[768];
+	char line[1024];
 	std::snprintf(line, sizeof(line),
-			"look L1: sun (%.3f %.3f %.3f) x %.2f; ambient up (%.3f %.3f %.3f) down (%.3f %.3f %.3f); sky box sun lobe "
+			"look L1: sun (%.3f %.3f %.3f) x %.2f; sun shadows to %.0f m; ambient up (%.3f %.3f %.3f) down (%.3f %.3f "
+			"%.3f); sky box sun lobe "
 			"(%.3f %.3f %.3f) size %.3f, "
 			"back lobe (%.3f %.3f %.3f) size %.3f; sky x%.2f (textures %d%d%d); fog %s %.0f..%.0f m "
 			"density %.3f curve %.2f; middle grey %.3f exposure %.2f (%.2f..%.2f) over %.2f s, tonemap %s; bloom %.3f; "
 			"lut %d",
-			f.sun_color[0], f.sun_color[1], f.sun_color[2], f.sun_energy, f.ambient_up[0], f.ambient_up[1],
-			f.ambient_up[2], f.ambient_down[0], f.ambient_down[1], f.ambient_down[2], f.sun_lobe.color[0],
-			f.sun_lobe.color[1], f.sun_lobe.color[2], f.sun_lobe.size, f.back_lobe.color[0], f.back_lobe.color[1],
-			f.back_lobe.color[2], f.back_lobe.size, f.sky_brightness, int(sky_bound_[0]), int(sky_bound_[1]),
-			int(sky_bound_[2]), f.fog ? "on" : "off", f.fog_begin, f.fog_end, f.fog_density, f.fog_curve, f.middle_gray,
-			f.exposure, f.min_exposure, f.max_exposure, f.exposure_time, render::look_tonemap_name(f.tonemap), f.bloom,
-			f.lut);
+			f.sun_color[0], f.sun_color[1], f.sun_color[2], f.sun_energy, double(sun_shadow_distance(f)),
+			f.ambient_up[0], f.ambient_up[1], f.ambient_up[2], f.ambient_down[0], f.ambient_down[1], f.ambient_down[2],
+			f.sun_lobe.color[0], f.sun_lobe.color[1], f.sun_lobe.color[2], f.sun_lobe.size, f.back_lobe.color[0],
+			f.back_lobe.color[1], f.back_lobe.color[2], f.back_lobe.size, f.sky_brightness, int(sky_bound_[0]),
+			int(sky_bound_[1]), int(sky_bound_[2]), f.fog ? "on" : "off", f.fog_begin, f.fog_end, f.fog_density,
+			f.fog_curve, f.middle_gray, f.exposure, f.min_exposure, f.max_exposure, f.exposure_time,
+			render::look_tonemap_name(f.tonemap), f.bloom, f.lut);
 	return line + measured_text;
 }
 

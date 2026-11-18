@@ -304,4 +304,37 @@ TEST_SUITE("render-metro-light") {
 		}
 		check_install_unchanged(*m);
 	}
+
+	TEST_CASE("render.metro_light: the sun's shadows reach the area's SunShadowmapViewDistance") {
+		bf3::test::Mounted *m = bf3::test::shared_mount_or_skip();
+		if (m == nullptr) {
+			return;
+		}
+		LevelCase metro, canals;
+		load_case(*m, "MP_Subway", "ConquestLarge0", metro);
+		load_case(*m, "MP_017", "ConquestLarge0", canals);
+		const LevelScenePlan plan = plan_case(metro, SceneLook::L1);
+		const LevelScenePlan canals_plan = plan_case(canals, SceneLook::L1);
+		struct Camera {
+			const char *name;
+			LookVec3 at;
+			float distance;
+		};
+		const Camera cameras[] = {
+			{ "hall strip", { -167.76f, 66.2f, -475.19f }, 100.0f },
+			{ "deep tunnel", { -190.0f, 61.0f, -356.3f }, 100.0f },
+			{ "street", { -154.3f, 66.1f, -493.9f }, 100.0f },
+			{ "park", { -40.0f, 110.0f, -230.0f }, 65.0f },
+		};
+		for (const Camera &c : cameras) {
+			const LookFrame f = look_frame(plan.look_environment, c.at);
+			std::printf("render.metro_light sun shadows %s: %.1f m\n", c.name, f.sun_shadow_distance);
+			CHECK_MESSAGE(std::fabs(f.sun_shadow_distance - c.distance) < 1e-3f, c.name);
+		}
+		const LookFrame canals_frame = look_frame(canals_plan.look_environment, { 0.0f, 0.0f, 0.0f });
+		std::printf("render.metro_light sun shadows MP_017: %.1f m (its SunShadowmapViewDistance is -1)\n",
+				canals_frame.sun_shadow_distance);
+		CHECK(canals_frame.sun_shadow_distance == 0.0f);
+		check_install_unchanged(*m);
+	}
 }

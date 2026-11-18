@@ -196,6 +196,13 @@ bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::
 		r_state.exposure_time = std::clamp(number(p_c, "ExposureAdjustTime").value_or(0.5f), 0.01f, 60.0f);
 		r_state.tonemap_method = tonemap_of(p_c).value_or(r_state.tonemap_method);
 		r_state.bloom = vec3(p_c, "BloomScale").value_or(LookVec3{});
+	} else if (p_c.is_a("CameraParamsComponentData")) {
+		const float distance = number(p_c, "SunShadowmapViewDistance").value_or(0.0f);
+		if (r_state.camera || !(distance > 0.0f)) {
+			return false;
+		}
+		r_state.camera = true;
+		r_state.sun_shadow_distance = distance;
 	} else if (p_c.is_a("ColorCorrectionComponentData")) {
 		if (r_state.correction) {
 			return false;
@@ -408,6 +415,11 @@ void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 		r_state.correction = true;
 		r_state.lut = p_a.lut;
 	}
+	if (p_a.camera) {
+		r_state.sun_shadow_distance = r_state.camera ? lerp1(r_state.sun_shadow_distance, p_a.sun_shadow_distance, p_w)
+													 : p_a.sun_shadow_distance;
+		r_state.camera = true;
+	}
 }
 
 std::string lut_key(const LookEnvState &p_s) {
@@ -599,8 +611,8 @@ core::Result<LookEnvironment> read_look_environment(const EbxResolver &p_db, con
 		return env;
 	}
 
-	const char *kinds[] = { "OutdoorLightComponentData", "EnlightenComponentData", "SkyComponentData", "FogComponentData", "TonemapComponentData",
-		"ColorCorrectionComponentData" };
+	const char *kinds[] = { "OutdoorLightComponentData", "EnlightenComponentData", "SkyComponentData",
+		"FogComponentData", "TonemapComponentData", "ColorCorrectionComponentData", "CameraParamsComponentData" };
 	for (const char *kind : kinds) {
 		const Ve *best = nullptr;
 		std::optional<EbxInstance> best_component;
@@ -833,6 +845,7 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 	f.exposure = average > 1e-6f ? std::clamp(f.middle_gray / average, f.min_exposure, f.max_exposure) : f.max_exposure;
 	f.bloom = std::fmax(max3(p_s.bloom), 0.0f);
 	f.lut = p_s.lut;
+	f.sun_shadow_distance = p_s.camera ? p_s.sun_shadow_distance : 0.0f;
 	return f;
 }
 
