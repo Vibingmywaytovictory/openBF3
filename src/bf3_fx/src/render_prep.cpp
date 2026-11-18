@@ -31,6 +31,9 @@ inline Vec3 add(const Vec3 &a, const Vec3 &b) {
 inline Vec3 cross(const Vec3 &a, const Vec3 &b) {
 	return Vec3{ a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x };
 }
+inline float length(const Vec3 &a) {
+	return std::sqrt(dot(a, a));
+}
 inline Vec3 normalized(const Vec3 &a, const Vec3 &p_fallback) {
 	const float l2 = dot(a, a);
 	if (!(l2 > 1e-20f) || !std::isfinite(l2)) {
@@ -95,6 +98,58 @@ FxBatchKey fx_batch_key(const EmitterDef &p_emitter, bool p_first_person) {
 	k.blend = (p_emitter.tmpl.flags & kEmitterEmissive) != 0 ? FxBlend::Additive : FxBlend::Alpha;
 	k.pass = p_first_person ? FxPass::FirstPerson : FxPass::World;
 	return k;
+}
+
+float fx_distance_scale(const EmitterTemplateDef &p_template, float p_distance) {
+	const float near_scale = p_template.distance_scale_near, far_scale = p_template.distance_scale_far;
+	if (!std::isfinite(near_scale) || !std::isfinite(far_scale) || !std::isfinite(p_distance)) {
+		return 1.0f;
+	}
+	const float t = p_template.distance_scale_length > 0.0f
+			? std::clamp(p_distance / p_template.distance_scale_length, 0.0f, 1.0f)
+			: 1.0f;
+	return near_scale + (far_scale - near_scale) * t;
+}
+
+FxViewAxes fx_view_axes(const Vec3 &p_forward) {
+	FxViewAxes axes;
+	const Vec3 forward = normalized(p_forward, Vec3{ 0, 0, 1 });
+	axes.right = normalized(cross(forward, Vec3{ 0, 1, 0 }), Vec3{ 1, 0, 0 });
+	axes.up = normalized(cross(axes.right, forward), Vec3{ 0, 1, 0 });
+	return axes;
+}
+
+Vec3 fx_pivoted_position(FxShaderClass p_shader, bool p_world_aligned, const Vec2 &p_pivot,
+		const ParticleVertex &p_particle, const Vec3 &p_emitter_right, const Vec3 &p_emitter_up,
+		const Vec3 &p_view_right, const Vec3 &p_view_up) {
+	if ((p_pivot.x == 0.0f && p_pivot.y == 0.0f) || !std::isfinite(p_pivot.x) || !std::isfinite(p_pivot.y)) {
+		return p_particle.position;
+	}
+	const float along_x = p_pivot.x * p_particle.size.x * 0.5f, along_y = p_pivot.y * p_particle.size.y * 0.5f;
+	const float c = std::cos(p_particle.rotation), s = std::sin(p_particle.rotation);
+	switch (p_shader) {
+		case FxShaderClass::Saq: {
+			const float right = along_x * c - along_y * s, up = along_x * s + along_y * c;
+			return sub(p_particle.position, add(scale(p_view_right, right), scale(p_view_up, up)));
+		}
+		case FxShaderClass::Daq: {
+			const Vec3 axis = normalized(p_particle.axis, Vec3{ 0, 1, 0 });
+			const float dx = dot(axis, p_view_right), dy = dot(axis, p_view_up);
+			const float len = std::sqrt(dx * dx + dy * dy);
+			const float ux = len > 1e-5f ? dx / len : 0.0f, uy = len > 1e-5f ? dy / len : 1.0f;
+			const float right = uy * along_x + ux * along_y, up = -ux * along_x + uy * along_y;
+			return sub(p_particle.position, add(scale(p_view_right, right), scale(p_view_up, up)));
+		}
+		case FxShaderClass::Waq: {
+			const Vec3 bx = p_world_aligned ? Vec3{ 1, 0, 0 } : p_emitter_right;
+			const Vec3 by = p_world_aligned ? Vec3{ 0, 0, -1 } : p_emitter_up;
+			const Vec3 rx = add(scale(bx, c), scale(by, s));
+			const Vec3 ry = add(scale(bx, -s), scale(by, c));
+			return sub(p_particle.position, add(scale(rx, along_x), scale(ry, along_y)));
+		}
+		default:
+			return p_particle.position;
+	}
 }
 
 float fx_pack_alpha_levels(float p_min, float p_max) {
@@ -199,6 +254,9 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 	const std::span<const ParticleLight> plights = p_world.lights();
 	const Vec3 cam = p_view.camera_position;
 	const Vec3 fwd = normalized(p_view.camera_forward, Vec3{ 0, 0, 1 });
+	const FxViewAxes axes = fx_view_axes(fwd);
+	const Vec3 view_right = axes.right;
+	const Vec3 view_up = axes.up;
 
 	m.params.resize(outputs.size());
 	m.candidates.clear();
@@ -307,12 +365,19 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 					const Vec3 ex = normalized(et.right, Vec3{ 1, 0, 0 });
 					const Vec3 ey = normalized(et.up, Vec3{ 0, 1, 0 });
 					const Vec3 ez = normalized(et.forward, Vec3{ 0, 0, 1 });
+					const EmitterDef &drawn = o.def->emitters[o.emitter];
 					++batch.emitters;
 					for (uint32_t k = 0; k < o.particle_count; ++k) {
-						const ParticleVertex &p = particles[o.first_particle + k];
+						ParticleVertex p = particles[o.first_particle + k];
 						if (written >= m.instances.size()) {
 							break;
 						}
+						if (!o.first_person) {
+							const float s = fx_distance_scale(drawn.tmpl, length(sub(p.position, cam)));
+							p.size = Vec3{ p.size.x * s, p.size.y * s, p.size.z * s };
+						}
+						p.position = fx_pivoted_position(
+								key.shader, world_aligned, drawn.params.size_pivot, p, ex, ey, view_right, view_up);
 						FxInstance &in = m.instances[written++];
 						const float c = std::cos(p.rotation), s = std::sin(p.rotation);
 						switch (key.shader) {

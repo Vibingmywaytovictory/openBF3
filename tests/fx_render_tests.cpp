@@ -588,4 +588,45 @@ TEST_CASE("atlas pixels: blob round trip, every truncation, seeded mutations") {
 	CHECK_FALSE(decode_atlas_pixels(empty, back).ok());
 }
 
+TEST_CASE("fx draw: the distance scale runs from the near value to the far value over its length") {
+	EmitterTemplateDef t;
+	CHECK(fx_distance_scale(t, 3.0f) == doctest::Approx(1.0f));
+	t.distance_scale_near = 0.5f;
+	t.distance_scale_far = 1.0f;
+	t.distance_scale_length = 15.0f;
+	CHECK(fx_distance_scale(t, 0.0f) == doctest::Approx(0.5f));
+	CHECK(fx_distance_scale(t, 7.5f) == doctest::Approx(0.75f));
+	CHECK(fx_distance_scale(t, 15.0f) == doctest::Approx(1.0f));
+	CHECK(fx_distance_scale(t, 900.0f) == doctest::Approx(1.0f));
+	t.distance_scale_near = 0.0f;
+	t.distance_scale_length = 0.0f;
+	CHECK(fx_distance_scale(t, 1.0f) == doctest::Approx(1.0f));
+}
+
+TEST_CASE("fx draw: the size pivot puts the particle at that point of the quad, -1 and 1 its edges") {
+	ParticleVertex p;
+	p.position = { 10, 20, 30 };
+	p.size = { 2, 4, 0 };
+	const FxViewAxes axes = fx_view_axes({ 0, 0, -1 });
+	CHECK(axes.right.x == doctest::Approx(1.0f));
+	CHECK(axes.up.y == doctest::Approx(1.0f));
+	const Vec3 same =
+			fx_pivoted_position(FxShaderClass::Saq, false, { 0, 0 }, p, { 1, 0, 0 }, { 0, 1, 0 }, axes.right, axes.up);
+	CHECK(same.y == doctest::Approx(20.0f));
+	const Vec3 raised = fx_pivoted_position(
+			FxShaderClass::Saq, false, { 0, -0.5f }, p, { 1, 0, 0 }, { 0, 1, 0 }, axes.right, axes.up);
+	CHECK(raised.x == doctest::Approx(10.0f));
+	CHECK(raised.y == doctest::Approx(21.0f));
+	const Vec3 bottom = fx_pivoted_position(
+			FxShaderClass::Saq, false, { 0, -1.0f }, p, { 1, 0, 0 }, { 0, 1, 0 }, axes.right, axes.up);
+	CHECK(bottom.y - p.size.y * 0.5f == doctest::Approx(p.position.y));
+	p.axis = { 0, 1, 0 };
+	const Vec3 along = fx_pivoted_position(
+			FxShaderClass::Daq, false, { 0, -0.5f }, p, { 1, 0, 0 }, { 0, 1, 0 }, axes.right, axes.up);
+	CHECK(along.y == doctest::Approx(21.0f));
+	const Vec3 flat = fx_pivoted_position(
+			FxShaderClass::Waq, true, { 0.5f, 0 }, p, { 1, 0, 0 }, { 0, 1, 0 }, axes.right, axes.up);
+	CHECK(flat.x == doctest::Approx(9.5f));
+	CHECK(flat.y == doctest::Approx(20.0f));
+}
 }

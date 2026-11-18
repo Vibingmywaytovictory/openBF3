@@ -62,6 +62,18 @@ struct FxBatchKey {
 
 FxBatchKey fx_batch_key(const EmitterDef &p_emitter, bool p_first_person);
 
+float fx_distance_scale(const EmitterTemplateDef &p_template, float p_distance);
+
+struct FxViewAxes {
+	Vec3 right{ 1, 0, 0 };
+	Vec3 up{ 0, 1, 0 };
+};
+FxViewAxes fx_view_axes(const Vec3 &p_forward);
+
+Vec3 fx_pivoted_position(FxShaderClass p_shader, bool p_world_aligned, const Vec2 &p_pivot,
+		const ParticleVertex &p_particle, const Vec3 &p_emitter_right, const Vec3 &p_emitter_up,
+		const Vec3 &p_view_right, const Vec3 &p_view_up);
+
 size_t fx_batch_index(const FxBatchKey &p_key);
 FxBatchKey fx_batch_key_at(size_t p_index);
 
