@@ -8691,6 +8691,87 @@ TEST_SUITE("host-vehicles-modes") {
 		tdm::check_install_unchanged(*level);
 	}
 
+	TEST_CASE("vehicles: on MP_007 ConquestSmall0 the logic holds a neutral flag's vehicle spawners shut; when an RU "
+			  "soldier takes the flag the logic opens a shut spawner and its vehicle spawns") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::unique_ptr<Match> m = start_match(*level, false, 73u, 0, 2);
+		Script *taker = m->bot();
+		Script *other = m->bot();
+		tdm::ScriptedPeer &p = m->join("watcher");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->until([&] { return is_alive(m->state(taker->slot)) && is_alive(m->state(other->slot)); }, 600));
+		if (m->rules().team_of(uint8_t(taker->slot)) != 2) {
+			std::swap(taker, other);
+		}
+		REQUIRE(m->rules().team_of(uint8_t(taker->slot)) == 2);
+		const auto enabled = [&] {
+			std::vector<bool> on;
+			for (const host::LevelVehicleSpawner &s : lv.spawners) {
+				const std::optional<sim::logic::NativeStubState> n = m->rules().natives().native_state(s.logic_node);
+				on.push_back(n.has_value() && n->enabled);
+			}
+			return on;
+		};
+		const std::vector<bool> before = enabled();
+		const sim::logic::ConquestNatives &cq = conquest_of(*m);
+		const sim::logic::ConquestPointView *flag = nullptr;
+		for (const sim::logic::ConquestPointView &v : cq.points()) {
+			if (!v.hq && v.team == 0) {
+				flag = &v;
+				break;
+			}
+		}
+		REQUIRE(flag != nullptr);
+		const uint32_t flag_node = flag->node;
+		const sim::Vec3 flag_at = flag->position;
+		const auto flag_team = [&] {
+			for (const sim::logic::ConquestPointView &v : cq.points()) {
+				if (v.node == flag_node) {
+					return v.controlled ? v.team : uint8_t(0);
+				}
+			}
+			return uint8_t(0xFF);
+		};
+		m->place(taker->slot, ground_at(*m->world, flag_at[0], flag_at[2], flag_at[1] + 50.0f));
+		REQUIRE(m->until([&] { return flag_team() == 2; }, 1500));
+		m->ticks(2);
+		const std::vector<bool> after = enabled();
+		std::vector<size_t> opened;
+		size_t closed = 0;
+		for (size_t i = 0; i < lv.spawners.size(); ++i) {
+			if (after[i] && !before[i]) {
+				opened.push_back(i);
+			}
+			closed += before[i] && !after[i] ? 1u : 0u;
+		}
+		float latest_delay = 0.0f;
+		for (const size_t i : opened) {
+			latest_delay = std::max(latest_delay, lv.spawners[i].initial_spawn_delay);
+		}
+		m->ticks(sim::seconds_to_ticks(latest_delay) + 60u);
+		size_t live_opened = 0;
+		for (const size_t i : opened) {
+			const bool live = m->server.vehicle_state(uint16_t(i)).has_value();
+			live_opened += live ? 1u : 0u;
+			std::printf("host.vehicles.modes: MP_007 ConquestSmall0: flag node %u taken by the RU opened spawner %zu "
+						"(%s, team %u): %s\n",
+					unsigned(flag_node), i, lv.kinds[lv.spawners[i].kind].blueprint.c_str(),
+					unsigned(lv.spawners[i].team), live ? "live" : "NOT live");
+		}
+		std::printf("host.vehicles.modes: MP_007 ConquestSmall0: %zu of %zu spawners open before the capture, %zu "
+					"opened and %zu shut by it, %zu of the opened live\n",
+				size_t(std::count(before.begin(), before.end(), true)), lv.spawners.size(), opened.size(), closed,
+				live_opened);
+		CHECK(std::count(before.begin(), before.end(), false) > 0);
+		CHECK_FALSE(opened.empty());
+		CHECK(live_opened == opened.size());
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
 	TEST_CASE("vehicles: MP_007 RushLarge0 loads its 17 land vehicle spawners; 35 s into the round a vehicle stands "
 			  "on every one the level logic holds enabled and on none it holds disabled") {
 		std::unique_ptr<tdm::TdmLevel> level = tdm::load_tdm_level("MP_007", "RushLarge0", false);
