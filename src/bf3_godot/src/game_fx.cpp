@@ -2,6 +2,7 @@
 
 #include "fx_decals.h"
 #include "fx_renderer.h"
+#include "godot_util.h"
 #include "viewmodel_muzzle.h"
 
 #include "bf3/core/ebx_db.h"
@@ -9,6 +10,7 @@
 #include "bf3/core/gameplay/weapon_blob.h"
 #include "bf3/core/gameplay/weapon_catalog.h"
 #include "bf3/core/install.h"
+#include "bf3/core/level/placed_effects.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/format.h"
 #include "bf3/fx/atlas_pixels.h"
@@ -21,6 +23,7 @@
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/core/object.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -61,6 +64,7 @@ struct Bf3GameFx::Impl {
 	std::unique_ptr<fx::FxWorld> world;
 	std::vector<host::PresentEvent> events;
 	std::unique_ptr<fx::FxTriggers> triggers;
+	fx::PlacedEffects placed;
 	fx::FxTriggerConfig config;
 	FxDecalAssets decal_assets;
 	FxDecalPool decals;
@@ -171,6 +175,7 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 	}
 
 	m.triggers.reset();
+	m.placed.forget();
 	m.world.reset();
 	m.local_defs.clear();
 	m.library.reset();
@@ -332,6 +337,19 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 			}
 		}
 		const size_t vehicle_names = names.size() - before_vehicles;
+		std::vector<core::level::PlacedEffect> placed;
+		if (p_in.db->world != nullptr) {
+			core::Result<std::vector<core::level::PlacedEffect>> read =
+					core::level::read_placed_effects(*p_in.db->world);
+			if (read) {
+				placed = std::move(*read);
+			} else {
+				m.notes.push_back("placed effects: " + read.error().message);
+			}
+		}
+		for (const core::level::PlacedEffect &e : placed) {
+			names.push_back(e.blueprint);
+		}
 		std::sort(names.begin(), names.end());
 		names.erase(std::unique(names.begin(), names.end()), names.end());
 		const size_t failed = m.library->preload(names, p_in.threads);
@@ -341,6 +359,32 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 		m.notes.push_back(fmt("preload: %zu blueprints (%zu fire, %zu impact, %zu vehicle), %zu failed, %.3f s",
 				names.size(), m.fire->blueprints().size(), fx::impact_effect_names(*m.impacts).size(), vehicle_names,
 				failed, seconds_since(tp)));
+		std::map<std::string, fx::DrawableEffect, std::less<>> drawable;
+		uint32_t undrawn = 0;
+		for (const core::level::PlacedEffect &e : placed) {
+			auto found = drawable.find(e.blueprint);
+			if (found == drawable.end()) {
+				fx::DrawableEffect d;
+				if (core::Result<std::shared_ptr<const fx::EffectDef>> def = m.library->get(e.blueprint)) {
+					d = fx::without_mesh_emitters(*def);
+				} else {
+					m.notes.push_back("placed effect " + e.blueprint + ": " + def.error().message);
+				}
+				found = drawable.emplace(e.blueprint, std::move(d)).first;
+			}
+			undrawn += found->second.mesh_emitters;
+			fx::Transform at;
+			at.right = e.transform.right;
+			at.up = e.transform.up;
+			at.forward = e.transform.forward;
+			at.trans = e.transform.trans;
+			m.placed.add(found->second.def, at, e.auto_start);
+		}
+		m.placed.set_undrawn_mesh_emitters(undrawn);
+		const fx::PlacedEffectStats &ps = m.placed.stats();
+		m.notes.push_back(fmt("placed effects: %u placed (%zu blueprints), %u start at load, %u without a blueprint, "
+							  "%u mesh emitters not drawn",
+				ps.placed, drawable.size(), ps.auto_start, ps.without_def, ps.mesh_emitters_undrawn));
 	}
 	if (stopping(p_in)) {
 		return core::Error{ "Bf3GameFx::load: stopped" };
@@ -477,6 +521,8 @@ void Bf3GameFx::step(const GameFrame &p_frame) {
 	for (const fx::DecalCue &c : m.triggers->decals()) {
 		m.decals.place(c);
 	}
+	m.placed.step(*m.world, view, m.config.tier, m.start_seed);
+	m.stats.placed = m.placed.stats();
 	m.decals.step(p_frame.dt);
 	renderer->step_world(*m.world, p_frame.dt, view);
 	renderer->draw(*m.world, view, *m.atlas);
@@ -593,6 +639,17 @@ GameFxStats Bf3GameFx::stats() const {
 
 void Bf3GameFx::shutdown() {
 	Impl &m = *impl_;
+	if (m.built && m.placed.stats().placed > 0) {
+		const fx::PlacedEffectStats &ps = m.placed.stats();
+		UtilityFunctions::print(to_godot(fmt("[game] placed effects: %u placed, %u start at load, %u of them started, "
+											 "%u in range, %u running, %u ended in "
+											 "range, %llu starts, %llu stops, %llu start failures, %u without a "
+											 "blueprint, %u mesh emitters not drawn",
+				ps.placed, ps.auto_start, ps.started_placements, ps.in_range, ps.running, ps.ended_in_range,
+				(unsigned long long)ps.starts, (unsigned long long)ps.stops, (unsigned long long)ps.start_failures,
+				ps.without_def, ps.mesh_emitters_undrawn)));
+	}
+	m.placed.forget();
 	m.decals.clear();
 	if (Bf3FxRenderer *r = m.live_renderer()) {
 		r->clear();

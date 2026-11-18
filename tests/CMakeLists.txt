@@ -1567,6 +1567,12 @@ openbf3_proc_row(test.scratch.procs test_scratch_tests TIMEOUT 120 ARGS --test-s
 add_test(NAME test.scratch.paths COMMAND ${CMAKE_COMMAND} "-DSOURCE_DIR=${CMAKE_SOURCE_DIR}" -P ${CMAKE_CURRENT_SOURCE_DIR}/test_scratch_paths.cmake)
 set_tests_properties(test.scratch.paths PROPERTIES TIMEOUT 60 LABELS "unit")
 
+openbf3_test(test_placed_effects test_main.cpp placed_effects_tests.cpp fx_test_support.h test_support.h)
+target_link_libraries(test_placed_effects PRIVATE bf3_fx)
+add_test(NAME fx.placed_effects.unit COMMAND test_placed_effects --test-suite=placed-effects-unit)
+add_test(NAME fx.placed_effects COMMAND test_placed_effects --test-suite=placed-effects)
+set_tests_properties(fx.placed_effects PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(fx.placed_effects.unit fx.placed_effects PROPERTIES TIMEOUT 300)
 openbf3_check_rows()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME hygiene.rules COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/check_hygiene.py" "${CMAKE_SOURCE_DIR}")

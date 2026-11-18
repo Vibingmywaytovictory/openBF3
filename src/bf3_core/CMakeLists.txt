@@ -241,6 +241,8 @@ target_sources(bf3_core PRIVATE
 
 target_sources(bf3_core PRIVATE
     include/bf3/core/level/mode_areas.h
+    include/bf3/core/level/placed_effects.h
+    src/level/placed_effects.cpp
     src/level/mode_areas.cpp
 )
 

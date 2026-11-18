@@ -1,0 +1,54 @@
+#pragma once
+
+#include "bf3/fx/effect_def.h"
+#include "bf3/fx/simulator.h"
+
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+namespace bf3::fx {
+
+struct DrawableEffect {
+	std::shared_ptr<const EffectDef> def;
+	uint32_t mesh_emitters = 0;
+};
+
+DrawableEffect without_mesh_emitters(const std::shared_ptr<const EffectDef> &p_def);
+
+struct PlacedEffectStats {
+	uint32_t placed = 0;
+	uint32_t auto_start = 0;
+	uint32_t without_def = 0;
+	uint32_t in_range = 0;
+	uint32_t running = 0;
+	uint32_t ended_in_range = 0;
+	uint32_t mesh_emitters_undrawn = 0;
+	uint32_t started_placements = 0;
+	uint64_t starts = 0;
+	uint64_t stops = 0;
+	uint64_t start_failures = 0;
+};
+
+class PlacedEffects {
+public:
+	void add(std::shared_ptr<const EffectDef> p_def, const Transform &p_transform, bool p_auto_start);
+	void step(FxWorld &r_world, const FxView &p_view, uint8_t p_tier, uint64_t p_seed);
+	void forget();
+	void set_undrawn_mesh_emitters(uint32_t p_count) { stats_.mesh_emitters_undrawn = p_count; }
+	const PlacedEffectStats &stats() const { return stats_; }
+
+private:
+	struct Slot {
+		std::shared_ptr<const EffectDef> def;
+		Transform transform;
+		bool auto_start = false;
+		bool finished = false;
+		bool started = false;
+		EffectHandle handle;
+	};
+	std::vector<Slot> slots_;
+	PlacedEffectStats stats_;
+};
+
+}

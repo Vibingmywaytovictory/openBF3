@@ -41,3 +41,8 @@ target_link_libraries(bf3_fx PUBLIC bf3_present)
 target_sources(bf3_fx PRIVATE
     src/triggers.cpp
 )
+
+target_sources(bf3_fx PRIVATE
+    include/bf3/fx/placed_effects.h
+    src/placed_effects.cpp
+)

@@ -3,6 +3,7 @@
 #include "game_frame.h"
 
 #include "bf3/core/result.h"
+#include "bf3/fx/placed_effects.h"
 #include "bf3/fx/simulator.h"
 #include "bf3/fx/triggers.h"
 
@@ -40,6 +41,7 @@ struct GameFxStats {
 	uint64_t start_effect_calls = 0, start_effect_failures = 0;
 	uint32_t texture_fallbacks = 0;
 	double load_seconds = 0;
+	fx::PlacedEffectStats placed;
 };
 
 class Bf3GameFx {

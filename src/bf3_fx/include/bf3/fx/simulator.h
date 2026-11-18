@@ -58,6 +58,7 @@ struct EffectStart {
 
 	float start_age = 0;
 	EmitterParams params;
+	uint32_t owner = 0;
 };
 
 struct FxView {

@@ -1277,7 +1277,7 @@ core::Result<EffectHandle> FxWorld::start(std::shared_ptr<const EffectDef> p_def
 	uint32_t oldest = kNone;
 	for (const uint32_t slot : w.effect_list) {
 		const Impl::EffectSlot &s = w.effects[slot];
-		if (s.active && !s.killed && s.def == p_def) {
+		if (s.active && !s.killed && s.def == p_def && s.start.owner == p_start.owner) {
 			++live;
 			if (oldest == kNone || s.sequence < w.effects[oldest].sequence) {
 				oldest = slot;
