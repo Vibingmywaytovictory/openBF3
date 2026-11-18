@@ -104,4 +104,8 @@ target_sources(bf3_render PRIVATE
     src/terrain_look.cpp
     src/terrain_scatter.cpp
     src/terrain_scatter_program.cpp
+    include/bf3/render/roads.h
+    src/roads.cpp
+    include/bf3/render/terrain_program.h
+    src/terrain_program.cpp
 )

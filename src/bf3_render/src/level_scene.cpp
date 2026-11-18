@@ -1019,6 +1019,10 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 						*p_options.mount, resolver->shaders(), terrain.asset,
 						[&](const std::string &p_mesh) { return builder.scatter_mesh(p_resolver, databases, p_mesh); },
 						plan.failures);
+				terrain.decals = plan_terrain_decals(
+						*p_options.mount, resolver->shaders(), terrain.asset,
+						[&](const std::string &p_name) { return int32_t(builder.texture(p_name, TextureRole::Data)); },
+						plan.failures);
 			}
 			plan.terrains.push_back(std::move(terrain));
 		}
@@ -1243,6 +1247,19 @@ core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mo
 		} else {
 			out.scatter_failures.emplace_back(where, built.error().message);
 		}
+	}
+	if (!plan.decals.empty()) {
+		const std::string decals_name = terrain_decals_name(plan.asset);
+		auto decals_res = p_mount.read_res(decals_name);
+		if (!decals_res) {
+			return core::error_at("res " + decals_name, decals_res.error());
+		}
+		core::res::TerrainDecals decals;
+		e = core::res::TerrainDecals::parse(decals_res->second, decals);
+		if (!e.ok()) {
+			return core::make_error("res " + decals_name + ": " + e.message());
+		}
+		out.decals = add_terrain_decals(decals, grid, t, crop, plan.decals, *out.look, out.mesh);
 	}
 	return out;
 }

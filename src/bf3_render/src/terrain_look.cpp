@@ -5,6 +5,7 @@
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/util/text.h"
 #include "bf3/render/shader_database.h"
+#include "bf3/render/terrain_program.h"
 
 #include <algorithm>
 #include <charconv>
@@ -18,8 +19,6 @@ namespace bf3::render {
 namespace {
 
 constexpr std::string_view kComboSuffix = "__2d__0";
-constexpr std::string_view kConstants = "externalConstants";
-constexpr std::string_view kViewConstants = "viewConstants";
 constexpr std::string_view kMaskPrefix = "external_worldToMask";
 constexpr std::string_view kMaskSuffix = "UvTransform";
 
@@ -123,6 +122,25 @@ std::optional<std::vector<uint8_t>> terrain_combo_layers(std::string_view p_shad
 	return layers;
 }
 
+SceneTerrainTexture plan_terrain_texture(const core::LevelMount &p_mount, uint32_t p_slot, const std::string &p_texture,
+		const std::function<int32_t(const std::string &)> &p_register, std::map<std::string, bool> &r_srgb,
+		std::vector<std::pair<std::string, std::string>> &r_failures) {
+	const std::string lower = to_lower_ascii(p_texture);
+	auto found = r_srgb.find(lower);
+	if (found == r_srgb.end()) {
+		bool is_srgb = false;
+		core::Result<std::pair<core::ResInfo, std::vector<uint8_t>>> res = p_mount.read_res(lower);
+		core::res::DxTexture header;
+		if (res && core::res::DxTexture::parse(res->second, header).ok()) {
+			is_srgb = header.is_srgb();
+		} else {
+			r_failures.emplace_back("terrain texture " + lower, res ? "header does not parse" : res.error().message);
+		}
+		found = r_srgb.emplace(lower, is_srgb).first;
+	}
+	return SceneTerrainTexture{ p_slot, p_register(lower), found->second };
+}
+
 std::vector<SceneTerrainCombo> plan_terrain_combos(const core::LevelMount &p_mount, const ShaderLookup &p_shaders,
 		std::string_view p_asset, const std::function<int32_t(const std::string &)> &p_texture,
 		std::vector<std::pair<std::string, std::string>> &r_failures) {
@@ -152,21 +170,7 @@ std::vector<SceneTerrainCombo> plan_terrain_combos(const core::LevelMount &p_mou
 			}
 		}
 		for (const auto &[slot, texture] : shader->texture_slots) {
-			const std::string lower = to_lower_ascii(texture);
-			auto found = srgb.find(lower);
-			if (found == srgb.end()) {
-				bool is_srgb = false;
-				core::Result<std::pair<core::ResInfo, std::vector<uint8_t>>> res = p_mount.read_res(lower);
-				core::res::DxTexture header;
-				if (res && core::res::DxTexture::parse(res->second, header).ok()) {
-					is_srgb = header.is_srgb();
-				} else {
-					r_failures.emplace_back(
-							"terrain texture " + lower, res ? "header does not parse" : res.error().message);
-				}
-				found = srgb.emplace(lower, is_srgb).first;
-			}
-			combo.textures.push_back(SceneTerrainTexture{ slot, p_texture(lower), found->second });
+			combo.textures.push_back(plan_terrain_texture(p_mount, slot, texture, p_texture, srgb, r_failures));
 		}
 		out.push_back(std::move(combo));
 	}
@@ -223,7 +227,6 @@ uint32_t TerrainLook::material_at(float p_x, float p_z) const {
 
 core::Result<std::string> terrain_shader_code(
 		const PixelTranslation &p_translation, const TerrainMaterial &p_material) {
-	const std::vector<TerrainTextureBinding> &p_textures = p_material.textures;
 	if (p_translation.outputs < 3) {
 		return core::make_error(
 				"terrain combination writes " + std::to_string(p_translation.outputs) + " targets, not 3");
@@ -233,35 +236,14 @@ core::Result<std::string> terrain_shader_code(
 			return core::make_error("terrain combination reads input v" + std::to_string(input));
 		}
 	}
-	std::string code = "shader_type spatial;\nrender_mode blend_mix, depth_draw_opaque, cull_back;\n";
-	for (const auto &[slot, size] : p_translation.constant_buffers) {
-		if (slot != p_material.view_slot) {
-			code += "uniform vec4 cb" + std::to_string(slot) + "[" + std::to_string(size) + "];\n";
-		}
+	core::Result<std::string> head =
+			terrain_shader_head(p_translation, p_material, "terrain", "blend_mix, depth_draw_opaque, cull_back");
+	if (!head) {
+		return head.error();
 	}
-	for (uint32_t slot : p_translation.textures) {
-		const auto found = std::find_if(
-				p_textures.begin(), p_textures.end(), [&](const TerrainTextureBinding &b) { return b.slot == slot; });
-		if (found == p_textures.end()) {
-			return core::make_error("terrain texture t" + std::to_string(slot) + " has no binding");
-		}
-		std::string hints;
-		if (found->image >= 0) {
-			hints = found->image == kTerrainColourImage ? "filter_linear_mipmap, repeat_disable"
-														: "filter_linear, repeat_disable";
-		} else {
-			hints = std::string(found->srgb ? "source_color, " : "") +
-					"filter_linear_mipmap_anisotropic, repeat_enable";
-		}
-		code += "uniform sampler2D t" + std::to_string(slot) + " : " + hints + ";\n";
-	}
+	std::string code = std::move(*head);
 	code += "void fragment() {\nvec4 v1 = vec4(UV.x, UV.y, 0.0, 0.0);\n";
-	if (p_material.view_slot) {
-		code += "vec4 cb" + std::to_string(*p_material.view_slot) + "[1] = vec4[1](vec4(TIME, 0.0, 0.0, 0.0));\n";
-	}
-	for (uint32_t o = 0; o < p_translation.outputs; ++o) {
-		code += "vec4 o" + std::to_string(o) + " = vec4(0.0);\n";
-	}
+	code += terrain_shader_locals(p_translation, p_material);
 	code += p_translation.body;
 	code += "vec3 terrain_colour = vec3(o0.y, o0.z, o2.x);\n"
 			"ALBEDO = terrain_colour * terrain_colour;\n"
@@ -483,6 +465,8 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 		look.stats.image_bytes += img->data.size();
 	}
 	look.images = { std::move(atlas), std::move(colour), std::move(height), std::move(dynamic) };
+	look.height_uv = height_uv;
+	look.height_pixel = height_pixel;
 
 	const std::array<float, 4> colour_uv =
 			uv_transform(colours.grid, 0.0f, 0.0f, float(colours.grid.width), float(colours.grid.height));
@@ -500,92 +484,37 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 		look.stats.instructions += translation->instructions;
 		TerrainMaterial material;
 		material.combo = combo_index;
-		for (uint32_t slot : translation->textures) {
-			TerrainTextureBinding b;
-			b.slot = slot;
-			const dxbc::Binding *bound = program->binding(dxbc::BindingType::Texture, slot);
-			const std::string name = bound == nullptr ? std::string() : bound->name;
-			if (name == "texture_maskMap") {
-				b.image = kTerrainMaskAtlas;
-			} else if (name == "texture_globalColorMap") {
-				b.image = kTerrainColourImage;
-			} else if (name == "texture_heightfieldAtlas") {
-				b.image = kTerrainHeightImage;
-			} else if (name == "texture_dynamicMask") {
-				b.image = kTerrainDynamicMask;
-			} else {
-				const auto data = std::find_if(combo.textures.begin(), combo.textures.end(),
-						[&](const SceneTerrainTexture &t) { return t.slot == slot; });
-				if (data == combo.textures.end() || data->texture < 0) {
-					return core::make_error(where + ": texture t" + std::to_string(slot) + " (" + name +
-							") is not in the shader database");
-				}
-				b.texture = data->texture;
-				b.srgb = data->srgb;
+		const auto terrain_value = [&](const std::string &p_name) -> core::Result<std::array<float, 4>> {
+			if (p_name == "external_worldToGlobalColorUvTransform") {
+				return colour_uv;
 			}
-			material.textures.push_back(b);
-		}
-		const dxbc::Binding *constants = program->binding(dxbc::BindingType::ConstantBuffer, kConstants);
-		const dxbc::Binding *view = program->binding(dxbc::BindingType::ConstantBuffer, kViewConstants);
-		const dxbc::Variable *time = program->variable(kViewConstants, "time");
-		for (const auto &[slot, size] : translation->constant_buffers) {
-			if (view != nullptr && slot == view->bind_point && size == 1 && time != nullptr && time->offset == 0) {
-				material.view_slot = slot;
-				continue;
+			if (p_name == "external_heightmapWorldSizeY") {
+				return std::array<float, 4>{ 1.0f, 0.0f, 0.0f, 0.0f };
 			}
-			if (constants == nullptr || slot != constants->bind_point) {
-				return core::make_error(
-						where + ": reads constant buffer cb" + std::to_string(slot) + " beyond the view time");
+			if (!p_name.starts_with(kMaskPrefix) || !p_name.ends_with(kMaskSuffix)) {
+				return core::make_error(where + ": unknown constant " + p_name);
 			}
-			material.constant_slot = slot;
-			material.constants.assign(size, std::array<float, 4>{});
-		}
-		if (constants != nullptr) {
-			for (const dxbc::ConstantBuffer &cb : program->constant_buffers) {
-				if (cb.name != kConstants) {
-					continue;
-				}
-				for (const dxbc::Variable &v : cb.variables) {
-					std::array<float, 4> value{};
-					if (v.name == "external_clipToWorldSpaceXzTransform") {
-						value = { 1.0f, 1.0f, 0.0f, 0.0f };
-					} else if (v.name == "external_dynamicMaskUvScale") {
-						value = { 1.0f, 1.0f, 0.0f, 0.0f };
-					} else if (v.name == "external_worldToGlobalColorUvTransform") {
-						value = colour_uv;
-					} else if (v.name == "external_worldToHeightfieldUvTransform") {
-						value = height_uv;
-					} else if (v.name == "external_heightfieldPixelSizeAndAspect") {
-						value = height_pixel;
-					} else if (v.name == "external_heightmapWorldSizeY") {
-						value = { 1.0f, 0.0f, 0.0f, 0.0f };
-					} else if (v.name.starts_with(kMaskPrefix) && v.name.ends_with(kMaskSuffix)) {
-						const std::string_view digits = std::string_view(v.name).substr(
-								kMaskPrefix.size(), v.name.size() - kMaskPrefix.size() - kMaskSuffix.size());
-						unsigned n = 0;
-						std::vector<uint8_t> masked;
-						for (uint8_t l : combo.layers) {
-							if (l != 0) {
-								masked.push_back(l);
-							}
-						}
-						if (std::from_chars(digits.data(), digits.data() + digits.size(), n).ec != std::errc() ||
-								n >= masked.size()) {
-							return core::make_error(where + ": " + v.name + " has no masked layer");
-						}
-						const uint32_t tile = masked[n];
-						value = uv_transform(g, float((tile % columns) * tile_w + 1),
-								float((tile / columns) * tile_h + 1), atlas_w, atlas_h);
-					} else {
-						return core::make_error(where + ": unknown constant " + v.name);
-					}
-					const uint32_t reg = v.offset / 16;
-					const uint32_t first = (v.offset % 16) / 4;
-					for (uint32_t k = 0; k < v.size / 4 && first + k < 4 && reg < material.constants.size(); ++k) {
-						material.constants[reg][first + k] = value[k];
-					}
+			const std::string_view digits = std::string_view(p_name).substr(
+					kMaskPrefix.size(), p_name.size() - kMaskPrefix.size() - kMaskSuffix.size());
+			unsigned n = 0;
+			std::vector<uint8_t> masked;
+			for (uint8_t l : combo.layers) {
+				if (l != 0) {
+					masked.push_back(l);
 				}
 			}
+			if (std::from_chars(digits.data(), digits.data() + digits.size(), n).ec != std::errc() ||
+					n >= masked.size()) {
+				return core::make_error(where + ": " + p_name + " has no masked layer");
+			}
+			const uint32_t tile = masked[n];
+			return uv_transform(
+					g, float((tile % columns) * tile_w + 1), float((tile / columns) * tile_h + 1), atlas_w, atlas_h);
+		};
+		const core::Status bound = bind_terrain_program(
+				where, *program, *translation, combo.textures, height_uv, height_pixel, terrain_value, material);
+		if (!bound) {
+			return bound.error();
 		}
 		core::Result<std::string> code = terrain_shader_code(*translation, material);
 		if (!code) {

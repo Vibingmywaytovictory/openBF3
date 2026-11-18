@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -36,6 +37,10 @@ struct SceneTerrainCombo {
 };
 
 std::optional<std::vector<uint8_t>> terrain_combo_layers(std::string_view p_shader, std::string_view p_asset);
+
+SceneTerrainTexture plan_terrain_texture(const core::LevelMount &p_mount, uint32_t p_slot, const std::string &p_texture,
+		const std::function<int32_t(const std::string &)> &p_register, std::map<std::string, bool> &r_srgb,
+		std::vector<std::pair<std::string, std::string>> &r_failures);
 
 std::vector<SceneTerrainCombo> plan_terrain_combos(const core::LevelMount &p_mount, const ShaderLookup &p_shaders,
 		std::string_view p_asset, const std::function<int32_t(const std::string &)> &p_texture,
@@ -74,6 +79,7 @@ struct TerrainMaterial {
 	std::optional<uint32_t> view_slot;
 	std::vector<std::array<float, 4>> constants;
 	std::vector<TerrainTextureBinding> textures;
+	int32_t render_priority = 0;
 };
 
 enum class TerrainChoice : uint8_t {
@@ -115,6 +121,8 @@ struct TerrainLook {
 	uint32_t patch_columns = 0;
 	uint32_t patch_rows = 0;
 	std::vector<uint16_t> patch_material;
+	std::array<float, 4> height_uv{};
+	std::array<float, 4> height_pixel{};
 	TerrainLookStats stats;
 
 	uint32_t material_at(float p_x, float p_z) const;

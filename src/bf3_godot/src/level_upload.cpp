@@ -756,6 +756,7 @@ void LevelUpload::create_terrain_look(const Done &p_done) {
 		rs->shader_set_code(shader, to_godot(m.code));
 		const RID material = rs->material_create();
 		rs->material_set_shader(material, shader);
+		rs->material_set_render_priority(material, m.render_priority);
 		terrain_look_rids_.push_back(material);
 		terrain_look_rids_.push_back(shader);
 		PackedVector4Array constants;

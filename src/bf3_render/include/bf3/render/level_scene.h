@@ -10,6 +10,7 @@
 #include "bf3/render/look_materials.h"
 #include "bf3/render/material_lookup.h"
 #include "bf3/render/mesh_cache.h"
+#include "bf3/render/roads.h"
 #include "bf3/render/terrain_look.h"
 #include "bf3/render/terrain_scatter.h"
 #include "bf3/render/texture_prep.h"
@@ -62,6 +63,7 @@ struct SceneTerrainPlan {
 	std::array<float, 3> color{ 0.36f, 0.33f, 0.27f };
 	std::vector<SceneTerrainCombo> combos;
 	SceneScatterPlan scatter;
+	std::vector<SceneDecalShader> decals;
 };
 struct SceneTerrainOptions {
 	float spacing = 4.0f;
@@ -178,6 +180,7 @@ struct PreparedTerrain {
 	std::string look_error;
 	std::shared_ptr<const TerrainScatter> scatter;
 	std::vector<std::pair<std::string, std::string>> scatter_failures;
+	TerrainDecalStats decals;
 };
 
 core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mount, const LevelScenePlan &p_plan,
