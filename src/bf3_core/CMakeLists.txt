@@ -115,6 +115,11 @@ target_sources(bf3_core PRIVATE
 )
 
 target_sources(bf3_core PRIVATE
+    src/res/terrain_decals.cpp
+    include/bf3/core/res/terrain_decals.h
+)
+
+target_sources(bf3_core PRIVATE
     src/gameplay/ebx_fields.h
     src/gameplay/ebx_fields.cpp
     src/gameplay/weapon_readers.h

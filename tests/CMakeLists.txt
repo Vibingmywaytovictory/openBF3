@@ -100,7 +100,7 @@ target_link_libraries(test_host PRIVATE bf3_host)
 openbf3_test(test_ant test_main.cpp ant_tests.cpp test_support.h)
 target_link_libraries(test_ant PRIVATE bf3_core antdump_lib)
 
-openbf3_test(test_res test_main.cpp res_tests.cpp test_support.h)
+openbf3_test(test_res test_main.cpp res_tests.cpp terrain_decals_tests.cpp test_support.h)
 target_link_libraries(test_res PRIVATE bf3_core)
 
 add_test(NAME core.guard COMMAND test_core --test-suite-exclude=install,containers,fuzz)
@@ -125,6 +125,10 @@ set_tests_properties(core.guard core.formats core.install core.fuzz core.cache s
 set_tests_properties(core.install PROPERTIES TIMEOUT 600)
 set_tests_properties(core.cache_data PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 set_tests_properties(core.res.unit core.res PROPERTIES TIMEOUT 300)
+add_test(NAME core.res.terrain_decals.unit COMMAND test_res --test-suite=res_decals_unit)
+add_test(NAME core.res.terrain_decals COMMAND test_res --test-suite=res_decals)
+set_tests_properties(core.res.terrain_decals PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(core.res.terrain_decals.unit core.res.terrain_decals PROPERTIES TIMEOUT 300)
 
 openbf3_test(test_res_install test_main.cpp res_install_tests.cpp test_support.h)
 target_link_libraries(test_res_install PRIVATE bf3_core)
