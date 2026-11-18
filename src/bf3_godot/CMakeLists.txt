@@ -362,6 +362,10 @@ if(OPENBF3_BUILD_CHECKS)
         src/vehicle_drive_check.cpp
         src/vehicle_drive_check.h
     )
+    target_sources(bf3_godot PRIVATE
+        src/vault_run_check.cpp
+        src/vault_run_check.h
+    )
     target_link_libraries(bf3_godot PRIVATE bf3_sim_harness)
     target_include_directories(bf3_godot PRIVATE ${PROJECT_SOURCE_DIR}/tests)
     target_include_directories(bf3_godot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

@@ -313,6 +313,9 @@ void Bf3LevelSession::game_parse_args() {
 		g.vehicle_drive =
 				std::make_unique<VehicleDriveRun>(user_arg_value("vehicle-shots"), has_user_arg("vehicle-zoom"));
 	}
+	if (has_check_arg("vault-run")) {
+		g.vault_run = std::make_unique<VaultRunCheck>(user_arg_value("vault-shots"));
+	}
 	if (has_check_arg("net-overlay-check")) {
 		g.net_overlay_check = std::make_unique<NetOverlayCheck>(user_arg_value("net-overlay-shots"));
 	}
@@ -1596,6 +1599,18 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			g.finished = true;
 			UtilityFunctions::print(to_godot(std::string("CROSSHAIR WALK: ") + (g.crosshair_walk->exit_code() == 0 ? "PASS" : "FAIL")));
 			finish(g.crosshair_walk->exit_code());
+			return true;
+		}
+	}
+	if (g.vault_run != nullptr && !g.finished) {
+		VaultRunInputs in;
+		in.alive = g.alive;
+		in.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		if (g.vault_run->step(*this, in, p_delta)) {
+			g.finished = true;
+			UtilityFunctions::print(
+					to_godot(std::string("VAULT RUN: ") + (g.vault_run->exit_code() == 0 ? "PASS" : "FAIL")));
+			finish(g.vault_run->exit_code());
 			return true;
 		}
 	}

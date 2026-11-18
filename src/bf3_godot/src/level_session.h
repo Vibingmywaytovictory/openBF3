@@ -139,7 +139,8 @@ public:
 #endif
 
 	bool restart_client(const std::string &p_netsim, uint64_t p_seed, std::string *r_error);
-	bool join_extra_client(std::string *r_error);
+	bool join_extra_client(std::string *r_error, bool p_dev_commands = false);
+	bf3::host::ClientSession *extra_client() const { return extra_client_.get(); }
 
 	bool save_screenshot(const std::string &p_path);
 

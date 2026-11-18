@@ -18,6 +18,7 @@
 #include "net_overlay.h"
 #include "net_overlay_check.h"
 #include "tdm_flow.h"
+#include "vault_run_check.h"
 #include "vehicle_drive_check.h"
 
 #include "bf3/anim/viewmodel_anim.h"
@@ -281,6 +282,7 @@ struct Bf3LevelSession::Game : GameState {
 	std::unique_ptr<CrosshairWalkRun> crosshair_walk;
 	std::unique_ptr<GadgetsDrawRun> gadgets_draw;
 	std::unique_ptr<VehicleDriveRun> vehicle_drive;
+	std::unique_ptr<VaultRunCheck> vault_run;
 	std::unique_ptr<AudioAreasCheck> audio_areas;
 	std::unique_ptr<NetOverlayCheck> net_overlay_check;
 #endif
