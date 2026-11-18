@@ -60,7 +60,8 @@ functional.
 * Scratch folders come only from the test scratch helper (`ScratchDir` or `process_scratch` in `tests/test_scratch.h`,
   `openbf3_scratch_dir` in `tests/test_scratch.cmake`): `%TEMP%\openbf3-tests\<pass>.<name>-<pid>-<n>`, removed at scope or
   process end; `test.scratch.paths` fails any other temp path, and any `${BUILD_DIR}/scratch`, in `tests/`, `tools/` or `src/`. Every row requires the
-  `openbf3_scratch_pass` fixture and carries `OPENBF3_SCRATCH_TAG`, its build directory's pass tag: `test.scratch.before`
+  `openbf3_scratch_pass` fixture and carries `OPENBF3_SCRATCH_TAG`, its build directory's pass tag (applied at the end of
+  `tests/CMakeLists.txt`, so rows appended anywhere get both; `test.scratch.rows` fails a row without them): `test.scratch.before`
   sweeps and lists the temp folder, and `test.scratch.after` fails the ctest run on every folder with its tag that was
   not there before and whose owner is gone (a row killed by a timeout or a crash, a script that failed without
   removing its folder), then removes it. Other processes leave a tagged folder to its pass until it is 6 h old, and

@@ -1567,6 +1567,8 @@ openbf3_check_rows()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME hygiene.rules COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/check_hygiene.py" "${CMAKE_SOURCE_DIR}")
 set_tests_properties(hygiene.rules PROPERTIES TIMEOUT 120 LABELS "unit")
+add_test(NAME test.scratch.rows COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/test_scratch_rows.py" "${CMAKE_CTEST_COMMAND}" "${CMAKE_BINARY_DIR}")
+set_tests_properties(test.scratch.rows PROPERTIES TIMEOUT 60 LABELS "unit")
 
 openbf3_test(test_ai_port test_main.cpp ai_port_tests.cpp ai_bot_fake.h test_support.h)
 target_link_libraries(test_ai_port PRIVATE bf3_ai)
@@ -1645,18 +1647,21 @@ add_test(NAME audio.vehicles.drive COMMAND test_audio_vehicle --test-suite=audio
 add_test(NAME audio.vehicles.weapons COMMAND test_audio_vehicle --test-suite=audio-vehicles-weapons)
 set_tests_properties(core.audio.vehicles audio.vehicles.drive audio.vehicles.weapons PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 
-add_test(NAME test.scratch.before COMMAND test_scratch_tests --test-suite=test-scratch-pass-before)
-add_test(NAME test.scratch.after COMMAND test_scratch_tests --test-suite=test-scratch-pass-after)
-set_tests_properties(test.scratch.before PROPERTIES FIXTURES_SETUP openbf3_scratch_pass TIMEOUT 60 LABELS "unit"
-    ENVIRONMENT "OPENBF3_SCRATCH_LISTING=${CMAKE_BINARY_DIR}/scratch-listing.txt")
-set_tests_properties(test.scratch.after PROPERTIES FIXTURES_CLEANUP openbf3_scratch_pass TIMEOUT 60 LABELS "unit"
-    ENVIRONMENT "OPENBF3_SCRATCH_LISTING=${CMAKE_BINARY_DIR}/scratch-listing.txt")
-string(SHA1 _openbf3_scratch_tag "${CMAKE_BINARY_DIR}")
-string(SUBSTRING "${_openbf3_scratch_tag}" 0 8 _openbf3_scratch_tag)
-get_property(_openbf3_pass_rows DIRECTORY PROPERTY TESTS)
-set_property(TEST ${_openbf3_pass_rows} APPEND PROPERTY ENVIRONMENT "OPENBF3_SCRATCH_TAG=${_openbf3_scratch_tag}")
-list(REMOVE_ITEM _openbf3_pass_rows test.scratch.before test.scratch.after)
-set_property(TEST ${_openbf3_pass_rows} APPEND PROPERTY FIXTURES_REQUIRED openbf3_scratch_pass)
+function(openbf3_scratch_pass_rows)
+    add_test(NAME test.scratch.before COMMAND test_scratch_tests --test-suite=test-scratch-pass-before)
+    add_test(NAME test.scratch.after COMMAND test_scratch_tests --test-suite=test-scratch-pass-after)
+    set_tests_properties(test.scratch.before PROPERTIES FIXTURES_SETUP openbf3_scratch_pass TIMEOUT 60 LABELS "unit"
+        ENVIRONMENT "OPENBF3_SCRATCH_LISTING=${CMAKE_BINARY_DIR}/scratch-listing.txt")
+    set_tests_properties(test.scratch.after PROPERTIES FIXTURES_CLEANUP openbf3_scratch_pass TIMEOUT 60 LABELS "unit"
+        ENVIRONMENT "OPENBF3_SCRATCH_LISTING=${CMAKE_BINARY_DIR}/scratch-listing.txt")
+    string(SHA1 tag "${CMAKE_BINARY_DIR}")
+    string(SUBSTRING "${tag}" 0 8 tag)
+    get_property(rows DIRECTORY PROPERTY TESTS)
+    set_property(TEST ${rows} APPEND PROPERTY ENVIRONMENT "OPENBF3_SCRATCH_TAG=${tag}")
+    list(REMOVE_ITEM rows test.scratch.before test.scratch.after)
+    set_property(TEST ${rows} APPEND PROPERTY FIXTURES_REQUIRED openbf3_scratch_pass)
+endfunction()
+cmake_language(DEFER CALL openbf3_scratch_pass_rows)
 
 if(OPENBF3_ASAN)
     get_filename_component(_openbf3_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
