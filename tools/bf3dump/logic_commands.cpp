@@ -236,7 +236,9 @@ int cmd_ports(const LogicGraph &p_graph) {
 	const auto type_of = [&](uint32_t p_node) { return std::string(p_graph.text(p_graph.nodes()[p_node].type_name)); };
 	const auto count = [&](std::span<const LogicEdge> p_list, const char *p_in, const char *p_out) {
 		for (const LogicEdge &e : p_list) {
-			++usage[type_of(e.source)][std::string(p_out) + " " + port_name(e.source_port)];
+			if (e.source != kNoLogicIndex) {
+				++usage[type_of(e.source)][std::string(p_out) + " " + port_name(e.source_port)];
+			}
 			if (e.target != kNoLogicIndex) {
 				++usage[type_of(e.target)][std::string(p_in) + " " + port_name(e.target_port)];
 			}

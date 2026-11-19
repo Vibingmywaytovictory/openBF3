@@ -506,9 +506,11 @@ Result<LogicGraph> LogicGraphBuild::finalize(GraphParts &&r_parts, const LogicGr
 			return make_error("logic graph: input node " + std::to_string(node) + " out of range");
 		}
 	}
-	const auto check_edges = [&](const std::vector<LogicEdge> &p_list, const char *p_kind, bool p_target_optional) -> Status {
+	const auto check_edges = [&](const std::vector<LogicEdge> &p_list, const char *p_kind,
+									 bool p_ends_optional) -> Status {
 		for (const LogicEdge &e : p_list) {
-			if (e.source >= n || (e.target >= n && !(p_target_optional && e.target == kNoLogicIndex))) {
+			const bool source_ok = e.source < n || (p_ends_optional && e.source == kNoLogicIndex);
+			if (!source_ok || (e.target >= n && !(p_ends_optional && e.target == kNoLogicIndex))) {
 				return make_error(std::string("logic graph: ") + p_kind + " edge end out of range");
 			}
 		}
@@ -580,7 +582,9 @@ Result<LogicGraph> LogicGraphBuild::finalize(GraphParts &&r_parts, const LogicGr
 	csr(r_parts.links, &LogicNode::link_out_begin, &LogicNode::link_out_count);
 	for (const std::vector<LogicEdge> *list : { &r_parts.events, &r_parts.properties, &r_parts.links, &r_parts.networked }) {
 		for (const LogicEdge &e : *list) {
-			g.nodes_[e.source].flags |= kLogicNodeConnected;
+			if (e.source != kNoLogicIndex) {
+				g.nodes_[e.source].flags |= kLogicNodeConnected;
+			}
 			if (e.target != kNoLogicIndex) {
 				g.nodes_[e.target].flags |= kLogicNodeConnected;
 			}
@@ -1291,7 +1295,8 @@ private:
 						st.dropped_unbound_events += list.kind == EdgeKind::Event;
 						continue;
 					}
-					if (from->kind == EndKind::Absent) {
+					if (from->kind == EndKind::Absent &&
+							!(list.kind == EdgeKind::Event && options_.side == LogicSide::Client)) {
 						++st.dropped_realm;
 						continue;
 					}
@@ -1310,7 +1315,8 @@ private:
 	Status emit(EdgeKind p_kind, const Hop &p_first, const Hop &p_last) {
 		BF3_TRY(emit_charge());
 		LogicGraphStats &st = parts_.stats;
-		const uint32_t source = p_first.source.index;
+		const bool remote = p_first.source.kind == EndKind::Absent;
+		const uint32_t source = remote ? kNoLogicIndex : p_first.source.index;
 		const bool present = p_last.target.kind == EndKind::Real;
 		const uint32_t target = present ? p_last.target.index : kNoLogicIndex;
 		if (p_kind != EdgeKind::Event) {
@@ -1332,8 +1338,12 @@ private:
 		}
 
 		const bool fire_only = networked && (options_.side == LogicSide::Client || tt == LogicEventTarget::NetworkedClient || !present);
-		if (fire_only) {
+		if (fire_only && !(remote && !present)) {
 			parts_.add_edge(parts_.networked, source, p_first.source_port, target, p_last.target_port, tt, true, p_last.connection);
+			return Status::success();
+		}
+		if (remote) {
+			++st.dropped_realm;
 			return Status::success();
 		}
 		if (!delivered) {
@@ -1387,7 +1397,7 @@ private:
 	Status collapse(EdgeKind p_kind) {
 		KindGraph &kind = kinds_[static_cast<size_t>(p_kind)];
 		for (const Hop &hop : kind.hops) {
-			if (hop.source.kind != EndKind::Real) {
+			if (hop.source.kind == EndKind::Virtual) {
 				continue;
 			}
 			BF3_TRY(budget_.charge(1));

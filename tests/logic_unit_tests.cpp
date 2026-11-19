@@ -756,6 +756,29 @@ TEST_SUITE("logic-unit") {
 		CHECK(std::find(client_ids.begin(), client_ids.end(), g->networked_edges()[0].connection) != client_ids.end());
 	}
 
+	TEST_CASE("logic: a server-only source's networked event keeps its client target in the client graph") {
+		LogicSyn syn;
+		const uint32_t server = syn.entity(0, "EventSplitterEntityData", LogicRealm::Server);
+		const uint32_t client = syn.entity(0, "EventGateEntityData", LogicRealm::Client);
+		syn.event(0, server, port::kSplitterOut, client, port::kIn, LogicEventTarget::NetworkedClient);
+		syn.event(0, server, port::kSplitterOut, client, port::kOpen, LogicEventTarget::Server);
+		EbxDb db;
+		Result<LogicGraph> g = syn.build(db);
+		REQUIRE_MESSAGE(g.ok(), (g.ok() ? std::string() : g.error().message));
+		REQUIRE(g->networked_edges().size() == 1);
+		EbxDb client_db;
+		Result<LogicGraph> c = syn.build(client_db, LogicSide::Client);
+		REQUIRE_MESSAGE(c.ok(), (c.ok() ? std::string() : c.error().message));
+		REQUIRE(c->networked_edges().size() == 1);
+		const LogicEdge &e = c->networked_edges()[0];
+		CHECK(e.source == kNoLogicIndex);
+		CHECK(e.target == node_of(*c, syn.s, client));
+		CHECK(e.target_port == port::kIn);
+		CHECK(e.connection == g->networked_edges()[0].connection);
+		CHECK(c->event_edges().empty());
+		CHECK(c->stats().dropped_realm == 1);
+	}
+
 	TEST_CASE("logic: a diamond through two interfaces gives 2 edges and duplicate_paths 1") {
 		LogicSyn syn;
 		const uint32_t p = syn.add_prefab();

@@ -46,6 +46,8 @@ struct ClientLogicWorld {
 };
 core::Result<ClientLogicWorld> build_client_logic(const core::level::LoadedLevel &p_level);
 
+bool logic_starts_effects_only(const core::gameplay::LogicGraph &p_graph, uint32_t p_node);
+
 struct UiGameState {
 	bool joined = false;
 	net::MatchPhase phase = net::MatchPhase::Loading;

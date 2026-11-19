@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <set>
 
 namespace bf3::host {
@@ -31,6 +32,33 @@ constexpr size_t kMaxTimers = 4096;
 std::string leaf_key(std::string_view p_category, int32_t p_key) {
 	return ui::ui_data_category_leaf(p_category) + "#" + std::to_string(p_key);
 }
+
+}
+
+bool logic_starts_effects_only(const gp::LogicGraph &p_graph, uint32_t p_node) {
+	using T = gp::LogicTypeId;
+	constexpr T kPresentation[] = { T::Camera, T::TargetCamera, T::PlayerCamera, T::Fade, T::MapMarker,
+		T::VisualEnvironment, T::LogicVisualEnvironment, T::UIGraph, T::UIEndOfRound, T::UIMessageTrigger, T::Message,
+		T::UISetValue };
+	std::vector<uint32_t> open{ p_node };
+	std::set<uint32_t> seen;
+	bool effect = false;
+	while (!open.empty() && seen.size() < kMaxTimers) {
+		const uint32_t n = open.back();
+		open.pop_back();
+		if (n >= p_graph.nodes().size() || !seen.insert(n).second) {
+			continue;
+		}
+		const T type = p_graph.nodes()[n].type;
+		if (std::find(std::begin(kPresentation), std::end(kPresentation), type) != std::end(kPresentation)) {
+			return false;
+		}
+		effect = effect || type == T::Effect;
+		for (const gp::LogicEdge &e : p_graph.events_from(n)) {
+			open.push_back(e.target);
+		}
+	}
+	return effect;
 }
 
 std::string_view ui_game_logic_scope(std::string_view p_mode) {
@@ -189,7 +217,8 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 	}
 	watch_ports_.assign(ports.begin(), ports.end());
 	for (const gp::LogicEdge &e : graph_->networked_edges()) {
-		if (e.target == gp::kNoLogicIndex) {
+		if (e.target == gp::kNoLogicIndex ||
+				(e.source == gp::kNoLogicIndex && !logic_starts_effects_only(*graph_, e.target))) {
 			continue;
 		}
 		std::vector<std::pair<uint32_t, int32_t>> &targets = networked_targets_[e.connection];
