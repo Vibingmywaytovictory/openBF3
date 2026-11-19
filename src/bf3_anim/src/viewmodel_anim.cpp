@@ -1,6 +1,7 @@
 #include "bf3/anim/viewmodel_anim.h"
 
 #include "bf3/anim/layers.h"
+#include "bf3/anim/vault_anim.h"
 #include "bf3/core/math.h"
 #include "bf3/core/util/text.h"
 
@@ -450,6 +451,8 @@ struct ViewmodelAnimator::Impl {
 	SpringState sway_x, sway_y, bob_amp, kick_back, kick_pitch, cam_pitch, cam_yaw;
 	float sway_tx = 0, sway_ty = 0, bob_target = 0;
 	std::unique_ptr<VmDeltaLoco, VmDeltaLocoDeleter> delta_loco;
+	VmVaultRun vault_run;
+	bool has_vault = false;
 	HandReach hand_reach, tagged_reach;
 	std::vector<Xform> held_model, reach_model;
 
@@ -913,7 +916,10 @@ struct ViewmodelAnimator::Impl {
 		if (held) {
 			model_pose(rig, r_pose, held_model);
 		}
-		const bool loco_applied = delta_loco && vm_loco_apply(*delta_loco, p_input, sprint_w, ads, dt, tuning.sprint_blend_seconds, r_pose, r_out);
+		const bool vault_applied =
+				has_vault && vm_vault_apply(vault_run, rig, t, p_input.vault, p_input.vault_seconds, r_pose, r_out);
+		const bool loco_applied = !vault_applied && delta_loco &&
+				vm_loco_apply(*delta_loco, p_input, sprint_w, ads, dt, tuning.sprint_blend_seconds, r_pose, r_out);
 		if (held && loco_applied && (r_out.loco_run_weight > 0.0f || r_out.loco_sprint_weight > 0.0f)) {
 			tag_reach(t, ads);
 			reach_hands(rig, tagged_reach, held_model, r_pose, reach_model);
@@ -925,7 +931,9 @@ struct ViewmodelAnimator::Impl {
 		step_spring(tuning.sway, sway_tx, dt, sway_x);
 		step_spring(tuning.sway, sway_ty, dt, sway_y);
 		const float move = p_input.grounded ? std::min(speed / 4.0f, 1.5f) : 0.0f;
-		bob_target = loco_applied ? 0.0f : tuning.bob_amplitude * move * (1.0f + (tuning.bob_ads_scale - 1.0f) * ads);
+		bob_target = loco_applied || vault_applied
+				? 0.0f
+				: tuning.bob_amplitude * move * (1.0f + (tuning.bob_ads_scale - 1.0f) * ads);
 		step_spring(tuning.bob, bob_target, dt, bob_amp);
 		bob_phase += 2.0 * kPi * double(tuning.bob_frequency) * double(std::max(move, 0.0f)) * double(dt);
 		bob_phase = std::fmod(bob_phase, 2.0 * kPi);
@@ -987,6 +995,7 @@ struct ViewmodelAnimator::Impl {
 		if (delta_loco) {
 			vm_loco_reset(*delta_loco);
 		}
+		vault_run.kind = kNoVaultAnim;
 	}
 };
 
@@ -998,6 +1007,10 @@ ViewmodelAnimator::~ViewmodelAnimator() = default;
 void ViewmodelAnimator::step(const ViewmodelFrameInput &p_input, std::span<const VmCue> p_cues, LocalPose &r_pose, ViewmodelOutput &r_out) {
 	r_out.event_tag_count = 0;
 	r_out.loco_tagged = false;
+	r_out.vault_clip = kNoVaultAnim;
+	r_out.vault_frame = 0.0f;
+	r_out.vault_seconds = 0.0f;
+	r_out.camera_offset = xform_identity();
 	impl_->step(p_input, p_cues, r_pose, r_out);
 }
 
@@ -1158,6 +1171,12 @@ bool VmThrowFlow::valid() const {
 	return ok(release_from_s) && ok(release_until_s) && ok(release_in_s) && ok(hold_from_s) && ok(release_end_s) &&
 			std::isfinite(hold_loop_s) && hold_loop_s > 0.0f && release_until_s >= release_from_s &&
 			release_end_s > release_in_s;
+}
+
+void ViewmodelAnimator::set_vault(const VmVault &p_vault) {
+	Impl &m = *impl_;
+	vm_vault_set(m.vault_run, m.rig, p_vault);
+	m.has_vault = m.vault_run.ok[0] || m.vault_run.ok[1] || m.vault_run.ok[2];
 }
 
 void ViewmodelAnimator::set_hand_reach(const HandReach &p_reach) {

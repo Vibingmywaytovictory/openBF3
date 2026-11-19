@@ -220,4 +220,58 @@ core::Result<CrowdVaultClip> load_crowd_vault(const CrowdClipSet &p_set, const A
 	return out;
 }
 
+void vm_vault_set(VmVaultRun &r_run, const Skeleton &p_rig, const VmVault &p_vault) {
+	r_run.vault = p_vault;
+	r_run.kind = kNoVaultAnim;
+	for (size_t k = 0; k < kVaultAnimKinds; ++k) {
+		const VmClipRef &c = p_vault.clips[k];
+		const bool usable = c.clip != nullptr && c.tracks != nullptr && c.clip->consistent() &&
+				c.tracks->end_frame > 0 && p_vault.play[k].seconds() > 0.0f;
+		r_run.masks[k] = usable ? mask_from_tracks(p_rig, *c.tracks) : BoneMask{};
+		r_run.ok[k] = usable && r_run.masks[k].size() == p_rig.size();
+	}
+}
+
+bool vm_vault_apply(VmVaultRun &r_run, const Skeleton &p_rig, double p_time_s, uint8_t p_kind, float p_seconds,
+		LocalPose &r_pose, ViewmodelOutput &r_out) {
+	r_out.vault_clip = kNoVaultAnim;
+	r_out.vault_frame = 0.0f;
+	r_out.vault_seconds = 0.0f;
+	r_out.camera_offset = xform_identity();
+	if (p_kind < kVaultAnimKinds && core::finite(p_seconds) && p_seconds >= 0.0f && std::isfinite(p_time_s)) {
+		r_run.kind = p_kind;
+		r_run.start_s = p_time_s - double(p_seconds);
+	}
+	if (r_run.kind >= kVaultAnimKinds) {
+		return false;
+	}
+	const size_t k = r_run.kind;
+	const double age = p_time_s - r_run.start_s;
+	if (!r_run.ok[k] || !(age >= 0.0) || age >= double(r_run.vault.play[k].seconds())) {
+		r_run.kind = kNoVaultAnim;
+		return false;
+	}
+	const VmClipRef &c = r_run.vault.clips[k];
+	const float frame = std::min(r_run.vault.play[k].frame_at(float(age)), float(c.tracks->end_frame));
+	r_run.delta = identity_pose(p_rig);
+	if (!core::ant::sample_clip(*c.clip, frame, r_run.scratch)) {
+		r_run.kind = kNoVaultAnim;
+		return false;
+	}
+	apply_clip_pose(*c.tracks, r_run.scratch, r_run.delta);
+	const int32_t cam = r_run.vault.camera_joint;
+	const bool camera = cam >= 0 && size_t(cam) < p_rig.size();
+	if (camera) {
+		model_pose(p_rig, r_pose, r_run.before);
+	}
+	apply_additive(r_pose, r_run.delta, r_run.masks[k], 1.0f, AdditiveOrder::LocalPost);
+	if (camera) {
+		model_pose(p_rig, r_pose, r_run.after);
+		r_out.camera_offset = xform_mul(xform_inverse(r_run.before[size_t(cam)]), r_run.after[size_t(cam)]);
+	}
+	r_out.vault_clip = uint8_t(k);
+	r_out.vault_frame = frame;
+	r_out.vault_seconds = float(age);
+	return true;
+}
 }

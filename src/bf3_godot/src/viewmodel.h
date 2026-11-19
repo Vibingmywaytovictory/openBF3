@@ -49,6 +49,8 @@ struct ViewmodelFrame {
 	double yaw = 0, pitch = 0;
 	float view_yaw_rate = 0, view_pitch_rate = 0;
 	bool switch_back = false;
+	uint8_t vault = bf3::anim::kNoVaultAnim;
+	float vault_seconds = 0;
 };
 
 struct SightSurfaces {

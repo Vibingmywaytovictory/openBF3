@@ -70,4 +70,24 @@ struct CrowdVaultClip {
 core::Result<CrowdVaultClip> load_crowd_vault(const CrowdClipSet &p_set, const core::ant::AntLibrary &p_library,
 		const VaultControllers &p_controllers, size_t p_kind, const ChooserIndices &p_indices);
 
+struct VmVault {
+	std::array<VmClipRef, kVaultAnimKinds> clips{};
+	std::array<VaultPlay, kVaultAnimKinds> play{};
+	int32_t camera_joint = -1;
+};
+
+struct VmVaultRun {
+	VmVault vault;
+	std::array<BoneMask, kVaultAnimKinds> masks;
+	std::array<bool, kVaultAnimKinds> ok{};
+	uint8_t kind = kNoVaultAnim;
+	double start_s = 0.0;
+	LocalPose delta;
+	core::ant::ClipPose scratch;
+	std::vector<Xform> before, after;
+};
+
+void vm_vault_set(VmVaultRun &r_run, const Skeleton &p_rig, const VmVault &p_vault);
+bool vm_vault_apply(VmVaultRun &r_run, const Skeleton &p_rig, double p_time_s, uint8_t p_kind, float p_seconds,
+		LocalPose &r_pose, ViewmodelOutput &r_out);
 }

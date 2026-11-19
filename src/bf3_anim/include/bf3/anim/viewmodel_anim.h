@@ -119,6 +119,8 @@ struct VmCue {
 };
 const char *vm_cue_name(VmCue::Kind p_kind);
 
+inline constexpr uint8_t kNoVaultAnim = 0xFF;
+
 struct ViewmodelFrameInput {
 	double time_s = 0;
 	float dt = 0;
@@ -130,10 +132,11 @@ struct ViewmodelFrameInput {
 	bool sprinting = false;
 	float view_yaw_rate = 0, view_pitch_rate = 0;
 	bool switch_back = false;
+	uint8_t vault = kNoVaultAnim;
+	float vault_seconds = 0;
 };
 
 inline constexpr size_t kMaxVmStepEventTags = 4;
-inline constexpr uint8_t kNoVaultAnim = 0xFF;
 
 struct ViewmodelOutput {
 	Xform weapon_offset;
@@ -163,6 +166,7 @@ struct ViewmodelOutput {
 
 struct VmLocomotion;
 struct VmThrowFlow;
+struct VmVault;
 
 class ViewmodelAnimator {
 public:
@@ -183,6 +187,8 @@ public:
 	void set_throw_flow(const VmThrowFlow &p_flow);
 
 	void set_hand_reach(const HandReach &p_reach);
+
+	void set_vault(const VmVault &p_vault);
 
 private:
 	struct Impl;

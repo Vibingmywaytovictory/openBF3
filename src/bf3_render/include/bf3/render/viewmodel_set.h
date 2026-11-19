@@ -162,6 +162,7 @@ struct ViewmodelLight {
 };
 
 struct ViewmodelLocomotionClips;
+struct ViewmodelVaultClips;
 
 struct ViewmodelItem {
 	std::string unlock;
@@ -191,6 +192,7 @@ struct ViewmodelItem {
 	std::optional<ViewmodelSight> sight;
 	uint32_t hidden_surfaces = 0;
 	std::shared_ptr<const ViewmodelLocomotionClips> locomotion;
+	std::shared_ptr<const ViewmodelVaultClips> vault;
 	anim::VmThrowFlow throw_flow;
 	std::string throw_flow_name;
 };
@@ -322,6 +324,9 @@ struct ViewmodelLocomotionClips {
 
 void load_viewmodel_locomotion(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, uint32_t p_ant_ref, ViewmodelItem &r_item,
 		std::vector<std::string> &r_notes);
+
+core::Status load_route_clip(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
+		const anim::AntClipRoute &p_route, ViewmodelClip &r_clip);
 
 anim::VmLocomotion viewmodel_locomotion(const ViewmodelItem &p_item);
 

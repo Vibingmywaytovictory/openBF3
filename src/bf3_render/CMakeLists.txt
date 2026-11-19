@@ -117,3 +117,8 @@ target_sources(bf3_render PRIVATE
     include/bf3/render/surface_decals.h
     src/surface_decals.cpp
 )
+
+target_sources(bf3_render PRIVATE
+    include/bf3/render/viewmodel_vault.h
+    src/viewmodel_vault.cpp
+)

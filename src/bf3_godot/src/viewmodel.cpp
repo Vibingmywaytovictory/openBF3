@@ -6,6 +6,7 @@
 
 #include "bf3/host/presentation_events.h"
 #include "bf3/host/presentation_weapon.h"
+#include "bf3/render/viewmodel_vault.h"
 #include "bf3/sim/weapons/sim_time.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
@@ -503,6 +504,7 @@ void Bf3Viewmodel::select_item(int p_index) {
 		animator_->set_locomotion(bf3::render::viewmodel_locomotion(*n.item));
 	}
 	animator_->set_throw_flow(n.item->throw_flow);
+	animator_->set_vault(bf3::render::viewmodel_vault(set_->rig, *n.item));
 	animator_->set_hand_reach(set_->hand_reach);
 	ads_params_ = bf3::render::viewmodel_ads_params(*n.item, tuning_);
 	viewmodel_fov_ = -1;
@@ -574,6 +576,8 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	in.view_yaw_rate = p_frame.view_yaw_rate;
 	in.view_pitch_rate = p_frame.view_pitch_rate;
 	in.switch_back = p_frame.switch_back;
+	in.vault = p_frame.vault;
+	in.vault_seconds = p_frame.vault_seconds;
 	animator_->step(in, p_cues, pose_, output_);
 	bf3::anim::model_pose(set_->rig, pose_, model_);
 
@@ -588,9 +592,13 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	fx.shake_roll_rad = p_frame.shake_roll_rad;
 	apply_view_effects(p_camera, p_frame.eye, p_frame.yaw, p_frame.pitch, fx);
 
+	const Transform3D turn(Basis(Vector3(0, 1, 0), real_t(Math::PI)), Vector3());
+	if (p_camera != nullptr && output_.vault_clip != bf3::anim::kNoVaultAnim) {
+		p_camera->set_global_transform(p_camera->get_global_transform() * turn * xform_to_godot(output_.camera_offset) *
+				turn.affine_inverse());
+	}
 	const Transform3D cam = p_camera ? p_camera->get_global_transform() : Transform3D();
 	const Transform3D joint = xform_to_godot(model_[size_t(camera_joint_)]);
-	const Transform3D turn(Basis(Vector3(0, 1, 0), real_t(Math::PI)), Vector3());
 	Transform3D sight;
 	if (const std::optional<bf3::render::ViewmodelSight> &s = items_[size_t(item_)].item->sight) {
 		sight.origin = Vector3(-s->at_zoom_pose.x, -s->at_zoom_pose.y, 0.0f) * ads_frame_.blend;

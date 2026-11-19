@@ -1,4 +1,5 @@
 #include "bf3/render/viewmodel_set.h"
+#include "bf3/render/viewmodel_vault.h"
 
 #include "bf3/anim/crowd_clips.h"
 #include "bf3/core/ant/ant_install_source.h"
@@ -754,6 +755,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 	}
 	const core::EbxLibrary &lib = *p_sources.ebx;
 	const core::ant::AntLibrary &ant = *p_sources.library;
+	const core::Result<anim::VaultControllers> vault = anim::find_vault_controllers(ant);
 	auto set = std::make_unique<ViewmodelSet>();
 	set->library = p_sources.library;
 
@@ -947,6 +949,9 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		}
 		if (locomotion_ant_ref && *locomotion_ant_ref >= 0 && *locomotion_ant_ref <= int64_t(UINT32_MAX)) {
 			load_viewmodel_locomotion(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
+			if (vault) {
+				load_viewmodel_vault(ant, set->rig, *vault, uint32_t(*locomotion_ant_ref), item, set->notes);
+			}
 			if (item.kind == ViewmodelItemKind::Gun && item.clips[size_t(Role::Fire)].source == Source::Missing &&
 					item.clips[size_t(Role::FireSingle)].source == Source::Missing) {
 				load_viewmodel_chooser_fire(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
@@ -1652,6 +1657,8 @@ float route_tick_frames(const anim::AntClipRoute &p_route) {
 	return std::isfinite(p_route.fps_scale) && p_route.fps_scale > 0.0f ? p_route.fps_scale : 0.5f;
 }
 
+}
+
 core::Status load_route_clip(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
 		const anim::AntClipRoute &p_route, ViewmodelClip &r_clip) {
 	const core::ant::AntPackage *sp = p_library.static_package();
@@ -1674,6 +1681,8 @@ core::Status load_route_clip(const core::ant::AntLibrary &p_library, const anim:
 	r_clip = std::move(clip);
 	return core::Status::success();
 }
+
+namespace {
 
 void load_delta_clip(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig, std::string_view p_chooser,
 		const anim::ChooserIndices &p_indices, const std::string &p_where, ViewmodelClip &r_clip, float &r_start,
