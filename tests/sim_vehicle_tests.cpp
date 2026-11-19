@@ -1124,20 +1124,21 @@ TEST_SUITE("sim-vehicle-unit") {
 			}
 			return p;
 		};
+		const float ram_lane_x = 6.5f;
 		std::array<VehicleCourse, 3> group;
 
 		group[0].kind = VehicleCourseKind::SlopeIdle;
 		group[0].found = true;
-		group[0].a = { 2.5f, ground_y(2.5f, 13.0f), 13.0f };
+		group[0].a = { ram_lane_x, ground_y(ram_lane_x, 13.0f), 13.0f };
 		group[0].b = group[0].a;
-		group[0].start = at(2.5f, 13.0f, true);
+		group[0].start = at(ram_lane_x, 13.0f, true);
 		group[0].slope_degrees = 4.0f;
 
 		group[1].kind = VehicleCourseKind::Collision;
 		group[1].found = true;
-		group[1].a = { 2.5f, ground_y(2.5f, -15.0f), -15.0f };
-		group[1].b = { 2.5f, ground_y(2.5f, 11.8f), 11.8f };
-		group[1].start = at(2.5f, -15.0f, false);
+		group[1].a = { ram_lane_x, ground_y(ram_lane_x, -15.0f), -15.0f };
+		group[1].b = { ram_lane_x, ground_y(ram_lane_x, 11.8f), 11.8f };
+		group[1].start = at(ram_lane_x, -15.0f, false);
 		group[1].feature = 1.5f;
 
 		group[2].kind = VehicleCourseKind::Slalom;
