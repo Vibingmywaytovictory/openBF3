@@ -80,6 +80,8 @@ struct ScatterHeights {
 	float metres(uint32_t p_x, uint32_t p_z) const { return base + float(samples[size_t(p_z) * width + p_x]) * step; }
 	std::optional<float> surface(float p_x, float p_z) const;
 	std::optional<std::array<float, 3>> normal(float p_x, float p_z) const;
+	float drop_under(const std::array<std::array<float, 2>, 4> &p_quad, const std::array<float, 3> &p_point,
+			const std::array<float, 3> &p_normal) const;
 	float bilinear(float p_u, float p_v) const;
 };
 
@@ -156,6 +158,8 @@ struct ScatterInstance {
 
 std::array<float, 12> scatter_instance_rows(const ScatterInstance &p_instance);
 
+using ScatterFootprint = std::optional<std::array<float, 4>>;
+
 struct ScatterBatch {
 	uint32_t type = 0;
 	uint32_t candidates = 0;
@@ -202,7 +206,8 @@ public:
 	std::array<float, 4> cell_rect(const ScatterCellId &p_cell) const;
 	std::vector<ScatterCellId> cells_within(uint8_t p_level, float p_x, float p_z, float p_distance) const;
 
-	std::vector<ScatterBatch> generate(const ScatterCellId &p_cell, ScatterCellStats *r_stats = nullptr) const;
+	std::vector<ScatterBatch> generate(const ScatterCellId &p_cell, ScatterCellStats *r_stats = nullptr,
+			std::span<const ScatterFootprint> p_footprints = {}) const;
 	std::optional<std::array<float, 2>> mask_scale(uint32_t p_type, float p_x, float p_z) const;
 
 	const core::res::TerrainMaskField &masks() const { return masks_; }

@@ -41,7 +41,7 @@ TerrainScatterDraw::~TerrainScatterDraw() {
 }
 
 void TerrainScatterDraw::begin(std::string p_name, std::shared_ptr<const render::TerrainScatter> p_scatter,
-		const RID &p_scenario, const Transform3D &p_terrain, MeshOf p_mesh) {
+		const RID &p_scenario, const Transform3D &p_terrain, MeshOf p_mesh, const BoundsOf &p_bounds) {
 	free_all();
 	if (p_scatter == nullptr || p_scatter->levels().empty()) {
 		return;
@@ -51,6 +51,20 @@ void TerrainScatterDraw::begin(std::string p_name, std::shared_ptr<const render:
 	scenario_ = p_scenario;
 	terrain_ = p_terrain;
 	mesh_ = std::move(p_mesh);
+	std::vector<render::ScatterFootprint> footprints;
+	for (const render::ScatterType &t : scatter_->types()) {
+		if (t.mesh < 0 || t.upright || !p_bounds) {
+			continue;
+		}
+		if (footprints.size() <= size_t(t.mesh)) {
+			footprints.resize(size_t(t.mesh) + 1);
+		}
+		if (const std::optional<AABB> box = p_bounds(uint32_t(t.mesh))) {
+			footprints[size_t(t.mesh)] = std::array<float, 4>{ float(box->position.x), float(box->position.z),
+				float(box->position.x + box->size.x), float(box->position.z + box->size.z) };
+		}
+	}
+	footprints_ = std::make_shared<const std::vector<render::ScatterFootprint>>(std::move(footprints));
 	jobs_ = std::make_unique<bf3::core::JobQueue>("scatter");
 	size_t placed = 0;
 	for (const render::ScatterType &t : scatter_->types()) {
@@ -165,17 +179,18 @@ void TerrainScatterDraw::update(const Vector3 &p_camera, double p_budget_ms) {
 			cell.id = id;
 			cell.cancelled = std::make_shared<std::atomic<bool>>(false);
 			const std::shared_ptr<const render::TerrainScatter> scatter = scatter_;
+			const std::shared_ptr<const std::vector<render::ScatterFootprint>> footprints = footprints_;
 			const std::shared_ptr<std::atomic<bool>> cancelled = cell.cancelled;
 			const std::shared_ptr<std::mutex> mutex = ready_mutex_;
 			const std::shared_ptr<std::vector<Result>> ready = ready_;
-			const bool posted = jobs_->post([scatter, cancelled, mutex, ready, id]() {
+			const bool posted = jobs_->post([scatter, footprints, cancelled, mutex, ready, id]() {
 				if (cancelled->load(std::memory_order_acquire)) {
 					return;
 				}
 				const double begin = seconds_now();
 				Result result;
 				result.id = id;
-				result.batches = scatter->generate(id, &result.stats);
+				result.batches = scatter->generate(id, &result.stats, *footprints);
 				result.seconds = seconds_now() - begin;
 				std::lock_guard lock(*mutex);
 				ready->push_back(std::move(result));

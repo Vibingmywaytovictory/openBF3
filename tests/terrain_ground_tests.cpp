@@ -216,7 +216,7 @@ TEST_SUITE("render-terrain-detail") {
 }
 
 TEST_SUITE("render-scatter-ground") {
-	TEST_CASE("scatter: every rock MP_007 scatters near the cameras rests on the slope under it as on flat ground") {
+	TEST_CASE("scatter: every rock MP_007 scatters near the cameras rests on the drawn terrain as on flat ground") {
 		const Caspian *c = caspian();
 		if (c == nullptr) {
 			return;
@@ -250,6 +250,13 @@ TEST_SUITE("render-scatter-ground") {
 				}
 			}
 			REQUIRE(!local.empty());
+			std::vector<render::ScatterFootprint> footprints(size_t(type.mesh) + 1);
+			std::array<float, 4> box{ INFINITY, INFINITY, -INFINITY, -INFINITY };
+			for (size_t v = 0; v + 2 < local.size(); v += 3) {
+				box = { std::fmin(box[0], local[v]), std::fmin(box[1], local[v + 2]), std::fmax(box[2], local[v]),
+					std::fmax(box[3], local[v + 2]) };
+			}
+			footprints[size_t(type.mesh)] = box;
 			std::map<std::tuple<int32_t, int32_t>, bool> seen;
 			uint64_t type_instances = 0, type_floating = 0;
 			float type_worst = -INFINITY, slope_at_worst = 0.0f, flat_at_worst = 0.0f, type_bend = 0.0f,
@@ -261,13 +268,13 @@ TEST_SUITE("render-scatter-ground") {
 					if (!seen.emplace(std::make_tuple(cell.x, cell.z), true).second) {
 						continue;
 					}
-					for (const render::ScatterBatch &batch : scatter.generate(cell)) {
+					for (const render::ScatterBatch &batch : scatter.generate(cell, nullptr, footprints)) {
 						if (batch.type != t) {
 							continue;
 						}
 						for (const render::ScatterInstance &inst : batch.instances) {
 							const RockRest rest = rock_rest(inst, local, scatter.heights());
-							const float gap = rest.plane;
+							const float gap = rest.terrain;
 							const float flat = rest.flat;
 							++type_instances;
 							type_bend = std::fmax(type_bend, rest.bend);
@@ -293,8 +300,8 @@ TEST_SUITE("render-scatter-ground") {
 				}
 			}
 			std::printf(
-					"render.scatter_ground MP_007 %s: %llu instances near the cameras, %llu float on a side over their "
-					"tangent plane, worst %.3f m over the mesh's own on flat ground (%.3f m) on a %.1f degree slope; "
+					"render.scatter_ground MP_007 %s: %llu instances near the cameras, %llu float on a side over the "
+					"drawn terrain, worst %.3f m over the mesh's own on flat ground (%.3f m) on a %.1f degree slope; "
 					"the "
 					"drawn terrain bends away under a rock by at most %.3f m; the steepest rock stands at (%.1f, %.1f, "
 					"%.1f)\n",

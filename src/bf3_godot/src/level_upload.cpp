@@ -966,9 +966,13 @@ void LevelUpload::update_scatter() {
 				continue;
 			}
 			std::unique_ptr<TerrainScatterDraw> draw = std::make_unique<TerrainScatterDraw>();
-			draw->begin(plan_->terrains[terrain].asset, scatter, scenario_,
+			draw->begin(
+					plan_->terrains[terrain].asset, scatter, scenario_,
 					instance_transform(plan_->terrains[terrain].transform),
-					[this](uint32_t p_mesh) { return mesh_rid(p_mesh); });
+					[this](uint32_t p_mesh) { return mesh_rid(p_mesh); },
+					[this](uint32_t p_mesh) {
+						return p_mesh < mesh_bounds_.size() ? mesh_bounds_[p_mesh] : std::optional<AABB>();
+					});
 			scatter_draws_.push_back(std::move(draw));
 		}
 	}

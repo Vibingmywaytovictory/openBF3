@@ -310,6 +310,11 @@ TEST_SUITE("render-scatter-unit") {
 				doctest::Approx(0.0).epsilon(0.0001));
 		CHECK(std::sqrt(tilted[0] * tilted[0] + tilted[4] * tilted[4] + tilted[8] * tilted[8]) ==
 				doctest::Approx(2.0f));
+		const std::array<std::array<float, 2>, 4> quad = { { { 0.6f, 0.6f }, { 9.4f, 0.6f }, { 9.4f, 9.4f },
+				{ 0.6f, 9.4f } } };
+		CHECK(heights.drop_under(quad, inst.position, *n) <= heights.step);
+		const std::array<float, 3> above{ inst.position[0], inst.position[1] + 0.3f, inst.position[2] };
+		CHECK(heights.drop_under(quad, above, *n) == doctest::Approx(0.3f * (*n)[1]).epsilon(0.001));
 	}
 
 	TEST_CASE("scatter: a MaskScale program runs on the CPU with its branch, mask sample and constants, a texture the "

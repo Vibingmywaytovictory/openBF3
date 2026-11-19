@@ -337,7 +337,8 @@ int32_t TerrainScatter::program_for(uint8_t p_layer, uint64_t p_present) const {
 	return best;
 }
 
-std::vector<ScatterBatch> TerrainScatter::generate(const ScatterCellId &p_cell, ScatterCellStats *r_stats) const {
+std::vector<ScatterBatch> TerrainScatter::generate(
+		const ScatterCellId &p_cell, ScatterCellStats *r_stats, std::span<const ScatterFootprint> p_footprints) const {
 	std::vector<ScatterBatch> out;
 	const std::array<float, 4> rect = cell_rect(p_cell);
 	const ScatterSamplers samplers{ &masks_, &heights_, images_ };
@@ -408,6 +409,21 @@ std::vector<ScatterBatch> TerrainScatter::generate(const ScatterCellId &p_cell, 
 			ScatterInstance instance{ { x, *y, z }, turn * 2.0f * std::numbers::pi_v<float>, { sx, sy } };
 			if (const std::optional<std::array<float, 3>> up = type.upright ? std::nullopt : heights_.normal(x, z)) {
 				instance.up = *up;
+				if (size_t(type.mesh) < p_footprints.size() && p_footprints[size_t(type.mesh)]) {
+					const std::array<float, 4> &f = *p_footprints[size_t(type.mesh)];
+					const std::array<float, 12> rows = scatter_instance_rows(instance);
+					std::array<std::array<float, 2>, 4> quad{};
+					const std::array<std::array<float, 2>, 4> corners = { { { f[0], f[1] }, { f[2], f[1] },
+							{ f[2], f[3] }, { f[0], f[3] } } };
+					for (size_t c = 0; c < 4; ++c) {
+						quad[c] = { rows[0] * corners[c][0] + rows[2] * corners[c][1] + rows[3],
+							rows[8] * corners[c][0] + rows[10] * corners[c][1] + rows[11] };
+					}
+					const float drop = heights_.drop_under(quad, instance.position, instance.up);
+					for (size_t k = 0; k < 3; ++k) {
+						instance.position[k] -= instance.up[k] * drop;
+					}
+				}
 			}
 			batch.instances.push_back(instance);
 		}

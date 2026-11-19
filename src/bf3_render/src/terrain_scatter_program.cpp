@@ -272,6 +272,74 @@ std::optional<std::array<float, 3>> ScatterHeights::normal(float p_x, float p_z)
 	return std::array<float, 3>{ nx / length, ny / length, nz / length };
 }
 
+float ScatterHeights::drop_under(const std::array<std::array<float, 2>, 4> &p_quad, const std::array<float, 3> &p_point,
+		const std::array<float, 3> &p_normal) const {
+	if (!(p_normal[1] > 0.0f)) {
+		return 0.0f;
+	}
+	std::array<std::array<double, 2>, 4> g{};
+	for (size_t c = 0; c < 4; ++c) {
+		g[c] = { (double(p_quad[c][0]) - double(origin[0])) / double(spacing[0]),
+			(double(p_quad[c][1]) - double(origin[1])) / double(spacing[1]) };
+	}
+	float drop = 0.0f;
+	const auto at = [&](double p_gx, double p_gz) {
+		const float x = float(double(origin[0]) + p_gx * double(spacing[0]));
+		const float z = float(double(origin[1]) + p_gz * double(spacing[1]));
+		const std::optional<float> h = surface(x, z);
+		if (!h) {
+			return;
+		}
+		const float plane =
+				p_point[1] - (p_normal[0] * (x - p_point[0]) + p_normal[2] * (z - p_point[2])) / p_normal[1];
+		drop = std::fmax(drop, (plane - *h) * p_normal[1]);
+	};
+	const auto inside = [&](double p_gx, double p_gz) {
+		int sign = 0;
+		for (size_t c = 0; c < 4; ++c) {
+			const std::array<double, 2> &a = g[c], &b = g[(c + 1) % 4];
+			const double cross = (b[0] - a[0]) * (p_gz - a[1]) - (b[1] - a[1]) * (p_gx - a[0]);
+			const int s = cross > 1e-9 ? 1 : (cross < -1e-9 ? -1 : 0);
+			if (s != 0 && sign != 0 && s != sign) {
+				return false;
+			}
+			sign = s != 0 ? s : sign;
+		}
+		return true;
+	};
+	double lo_x = g[0][0], hi_x = g[0][0], lo_z = g[0][1], hi_z = g[0][1];
+	for (const std::array<double, 2> &c : g) {
+		at(c[0], c[1]);
+		lo_x = std::min(lo_x, c[0]);
+		hi_x = std::max(hi_x, c[0]);
+		lo_z = std::min(lo_z, c[1]);
+		hi_z = std::max(hi_z, c[1]);
+	}
+	for (double j = std::ceil(lo_z); j <= hi_z; j += 1.0) {
+		for (double i = std::ceil(lo_x); i <= hi_x; i += 1.0) {
+			if (inside(i, j)) {
+				at(i, j);
+			}
+		}
+	}
+	for (size_t c = 0; c < 4; ++c) {
+		const std::array<double, 2> &a = g[c], &b = g[(c + 1) % 4];
+		const auto cross_lines = [&](double p_from, double p_to) {
+			if (std::fabs(p_to - p_from) < 1e-12) {
+				return;
+			}
+			for (double k = std::ceil(std::min(p_from, p_to)); k <= std::max(p_from, p_to); k += 1.0) {
+				const double t = (k - p_from) / (p_to - p_from);
+				at(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
+			}
+		};
+		cross_lines(a[0], b[0]);
+		cross_lines(a[1], b[1]);
+		cross_lines(a[0] + a[1], b[0] + b[1]);
+	}
+	return drop;
+}
+
 float ScatterHeights::bilinear(float p_u, float p_v) const {
 	if (width < 2 || height < 2) {
 		return 0.0f;
