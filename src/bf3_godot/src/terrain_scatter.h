@@ -40,6 +40,7 @@ class TerrainScatterDraw {
 public:
 	using MeshOf = std::function<godot::RID(uint32_t)>;
 	using BoundsOf = std::function<std::optional<godot::AABB>(uint32_t)>;
+	using NameOf = std::function<std::string(uint32_t)>;
 
 	TerrainScatterDraw();
 	~TerrainScatterDraw();
@@ -47,7 +48,8 @@ public:
 	TerrainScatterDraw &operator=(const TerrainScatterDraw &) = delete;
 
 	void begin(std::string p_name, std::shared_ptr<const bf3::render::TerrainScatter> p_scatter,
-			const godot::RID &p_scenario, const godot::Transform3D &p_terrain, MeshOf p_mesh, const BoundsOf &p_bounds);
+			const godot::RID &p_scenario, const godot::Transform3D &p_terrain, MeshOf p_mesh, const BoundsOf &p_bounds,
+			NameOf p_name_of);
 	bool begun() const { return scatter_ != nullptr; }
 
 	void update(const godot::Vector3 &p_camera, double p_budget_ms);
@@ -89,6 +91,7 @@ private:
 	godot::RID scenario_;
 	godot::Transform3D terrain_;
 	MeshOf mesh_;
+	NameOf name_of_;
 	std::shared_ptr<const std::vector<bf3::render::ScatterFootprint>> footprints_;
 	std::unique_ptr<bf3::core::JobQueue> jobs_;
 	std::shared_ptr<std::mutex> ready_mutex_;

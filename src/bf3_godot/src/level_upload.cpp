@@ -972,6 +972,10 @@ void LevelUpload::update_scatter() {
 					[this](uint32_t p_mesh) { return mesh_rid(p_mesh); },
 					[this](uint32_t p_mesh) {
 						return p_mesh < mesh_bounds_.size() ? mesh_bounds_[p_mesh] : std::optional<AABB>();
+					},
+					[this](uint32_t p_mesh) {
+						return p_mesh < plan_->meshes.size() ? plan_->requests[plan_->meshes[p_mesh].request].res
+															 : std::string();
 					});
 			scatter_draws_.push_back(std::move(draw));
 		}

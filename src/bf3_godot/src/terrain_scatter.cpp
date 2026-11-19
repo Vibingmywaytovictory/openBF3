@@ -41,12 +41,14 @@ TerrainScatterDraw::~TerrainScatterDraw() {
 }
 
 void TerrainScatterDraw::begin(std::string p_name, std::shared_ptr<const render::TerrainScatter> p_scatter,
-		const RID &p_scenario, const Transform3D &p_terrain, MeshOf p_mesh, const BoundsOf &p_bounds) {
+		const RID &p_scenario, const Transform3D &p_terrain, MeshOf p_mesh, const BoundsOf &p_bounds,
+		NameOf p_name_of) {
 	free_all();
 	if (p_scatter == nullptr || p_scatter->levels().empty()) {
 		return;
 	}
 	name_ = std::move(p_name);
+	name_of_ = std::move(p_name_of);
 	scatter_ = std::move(p_scatter);
 	scenario_ = p_scenario;
 	terrain_ = p_terrain;
@@ -303,6 +305,18 @@ void TerrainScatterDraw::report(const Vector3 &p_local) {
 			static_cast<unsigned long long>(evaluated), coverage, static_cast<unsigned long long>(unmatched),
 			stats_.generate_seconds, static_cast<unsigned long long>(stats_.cells_generated),
 			static_cast<unsigned long long>(stats_.cells_freed), per_type.c_str())));
+	for (size_t t = 0; t < types.size(); ++t) {
+		const render::ScatterType &type = types[t];
+		if (type.mesh < 0 || type.candidates == 0) {
+			continue;
+		}
+		const std::string mesh = name_of_ ? name_of_(uint32_t(type.mesh)) : std::string();
+		UtilityFunctions::print(to_godot(fmt("[scatter] %s type %zu %s: %llu drawn, mask sum %.1f, within %.0f m "
+											 "(tree level %u, cell %.0f m), density %.4f per m2",
+				name_.c_str(), t, mesh.c_str(), static_cast<unsigned long long>(instances[t]), masks[t],
+				double(scatter_->view_distance(type.tree_level)), unsigned(type.tree_level), double(type.cell),
+				double(type.density))));
+	}
 }
 
 }
