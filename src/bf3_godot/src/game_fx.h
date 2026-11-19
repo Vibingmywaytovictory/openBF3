@@ -3,6 +3,7 @@
 #include "game_frame.h"
 
 #include "bf3/core/result.h"
+#include "bf3/host/logic_effect_feed.h"
 #include "bf3/fx/placed_effects.h"
 #include "bf3/fx/simulator.h"
 #include "bf3/fx/triggers.h"
@@ -66,6 +67,7 @@ public:
 	fx::MuzzleSample own_muzzle(const Bf3Viewmodel &p_viewmodel, uint16_t p_def, uint8_t p_slot, const fx::Vec3 &p_velocity) const;
 
 	void set_first_person_projection(float p_fov_override, float p_z_clip_scale);
+	void logic_effects(const core::gameplay::LogicGraph &p_graph, const host::LogicEffectFeed &p_feed);
 
 	core::Result<fx::EffectHandle> start_effect(std::string_view p_blueprint, const fx::Transform &p_transform, float p_start_age = 0.0f);
 	void stop_effect(fx::EffectHandle p_effect);

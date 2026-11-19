@@ -52,6 +52,7 @@ void PlacedEffects::add(std::shared_ptr<const EffectDef> p_def, const Transform 
 	slot.def = std::move(p_def);
 	slot.transform = p_transform;
 	slot.auto_start = p_auto_start;
+	slot.wanted = p_auto_start;
 	++stats_.placed;
 	stats_.auto_start += p_auto_start ? 1u : 0u;
 	stats_.without_def += slot.def == nullptr ? 1u : 0u;
@@ -62,7 +63,17 @@ void PlacedEffects::step(FxWorld &r_world, const FxView &p_view, uint8_t p_tier,
 	uint32_t running = 0, in_range_count = 0, ended = 0;
 	for (size_t i = 0; i < slots_.size(); ++i) {
 		Slot &slot = slots_[i];
-		if (!slot.auto_start || slot.def == nullptr) {
+		if (slot.def == nullptr) {
+			continue;
+		}
+		if (!slot.wanted) {
+			if (slot.handle.valid()) {
+				if (r_world.alive(slot.handle)) {
+					r_world.stop(slot.handle);
+					++stats_.stops;
+				}
+				slot.handle = EffectHandle{};
+			}
 			continue;
 		}
 		const float cull = slot.def->cull_distance;
@@ -88,6 +99,8 @@ void PlacedEffects::step(FxWorld &r_world, const FxView &p_view, uint8_t p_tier,
 				slot.handle = *h;
 				stats_.started_placements += slot.started ? 0u : 1u;
 				slot.started = true;
+				stats_.logic_started_placements += slot.logic_started || slot.auto_start ? 0u : 1u;
+				slot.logic_started = slot.logic_started || !slot.auto_start;
 				++stats_.starts;
 			} else {
 				++stats_.start_failures;
@@ -102,6 +115,35 @@ void PlacedEffects::step(FxWorld &r_world, const FxView &p_view, uint8_t p_tier,
 	stats_.running = running;
 	stats_.in_range = in_range_count;
 	stats_.ended_in_range = ended;
+}
+
+void PlacedEffects::bind_logic(std::span<const uint32_t> p_nodes) {
+	stats_.logic_bound = 0;
+	for (size_t i = 0; i < slots_.size(); ++i) {
+		slots_[i].logic_node = i < p_nodes.size() ? p_nodes[i] : kNoPlacedLogicNode;
+		stats_.logic_bound += slots_[i].logic_node != kNoPlacedLogicNode ? 1u : 0u;
+	}
+}
+
+void PlacedEffects::logic_event(uint32_t p_node, bool p_start) {
+	if (p_node == kNoPlacedLogicNode) {
+		return;
+	}
+	for (Slot &slot : slots_) {
+		if (slot.logic_node != p_node) {
+			continue;
+		}
+		slot.wanted = p_start;
+		slot.finished = false;
+		++(p_start ? stats_.logic_starts : stats_.logic_stops);
+	}
+}
+
+void PlacedEffects::logic_reset() {
+	for (Slot &slot : slots_) {
+		slot.wanted = slot.auto_start;
+		slot.finished = false;
+	}
 }
 
 void PlacedEffects::forget() {

@@ -1331,6 +1331,10 @@ openbf3_test(test_logic_placements test_main.cpp logic_placements_tests.cpp test
 target_link_libraries(test_logic_placements PRIVATE bf3_host)
 add_test(NAME logic.placements COMMAND test_logic_placements --test-suite=logic-placements)
 set_tests_properties(logic.placements PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+openbf3_test(test_logic_effects test_main.cpp logic_effects_tests.cpp test_support.h)
+target_link_libraries(test_logic_effects PRIVATE bf3_host)
+add_test(NAME logic.effects COMMAND test_logic_effects --test-suite=logic-effects)
+set_tests_properties(logic.effects PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
 
 openbf3_test(test_m2b_gx test_main.cpp m2b_gx_tests.cpp test_support.h ${CMAKE_SOURCE_DIR}/src/bf3_godot/src/tdm_flow.cpp
     ${CMAKE_SOURCE_DIR}/src/bf3_godot/src/m2b_check_rows.cpp)
@@ -1411,6 +1415,8 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_cost(godot.minimap_modes.caspian_small 1 33)
     openbf3_cost(godot.minimap_modes.caspian_large 1 33)
     openbf3_godot_row(godot.caspian_world godot_caspian_world.cmake WINDOW TIMEOUT 240)
+    openbf3_godot_row(godot.logic_effects godot_logic_effects.cmake WINDOW TIMEOUT 240 ARGS -DQUIT_AFTER=8 -DINJECT_AT=0)
+    openbf3_cost(godot.logic_effects 1 21)
     openbf3_cost(godot.caspian_world 1 20)
     openbf3_godot_row(godot.water_run godot_water_run.cmake WINDOW TIMEOUT 240)
     set_tests_properties(godot.water_run PROPERTIES RUN_SERIAL TRUE)

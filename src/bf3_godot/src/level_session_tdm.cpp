@@ -68,6 +68,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 
 namespace bf3::godot_side {
@@ -520,6 +521,16 @@ void Bf3LevelSession::tdm_parse_args(std::string &r_error) {
 		}
 #if OPENBF3_BUILD_CHECKS
 		m.auto_deploy = has_check_arg("auto-deploy");
+		if (has_check_arg("logic-networked")) {
+			const std::string arg = user_arg_value("logic-networked");
+			const size_t at = arg.find('@');
+			m.logic_networked_connection = std::strtoull(arg.c_str(), nullptr, 16);
+			const double seconds = at == std::string::npos ? 0.0 : std::atof(arg.c_str() + at + 1);
+			m.logic_networked_at_ns = uint64_t(std::clamp(seconds, 0.0, 3600.0) * 1.0e9);
+			if (m.logic_networked_connection == 0 && error.empty()) {
+				error = "--logic-networked=" + arg + ": not <connection hex>@<seconds>";
+			}
+		}
 		if (has_check_arg("late-join-check")) {
 			if (const std::optional<LateJoinMode> mode = LateJoinCheck::parse_mode(user_arg_value("late-join-check"))) {
 				m.late_join = std::unique_ptr<LateJoinCheck, void (*)(LateJoinCheck *)>(
@@ -1597,6 +1608,22 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				light_on = effects.environment(eor->environment->visual_environment) != nullptr;
 			}
 			m.eor_showroom->frame(this, *plan_, upload_, eor, light_on);
+		}
+#if OPENBF3_BUILD_CHECKS
+		if (m.logic_networked_connection != 0 && m.native_flow != nullptr && m.native_flow->session() != nullptr) {
+			if (m.logic_networked_at_ns <= p_now_ns) {
+				sim::logic::LogicNetworkedEvent ev;
+				ev.connection = m.logic_networked_connection;
+				m.native_flow->session()->receive_networked(std::span<const sim::logic::LogicNetworkedEvent>(&ev, 1));
+				UtilityFunctions::print(
+						to_godot(bf3::core::fmt("[game] logic networked event %016llx delivered to the client logic",
+								(unsigned long long)m.logic_networked_connection)));
+				m.logic_networked_connection = 0;
+			}
+		}
+#endif
+		if (flow != nullptr && r_game.fx != nullptr) {
+			r_game.fx->logic_effects(flow->runtime().graph(), flow->effect_feed());
 		}
 		if (plan_ != nullptr && upload_.begun() && flow != nullptr) {
 			if (m.logic_placements == nullptr) {

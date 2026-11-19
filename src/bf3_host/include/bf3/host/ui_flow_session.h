@@ -3,6 +3,7 @@
 #include "bf3/core/gameplay/logic_graph.h"
 #include "bf3/core/result.h"
 #include "bf3/core/ui/ui_graph.h"
+#include "bf3/host/logic_effect_feed.h"
 #include "bf3/host/logic_screen_effects.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/logic/ir_reverb_natives.h"
@@ -147,6 +148,7 @@ public:
 	const UiFlowSessionStats &stats() const { return stats_; }
 	LogicScreenEffectsFrame screen_effects() const { return effects_->frame(runtime_->tick(), runtime_.get()); }
 	const LogicScreenEffects &effects() const { return *effects_; }
+	const LogicEffectFeed &effect_feed() const { return *effect_feed_; }
 	const std::vector<std::string> &errors() const { return errors_; }
 	std::optional<std::string> data(std::string_view p_category, int32_t p_key) const;
 
@@ -209,6 +211,7 @@ private:
 	std::map<uint32_t, GraphEntity> graph_entities_;
 	std::vector<GraphEntity> entered_;
 	std::unique_ptr<LogicScreenEffects> effects_;
+	std::unique_ptr<LogicEffectFeed> effect_feed_;
 	std::vector<uint32_t> end_of_round_nodes_;
 	std::vector<uint32_t> pre_round_nodes_;
 	std::vector<std::pair<uint32_t, int64_t>> round_over_nodes_;

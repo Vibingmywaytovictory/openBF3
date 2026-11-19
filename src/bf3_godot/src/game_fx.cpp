@@ -19,6 +19,7 @@
 #include "bf3/fx/impact_table.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_vehicles.h"
+#include "bf3/sim/logic/conquest_data.h"
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/memory.hpp>
@@ -65,6 +66,10 @@ struct Bf3GameFx::Impl {
 	std::vector<host::PresentEvent> events;
 	std::unique_ptr<fx::FxTriggers> triggers;
 	fx::PlacedEffects placed;
+	std::vector<std::optional<sim::logic::PlacedLogicKey>> placed_keys;
+	const core::gameplay::LogicGraph *logic_graph = nullptr;
+	uint64_t logic_generation = 0;
+	uint64_t logic_cursor = 0;
 	fx::FxTriggerConfig config;
 	FxDecalAssets decal_assets;
 	FxDecalPool decals;
@@ -176,6 +181,8 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 
 	m.triggers.reset();
 	m.placed.forget();
+	m.placed_keys.clear();
+	m.logic_graph = nullptr;
 	m.world.reset();
 	m.local_defs.clear();
 	m.library.reset();
@@ -379,6 +386,7 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 			at.forward = e.transform.forward;
 			at.trans = e.transform.trans;
 			m.placed.add(found->second.def, at, e.auto_start);
+			m.placed_keys.push_back(sim::logic::placed_logic_key(*p_in.db->world, e.object));
 		}
 		m.placed.set_undrawn_mesh_emitters(undrawn);
 		const fx::PlacedEffectStats &ps = m.placed.stats();
@@ -570,6 +578,34 @@ void Bf3GameFx::set_first_person_projection(float p_fov_override, float p_z_clip
 	}
 }
 
+void Bf3GameFx::logic_effects(const core::gameplay::LogicGraph &p_graph, const host::LogicEffectFeed &p_feed) {
+	Impl &m = *impl_;
+	if (!m.built) {
+		return;
+	}
+	if (m.logic_graph != &p_graph) {
+		std::vector<uint32_t> nodes(m.placed_keys.size(), fx::kNoPlacedLogicNode);
+		for (size_t i = 0; i < m.placed_keys.size(); ++i) {
+			const std::optional<uint32_t> n = m.placed_keys[i]
+					? sim::logic::logic_node_of_key(p_graph, *m.placed_keys[i], core::gameplay::LogicTypeId::Effect)
+					: std::nullopt;
+			nodes[i] = n.value_or(fx::kNoPlacedLogicNode);
+		}
+		m.placed.bind_logic(nodes);
+		m.logic_graph = &p_graph;
+		m.logic_generation = p_feed.generation();
+		m.logic_cursor = 0;
+	}
+	if (p_feed.generation() != m.logic_generation) {
+		m.placed.logic_reset();
+		m.logic_generation = p_feed.generation();
+	}
+	for (const host::LogicEffectEvent &e : p_feed.since(m.logic_cursor)) {
+		m.placed.logic_event(e.node, e.start);
+	}
+	m.logic_cursor = p_feed.end();
+}
+
 core::Result<fx::EffectHandle> Bf3GameFx::start_effect(std::string_view p_blueprint, const fx::Transform &p_transform, float p_start_age) {
 	Impl &m = *impl_;
 	if (!m.loaded) {
@@ -644,10 +680,12 @@ void Bf3GameFx::shutdown() {
 		UtilityFunctions::print(to_godot(fmt("[game] placed effects: %u placed, %u start at load, %u of them started, "
 											 "%u in range, %u running, %u ended in "
 											 "range, %llu starts, %llu stops, %llu start failures, %u without a "
-											 "blueprint, %u mesh emitters not drawn",
+											 "blueprint, %u mesh emitters not drawn, %u bound to the client logic, "
+											 "%llu logic starts, %llu logic stops, %u started by logic",
 				ps.placed, ps.auto_start, ps.started_placements, ps.in_range, ps.running, ps.ended_in_range,
 				(unsigned long long)ps.starts, (unsigned long long)ps.stops, (unsigned long long)ps.start_failures,
-				ps.without_def, ps.mesh_emitters_undrawn)));
+				ps.without_def, ps.mesh_emitters_undrawn, ps.logic_bound, (unsigned long long)ps.logic_starts,
+				(unsigned long long)ps.logic_stops, ps.logic_started_placements)));
 	}
 	m.placed.forget();
 	m.decals.clear();

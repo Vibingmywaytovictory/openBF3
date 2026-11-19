@@ -90,19 +90,34 @@ std::optional<uint32_t> node_of(const gp::LogicGraph &p_graph, const core::Guid 
 	return std::nullopt;
 }
 
-std::optional<uint32_t> node_of_placed(
-		const gp::LogicGraph &p_graph, const core::level::World &p_level, uint32_t p_object, T p_type) {
+}
+
+std::optional<PlacedLogicKey> placed_logic_key(const core::level::World &p_level, uint32_t p_object) {
 	if (p_object >= p_level.objects.size()) {
 		return std::nullopt;
 	}
 	const core::level::PlacedObject &placed = p_level.objects[p_object];
-	const std::vector<core::Guid> chain = level_chain(p_level, placed.scope);
-	for (const uint32_t n : p_graph.nodes_with_guid(placed.entity.guid())) {
-		if (p_graph.nodes()[n].type == p_type && graph_chain(p_graph, p_graph.nodes()[n].scope) == chain) {
+	return PlacedLogicKey{ placed.entity.guid(), placed.reference ? placed.reference->guid() : core::Guid{},
+		level_chain(p_level, placed.scope) };
+}
+
+std::optional<uint32_t> logic_node_of_key(const gp::LogicGraph &p_graph, const PlacedLogicKey &p_key, T p_type) {
+	for (const uint32_t n : p_graph.nodes_with_guid(p_key.entity)) {
+		if (p_graph.nodes()[n].type == p_type &&
+				(p_key.reference.is_zero() || p_graph.reference_of(n) == p_key.reference) &&
+				graph_chain(p_graph, p_graph.nodes()[n].scope) == p_key.chain) {
 			return n;
 		}
 	}
 	return std::nullopt;
+}
+
+namespace {
+
+std::optional<uint32_t> node_of_placed(
+		const gp::LogicGraph &p_graph, const core::level::World &p_level, uint32_t p_object, T p_type) {
+	const std::optional<PlacedLogicKey> key = placed_logic_key(p_level, p_object);
+	return key ? logic_node_of_key(p_graph, *key, p_type) : std::nullopt;
 }
 
 }

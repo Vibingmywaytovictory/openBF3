@@ -387,6 +387,7 @@ struct GraphParts {
 	LogicSide side = LogicSide::Server;
 	std::vector<LogicScopeInfo> scopes;
 	std::vector<LogicNode> nodes;
+	std::vector<Guid> references;
 	std::vector<std::pair<uint32_t, LogicParam>> params;
 	std::vector<std::pair<uint32_t, LogicInput>> inputs;
 	std::vector<LogicEdge> events, properties, links, networked;
@@ -440,6 +441,7 @@ struct GraphParts {
 		}
 		n.type_name = intern(p_type_name);
 		nodes.push_back(n);
+		references.emplace_back();
 		return static_cast<uint32_t>(nodes.size() - 1);
 	}
 
@@ -530,6 +532,7 @@ Result<LogicGraph> LogicGraphBuild::finalize(GraphParts &&r_parts, const LogicGr
 	g.side_ = r_parts.side;
 	g.scopes_ = std::move(r_parts.scopes);
 	g.nodes_ = std::move(r_parts.nodes);
+	g.references_ = std::move(r_parts.references);
 	g.texts_ = std::move(r_parts.texts);
 	for (LogicNode &node : g.nodes_) {
 		node.flags = 0;
@@ -800,6 +803,10 @@ std::span<const LogicEdge> LogicGraph::links_from(uint32_t p_node) const {
 		return {};
 	}
 	return std::span<const LogicEdge>(link_edges_).subspan(nodes_[p_node].link_out_begin, nodes_[p_node].link_out_count);
+}
+
+Guid LogicGraph::reference_of(uint32_t p_node) const {
+	return p_node < references_.size() ? references_[p_node] : Guid{};
 }
 
 std::span<const uint32_t> LogicGraph::nodes_with_guid(const Guid &p_guid) const {
@@ -1121,6 +1128,7 @@ private:
 			objects_.add(object.scope, object.entity, node);
 			if (object.reference) {
 				objects_.add(object.scope, *object.reference, node);
+				parts_.references[node] = object.reference->guid();
 			}
 			BF3_TRY(params(object, type, node));
 		}

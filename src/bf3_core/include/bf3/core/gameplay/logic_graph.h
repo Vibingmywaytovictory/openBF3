@@ -195,6 +195,7 @@ public:
 	std::span<const LogicEdge> links_from(uint32_t p_node) const;
 
 	std::span<const uint32_t> nodes_with_guid(const Guid &p_guid) const;
+	Guid reference_of(uint32_t p_node) const;
 
 	std::span<const uint32_t> nodes_of_type(LogicTypeId p_type) const;
 
@@ -236,6 +237,7 @@ private:
 
 	LogicSide side_ = LogicSide::Server;
 	std::vector<LogicNode> nodes_;
+	std::vector<Guid> references_;
 	std::vector<LogicEdge> event_edges_, property_edges_, link_edges_, networked_edges_;
 	std::vector<LogicEntry> entries_;
 	std::vector<LogicParam> params_;

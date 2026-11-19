@@ -168,6 +168,8 @@ struct TdmState {
 	std::vector<net::SquadRequest> squad_requests;
 	uint64_t squad_requests_sent = 0;
 	std::unique_ptr<LateJoinCheck, void (*)(LateJoinCheck *)> late_join{ nullptr, nullptr };
+	uint64_t logic_networked_connection = 0;
+	uint64_t logic_networked_at_ns = 0;
 	std::unique_ptr<SquadTeamCheck, void (*)(SquadTeamCheck *)> squad_team{ nullptr, nullptr };
 	bool auto_deploy = false;
 };

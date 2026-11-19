@@ -162,6 +162,44 @@ TEST_SUITE("placed-effects-unit") {
 		CHECK(placed.stats().starts == 2);
 	}
 
+	TEST_CASE("placed effects: a logic Start runs a waiting placement and a Stop ends it") {
+		const std::shared_ptr<const fx::EffectDef> def = looping_effect(0.0f);
+		fx::PlacedEffects placed;
+		placed.add(def, at(0, 0, 0), false);
+		placed.add(def, at(10, 0, 0), true);
+		placed.add(def, at(20, 0, 0), false);
+		const uint32_t nodes[] = { 7, 8, fx::kNoPlacedLogicNode };
+		placed.bind_logic(nodes);
+		CHECK(placed.stats().logic_bound == 2);
+		fx::FxWorld world;
+		const fx::FxView view = view_at(0, 0, 0);
+		const auto run = [&](int p_frames) {
+			for (int i = 0; i < p_frames; ++i) {
+				placed.step(world, view, fx::kTierHigh, 1);
+				world.step(1.0f / 30.0f, view);
+			}
+		};
+		run(5);
+		CHECK(placed.stats().running == 1);
+		placed.logic_event(7, true);
+		run(5);
+		CHECK(placed.stats().running == 2);
+		CHECK(placed.stats().logic_starts == 1);
+		CHECK(placed.stats().logic_started_placements == 1);
+		placed.logic_event(8, false);
+		run(60);
+		CHECK(placed.stats().running == 1);
+		CHECK(placed.stats().logic_stops == 1);
+		CHECK(world.stats().live_effects == 1);
+		placed.logic_reset();
+		run(5);
+		CHECK(placed.stats().running == 1);
+		CHECK(placed.stats().started_placements == 2);
+		placed.logic_event(fx::kNoPlacedLogicNode, true);
+		run(5);
+		CHECK(placed.stats().running == 1);
+	}
+
 	TEST_CASE("placed effects: mesh particle emitters are left out, not drawn as boxes") {
 		fx::EmitterDef quad = fxt::emitter_def("quad", 4, 2.0f, 1.0f);
 		fx::EmitterDef mesh = fxt::emitter_def("mesh", 4, 2.0f, 1.0f);

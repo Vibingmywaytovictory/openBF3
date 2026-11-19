@@ -195,6 +195,8 @@ target_sources(bf3_host PRIVATE
     src/ui_flow_session.cpp
     include/bf3/host/logic_screen_effects.h
     src/logic_screen_effects.cpp
+    include/bf3/host/logic_effect_feed.h
+    src/logic_effect_feed.cpp
 )
 
 target_sources(bf3_host PRIVATE

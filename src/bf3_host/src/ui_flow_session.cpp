@@ -181,6 +181,7 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 		return core::error_at("ui flow session", effects.error());
 	}
 	effects_ = std::make_unique<LogicScreenEffects>(std::move(*effects));
+	effect_feed_ = std::make_unique<LogicEffectFeed>(LogicEffectFeed::bind(*graph_));
 	for (const uint32_t n : graph_->nodes_of_type(gp::LogicTypeId::UIEndOfRound)) {
 		const std::optional<core::EbxInstance> inst = logic_node_instance(db, *graph_, n);
 		const std::optional<double> seconds = inst ? logic_node_float(*inst, "PreEorTime") : std::nullopt;
@@ -215,6 +216,9 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 	for (const std::pair<uint32_t, int32_t> &p : effects_->watch_ports()) {
 		ports.insert(p);
 	}
+	for (const std::pair<uint32_t, int32_t> &p : effect_feed_->watch_ports()) {
+		ports.insert(p);
+	}
 	watch_ports_.assign(ports.begin(), ports.end());
 	for (const gp::LogicEdge &e : graph_->networked_edges()) {
 		if (e.target == gp::kNoLogicIndex ||
@@ -239,6 +243,7 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 core::Status UiFlowSession::start_logic() {
 	timers_.clear();
 	effects_->reset();
+	effect_feed_->reset();
 	graph_owner_.clear();
 	entered_.clear();
 	flow_.reset();
@@ -486,6 +491,7 @@ core::Status UiFlowSession::step() {
 		if (const std::optional<uint32_t> done = effects_->event(h.node, h.port, h.tick)) {
 			later(h.node, kFadeDone, *done);
 		}
+		effect_feed_->event(h.node, h.port, h.tick);
 		if (ui_graph_of_.count(h.node) != 0) {
 			ui_graph_input(h.node, h.port);
 		} else if (std::find(end_of_round_nodes_.begin(), end_of_round_nodes_.end(), h.node) !=

@@ -64,4 +64,13 @@ core::Result<std::shared_ptr<const ConquestParams>> read_conquest_params(const c
 std::optional<uint32_t> placed_logic_node(const core::gameplay::LogicGraph &p_graph, const core::level::World &p_level,
 		uint32_t p_object, core::gameplay::LogicTypeId p_type);
 
+struct PlacedLogicKey {
+	core::Guid entity;
+	core::Guid reference;
+	std::vector<core::Guid> chain;
+};
+
+std::optional<PlacedLogicKey> placed_logic_key(const core::level::World &p_level, uint32_t p_object);
+std::optional<uint32_t> logic_node_of_key(
+		const core::gameplay::LogicGraph &p_graph, const PlacedLogicKey &p_key, core::gameplay::LogicTypeId p_type);
 }
