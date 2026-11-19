@@ -312,3 +312,41 @@ TEST_SUITE("render-scatter-ground") {
 		CHECK(floating == 0);
 	}
 }
+
+TEST_SUITE("render-scatter-cut") {
+	TEST_CASE("scatter: every scattered mesh of MP_007 cuts its alpha where its own program discards") {
+		const Caspian *c = caspian();
+		if (c == nullptr) {
+			return;
+		}
+		REQUIRE(c->terrain.scatter != nullptr);
+		std::map<uint32_t, bool> seen;
+		uint32_t cut = 0, grass = 0;
+		for (const render::ScatterType &type : c->terrain.scatter->types()) {
+			if (type.mesh < 0) {
+				continue;
+			}
+			const render::SceneMeshPlan &mesh_plan = c->plan.meshes[size_t(type.mesh)];
+			const std::string name = to_lower_ascii(c->plan.requests[mesh_plan.request].res);
+			for (uint32_t m : mesh_plan.surface_materials) {
+				REQUIRE(m < c->plan.materials.size());
+				const render::SceneMaterialPlan &mp = c->plan.materials[m];
+				if (!seen.emplace(m, true).second) {
+					continue;
+				}
+				REQUIRE(mp.look.has_value());
+				std::printf("render.scatter_cut MP_007 %s: alpha cut %.3f\n", name.c_str(),
+						mp.look->alpha_cut ? double(*mp.look->alpha_cut) : -1.0);
+				CHECK(mp.alpha_test);
+				CHECK(mp.look->alpha_cut.has_value());
+				cut += mp.look->alpha_cut ? 1 : 0;
+				if (name.find("moorlandgrass01") != std::string::npos) {
+					++grass;
+					CHECK(mp.look->alpha_cut.value_or(0.0f) == doctest::Approx(0.253f));
+				}
+			}
+		}
+		CHECK(cut == seen.size());
+		CHECK(grass == 1);
+	}
+}

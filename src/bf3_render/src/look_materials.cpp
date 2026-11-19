@@ -308,11 +308,69 @@ struct LookResolver::ProgramInfo {
 	std::vector<ProgramBinding> mask_bindings;
 	std::optional<std::array<float, 3>> flat_colour;
 	bool flat_unlit = false;
+	std::optional<float> alpha_cut;
+	ProgramBinding alpha_cut_texture;
 };
 
 namespace {
 
 constexpr std::array<float, 4> kDepthPassOutput{ 1.0f, 0.0f, 0.0f, 1.0f };
+
+std::optional<std::pair<float, uint32_t>> discard_cut(const dxbc::Program &p_pixel) {
+	const auto written = [&](size_t p_before, uint32_t p_reg, uint8_t p_lane) -> const dxbc::Instruction * {
+		for (size_t i = p_before; i-- > 0;) {
+			const dxbc::Instruction &ins = p_pixel.code[i];
+			if (!ins.operands.empty() && ins.operands[0].is(dxbc::OperandType::Temp) &&
+					ins.operands[0].index[0] == p_reg && ((ins.operands[0].write_mask() >> p_lane) & 1u) != 0) {
+				return &ins;
+			}
+		}
+		return nullptr;
+	};
+	const auto immediate = [](const dxbc::Operand &p_op, uint8_t p_lane) -> std::optional<float> {
+		if (!p_op.is(dxbc::OperandType::Immediate32)) {
+			return std::nullopt;
+		}
+		float f;
+		std::memcpy(&f, &p_op.imm[p_op.components == 1 ? 0 : p_op.lane(p_lane)], 4);
+		return p_op.negate ? -f : f;
+	};
+	for (size_t i = 0; i < p_pixel.code.size(); ++i) {
+		const dxbc::Instruction &discard = p_pixel.code[i];
+		if (!discard.is(dxbc::Op::Discard) || !discard.nonzero || discard.operands.empty() ||
+				!discard.operands[0].is(dxbc::OperandType::Temp)) {
+			continue;
+		}
+		const dxbc::Operand &flag = discard.operands[0];
+		const dxbc::Instruction *test = written(i, flag.index[0], flag.lane(0));
+		if (test == nullptr || !test->is(dxbc::Op::Lt) || test->operands.size() != 3 ||
+				immediate(test->operands[2], 0) != 0.0f || !test->operands[1].is(dxbc::OperandType::Temp)) {
+			continue;
+		}
+		const dxbc::Operand &value = test->operands[1];
+		const dxbc::Instruction *shift = written(size_t(test - p_pixel.code.data()), value.index[0], value.lane(0));
+		if (shift == nullptr || !shift->is(dxbc::Op::Add) || shift->operands.size() != 3) {
+			continue;
+		}
+		const std::optional<float> offset = immediate(shift->operands[2], 0);
+		const dxbc::Operand &alpha = shift->operands[1];
+		if (!offset || !alpha.is(dxbc::OperandType::Temp)) {
+			continue;
+		}
+		const dxbc::Instruction *source = written(size_t(shift - p_pixel.code.data()), alpha.index[0], alpha.lane(0));
+		if (source != nullptr && source->is(dxbc::Op::Add) && source->operands.size() == 3 &&
+				source->operands[1].is(dxbc::OperandType::Temp) && source->operands[2].is(dxbc::OperandType::Input)) {
+			source = written(
+					size_t(source - p_pixel.code.data()), source->operands[1].index[0], source->operands[1].lane(0));
+		}
+		if (source == nullptr || !source->is(dxbc::Op::Sample) || source->operands.size() < 3 ||
+				!source->operands[2].is(dxbc::OperandType::Resource)) {
+			continue;
+		}
+		return std::pair<float, uint32_t>(-*offset, source->operands[2].index[0]);
+	}
+	return std::nullopt;
+}
 
 bool writes_target(const dxbc::Program &p_pixel, uint32_t p_register) {
 	return std::any_of(p_pixel.outputs.begin(), p_pixel.outputs.end(),
@@ -698,6 +756,25 @@ LookResolver::ProgramInfo &LookResolver::program_info(const SurfaceShader &p_sha
 			continue;
 		}
 		flat.note(*pixel);
+		if (!info->alpha_cut && writes_target(*pixel, target_register)) {
+			if (const std::optional<std::pair<float, uint32_t>> cut = discard_cut(*pixel)) {
+				info->alpha_cut = cut->first;
+				if (s.pixel_constants) {
+					for (const auto &[slot, name] : s.pixel_constants->textures) {
+						if ((slot & kTextureSlotRegister) == cut->second) {
+							info->alpha_cut_texture = ProgramBinding{ to_lower_ascii(name), std::string() };
+						}
+					}
+				}
+				const dxbc::Binding *bound = pixel->binding(dxbc::BindingType::Texture, cut->second);
+				if (info->alpha_cut_texture.name.empty() && bound != nullptr &&
+						bound->name.rfind(kTexturePrefix, 0) == 0 &&
+						p_shader.parameter(bound->name.substr(kTexturePrefix.size())) != nullptr) {
+					info->alpha_cut_texture =
+							ProgramBinding{ std::string(), bound->name.substr(kTexturePrefix.size()) };
+				}
+			}
+		}
 		const bool target =
 				std::any_of(pixel->outputs.begin(), pixel->outputs.end(), [&](const dxbc::SignatureElement &p_e) {
 					return p_e.name == "SV_Target" && p_e.reg == target_register;
@@ -812,6 +889,11 @@ void LookResolver::attach_program(
 	if (!r_out.color) {
 		r_out.flat_colour = info.flat_colour;
 		r_out.flat_unlit = info.flat_colour && info.flat_unlit;
+	}
+	const ProgramBinding &cut = info.alpha_cut_texture;
+	const std::string cut_name = cut.parameter.empty() ? cut.name : to_lower_ascii(p_slot.texture(cut.parameter));
+	if (info.alpha_cut && r_out.color && !cut_name.empty() && r_out.color->name == cut_name) {
+		r_out.alpha_cut = info.alpha_cut;
 	}
 	if (!info.refusal.empty()) {
 		r_out.graph_refusal = info.refusal;

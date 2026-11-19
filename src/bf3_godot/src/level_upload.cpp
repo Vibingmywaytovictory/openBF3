@@ -164,6 +164,7 @@ uniform float roughness_value = 0.6;
 uniform float specular_value = 0.5;
 uniform vec3 emission_value = vec3(0.0);
 uniform float glass_opacity = 0.0;
+uniform float alpha_cut = 0.5;
 varying vec3 world_pos;
 varying vec3 world_nrm;
 void vertex() {
@@ -193,7 +194,7 @@ void fragment() {
 	}
 )";
 	if (p_alpha_mode == 1) {
-		code += "\tALPHA = c.a;\n\tALPHA_SCISSOR_THRESHOLD = 0.5;\n";
+		code += "\tALPHA = c.a;\n\tALPHA_SCISSOR_THRESHOLD = alpha_cut;\n";
 	} else if (p_alpha_mode == 2) {
 		code += "\tALPHA = glass_opacity > 0.0 ? glass_opacity : c.a;\n";
 	}
@@ -658,6 +659,9 @@ void LevelUpload::create_materials(double p_deadline_us) {
 				rs->material_set_param(m, "normal_scale", mp.normal_scale);
 				if (mp.glass) {
 					rs->material_set_param(m, "glass_opacity", render::kLookGlassOpacity);
+				}
+				if (mp.look && mp.look->alpha_cut) {
+					rs->material_set_param(m, "alpha_cut", *mp.look->alpha_cut);
 				}
 			} else {
 				rs->material_set_shader(m, shaders_[(mp.alpha_test ? 2 : 0) + (mp.double_sided ? 1 : 0)]);

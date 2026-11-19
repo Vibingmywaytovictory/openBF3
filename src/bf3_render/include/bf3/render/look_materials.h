@@ -97,6 +97,7 @@ struct LookMaterial {
 	std::vector<std::string> graph_textures;
 	std::vector<std::array<float, 4>> graph_constants;
 	std::string graph_refusal;
+	std::optional<float> alpha_cut;
 	bool graph_plain = false;
 	bool graph_mask_colour = false;
 	std::optional<std::array<float, 3>> flat_colour;
