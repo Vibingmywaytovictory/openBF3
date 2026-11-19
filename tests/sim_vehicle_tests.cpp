@@ -1155,6 +1155,25 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK_MESSAGE(vehicle_gate_g1m(*r, &why), why);
 	}
 
+	TEST_CASE("sim.vehicle: gate D wants wheel lift on bumps only from the crest's lift speed up") {
+		VehicleCourseReport r;
+		r.course.kind = VehicleCourseKind::Bumps;
+		r.course.found = true;
+		r.distance = 400.0f;
+		r.max_speed_kmh = 60.0f;
+		r.course.lift_speed_kmh = 0.0f;
+		std::string why;
+		CHECK_FALSE(vehicle_course_drove(r, &why));
+		CHECK(why.find("wheel off") != std::string::npos);
+		r.ticks_any_wheel_off = 30;
+		CHECK(vehicle_course_drove(r, &why));
+		r.ticks_any_wheel_off = 0;
+		r.course.lift_speed_kmh = 59.9f;
+		CHECK_FALSE(vehicle_course_drove(r));
+		r.course.lift_speed_kmh = 79.6f;
+		CHECK(vehicle_course_drove(r));
+	}
+
 	TEST_CASE("sim.vehicle: two worlds stepped on two threads at once give the single-thread hashes") {
 		const std::shared_ptr<const StaticWorldShapes> shapes = ground_shapes();
 		const std::shared_ptr<const VehicleModel> m = fixture_model();

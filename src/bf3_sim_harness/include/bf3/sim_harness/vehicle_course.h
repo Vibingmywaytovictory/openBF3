@@ -28,6 +28,7 @@ struct VehicleCourse {
 	Vec3 a{}, b{};
 	float slope_degrees = 0;
 	float feature = 0;
+	float lift_speed_kmh = 0;
 	uint32_t seed = 0;
 	size_t queries = 0;
 	bool budget_exhausted = false;

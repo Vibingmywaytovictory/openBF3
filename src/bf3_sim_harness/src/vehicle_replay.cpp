@@ -568,8 +568,12 @@ bool vehicle_course_drove(const VehicleCourseReport &p_report, std::string *r_wh
 		std::snprintf(buffer, sizeof(buffer), "%.2f turns (< %.0f)", double(p_report.yaw_turns), double(a.min_yaw_turns));
 		return fail(buffer);
 	}
-	if (p_report.ticks_any_wheel_off < a.min_ticks_any_wheel_off) {
-		std::snprintf(buffer, sizeof(buffer), "%u ticks with a wheel off the ground (< %u)", p_report.ticks_any_wheel_off, a.min_ticks_any_wheel_off);
+	if (p_report.max_speed_kmh >= p_report.course.lift_speed_kmh &&
+			p_report.ticks_any_wheel_off < a.min_ticks_any_wheel_off) {
+		std::snprintf(buffer, sizeof(buffer),
+				"%u ticks with a wheel off the ground (< %u), top %.1f km/h, lift at %.1f km/h",
+				p_report.ticks_any_wheel_off, a.min_ticks_any_wheel_off, double(p_report.max_speed_kmh),
+				double(p_report.course.lift_speed_kmh));
 		return fail(buffer);
 	}
 	if (p_report.static_impacts < a.min_static_impacts) {
@@ -818,9 +822,12 @@ std::string format_vehicle_course_report(const VehicleCourseReport &p_report) {
 	if (!c.found) {
 		return out;
 	}
-	std::snprintf(line, sizeof(line), "  start (%.2f, %.2f, %.2f), a (%.1f, %.1f, %.1f), b (%.1f, %.1f, %.1f), slope %.1f deg, feature %.3f\n",
-			double(c.start.position[0]), double(c.start.position[1]), double(c.start.position[2]), double(c.a[0]), double(c.a[1]), double(c.a[2]),
-			double(c.b[0]), double(c.b[1]), double(c.b[2]), double(c.slope_degrees), double(c.feature));
+	std::snprintf(line, sizeof(line),
+			"  start (%.2f, %.2f, %.2f), a (%.1f, %.1f, %.1f), b (%.1f, %.1f, %.1f), slope %.1f deg, feature %.3f, "
+			"lifts at %.1f km/h\n",
+			double(c.start.position[0]), double(c.start.position[1]), double(c.start.position[2]), double(c.a[0]),
+			double(c.a[1]), double(c.a[2]), double(c.b[0]), double(c.b[1]), double(c.b[2]), double(c.slope_degrees),
+			double(c.feature), double(c.lift_speed_kmh));
 	out += line;
 	std::snprintf(line, sizeof(line),
 			"  D %s%s%s: %.1f m, top %.1f km/h, wheel off %u ticks (all off %u), static contact %u ticks, %u impacts (max %.1f km/h), asleep %u ticks, "

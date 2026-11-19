@@ -365,8 +365,8 @@ const char *vehicle_course_name(VehicleCourseKind p_kind) {
 	return "?";
 }
 
-core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_courses(const CollisionWorld &p_world, std::span<const Vec3> p_seeds,
-		const VehicleModel &, const VehicleCourseSearch &p_search) {
+core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_courses(const CollisionWorld &p_world,
+		std::span<const Vec3> p_seeds, const VehicleModel &p_model, const VehicleCourseSearch &p_search) {
 	if (!std::isfinite(p_search.radius) || !std::isfinite(p_search.grid) || p_search.grid < 1.0f || p_search.radius < p_search.grid ||
 			p_search.radius > 5000.0f || !(p_search.turnaround_radius >= 0.0f && p_search.turnaround_radius <= 200.0f)) {
 		return core::make_error("vehicle courses: search radius, grid or turnaround radius out of range");
@@ -591,6 +591,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 			fill_leg_course(s, best, course);
 			course.found = true;
 			course.seed = best_seed;
+			course.lift_speed_kmh = std::sqrt(p_model.tuning.gravity * p_model.gravity_factor / course.feature) * 3.6f;
 		}
 		course.queries = s.queries();
 		course.budget_exhausted = s.exhausted();
