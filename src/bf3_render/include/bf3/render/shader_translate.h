@@ -94,6 +94,7 @@ struct ProgramRequest {
 	std::function<uint32_t(uint32_t)> texture_usage;
 	ProgramAnalysis *analysis = nullptr;
 	std::span<const std::string_view> engine_globals = kEngineGlobals;
+	bool page_hidden = false;
 };
 
 struct TranslatedProgram {
@@ -102,6 +103,7 @@ struct TranslatedProgram {
 	std::vector<uint32_t> cubes;
 	std::vector<ProgramConstant> constants;
 	size_t instructions = 0;
+	bool terrain_pages = false;
 };
 
 inline constexpr uint32_t kDxgiR32G32B32A32Float = 2;

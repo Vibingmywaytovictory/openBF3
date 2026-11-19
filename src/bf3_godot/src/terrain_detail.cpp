@@ -23,12 +23,6 @@ using bf3::core::fmt;
 
 namespace {
 
-constexpr float kRecentreFraction = 0.25f;
-
-Vector4 vec4(const std::array<float, 4> &p_v) {
-	return Vector4(p_v[0], p_v[1], p_v[2], p_v[3]);
-}
-
 float window_side(const render::TerrainDetail &p_detail) {
 	const float mask = float(std::max(p_detail.mask.width, p_detail.mask.height)) * p_detail.mask.texel;
 	const float colour = float(std::max(p_detail.colour.width, p_detail.colour.height)) * p_detail.colour.texel;
@@ -52,6 +46,10 @@ void replace_texture(RID &r_texture, const Ref<Image> &p_image) {
 	r_texture = rs->texture_2d_create(p_image);
 }
 
+}
+
+Vector4 vec4_of(const std::array<float, 4> &p_v) {
+	return Vector4(p_v[0], p_v[1], p_v[2], p_v[3]);
 }
 
 Ref<Image> image_from_bytes(uint32_t p_width, uint32_t p_height, Image::Format p_format,
@@ -140,7 +138,7 @@ void TerrainDetailDraw::update(const Vector3 &p_camera) {
 	}
 	if (shown_) {
 		const float dx = local.x - shown_->centre[0], dz = local.z - shown_->centre[1];
-		if (std::sqrt(dx * dx + dz * dz) <= kRecentreFraction * window_side(*shown_)) {
+		if (std::sqrt(dx * dx + dz * dz) <= kWindowRecentreFraction * window_side(*shown_)) {
 			return;
 		}
 	} else if (stats_.failures > 0) {
@@ -192,13 +190,13 @@ void TerrainDetailDraw::apply(Built &r_built) {
 		if (has_mask) {
 			rs->material_set_param(material, "detail_mask", mask_texture_);
 		}
-		rs->material_set_param(material, "detail_mask_window", has_mask ? vec4(d.mask_window()) : Vector4());
-		rs->material_set_param(material, "detail_mask_size", vec4(d.mask_size()));
+		rs->material_set_param(material, "detail_mask_window", has_mask ? vec4_of(d.mask_window()) : Vector4());
+		rs->material_set_param(material, "detail_mask_size", vec4_of(d.mask_size()));
 		if (has_colour) {
 			rs->material_set_param(material, "detail_colour", colour_texture_);
 		}
-		rs->material_set_param(material, "detail_colour_window", has_colour ? vec4(d.colour_window()) : Vector4());
-		rs->material_set_param(material, "detail_colour_size", vec4(d.colour_size()));
+		rs->material_set_param(material, "detail_colour_window", has_colour ? vec4_of(d.colour_window()) : Vector4());
+		rs->material_set_param(material, "detail_colour_size", vec4_of(d.colour_size()));
 	}
 	shown_ = std::move(r_built.detail);
 	++stats_.windows;

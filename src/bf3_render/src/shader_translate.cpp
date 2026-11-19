@@ -2,6 +2,7 @@
 
 #include "bf3/core/res/mesh_set.h"
 #include "bf3/render/shader_database.h"
+#include "bf3/render/terrain_page.h"
 
 #include <algorithm>
 #include <charconv>
@@ -23,6 +24,7 @@ using dxbc::OperandType;
 constexpr char kLanes[] = "xyzw";
 constexpr uint32_t kSystemPosition = 1;
 constexpr uint32_t kGbufferAlbedo = 1;
+constexpr uint32_t kGbufferNormal = 0;
 constexpr const char *kViewConstants = "viewConstants";
 constexpr const char *kExternalPrefix = "external_";
 constexpr const char *kDepthTexture = "texture_depthBufferTexture";
@@ -121,6 +123,7 @@ public:
 	std::map<uint32_t, uint32_t> buffers;
 	std::map<uint32_t, TextureSampler> samplers;
 	std::set<uint32_t> clamped;
+	std::map<uint32_t, std::string> functions;
 
 	core::Result<std::string> operand(const Operand &p_op) {
 		std::string base;
@@ -216,13 +219,19 @@ public:
 				swizzle += kLanes[res.lane(c)];
 			}
 			std::string tex = "t" + std::to_string(res.index[0]);
+			const auto function = functions.find(res.index[0]);
 			if (depth_register && res.index[0] == *depth_register) {
 				tex = "depth_tex";
-			} else {
+			} else if (function == functions.end()) {
 				textures.insert(res.index[0]);
 			}
 			const std::string at = cubes.count(res.index[0]) != 0 ? ").xyz" : ").xy";
-			if (clamped.count(res.index[0]) != 0) {
+			if (function != functions.end()) {
+				if (!p_ins.is(Op::Sample) || !need(3)) {
+					return refuse("terrain atlas read by " + dxbc::format_instruction(p_ins));
+				}
+				value = function->second + "((" + src[0] + at + ")" + swizzle;
+			} else if (clamped.count(res.index[0]) != 0) {
 				core::Result<std::string> addressed = addressed_sample(p_ins, tex, "(" + src[0] + at, src);
 				if (!addressed) {
 					return addressed.error();
@@ -1169,6 +1178,10 @@ public:
 			}
 			locals += *l;
 		}
+		if (pages_) {
+			head += terrain_page_sampling();
+			out_.terrain_pages = true;
+		}
 		for (uint32_t r = 0; r < ps_.temps; ++r) {
 			locals += "\tvec4 r" + std::to_string(r) + " = vec4(0.0);\n";
 		}
@@ -1179,8 +1192,8 @@ public:
 		if (!vertex) {
 			return vertex.error();
 		}
-		out_.code =
-				header() + head + common_uniforms() + *vertex + "void fragment() {\n" + locals + body + tail() + "}\n";
+		out_.code = header() + head + common_uniforms() + *vertex + "void fragment() {\n" +
+				(request_.page_hidden ? terrain_page_hidden() : std::string()) + locals + body + tail() + "}\n";
 		return out_;
 	}
 
@@ -1199,6 +1212,20 @@ private:
 				live.insert(lane_key(uint8_t(OperandType::Output), kGbufferAlbedo, c));
 			}
 			outputs_used_.insert(kGbufferAlbedo);
+			const bool atlas = std::any_of(ps_.bindings.begin(), ps_.bindings.end(), [](const dxbc::Binding &p_b) {
+				return p_b.type == uint32_t(dxbc::BindingType::Texture) && terrain_page_atlas(p_b.name) >= 0;
+			});
+			const bool normal =
+					std::any_of(ps_.outputs.begin(), ps_.outputs.end(), [](const dxbc::SignatureElement &p_e) {
+						return p_e.reg == kGbufferNormal && p_e.name == "SV_Target";
+					});
+			if (atlas && normal) {
+				page_normal_ = true;
+				for (uint8_t c = 0; c < 3; ++c) {
+					live.insert(lane_key(uint8_t(OperandType::Output), kGbufferNormal, c));
+				}
+				outputs_used_.insert(kGbufferNormal);
+			}
 		} else {
 			for (uint8_t c = 0; c < 4; ++c) {
 				live.insert(lane_key(uint8_t(OperandType::Output), 0, c));
@@ -1436,6 +1463,11 @@ private:
 			emitter_.depth_register = reg;
 			return;
 		}
+		if (const int32_t atlas = b != nullptr ? terrain_page_atlas(b->name) : -1; atlas >= 0) {
+			pages_ = true;
+			emitter_.functions[reg] = terrain_page_function(atlas);
+			return;
+		}
 		if (std::find(request_.bound_textures.begin(), request_.bound_textures.end(), reg) ==
 				request_.bound_textures.end()) {
 			defer("texture t" + std::to_string(reg) + (b != nullptr ? " (" + b->name + ")" : std::string()) +
@@ -1550,6 +1582,11 @@ private:
 				return refuse(cb->name + " offset " + std::to_string(at) + " is no variable");
 			}
 			const uint8_t component = uint8_t((at - var->offset) / 4);
+			if (var->name == kTerrainPageUv && component < 4) {
+				pages_ = true;
+				lanes[c] = std::string(kTerrainPageUvUniform) + "." + kLanes[component];
+				continue;
+			}
 			if (var->name.rfind(kExternalPrefix, 0) == 0) {
 				if (component >= 4) {
 					return refuse(var->name + " is wider than a vector");
@@ -1651,6 +1688,14 @@ uniform float roughness_value = 0.6;
 	}
 
 	std::string tail() const {
+		if (request_.target == ProgramTarget::Deferred && page_normal_) {
+			return R"(	ALBEDO = o1.xyz * o1.xyz;
+	ROUGHNESS = roughness_value;
+	METALLIC = 0.0;
+	SPECULAR = 0.5;
+	NORMAL = normalize((VIEW_MATRIX * vec4(o0.xyz * 2.0 - 1.0, 0.0)).xyz);
+)";
+		}
 		if (request_.target == ProgramTarget::Deferred) {
 			return R"(	ALBEDO = o1.xyz * o1.xyz;
 	ROUGHNESS = roughness_value;
@@ -1677,6 +1722,8 @@ uniform float roughness_value = 0.6;
 	std::vector<uint32_t> textures_;
 	Emitter emitter_{ ConstantNames::Locals };
 	bool depth_ = false;
+	bool pages_ = false;
+	bool page_normal_ = false;
 	bool clip_ = false;
 	bool walked_ = false;
 	std::string pending_;

@@ -77,6 +77,7 @@ core::Result<TerrainMaterial> solution_material(const SceneWaterShader &p_shader
 		return b != bindings.end() && b->srgb;
 	};
 	request.engine_globals = kWaterGlobals;
+	request.page_hidden = true;
 	core::Result<TranslatedProgram> translated = translate_program(request);
 	if (!translated) {
 		return translated.error();

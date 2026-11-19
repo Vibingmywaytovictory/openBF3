@@ -6,6 +6,7 @@
 #include "bf3/render/level_scene.h"
 #include "bf3/render/mesh_cache.h"
 #include "bf3/render/terrain_detail.h"
+#include "bf3/render/terrain_page.h"
 #include "bf3/render/terrain_scatter.h"
 #include "test_support.h"
 
@@ -355,5 +356,49 @@ TEST_SUITE("render-scatter-cut") {
 		}
 		CHECK(cut == seen.size());
 		CHECK(grass == 1);
+	}
+}
+
+TEST_SUITE("render-scatter-pages") {
+	TEST_CASE("scatter: every scattered mesh of MP_007 whose program reads the terrain draws through that program") {
+		const Caspian *c = caspian();
+		if (c == nullptr) {
+			return;
+		}
+		REQUIRE(c->terrain.scatter != nullptr);
+		std::map<uint32_t, bool> seen;
+		uint32_t paged = 0, grass = 0;
+		for (const render::ScatterType &type : c->terrain.scatter->types()) {
+			if (type.mesh < 0) {
+				continue;
+			}
+			const render::SceneMeshPlan &mesh_plan = c->plan.meshes[size_t(type.mesh)];
+			const std::string name = to_lower_ascii(c->plan.requests[mesh_plan.request].res);
+			for (uint32_t m : mesh_plan.surface_materials) {
+				REQUIRE(m < c->plan.materials.size());
+				if (!seen.emplace(m, true).second) {
+					continue;
+				}
+				const render::SceneMaterialPlan &mp = c->plan.materials[m];
+				REQUIRE(mp.look.has_value());
+				const bool pages = mp.look->graph && mp.look->graph->translated.terrain_pages;
+				std::printf("render.scatter_pages MP_007 %s: %s%s\n", name.c_str(),
+						pages ? "program with the terrain pages" : (mp.look->graph ? "program" : "resolved look"),
+						mp.look->graph_refusal.empty() ? "" : (" (" + mp.look->graph_refusal + ")").c_str());
+				paged += pages ? 1 : 0;
+				if (name.find("moorlandgrass01") != std::string::npos) {
+					++grass;
+					REQUIRE(pages);
+					const std::string &code = mp.look->graph->translated.code;
+					CHECK(code.find("terrain_atlas0(") != std::string::npos);
+					CHECK(code.find("terrain_atlas1(") != std::string::npos);
+					CHECK(code.find(std::string(render::kTerrainPageUvUniform) + ".") != std::string::npos);
+					CHECK(code.find("NORMAL = ") != std::string::npos);
+					CHECK(code.find("discard") != std::string::npos);
+				}
+			}
+		}
+		CHECK(grass == 1);
+		CHECK(paged > 0);
 	}
 }

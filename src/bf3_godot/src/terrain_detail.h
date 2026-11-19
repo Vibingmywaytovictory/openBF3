@@ -7,7 +7,9 @@
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/vector4.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -16,6 +18,10 @@
 #include <vector>
 
 namespace bf3::godot_side {
+
+inline constexpr float kWindowRecentreFraction = 0.25f;
+
+godot::Vector4 vec4_of(const std::array<float, 4> &p_v);
 
 godot::Ref<godot::Image> image_from_bytes(uint32_t p_width, uint32_t p_height, godot::Image::Format p_format,
 		const std::vector<uint8_t> &p_data, bool p_mipmaps);

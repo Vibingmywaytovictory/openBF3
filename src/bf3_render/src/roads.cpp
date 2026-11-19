@@ -4,6 +4,7 @@
 #include "bf3/core/util/text.h"
 #include "bf3/render/dxbc.h"
 #include "bf3/render/shader_database.h"
+#include "bf3/render/terrain_page.h"
 #include "bf3/render/terrain_program.h"
 
 #include <algorithm>
@@ -267,9 +268,9 @@ core::Result<std::string> terrain_decal_shader_code(
 		return head.error();
 	}
 	std::string code = std::move(*head);
-	code += "void vertex() {\nVERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz * " +
-			std::to_string(1.0f - kTerrainDecalViewPull) +
-			";\nNORMAL = normalize((MODELVIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);\n"
+	code += "void vertex() {\nVERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz * (" + terrain_page_camera() +
+			" ? 1.0 : " + std::to_string(1.0f - kTerrainDecalViewPull) +
+			");\nNORMAL = normalize((MODELVIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);\n"
 			"TANGENT = normalize((MODELVIEW_MATRIX * vec4(TANGENT, 0.0)).xyz);\n"
 			"BINORMAL = normalize((MODELVIEW_MATRIX * vec4(BINORMAL, 0.0)).xyz);\n}\n";
 	code += "void fragment() {\nvec4 v1 = COLOR;\nvec4 v2 = vec4(UV2.x, UV2.y, 0.9, 0.0);\nvec4 v3 = vec4(UV.x, UV.y, "
@@ -278,11 +279,8 @@ core::Result<std::string> terrain_decal_shader_code(
 	code += p_translation.body;
 	code += "float decal_cover = max(o0.w, 0.0001);\n"
 			"vec3 decal_colour = vec3(o0.y, o0.z, o2.x) / decal_cover;\n"
-			"ALBEDO = decal_colour * decal_colour;\n"
-			"vec3 decal_normal = normalize(vec3(o0.x, o1.z, o1.x) / decal_cover * 2.0 - 1.0);\n"
-			"NORMAL = normalize((VIEW_MATRIX * (MODEL_MATRIX * vec4(decal_normal, 0.0))).xyz);\n"
-			"ROUGHNESS = 1.0;\n"
-			"ALPHA = clamp(o0.w, 0.0, 1.0);\n}\n";
+			"vec3 decal_normal = normalize(vec3(o0.x, o1.z, o1.x) / decal_cover * 2.0 - 1.0);\n" +
+			terrain_page_output("decal_colour", "decal_normal") + "ALPHA = clamp(o0.w, 0.0, 1.0);\n}\n";
 	return code;
 }
 

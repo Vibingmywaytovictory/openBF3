@@ -630,9 +630,6 @@ constexpr float kEnvmapSunDegrees = 15.0f;
 constexpr unsigned kCensusLanes = 4;
 constexpr std::string_view kMaskColourLedger[] = {
 	"architecture/shaders/facadepresetinterior_destrvolume_colorcontrol",
-	"levels/mp_subway/messscattering/shader/mp_subway_grass_01",
-	"levels/xp4_earthquake/terrain/shaders/asphalt_ms_ss",
-	"levels/xp5_001/meshscatteringtypes/shaders/xp5_001_moorlandgrass01_",
 	"levels/xp5_001/objects/forestledge_01_top_alpha_normalfix",
 	"levels/xp5_002/architecture/warehouse_02_xp5_002/ss_warehouse_02_destrvolume_xp5_002",
 };
@@ -649,6 +646,9 @@ constexpr std::pair<const char *, std::string_view> kDrawnThroughPrograms[] = {
 	{ "XP2_Skybar", "xp2/objects/skybarsigns/signs_shader" },
 	{ "XP2_Palace", "xp2/objects/palacecourtyardground_01/ss_palacecourtyardground_01_water" },
 	{ "MP_007", "levels/mp_007/props/m_mp007_waterwash_01" },
+	{ "MP_Subway", "levels/mp_subway/messscattering/shader/mp_subway_grass_01" },
+	{ "XP4_Quake", "levels/xp4_earthquake/terrain/shaders/asphalt_ms_ss" },
+	{ "XP5_001", "levels/xp5_001/meshscatteringtypes/shaders/xp5_001_moorlandgrass01_" },
 	{ "XP1_002", "levels/sp_tank/props/backdrop_wires_main" },
 };
 constexpr std::string_view kHiddenLedger[] = {

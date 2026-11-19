@@ -635,12 +635,9 @@ void LevelUpload::create_materials(double p_deadline_us) {
 			const render::SceneMaterialPlan &mp = plan.materials[next_material_];
 			if (plan.look == render::SceneLook::L1) {
 
-				static const bool blend_off = ("," + user_arg_value("look-off") + ",").find(",blend,") != std::string::npos;
-				const int mode = mp.blend && !blend_off ? 2 : (mp.alpha_test ? 1 : 0);
 				const bool program = mp.program >= 0 && !graph_programs_off();
-				rs->material_set_shader(m,
-						program ? shaders_[program_shaders_ + size_t(mp.program)]
-								: shaders_[size_t(2 * mode + (mp.double_sided ? 1 : 0))]);
+				rs->material_set_shader(
+						m, program ? shaders_[program_shaders_ + size_t(mp.program)] : generic_shader(mp));
 				if (program) {
 					std::lock_guard lock(stats_mutex_);
 					++stats_.program_materials;
@@ -828,6 +825,9 @@ void LevelUpload::create_terrain_look(const Done &p_done) {
 				instance_transform(plan_->terrains[p_done.index].transform));
 		detail_draws_.push_back(std::move(draw));
 	}
+	if (!page_terrain_ && p_done.bounds && p_done.index < plan_->terrains.size()) {
+		page_terrain_ = std::pair<uint32_t, float>(p_done.index, look.detail.data_mask_texel);
+	}
 	std::lock_guard lock(stats_mutex_);
 	stats_.terrain_layer_materials += materials.size();
 }
@@ -942,6 +942,7 @@ double LevelUpload::pump(const Callable &p_task, double p_budget_ms) {
 		stats_.last_c2_us = end;
 	}
 	update_scatter();
+	update_pages();
 	update_detail();
 	return ms;
 }
@@ -990,13 +991,62 @@ void LevelUpload::update_scatter() {
 }
 
 void LevelUpload::update_detail() {
-	const std::optional<Vector3> camera = detail_draws_.empty() ? std::nullopt : camera_position();
+	const std::optional<Vector3> camera =
+			detail_draws_.empty() && page_draws_.empty() ? std::nullopt : camera_position();
 	if (!camera) {
 		return;
 	}
 	for (const std::unique_ptr<TerrainDetailDraw> &draw : detail_draws_) {
 		draw->update(*camera);
 	}
+	const uint64_t ground = detail_draws_.empty() ? 0 : detail_draws_.front()->stats().windows;
+	for (const std::unique_ptr<TerrainPageDraw> &draw : page_draws_) {
+		draw->update(*camera, ground);
+	}
+}
+
+void LevelUpload::update_pages() {
+	if (pages_checked_ || !finished()) {
+		return;
+	}
+	pages_checked_ = true;
+	std::vector<size_t> users;
+	for (size_t i = 0; i < plan_->materials.size() && i < materials_.size(); ++i) {
+		const int32_t program = plan_->materials[i].program;
+		if (program >= 0 && plan_->programs[size_t(program)]->translated.terrain_pages && materials_[i].is_valid()) {
+			users.push_back(i);
+		}
+	}
+	static const bool pages_off = ("," + user_arg_value("look-off") + ",").find(",pages,") != std::string::npos;
+	if (!users.empty() && !pages_off && page_terrain_ && terrain_bounds_[page_terrain_->first]) {
+		const uint32_t t = page_terrain_->first;
+		const Transform3D terrain = instance_transform(plan_->terrains[t].transform);
+		std::vector<RID> rids;
+		for (size_t i : users) {
+			rids.push_back(materials_[i]);
+		}
+		std::unique_ptr<TerrainPageDraw> draw = std::make_unique<TerrainPageDraw>();
+		draw->begin(plan_->terrains[t].asset, terrain_meshes_[t], terrain, terrain.xform(*terrain_bounds_[t]),
+				page_terrain_->second, std::move(rids));
+		if (draw->begun()) {
+			page_draws_.push_back(std::move(draw));
+			return;
+		}
+	}
+	RenderingServer *rs = RenderingServer::get_singleton();
+	for (size_t i : users) {
+		rs->material_set_shader(materials_[i], generic_shader(plan_->materials[i]));
+	}
+	if (!users.empty()) {
+		UtilityFunctions::print(to_godot("[pages] no terrain pages: " + std::to_string(users.size()) +
+				" looks that read them draw their resolved looks"));
+	}
+}
+
+RID LevelUpload::generic_shader(const render::SceneMaterialPlan &p_material) const {
+	static const bool blend_off = ("," + user_arg_value("look-off") + ",").find(",blend,") != std::string::npos;
+	const int mode = p_material.blend && !blend_off ? 2 : (p_material.alpha_test ? 1 : 0);
+	return shaders_[size_t(2 * mode + (p_material.double_sided ? 1 : 0))];
 }
 
 ScatterDrawStats LevelUpload::scatter_stats() const {
@@ -1053,6 +1103,9 @@ void LevelUpload::free_all() {
 	}
 	scatter_draws_.clear();
 	detail_draws_.clear();
+	page_draws_.clear();
+	page_terrain_.reset();
+	pages_checked_ = false;
 	scatter_checked_ = false;
 	{
 		std::lock_guard lock(queue_mutex_);

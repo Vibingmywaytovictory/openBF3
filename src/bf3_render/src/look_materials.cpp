@@ -5,6 +5,7 @@
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/util/text.h"
 #include "bf3/render/dxbc.h"
+#include "bf3/render/terrain_page.h"
 
 #include <algorithm>
 #include <array>
@@ -802,7 +803,7 @@ LookResolver::ProgramInfo &LookResolver::program_info(const SurfaceShader &p_sha
 		}
 		for (const dxbc::Binding &b : info->pixel.bindings) {
 			if (b.type != uint32_t(dxbc::BindingType::Texture) || info->bindings.count(b.bind_point) != 0 ||
-					b.name.rfind(kTexturePrefix, 0) != 0) {
+					b.name.rfind(kTexturePrefix, 0) != 0 || terrain_page_atlas(b.name) >= 0) {
 				continue;
 			}
 			const std::string parameter = b.name.substr(kTexturePrefix.size());
@@ -926,12 +927,13 @@ void LookResolver::attach_program(
 		const std::string name = b.parameter.empty() ? b.name : to_lower_ascii(p_slot.texture(b.parameter));
 		mask_colour = mask_colour || (r_out.color && r_out.color->name == name);
 	}
-	if (info.target == ProgramTarget::Deferred && !mask_colour && textures.size() == 1 && r_out.color &&
+	const bool pages = !info.variants.empty() && info.variants.begin()->second->translated.terrain_pages;
+	if (info.target == ProgramTarget::Deferred && !mask_colour && !pages && textures.size() == 1 && r_out.color &&
 			textures.front() == r_out.color->name) {
 		r_out.graph_plain = true;
 		return;
 	}
-	if (info.target == ProgramTarget::Deferred && !mask_colour) {
+	if (info.target == ProgramTarget::Deferred && !mask_colour && !pages) {
 		return;
 	}
 	auto variant = info.variants.find(srgb);

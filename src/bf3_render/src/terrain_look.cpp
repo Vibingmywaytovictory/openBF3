@@ -5,6 +5,7 @@
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/util/text.h"
 #include "bf3/render/shader_database.h"
+#include "bf3/render/terrain_page.h"
 #include "bf3/render/terrain_program.h"
 
 #include <algorithm>
@@ -259,10 +260,8 @@ core::Result<std::string> terrain_shader_code(
 	code += terrain_shader_locals(p_translation, p_material);
 	code += detail->body;
 	code += "vec3 terrain_colour = vec3(o0.y, o0.z, o2.x);\n"
-			"ALBEDO = terrain_colour * terrain_colour;\n"
-			"vec3 terrain_normal = normalize(vec3(o0.x, o1.z, o1.x) * 2.0 - 1.0);\n"
-			"NORMAL = normalize((VIEW_MATRIX * (MODEL_MATRIX * vec4(terrain_normal, 0.0))).xyz);\n"
-			"ROUGHNESS = 1.0;\n}\n";
+			"vec3 terrain_normal = normalize(vec3(o0.x, o1.z, o1.x) * 2.0 - 1.0);\n" +
+			terrain_page_output("terrain_colour", "terrain_normal") + "}\n";
 	return code;
 }
 
