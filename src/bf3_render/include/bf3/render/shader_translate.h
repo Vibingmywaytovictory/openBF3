@@ -34,11 +34,13 @@ struct PixelTranslation {
 	uint32_t outputs = 0;
 	std::vector<uint32_t> inputs;
 	std::vector<uint32_t> textures;
+	std::vector<uint32_t> clamped;
 	std::vector<std::pair<uint32_t, uint32_t>> constant_buffers;
 	uint64_t instructions = 0;
 };
 
-core::Result<PixelTranslation> translate_pixel_program(const dxbc::Program &p_program);
+core::Result<PixelTranslation> translate_pixel_program(
+		const dxbc::Program &p_program, std::span<const TextureSampler> p_samplers = {});
 
 enum class ProgramTarget : uint8_t {
 	Deferred,

@@ -119,6 +119,8 @@ public:
 	std::set<uint32_t> inputs;
 	std::set<uint32_t> textures;
 	std::map<uint32_t, uint32_t> buffers;
+	std::map<uint32_t, TextureSampler> samplers;
+	std::set<uint32_t> clamped;
 
 	core::Result<std::string> operand(const Operand &p_op) {
 		std::string base;
@@ -220,7 +222,13 @@ public:
 				textures.insert(res.index[0]);
 			}
 			const std::string at = cubes.count(res.index[0]) != 0 ? ").xyz" : ").xy";
-			if (p_ins.is(Op::Sample) && need(3)) {
+			if (clamped.count(res.index[0]) != 0) {
+				core::Result<std::string> addressed = addressed_sample(p_ins, tex, "(" + src[0] + at, src);
+				if (!addressed) {
+					return addressed.error();
+				}
+				value = *addressed + swizzle;
+			} else if (p_ins.is(Op::Sample) && need(3)) {
 				value = "texture(" + tex + ", (" + src[0] + at + ")" + swizzle;
 			} else if (p_ins.is(Op::SampleL) && need(4)) {
 				value = "textureLod(" + tex + ", (" + src[0] + at + ", (" + src[3] + ").x)" + swizzle;
@@ -322,6 +330,71 @@ public:
 			}
 		}
 		return *r + "." + mask + " = (" + value + ")." + mask + ";";
+	}
+
+	core::Result<std::string> addressed_sample(const Instruction &p_ins, const std::string &p_texture,
+			const std::string &p_coord, const std::vector<std::string> &p_src) const {
+		if (p_ins.operands.size() < 4) {
+			return refuse("addressed " + dxbc::format_instruction(p_ins));
+		}
+		const Operand &sampler = p_ins.operands[3];
+		const auto state = samplers.find(sampler.index[0]);
+		if (!sampler.is(OperandType::Sampler) || state == samplers.end()) {
+			return refuse("sample through s" + std::to_string(sampler.index[0]) + " without a sampler state");
+		}
+		std::array<std::string, 2> lanes;
+		std::string inside;
+		bool identity = true;
+		for (uint8_t a = 0; a < 2; ++a) {
+			const std::string c = p_coord + "." + kLanes[a];
+			switch (TextureAddress(state->second.address[a])) {
+				case TextureAddress::Wrap:
+					lanes[a] = "fract(" + c + ")";
+					break;
+				case TextureAddress::Mirror:
+					lanes[a] = "(1.0 - abs(mod(" + c + ", 2.0) - 1.0))";
+					break;
+				case TextureAddress::MirrorOnce:
+					lanes[a] = "abs(" + c + ")";
+					break;
+				case TextureAddress::Border:
+					inside += std::string(inside.empty() ? "" : " && ") + c + " >= 0.0 && " + c + " <= 1.0";
+					lanes[a] = c;
+					break;
+				case TextureAddress::Clamp:
+					lanes[a] = c;
+					break;
+				default:
+					return refuse("s" + std::to_string(sampler.index[0]) + " address mode " +
+							std::to_string(state->second.address[a]));
+			}
+			identity = identity && lanes[a] == c && inside.empty();
+		}
+		const std::string uv = identity ? p_coord : "vec2(" + lanes[0] + ", " + lanes[1] + ")";
+		std::string sample;
+		if (p_ins.is(Op::Sample) && p_src.size() == 3) {
+			sample = identity
+					? "texture(" + p_texture + ", " + uv + ")"
+					: "textureGrad(" + p_texture + ", " + uv + ", dFdx(" + p_coord + "), dFdy(" + p_coord + "))";
+		} else if (p_ins.is(Op::SampleL) && p_src.size() == 4) {
+			sample = "textureLod(" + p_texture + ", " + uv + ", (" + p_src[3] + ").x)";
+		} else if (p_ins.is(Op::SampleD) && p_src.size() == 5) {
+			sample = "textureGrad(" + p_texture + ", " + uv + ", (" + p_src[3] + ").xy, (" + p_src[4] + ").xy)";
+		} else {
+			return refuse("addressed " + dxbc::format_instruction(p_ins));
+		}
+		if (inside.empty()) {
+			return sample;
+		}
+		std::string border = "vec4(";
+		for (uint8_t c = 0; c < 4; ++c) {
+			const std::optional<std::string> f = float_text(state->second.border[c]);
+			if (!f) {
+				return refuse("s" + std::to_string(sampler.index[0]) + " has a non-finite border colour");
+			}
+			border += (c == 0 ? "" : ", ") + *f;
+		}
+		return "((" + inside + ") ? " + sample + " : " + border + "))";
 	}
 
 private:
@@ -1612,12 +1685,30 @@ uniform float roughness_value = 0.6;
 
 }
 
-core::Result<PixelTranslation> translate_pixel_program(const dxbc::Program &p_program) {
+core::Result<PixelTranslation> translate_pixel_program(
+		const dxbc::Program &p_program, std::span<const TextureSampler> p_samplers) {
 	if (p_program.kind != dxbc::kPixelProgram) {
 		return refuse("not a pixel program");
 	}
 	Emitter emitter(ConstantNames::Arrays);
 	PixelTranslation out;
+	for (const TextureSampler &sampler : p_samplers) {
+		emitter.samplers.emplace(sampler.slot, sampler);
+	}
+	for (const Instruction &ins : p_program.code) {
+		if (p_samplers.empty() || !sampling(ins.opcode) || ins.operands.size() < 4) {
+			continue;
+		}
+		const Operand &res = ins.operands[2], &sampler = ins.operands[3];
+		const auto state = emitter.samplers.find(sampler.index[0]);
+		if (!sampler.is(OperandType::Sampler) || state == emitter.samplers.end()) {
+			return refuse("sample through s" + std::to_string(sampler.index[0]) + " without a sampler state");
+		}
+		if (state->second.address[0] != uint32_t(TextureAddress::Wrap) ||
+				state->second.address[1] != uint32_t(TextureAddress::Wrap)) {
+			emitter.clamped.insert(res.index[0]);
+		}
+	}
 	out.temps = p_program.temps;
 	out.outputs = p_program.declared_outputs;
 	std::string code;
@@ -1662,6 +1753,7 @@ core::Result<PixelTranslation> translate_pixel_program(const dxbc::Program &p_pr
 	}
 	out.body = head + code;
 	out.textures.assign(emitter.textures.begin(), emitter.textures.end());
+	out.clamped.assign(emitter.clamped.begin(), emitter.clamped.end());
 	out.inputs.assign(emitter.inputs.begin(), emitter.inputs.end());
 	out.constant_buffers.assign(emitter.buffers.begin(), emitter.buffers.end());
 	return out;

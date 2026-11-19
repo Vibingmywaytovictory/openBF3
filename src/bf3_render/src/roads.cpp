@@ -88,6 +88,9 @@ std::vector<SceneDecalShader> plan_terrain_decals(const core::LevelMount &p_moun
 			if (s.pixel_program) {
 				decal.program = s.pixel_program;
 				slots = s.pixel_constants != nullptr ? &s.pixel_constants->textures : nullptr;
+				if (s.pixel_constants != nullptr) {
+					decal.samplers = s.pixel_constants->samplers;
+				}
 				break;
 			}
 		}
@@ -96,20 +99,8 @@ std::vector<SceneDecalShader> plan_terrain_decals(const core::LevelMount &p_moun
 			continue;
 		}
 		const std::vector<std::pair<uint32_t, std::string>> &bound = slots != nullptr ? *slots : shader->texture_slots;
-		for (size_t a = 0; a < bound.size() && decal.refused.empty(); ++a) {
-			for (size_t b = a + 1; b < bound.size(); ++b) {
-				if (to_lower_ascii(bound[a].second) == to_lower_ascii(bound[b].second)) {
-					decal.refused = "t" + std::to_string(bound[a].first) + " and t" + std::to_string(bound[b].first) +
-							" sample " + to_lower_ascii(bound[a].second) +
-							" through two samplers whose address modes are not decoded";
-					break;
-				}
-			}
-		}
-		if (decal.refused.empty()) {
-			for (const auto &[slot, texture] : bound) {
-				decal.textures.push_back(plan_terrain_texture(p_mount, slot, texture, p_texture, srgb, r_failures));
-			}
+		for (const auto &[slot, texture] : bound) {
+			decal.textures.push_back(plan_terrain_texture(p_mount, slot, texture, p_texture, srgb, r_failures));
 		}
 		out.push_back(std::move(decal));
 	}
@@ -301,14 +292,11 @@ core::Result<TerrainMaterial> terrain_decal_material(
 	if (p_shader.program == nullptr) {
 		return core::make_error(where + ": no pixel program");
 	}
-	if (!p_shader.refused.empty()) {
-		return core::make_error(p_shader.refused);
-	}
 	core::Result<dxbc::Program> program = dxbc::parse(*p_shader.program);
 	if (!program) {
 		return core::error_at(where, program.error());
 	}
-	core::Result<PixelTranslation> translation = translate_pixel_program(*program);
+	core::Result<PixelTranslation> translation = translate_pixel_program(*program, p_shader.samplers);
 	if (!translation) {
 		return core::error_at(where, translation.error());
 	}
@@ -345,6 +333,7 @@ TerrainDecalStats add_terrain_decals(const core::res::TerrainDecals &p_decals, c
 		const core::res::TerrainDecalRecord &r = set.records[i];
 		const std::string name = to_lower_ascii(r.shader);
 		groups[{ r.draw_order(), name }].push_back(i);
+		++stats.shader_records[name][0];
 		seen.emplace(name, false);
 		stats.data_triangles += r.triangle_count;
 		double area = 0.0;
@@ -459,6 +448,7 @@ TerrainDecalStats add_terrain_decals(const core::res::TerrainDecals &p_decals, c
 		stats.drawn_triangles += draped.size() / 3;
 		stats.drawn_area += drawn_area * metres;
 		stats.drawn_records += drawn_records;
+		stats.shader_records[name][1] += drawn_records;
 		++stats.surfaces;
 		seen[name] = true;
 		r_mesh.vertices += surface.vertex_count();

@@ -6,6 +6,8 @@
 #include "bf3/core/util/text.h"
 #include "bf3/render/level_scene.h"
 #include "bf3/render/roads.h"
+#include "bf3/render/terrain_program.h"
+#include "dxbc_test_support.h"
 #include "terrain_test_support.h"
 #include "test_support.h"
 
@@ -79,6 +81,7 @@ struct DecalCounts {
 	std::vector<std::string> refused;
 	std::string asphalt;
 	std::vector<uint8_t> layers_under_asphalt;
+	uint32_t asphalt_records = 0;
 };
 
 constexpr double kRoadLayerMargin = 64.0;
@@ -287,9 +290,32 @@ void check_terrain_decals(const char *p_level, const char *p_mode, const DecalCo
 	std::vector<std::string> undrawn;
 	for (const auto &[shader, why] : stats.undrawn) {
 		undrawn.push_back(shader);
-		CHECK(why.find("address modes are not decoded") != std::string::npos);
 	}
 	CHECK(undrawn == p_data.refused);
+	if (!p_data.asphalt.empty()) {
+		const auto asphalt = stats.shader_records.find(p_data.asphalt);
+		REQUIRE(asphalt != stats.shader_records.end());
+		std::printf("%s %s: %s records %u of %u drawn\n", p_level, p_mode, p_data.asphalt.c_str(), asphalt->second[1],
+				asphalt->second[0]);
+		CHECK(asphalt->second[0] == p_data.asphalt_records);
+		CHECK(asphalt->second[1] == p_data.asphalt_records);
+		for (const render::PreparedSurface &s : terrain->mesh.surfaces) {
+			if (s.material_name == p_data.asphalt) {
+				const std::string &code = terrain->look->materials[s.material_index].code;
+				const auto hints = [&](const char *p_texture) {
+					const size_t at = code.find(std::string("uniform sampler2D ") + p_texture + " : ");
+					return at == std::string::npos ? std::string() : code.substr(at, code.find('\n', at) - at);
+				};
+				CHECK(hints("t1").ends_with("repeat_disable;"));
+				CHECK(hints("t2").ends_with("repeat_disable;"));
+				CHECK(hints("t3").ends_with("repeat_enable;"));
+				CHECK(code.find("? textureGrad(t2, vec2(") != std::string::npos);
+				CHECK(code.find(" : vec4(0.0, 0.0, 0.0, 0.0))") != std::string::npos);
+				CHECK(code.find("textureGrad(t1, vec2((1.0 - abs(mod(") != std::string::npos);
+				CHECK(code.find("texture(t3, ") != std::string::npos);
+			}
+		}
+	}
 	CHECK(decal_surfaces == stats.surfaces);
 }
 
@@ -342,6 +368,55 @@ TEST_SUITE("terrain-decals-draw-unit") {
 		CHECK(render::drape_triangle(grid, triangle, holed) == doctest::Approx(1.0));
 	}
 
+	TEST_CASE("terrain decals: a sampler's address modes reach the sample coordinate and the texture's repeat") {
+		using namespace dxbct;
+		const std::vector<std::vector<uint32_t>> code = {
+			ins(69, { dst(kTemp, 0, 0xF), src(kInput, 3, swz(0, 1, 0, 0)), src(kResource, 1), sampler(0) }),
+			ins(69, { dst(kTemp, 1, 0xF), src(kInput, 3, swz(0, 1, 0, 0)), src(kResource, 2), sampler(1) }),
+			ins(69, { dst(kTemp, 2, 0xF), src(kInput, 3, swz(0, 1, 0, 0)), src(kResource, 3), sampler(2) }),
+			ins(0, { dst(kOutput, 0, 0xF), src(kTemp, 0), src(kTemp, 1) }),
+		};
+		Result<render::dxbc::Program> program = render::dxbc::parse(container({ { "SHDR", code_chunk(0, 3, code) } }));
+		REQUIRE(program.ok());
+		std::vector<render::TextureSampler> samplers(3);
+		samplers[0] = { 0, { 2, 1, 1 }, {} };
+		samplers[1] = { 1, { 4, 1, 1 }, { 0.5f, 0.0f, 0.0f, 1.0f } };
+		samplers[2] = { 2, { 1, 1, 1 }, {} };
+		Result<render::PixelTranslation> plain = render::translate_pixel_program(*program);
+		Result<render::PixelTranslation> t = render::translate_pixel_program(*program, samplers);
+		REQUIRE(plain.ok());
+		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+		INFO(t->body);
+		CHECK(plain->clamped.empty());
+		CHECK(t->clamped == std::vector<uint32_t>{ 1, 2 });
+		const std::string c = "(v3.xyxx).xy";
+		CHECK(t->body.find("textureGrad(t1, vec2((1.0 - abs(mod(" + c + ".x, 2.0) - 1.0)), fract(" + c + ".y)), dFdx(" +
+					  c + "), dFdy(" + c + "))") != std::string::npos);
+		CHECK(t->body.find("((" + c + ".x >= 0.0 && " + c + ".x <= 1.0) ? textureGrad(t2, vec2(" + c + ".x, fract(" +
+					  c + ".y)), dFdx(" + c + "), dFdy(" + c + ")) : vec4(0.5, 0.0, 0.0, 1.0))") != std::string::npos);
+		CHECK(t->body.find("texture(t3, " + c + ")") != std::string::npos);
+		CHECK(plain->body.find("texture(t1, " + c + ")") != std::string::npos);
+		render::TerrainMaterial material;
+		for (uint32_t slot = 1; slot <= 3; ++slot) {
+			render::TerrainTextureBinding b;
+			b.slot = slot;
+			b.texture = int32_t(slot);
+			material.textures.push_back(b);
+		}
+		Result<std::string> head = render::terrain_shader_head(*t, material, "test", "blend_mix");
+		REQUIRE(head.ok());
+		CHECK(head->find("uniform sampler2D t1 : filter_linear_mipmap_anisotropic, repeat_disable;") !=
+				std::string::npos);
+		CHECK(head->find("uniform sampler2D t2 : filter_linear_mipmap_anisotropic, repeat_disable;") !=
+				std::string::npos);
+		CHECK(head->find("uniform sampler2D t3 : filter_linear_mipmap_anisotropic, repeat_enable;") !=
+				std::string::npos);
+		samplers.pop_back();
+		CHECK_FALSE(render::translate_pixel_program(*program, samplers).ok());
+		samplers.push_back({ 2, { 1, 6, 1 }, {} });
+		CHECK_FALSE(render::translate_pixel_program(*program, samplers).ok());
+	}
+
 	TEST_CASE("terrain decals: the shader takes the mask, the world position and the decal coordinates") {
 		render::PixelTranslation translation;
 		translation.outputs = 3;
@@ -364,8 +439,7 @@ TEST_SUITE("terrain-decals-draw-unit") {
 TEST_SUITE("terrain-decals-draw") {
 	TEST_CASE("terrain decals: MP_007 ConquestLarge0 draws its roads and quad decals") {
 		check_terrain_decals("MP_007", "ConquestLarge0",
-				DecalCounts{ 156, 1, 281, 5, { "levels/mp_007/shaders/mp_007_roadasphalt2d" },
-						"levels/mp_007/shaders/mp_007_roadasphalt2d" });
+				DecalCounts{ 156, 1, 281, 5, {}, "levels/mp_007/shaders/mp_007_roadasphalt2d", {}, 72 });
 	}
 
 	TEST_CASE("terrain decals: MP_Subway ConquestLarge0 draws its roads and quad decals") {
@@ -374,7 +448,6 @@ TEST_SUITE("terrain-decals-draw") {
 
 	TEST_CASE("terrain decals: MP_018 ConquestLarge0 draws its roads and quad decals") {
 		check_terrain_decals("MP_018", "ConquestLarge0",
-				DecalCounts{ 260, 0, 503, 7, { "levels/mp_018/terrain/shaders/mp018_road_01_2d" },
-						"levels/mp_018/terrain/shaders/mp018_road_01_2d", { 7 } });
+				DecalCounts{ 260, 0, 503, 7, {}, "levels/mp_018/terrain/shaders/mp018_road_01_2d", { 7 }, 121 });
 	}
 }

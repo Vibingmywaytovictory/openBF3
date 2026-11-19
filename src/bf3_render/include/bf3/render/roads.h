@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -35,8 +36,8 @@ inline constexpr size_t kMaxTerrainDecalTriangles = size_t(1) << 22;
 struct SceneDecalShader {
 	std::string shader;
 	std::vector<SceneTerrainTexture> textures;
+	std::vector<TextureSampler> samplers;
 	std::shared_ptr<const std::vector<uint8_t>> program;
-	std::string refused;
 };
 
 std::string terrain_decals_name(std::string_view p_asset);
@@ -85,6 +86,7 @@ struct TerrainDecalStats {
 	uint32_t refused_records = 0;
 	double refused_area = 0.0;
 	std::vector<std::pair<std::string, std::string>> undrawn;
+	std::map<std::string, std::array<uint32_t, 2>> shader_records;
 };
 
 core::Result<std::string> terrain_decal_shader_code(

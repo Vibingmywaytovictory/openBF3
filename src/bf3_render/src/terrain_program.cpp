@@ -108,8 +108,10 @@ core::Result<std::string> terrain_shader_head(const PixelTranslation &p_translat
 			hints = found->image == kTerrainColourImage ? "filter_linear_mipmap, repeat_disable"
 														: "filter_linear, repeat_disable";
 		} else {
-			hints = std::string(found->srgb ? "source_color, " : "") +
-					"filter_linear_mipmap_anisotropic, repeat_enable";
+			const bool clamped = std::find(p_translation.clamped.begin(), p_translation.clamped.end(), slot) !=
+					p_translation.clamped.end();
+			hints = std::string(found->srgb ? "source_color, " : "") + "filter_linear_mipmap_anisotropic, " +
+					(clamped ? "repeat_disable" : "repeat_enable");
 		}
 		code += "uniform sampler2D t" + std::to_string(slot) + " : " + hints + ";\n";
 	}
