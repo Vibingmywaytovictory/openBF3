@@ -57,7 +57,7 @@ private:
 	void place_soldier();
 	void set_pose(const godot::Vector3 &p_position, const godot::Vector3 &p_target);
 	void own_shot(bool p_tracer);
-	void impact(const Surface &p_surface, int p_index);
+	void impact(const Surface &p_surface, int p_index, uint8_t p_slot);
 	void soldier_hit();
 	void remote_burst();
 	bool flash_present() const;
@@ -99,6 +99,8 @@ private:
 	double shot_left_ = 0;
 	double t_ = 0;
 	double next_shot_ = 0;
+	double barrage_period_ = 0;
+	std::vector<double> barrage_next_;
 	uint32_t shot_id_ = 0;
 	uint32_t remote_id_ = 0;
 	uint64_t frames_ = 0;

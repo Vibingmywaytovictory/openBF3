@@ -56,6 +56,7 @@ constexpr double kRunSeconds = 15.0;
 constexpr int kSettleFrames = 4;
 constexpr int kFlashRetries = 24;
 constexpr int kImpactsPerShot = 6;
+constexpr uint8_t kBarrageSlots[] = { 0, 5, 6, 7 };
 constexpr float kImpactSpread = 0.18f;
 constexpr float kSurfaceRay = 20.0f, kSurfaceMin = 1.5f, kSurfaceMax = 12.0f, kSurfaceBest = 4.0f;
 constexpr float kViewDistance = 1.5f;
@@ -473,6 +474,7 @@ bool Bf3Fx3Demo::build(std::string *r_error) {
 		return false;
 	}
 	bullet_ = loaded_->fx.fire_effects()->defs[rifle_].bullet_material;
+	barrage_period_ = core::gameplay::shot_interval(loaded_->gunplay->defs[rifle_].fire);
 	const std::shared_ptr<const hk::SharedLevel> level = session_->shared_level();
 	bf3::core::Result<std::unique_ptr<bf3::sim::CollisionWorld>> cw = bf3::sim::CollisionWorld::create(level->static_world);
 	if (!cw) {
@@ -564,8 +566,7 @@ void Bf3Fx3Demo::own_shot(bool p_tracer) {
 	events_.push_back(e);
 }
 
-void Bf3Fx3Demo::impact(const Surface &p_surface, int p_index) {
-
+void Bf3Fx3Demo::impact(const Surface &p_surface, int p_index, uint8_t p_slot) {
 	const Vector3 n = p_surface.normal;
 	Vector3 a = n.cross(Vector3(0, 1, 0));
 	if (a.length() < 1e-3f) {
@@ -578,13 +579,13 @@ void Bf3Fx3Demo::impact(const Surface &p_surface, int p_index) {
 	hk::PresentEvent e;
 	e.kind = hk::PresentKind::Impact;
 	e.timeline = hk::PresentTimeline::Predicted;
-	e.slot = kOwnSlot;
+	e.slot = p_slot;
 	e.def = rifle_;
 	e.id = shot_id_++;
 	e.material = p_surface.material;
 	e.pos[0] = float(p.x), e.pos[1] = float(p.y), e.pos[2] = float(p.z);
 	e.dir[0] = float(n.x), e.dir[1] = float(n.y), e.dir[2] = float(n.z);
-	e.seed = hk::impact_seed(hk::effect_seed(kMatchSeed, kOwnSlot, e.id), 0, 0);
+	e.seed = hk::impact_seed(hk::effect_seed(kMatchSeed, p_slot, e.id), 0, 0);
 	events_.push_back(e);
 }
 
@@ -746,13 +747,17 @@ void Bf3Fx3Demo::_process(double p_delta) {
 				if (surface->found) {
 					set_pose(surface->point + surface->normal * kViewDistance + Vector3(0, 0.25f, 0), surface->point);
 					for (int i = 0; i < kImpactsPerShot; ++i) {
-						impact(*surface, i);
+						impact(*surface, i, kOwnSlot);
 					}
 				}
 				break;
 			case 7:
 				if (metal_.found) {
 					set_pose(metal_.point + metal_.normal * kViewDistance + Vector3(0, 0.25f, 0), metal_.point);
+				}
+				barrage_next_.clear();
+				for (size_t k = 0; k < std::size(kBarrageSlots); ++k) {
+					barrage_next_.push_back(t_ + barrage_period_ * double(k) / double(std::size(kBarrageSlots)));
 				}
 				break;
 			case 6:
@@ -777,8 +782,13 @@ void Bf3Fx3Demo::_process(double p_delta) {
 		own_shot(shot_id_ % 3 == 0);
 		next_shot_ = t_ + kShotPeriod;
 	}
-	if (shot_active_ && shots_[shot_index_].kind == 7 && metal_.found) {
-		impact(metal_, int(shot_id_ % uint32_t(kImpactsPerShot)));
+	if (shot_active_ && shots_[shot_index_].kind == 7 && metal_.found && barrage_period_ > 0.0) {
+		for (size_t k = 0; k < barrage_next_.size(); ++k) {
+			while (t_ >= barrage_next_[k]) {
+				impact(metal_, int(shot_id_ % uint32_t(kImpactsPerShot)), kBarrageSlots[k]);
+				barrage_next_[k] += barrage_period_;
+			}
+		}
 	}
 	step_fx(dt);
 	if (shot_active_) {
