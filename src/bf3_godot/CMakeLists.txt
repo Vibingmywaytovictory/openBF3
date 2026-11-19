@@ -363,6 +363,10 @@ if(OPENBF3_BUILD_CHECKS)
         src/vehicle_drive_check.h
     )
     target_sources(bf3_godot PRIVATE
+        src/fire_guard_check.cpp
+        src/fire_guard_check.h
+    )
+    target_sources(bf3_godot PRIVATE
         src/vault_run_check.cpp
         src/vault_run_check.h
     )

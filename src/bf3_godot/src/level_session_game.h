@@ -5,6 +5,7 @@
 #include "commo_rose_check.h"
 #include "conquest_hud_check.h"
 #include "crosshair_walk_check.h"
+#include "fire_guard_check.h"
 #include "gadgets_draw_check.h"
 #include "game_deployables.h"
 #include "game_frame.h"
@@ -279,6 +280,7 @@ struct Bf3LevelSession::Game : GameState {
 	std::unique_ptr<ConquestHudCheck> conquest_hud;
 	std::unique_ptr<Icons3dCheck> icons3d;
 	std::unique_ptr<CommoRoseCheck> commo_rose;
+	std::unique_ptr<FireGuardCheck> fire_guard;
 	std::unique_ptr<CrosshairWalkRun> crosshair_walk;
 	std::unique_ptr<GadgetsDrawRun> gadgets_draw;
 	std::unique_ptr<VehicleDriveRun> vehicle_drive;

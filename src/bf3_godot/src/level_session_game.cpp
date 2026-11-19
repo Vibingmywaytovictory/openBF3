@@ -37,7 +37,9 @@
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/input_map.hpp>
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -332,6 +334,9 @@ void Bf3LevelSession::game_parse_args() {
 	if (has_check_arg("commo-rose-check")) {
 		g.commo_rose = std::make_unique<CommoRoseCheck>();
 		mapper_.set_scripted(true);
+	}
+	if (has_check_arg("fire-guard-check")) {
+		g.fire_guard = std::make_unique<FireGuardCheck>(user_arg_value("fire-guard-shots"));
 	}
 	if (has_check_arg("audio-areas-check")) {
 		std::vector<AudioAreasPoint> points;
@@ -1550,6 +1555,33 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			g.finished = true;
 			UtilityFunctions::print(to_godot(g.commo_rose->report()));
 			finish(g.commo_rose->exit_code());
+			return true;
+		}
+	}
+	if (g.fire_guard != nullptr && !g.finished) {
+		FireGuardIo io;
+		io.alive = g.alive;
+		io.game_input = mapper_.game_input();
+		io.captured = mapper_.captured();
+		io.rose_open = g.tdm != nullptr && g.tdm->commo.rose_open();
+		io.spot_held = mapper_.spot_held();
+		const TypedArray<InputEvent> mode_keys = InputMap::get_singleton()->action_get_events(
+				InputMapper::weapon_action_name(InputMapper::WeaponAction::FireMode));
+		for (int64_t i = 0; i < mode_keys.size() && io.fire_mode_key == 0; ++i) {
+			const Ref<InputEventKey> k = mode_keys[i];
+			io.fire_mode_key = k.is_valid() ? int64_t(k->get_physical_keycode()) : 0;
+		}
+		io.own_shots = g.own_shots_seen;
+		io.fire_mode = g.weapon.valid && frame_->own_weapons_valid && g.weapon.active_slot < sw::kMaxWeaponSlots
+				? int32_t(frame_->own_weapons_curr.slots[g.weapon.active_slot].mode)
+				: -1;
+		io.centre = get_viewport()->get_visible_rect().get_center();
+		io.push = [](const Ref<InputEvent> &p_event) { Input::get_singleton()->parse_input_event(p_event); };
+		io.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		if (g.fire_guard->step(io, p_delta)) {
+			g.finished = true;
+			UtilityFunctions::print(to_godot(g.fire_guard->report()));
+			finish(g.fire_guard->exit_code());
 			return true;
 		}
 	}

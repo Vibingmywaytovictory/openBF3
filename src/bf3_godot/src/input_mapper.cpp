@@ -327,7 +327,7 @@ bf3::host::InputSample InputMapper::sample() const {
 	if (!game_input_) {
 		s.move_forward = 0.0f;
 		s.move_right = 0.0f;
-		s.held_buttons = 0;
+		s.held_buttons &= sim::weapons::weapon_buttons::kFireModeMask;
 	}
 	return s;
 }
@@ -542,7 +542,7 @@ bool InputMapper::weapon_handle_event(const Ref<InputEvent> &p_event) {
 			return false;
 		}
 		if (p_event->is_action_pressed(weapon_action_name(WeaponAction::Fire), false, false)) {
-			if (weapon_.allowed && !weapon_.swallow_fire) {
+			if (weapon_.allowed && !weapon_.swallow_fire && !tdm_.rose_open) {
 				++weapon_.fire_presses;
 			}
 		} else if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP && weapon_.allowed) {
@@ -684,6 +684,9 @@ void InputMapper::weapon_frame(const bf3::host::PresentationFrame &p_frame, uint
 	if (!hold_to_zoom) {
 		weapon_.held[size_t(WeaponAction::Ads)] = weapon_.ads_latched;
 	}
+	if (tdm_.rose_open) {
+		weapon_.swallow_fire = true;
+	}
 	if (weapon_.swallow_fire) {
 		if (weapon_.held[size_t(WeaponAction::Fire)]) {
 			weapon_.held[size_t(WeaponAction::Fire)] = false;
@@ -700,15 +703,17 @@ void InputMapper::weapon_sample(bf3::host::InputSample &r_sample) const {
 	if (weapon_.frame != nullptr) {
 		bf3::host::set_view_sample(r_sample, *weapon_.frame, weapon_.now_ns);
 	}
+	r_sample.fire_presses = weapon_.fire_presses;
+	sim::weapons::WeaponInput idle;
+	idle.fire_mode_counter = weapon_.mode_counter;
 	if (!scripted_ && !captured_ && DisplayServer::get_singleton()->get_name() != String("headless")) {
-
 		r_sample.move_forward = 0.0f;
 		r_sample.move_right = 0.0f;
-		r_sample.held_buttons = 0;
+		r_sample.held_buttons = sim::weapons::with_weapon_input(0u, idle);
 		return;
 	}
-	r_sample.fire_presses = weapon_.fire_presses;
 	if (!weapon_.allowed || free_camera_) {
+		r_sample.held_buttons = sim::weapons::with_weapon_input(r_sample.held_buttons, idle);
 		return;
 	}
 	sim::weapons::WeaponInput w;

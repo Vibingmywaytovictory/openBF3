@@ -76,7 +76,7 @@ public:
 
 	bool in_menu() const { return in_menu_; }
 	bool game_input() const { return game_input_; }
-	bool wants_mouse() const { return !game_input_ || mouse_input_; }
+	bool wants_mouse() const { return !game_input_ || (mouse_input_ && cursor_wanted_); }
 	bool quit_requested() const { return quit_requested_; }
 	const NativeMenuStats &stats() const { return stats_; }
 
