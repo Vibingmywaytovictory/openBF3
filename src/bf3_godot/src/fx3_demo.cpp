@@ -541,6 +541,7 @@ bool Bf3Fx3Demo::build(std::string *r_error) {
 		{ "fx3_decals_concrete", 9.0, 6, 0.0 },
 		{ "fx3_hit_soldier", 10.5, 4, 0.08 },
 		{ "fx3_tracers", 12.0, 5, 0.03 },
+		{ "fx3_barrage_metal", 13.0, 7, 1.0 },
 	};
 	built_ = true;
 	return true;
@@ -749,6 +750,11 @@ void Bf3Fx3Demo::_process(double p_delta) {
 					}
 				}
 				break;
+			case 7:
+				if (metal_.found) {
+					set_pose(metal_.point + metal_.normal * kViewDistance + Vector3(0, 0.25f, 0), metal_.point);
+				}
+				break;
 			case 6:
 				if (concrete_.found) {
 					set_pose(concrete_.point + concrete_.normal * kViewDistance + Vector3(0, 0.25f, 0), concrete_.point);
@@ -770,6 +776,9 @@ void Bf3Fx3Demo::_process(double p_delta) {
 	if (!shot_active_ && t_ >= next_shot_) {
 		own_shot(shot_id_ % 3 == 0);
 		next_shot_ = t_ + kShotPeriod;
+	}
+	if (shot_active_ && shots_[shot_index_].kind == 7 && metal_.found) {
+		impact(metal_, int(shot_id_ % uint32_t(kImpactsPerShot)));
 	}
 	step_fx(dt);
 	if (shot_active_) {

@@ -597,6 +597,14 @@ void Bf3GameFx::step(const GameFrame &p_frame) {
 	m.stats.mesh_particles = m.meshes.stats().drawn;
 	m.stats.mesh_particles_undrawn = m.meshes.stats().unknown;
 	m.stats.lights = renderer->stats().lights;
+	{
+		const fx::RenderPrepStats &ps = renderer->prep().stats();
+		m.stats.light_candidates_max = std::max(m.stats.light_candidates_max, ps.light_candidates);
+		m.stats.lights_max = std::max(m.stats.lights_max, ps.lights);
+		m.stats.light_frames_over += ps.light_candidates > ps.lights ? 1u : 0u;
+		m.stats.lights_dropped = ps.lights_dropped;
+		m.stats.light_particles_max = std::max(m.stats.light_particles_max, m.world->stats().live_lights);
+	}
 	m.stats.texture_fallbacks = uint32_t(renderer->prep().stats().unresolved_textures);
 	const FxDecalStats &ds = m.decals.stats();
 	m.stats.decals_live = ds.live;
@@ -740,6 +748,19 @@ void Bf3GameFx::shutdown() {
 				(unsigned long long)ps.starts, (unsigned long long)ps.stops, (unsigned long long)ps.start_failures,
 				ps.without_def, ps.mesh_emitters_undrawn, ps.logic_bound, (unsigned long long)ps.logic_starts,
 				(unsigned long long)ps.logic_stops, ps.logic_started_placements)));
+	}
+	if (m.built) {
+		const GameFxStats &st = m.stats;
+		UtilityFunctions::print(to_godot(fmt("[game] effect lights: %llu frames, at most %u light particles, %u lights "
+											 "asked for and %u shown, %llu frames over the pool, %llu dropped; mesh "
+											 "particles %llu drawn, %llu without a mesh; %llu effect instances "
+											 "reset by MaxInstanceCount, %llu refused, %llu particle spawns dropped",
+				(unsigned long long)st.frames, st.light_particles_max, st.light_candidates_max, st.lights_max,
+				(unsigned long long)st.light_frames_over, (unsigned long long)st.lights_dropped,
+				(unsigned long long)m.meshes.stats().drawn_total, (unsigned long long)m.meshes.stats().unknown_total,
+				(unsigned long long)m.world->stats().stolen_instances,
+				(unsigned long long)m.world->stats().refused_starts,
+				(unsigned long long)m.world->stats().spawns_dropped)));
 	}
 	m.placed.forget();
 	m.decals.clear();
