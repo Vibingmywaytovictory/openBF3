@@ -19,6 +19,7 @@ namespace ssp = core::gameplay::soldier_sound_port;
 namespace {
 
 constexpr uint32_t kJump = uint32_t(core::gameplay::logic_port_id("Jump"));
+constexpr uint32_t kVault = uint32_t(core::gameplay::logic_port_id("Vault"));
 
 uint16_t soldier_key(const FootstepSoldier &p_s) {
 	return uint16_t((uint16_t(p_s.slot) << 8) | p_s.generation);
@@ -122,6 +123,10 @@ void MovementFoley::step(MixerCore &r_mixer, const FootstepSoldier *p_own, const
 	if (p_own->mode == sim::MoveMode::Jumping && mode_ != sim::MoveMode::Jumping &&
 			push(r_mixer, MixerCommandType::PostEvent, kJump, 0.0f)) {
 		++stats_.jumps;
+	}
+	if (p_own->mode == sim::MoveMode::AnimationControlled && mode_ != sim::MoveMode::AnimationControlled &&
+			push(r_mixer, MixerCommandType::PostEvent, kVault, 0.0f)) {
+		++stats_.vaults;
 	}
 	mode_ = p_own->mode;
 }

@@ -2246,6 +2246,53 @@ TEST_SUITE("audio-footsteps") {
 		check_unchanged(*f);
 	}
 
+	TEST_CASE(
+			"MovementFoley: a vault posts the movement patch's Vault event once, which sounds while the soldier stands "
+			"still") {
+		Fixture *f = need_install();
+		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
+		REQUIRE(d.ok());
+		const StepPatch moves = step_patch(*f->install, *f->metro, d->movement);
+		ba::MixerConfig mc;
+		mc.max_instances = 16;
+		ba::MixerCore mixer(mc);
+		mixer.record_cuts(true);
+		ba::MovementFoley foley(moves.program, moves.bank, ba::AudioTuning{});
+		std::vector<float> out(2 * 800);
+		std::vector<ba::MixerCutEvent> cuts(256);
+		const ba::ListenerState listener{};
+		double before = 0.0, after = 0.0;
+		for (int frame = 0; frame < 240; ++frame) {
+			ba::FootstepSoldier own;
+			own.slot = 3;
+			own.local_player = true;
+			own.first_person = true;
+			own.mode = frame >= 100 && frame < 130 ? bf3::sim::MoveMode::AnimationControlled
+												   : bf3::sim::MoveMode::OnGround;
+			foley.step(mixer, &own, listener);
+			REQUIRE(mixer.mix(out.data(), 800) == 800);
+			for (size_t n = mixer.poll_cuts(cuts); n > 0; n = mixer.poll_cuts(cuts)) {
+				for (size_t i = 0; i < n; ++i) {
+					foley.on_cut(cuts[i]);
+				}
+			}
+			double e = 0.0;
+			for (const float v : out) {
+				e += double(v) * double(v);
+			}
+			(frame < 100 ? before : after) += e;
+		}
+		const ba::MovementFoleyStats &st = foley.stats();
+		MESSAGE("movement foley: ", st.vaults, " Vault events, ", st.jumps, " jumps; energy standing ", before,
+				", from the vault on ", after);
+		CHECK(st.vaults == 1);
+		CHECK(st.jumps == 0);
+		CHECK(st.push_failures == 0);
+		CHECK(before == 0.0);
+		CHECK(after > 0.0);
+		check_unchanged(*f);
+	}
+
 	TEST_CASE("load_soldier_audio; FootstepGroundProbe over Metro's Concrete and Water pairs; footstep_soldiers") {
 		Fixture *f = need_install();
 		Result<bf3::sim::weapons::InstallWeapons> w = bf3::sim::weapons::open_install_weapons(f->install);
