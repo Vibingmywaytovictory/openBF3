@@ -42,20 +42,23 @@ uint64_t now_us() {
 	return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
+std::optional<Vector3> camera_position() {
+	const SceneTree *tree = Object::cast_to<SceneTree>(Engine::get_singleton()->get_main_loop());
+	const Camera3D *camera =
+			tree != nullptr && tree->get_root() != nullptr ? tree->get_root()->get_camera_3d() : nullptr;
+	if (camera == nullptr) {
+		return std::nullopt;
+	}
+	return camera->get_global_position();
+}
+
 RID terrain_image(const render::TerrainImage &p_image) {
-	PackedByteArray bytes;
-	bytes.resize(int64_t(p_image.data.size()));
-	std::memcpy(bytes.ptrw(), p_image.data.data(), p_image.data.size());
 	const Image::Format format = p_image.format == render::TerrainImageFormat::R8 ? Image::FORMAT_R8
 			: p_image.format == render::TerrainImageFormat::Rgba8				  ? Image::FORMAT_RGBA8
 																				  : Image::FORMAT_RF;
-	const Ref<Image> image =
-			Image::create_from_data(int32_t(p_image.width), int32_t(p_image.height), false, format, bytes);
+	const Ref<Image> image = image_from_bytes(p_image.width, p_image.height, format, p_image.data, p_image.mipmaps);
 	if (image.is_null() || image->is_empty()) {
 		return RID();
-	}
-	if (p_image.mipmaps) {
-		image->generate_mipmaps();
 	}
 	return RenderingServer::get_singleton()->texture_2d_create(image);
 }
@@ -579,6 +582,7 @@ void LevelUpload::run_task() {
 			}
 			if (look) {
 				done.look = std::make_shared<const render::TerrainLook>(std::move(*item.terrain->look));
+				done.detail = item.terrain->detail;
 			}
 			if (!surfaces.is_empty()) {
 				done.rid = rs->mesh_create_from_surfaces(surfaces, 0);
@@ -813,6 +817,13 @@ void LevelUpload::create_terrain_look(const Done &p_done) {
 			rs->mesh_surface_set_material(p_done.rid, int32_t(s), materials[p_done.surface_materials[s]]);
 		}
 	}
+	static const bool detail_off = ("," + user_arg_value("look-off") + ",").find(",detail,") != std::string::npos;
+	if (p_done.detail != nullptr && !detail_off && p_done.index < plan_->terrains.size()) {
+		std::unique_ptr<TerrainDetailDraw> draw = std::make_unique<TerrainDetailDraw>();
+		draw->begin(plan_->terrains[p_done.index].asset, p_done.detail, look.detail, materials,
+				instance_transform(plan_->terrains[p_done.index].transform));
+		detail_draws_.push_back(std::move(draw));
+	}
 	std::lock_guard lock(stats_mutex_);
 	stats_.terrain_layer_materials += materials.size();
 }
@@ -927,6 +938,7 @@ double LevelUpload::pump(const Callable &p_task, double p_budget_ms) {
 		stats_.last_c2_us = end;
 	}
 	update_scatter();
+	update_detail();
 	return ms;
 }
 
@@ -956,14 +968,22 @@ void LevelUpload::update_scatter() {
 			scatter_draws_.push_back(std::move(draw));
 		}
 	}
-	const SceneTree *tree = Object::cast_to<SceneTree>(Engine::get_singleton()->get_main_loop());
-	const Camera3D *camera =
-			tree != nullptr && tree->get_root() != nullptr ? tree->get_root()->get_camera_3d() : nullptr;
-	if (camera == nullptr) {
+	const std::optional<Vector3> camera = camera_position();
+	if (!camera) {
 		return;
 	}
 	for (const std::unique_ptr<TerrainScatterDraw> &draw : scatter_draws_) {
-		draw->update(camera->get_global_position(), 1.0);
+		draw->update(*camera, 1.0);
+	}
+}
+
+void LevelUpload::update_detail() {
+	const std::optional<Vector3> camera = detail_draws_.empty() ? std::nullopt : camera_position();
+	if (!camera) {
+		return;
+	}
+	for (const std::unique_ptr<TerrainDetailDraw> &draw : detail_draws_) {
+		draw->update(*camera);
 	}
 }
 
@@ -1020,6 +1040,7 @@ void LevelUpload::free_all() {
 		return;
 	}
 	scatter_draws_.clear();
+	detail_draws_.clear();
 	scatter_checked_ = false;
 	{
 		std::lock_guard lock(queue_mutex_);

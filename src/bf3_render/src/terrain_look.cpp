@@ -241,10 +241,23 @@ core::Result<std::string> terrain_shader_code(
 	if (!head) {
 		return head.error();
 	}
+	std::vector<uint32_t> mask_slots, colour_slots;
+	for (const TerrainTextureBinding &b : p_material.textures) {
+		if (b.image == kTerrainMaskAtlas) {
+			mask_slots.push_back(b.slot);
+		} else if (b.image == kTerrainColourImage) {
+			colour_slots.push_back(b.slot);
+		}
+	}
+	core::Result<TerrainDetailCode> detail = terrain_detail_code(mask_slots, colour_slots, p_translation.body);
+	if (!detail) {
+		return detail.error();
+	}
 	std::string code = std::move(*head);
+	code += detail->functions;
 	code += "void fragment() {\nvec4 v1 = vec4(UV.x, UV.y, 0.0, 0.0);\n";
 	code += terrain_shader_locals(p_translation, p_material);
-	code += p_translation.body;
+	code += detail->body;
 	code += "vec3 terrain_colour = vec3(o0.y, o0.z, o2.x);\n"
 			"ALBEDO = terrain_colour * terrain_colour;\n"
 			"vec3 terrain_normal = normalize(vec3(o0.x, o1.z, o1.x) * 2.0 - 1.0);\n"
@@ -423,6 +436,19 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 	look.stats.colour_texel = colours.grid.texel;
 	colour.width = colours.grid.width;
 	colour.height = colours.grid.height;
+	look.detail.mask = g;
+	look.detail.mask_columns = columns;
+	look.detail.mask_tiles = tiles;
+	look.detail.mask_depth = mask.max_level();
+	look.detail.data_mask_texel = look.stats.data_mask_texel;
+	look.detail.mask_grid_origin = { mask.bounds[0], mask.bounds[1] };
+	look.detail.region = rect;
+	if (tree.colour) {
+		look.detail.colour = colours.grid;
+		look.detail.colour_depth = tree.colour->max_level();
+		look.detail.data_colour_texel = look.stats.data_colour_texel;
+		look.detail.colour_grid_origin = { tree.colour->bounds[0], tree.colour->bounds[1] };
+	}
 
 	const core::res::HeightGrid &hg = *p_input.heights;
 	const auto grid_index = [&](float p_v, float p_o, float p_s, size_t p_n, bool p_up) {
@@ -515,6 +541,20 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 				where, *program, *translation, combo.textures, height_uv, height_pixel, terrain_value, material);
 		if (!bound) {
 			return bound.error();
+		}
+		for (const TerrainTextureBinding &b : material.textures) {
+			if (b.image == kTerrainMaskAtlas) {
+				material.uniforms.emplace_back(
+						"detail_mask_coarse", std::array<float, 4>{ g.origin[0], g.origin[1], g.texel, 0.0f });
+				material.uniforms.emplace_back("detail_mask_coarse_atlas",
+						std::array<float, 4>{ atlas_w, atlas_h, float(tile_w), float(tile_h) });
+			} else if (b.image == kTerrainColourImage) {
+				material.uniforms.emplace_back("detail_colour_coarse",
+						std::array<float, 4>{
+								colours.grid.origin[0], colours.grid.origin[1], colours.grid.texel, 0.0f });
+				material.uniforms.emplace_back("detail_colour_coarse_size",
+						std::array<float, 4>{ float(colours.grid.width), float(colours.grid.height), 0.0f, 0.0f });
+			}
 		}
 		core::Result<std::string> code = terrain_shader_code(*translation, material);
 		if (!code) {

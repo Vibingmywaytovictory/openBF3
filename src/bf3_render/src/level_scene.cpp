@@ -1278,6 +1278,17 @@ core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mo
 		out.water = add_terrain_water(
 				decals, plan.water, p_plan.look_environment.base, plan.water_envmap, *out.look, out.mesh);
 	}
+	if (!terrain_detail_gains(out.look->detail)) {
+		return out;
+	}
+	std::shared_ptr<TerrainDetailSource> detail = std::make_shared<TerrainDetailSource>();
+	for (auto &[key, chunk] : chunks) {
+		if (chunk) {
+			detail->chunks.emplace(key.bytes, std::move(*chunk));
+		}
+	}
+	detail->tree = std::move(tree);
+	out.detail = std::move(detail);
 	return out;
 }
 

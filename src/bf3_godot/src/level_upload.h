@@ -3,6 +3,7 @@
 #include "bf3/core/level/level_transform.h"
 #include "bf3/host/level_load.h"
 #include "bf3/render/level_scene.h"
+#include "terrain_detail.h"
 #include "terrain_scatter.h"
 
 #include <godot_cpp/variant/aabb.hpp>
@@ -125,6 +126,7 @@ private:
 		uint32_t index = 0;
 		godot::RID rid;
 		std::shared_ptr<const bf3::render::TerrainLook> look;
+		std::shared_ptr<const bf3::render::TerrainDetailSource> detail;
 		std::vector<godot::RID> images;
 		std::vector<uint32_t> surface_materials;
 		std::optional<godot::AABB> bounds;
@@ -136,6 +138,7 @@ private:
 	void create_instances(double p_deadline_us);
 	void create_terrain_look(const Done &p_done);
 	void update_scatter();
+	void update_detail();
 	void add_world_bounds(const std::optional<godot::AABB> &p_bounds, const godot::Transform3D &p_transform);
 
 	std::shared_ptr<const bf3::render::LevelScenePlan> plan_;
@@ -176,6 +179,7 @@ private:
 	std::vector<std::pair<uint32_t, std::shared_ptr<const bf3::render::TerrainScatter>>> scatters_;
 	std::vector<std::unique_ptr<TerrainScatterDraw>> scatter_draws_;
 	bool scatter_checked_ = false;
+	std::vector<std::unique_ptr<TerrainDetailDraw>> detail_draws_;
 	std::vector<godot::RID> instances_;
 	std::vector<godot::RID> plan_instances_;
 	std::vector<uint8_t> instance_visible_;

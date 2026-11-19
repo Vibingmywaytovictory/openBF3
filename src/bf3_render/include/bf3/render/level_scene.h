@@ -183,6 +183,7 @@ struct PreparedTerrain {
 	std::string look_error;
 	std::shared_ptr<const TerrainScatter> scatter;
 	std::vector<std::pair<std::string, std::string>> scatter_failures;
+	std::shared_ptr<const TerrainDetailSource> detail;
 	TerrainDecalStats decals;
 	TerrainWaterStats water;
 };

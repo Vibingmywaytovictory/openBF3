@@ -3,6 +3,7 @@
 #include "bf3/core/res/terrain.h"
 #include "bf3/core/result.h"
 #include "bf3/render/shader_translate.h"
+#include "bf3/render/terrain_detail.h"
 
 #include <array>
 #include <cstdint>
@@ -126,6 +127,7 @@ struct TerrainLook {
 	std::array<float, 4> height_uv{};
 	std::array<float, 4> height_pixel{};
 	TerrainLookStats stats;
+	TerrainDetailLayout detail;
 
 	uint32_t material_at(float p_x, float p_z) const;
 };

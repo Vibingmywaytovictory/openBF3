@@ -108,6 +108,8 @@ target_sources(bf3_render PRIVATE
     src/roads.cpp
     include/bf3/render/terrain_program.h
     src/terrain_program.cpp
+    include/bf3/render/terrain_detail.h
+    src/terrain_detail.cpp
     include/bf3/render/water.h
     src/water.cpp
 )
