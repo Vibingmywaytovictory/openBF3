@@ -255,6 +255,10 @@ set_tests_properties(sim.vault.levels PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300
 add_test(NAME sim.swim.unit COMMAND test_sim_motor --test-suite=sim-swim-unit)
 add_test(NAME sim.swim.levels COMMAND test_sim_motor --test-suite=sim-swim-levels)
 set_tests_properties(sim.swim.levels PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+openbf3_test(test_anim_vault test_main.cpp anim_vault_tests.cpp test_support.h)
+target_link_libraries(test_anim_vault PRIVATE bf3_anim)
+add_test(NAME anim.vault COMMAND test_anim_vault --test-suite=anim-vault)
+set_tests_properties(anim.vault PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 set_tests_properties(sim.motor.unit PROPERTIES TIMEOUT 300)
 set_tests_properties(sim.motor PROPERTIES TIMEOUT 600)
 

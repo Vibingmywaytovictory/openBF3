@@ -500,7 +500,12 @@ core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPack
 			if (!read_float_state_tags(p_library, *pkg, cur, start_time, route.float_tags)) {
 				return core::make_error(label(cur) + ": unreadable float game state tags");
 			}
+			float scale = 1.0f;
+			if (anim.read_float("Scale", scale) && (!finite(scale) || !(scale > 0.0f))) {
+				return core::make_error(label(cur) + ": a non-positive Anims[0].Scale");
+			}
 			route.sequence = true;
+			route.sequence_scale = scale;
 			route.start_in_tick = in0;
 			route.end_in_tick = in1;
 			if (core::Status s = follow(g, "Anims[0].Asset"); !s.ok()) {

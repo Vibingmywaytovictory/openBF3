@@ -60,6 +60,7 @@ struct AntClipRoute {
 	float fps = 30.0f, fps_scale = 0.5f;
 
 	float start_in_tick = 0.0f, end_in_tick = 0.0f;
+	float sequence_scale = 1.0f;
 	bool sequence = false;
 	bool looping = false;
 	std::vector<std::string> path;

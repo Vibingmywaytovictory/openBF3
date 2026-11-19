@@ -49,3 +49,8 @@ target_sources(bf3_anim PRIVATE
     src/move_group.cpp
     include/bf3/anim/move_group.h
 )
+
+target_sources(bf3_anim PRIVATE
+    src/vault_anim.cpp
+    include/bf3/anim/vault_anim.h
+)
