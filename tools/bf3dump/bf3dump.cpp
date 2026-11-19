@@ -470,6 +470,7 @@ void usage() {
 	std::fprintf(stderr, "  eorcamera <LEVEL> <MODE>\n");
 	std::fprintf(stderr, "%s", bf3dump::logic_usage());
 	std::fprintf(stderr, "  looks <LEVEL> <MODE> [--materials] [--program-code] [--shader NAME]...\n");
+	std::fprintf(stderr, "  programs [<name part>] [--code]\n");
 	std::fprintf(stderr, "%s", bf3dump::vehicle_usage());
 	std::fprintf(stderr, "%s", bf3dump::swf_usage());
 	std::fprintf(stderr, "%s", bf3dump::weapon_sim_usage());
@@ -615,6 +616,9 @@ int wmain(int argc, wchar_t **argv) {
 
 	if (cmd == "looks") {
 		return bf3dump::cmd_looks(ctx.install, rest);
+	}
+	if (cmd == "programs") {
+		return bf3dump::cmd_programs(ctx.install, rest);
 	}
 
 	if (cmd == "nav") {

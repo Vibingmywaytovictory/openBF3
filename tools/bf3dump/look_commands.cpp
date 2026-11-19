@@ -8,6 +8,7 @@
 #include "bf3/render/dxbc.h"
 #include "bf3/render/level_scene.h"
 #include "bf3/render/mesh_cache.h"
+#include "bf3/render/program_database.h"
 
 #include <algorithm>
 #include <chrono>
@@ -471,6 +472,58 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 	const bool pass = percent(l1_albedo, drawn) >= 95.0;
 	std::printf("looks gate l1.albedo >= 95 %%: %s\n", pass ? "PASS" : "FAIL");
 	return pass ? 0 : 1;
+}
+
+int cmd_programs(const std::shared_ptr<Install> &p_install, const std::vector<std::string> &p_args) {
+	if (p_args.size() > 2 || (p_args.size() == 2 && p_args[1] != "--code")) {
+		std::fprintf(stderr, "usage: programs [<name part>] [--code]\n");
+		return 2;
+	}
+	const std::string part = p_args.empty() ? std::string() : p_args[0];
+	const bool code = p_args.size() == 2;
+	Result<render::ProgramDatabase> db = render::read_program_database(*p_install);
+	if (!db) {
+		std::fprintf(stderr, "programs: %s\n", db.error().message.c_str());
+		return 1;
+	}
+	size_t shown = 0;
+	for (const render::DatabaseProgram &p : db->programs) {
+		if (p.name.find(part) == std::string::npos) {
+			continue;
+		}
+		++shown;
+		Result<render::dxbc::Program> parsed = render::dxbc::parse(p.bytes);
+		if (!parsed) {
+			std::printf("%s\t%zu B\tparse: %s\n", p.name.c_str(), p.bytes.size(), parsed.error().message.c_str());
+			continue;
+		}
+		std::printf("%s\t%zu B\tkind %u\t%zu instructions\n", p.name.c_str(), p.bytes.size(), unsigned(parsed->kind),
+				parsed->code.size());
+		if (!code) {
+			continue;
+		}
+		for (const render::dxbc::Binding &b : parsed->bindings) {
+			std::printf(
+					"  binding %s type %u dimension %u point %u\n", b.name.c_str(), b.type, b.dimension, b.bind_point);
+		}
+		for (const render::dxbc::ConstantBuffer &cb : parsed->constant_buffers) {
+			for (const render::dxbc::Variable &v : cb.variables) {
+				std::printf("  cb %s %s offset %u size %u\n", cb.name.c_str(), v.name.c_str(), v.offset, v.size);
+			}
+		}
+		for (const render::dxbc::SignatureElement &e : parsed->inputs) {
+			std::printf("  in v%u %s%u mask %u\n", e.reg, e.name.c_str(), e.semantic_index, unsigned(e.mask));
+		}
+		for (size_t i = 0; i < parsed->immediate_constants.size(); ++i) {
+			const std::array<uint32_t, 4> &c = parsed->immediate_constants[i];
+			std::printf("  icb[%zu] %08x %08x %08x %08x\n", i, c[0], c[1], c[2], c[3]);
+		}
+		for (size_t i = 0; i < parsed->code.size(); ++i) {
+			std::printf("  %4zu %s\n", i, render::dxbc::format_instruction(parsed->code[i]).c_str());
+		}
+	}
+	std::printf("programs: %zu of %zu shown\n", shown, db->programs.size());
+	return shown > 0 ? 0 : 1;
 }
 
 }

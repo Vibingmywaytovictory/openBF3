@@ -1011,6 +1011,11 @@ openbf3_test(test_render_vehicle_materials test_main.cpp render_vehicle_material
 target_link_libraries(test_render_vehicle_materials PRIVATE bf3_render bf3_host)
 add_test(NAME render.vehicle_materials COMMAND test_render_vehicle_materials --test-suite=render-vehicle-materials)
 set_tests_properties(render.vehicle_materials PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+openbf3_test(test_render_light_pass test_main.cpp render_light_pass_tests.cpp test_support.h)
+target_link_libraries(test_render_light_pass PRIVATE bf3_render)
+add_test(NAME render.program_database.unit COMMAND test_render_light_pass --test-suite=render-program-database-unit)
+add_test(NAME render.light_pass COMMAND test_render_light_pass --test-suite=render-light-pass)
+set_tests_properties(render.light_pass PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 
 openbf3_test(test_audio_router test_main.cpp audio_router_tests.cpp test_support.h weapons_support.h)
 target_link_libraries(test_audio_router PRIVATE bf3_audio bf3_client_audio bf3_host bf3_fx bf3_core bf3_sim_harness)

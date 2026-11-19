@@ -96,6 +96,10 @@ target_sources(bf3_render PRIVATE
 
 target_sources(bf3_render PRIVATE
     include/bf3/render/dxbc.h
+    include/bf3/render/program_database.h
+    src/program_database.cpp
+    include/bf3/render/light_pass.h
+    src/light_pass.cpp
     include/bf3/render/shader_translate.h
     include/bf3/render/terrain_look.h
     include/bf3/render/terrain_scatter.h

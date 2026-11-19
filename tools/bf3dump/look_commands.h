@@ -9,5 +9,5 @@
 namespace bf3dump {
 
 int cmd_looks(const std::shared_ptr<bf3::core::Install> &p_install, const std::vector<std::string> &p_args);
-
+int cmd_programs(const std::shared_ptr<bf3::core::Install> &p_install, const std::vector<std::string> &p_args);
 }
