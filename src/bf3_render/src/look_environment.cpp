@@ -164,6 +164,13 @@ bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::
 			r_state.uv_min_y = 0.0f;
 			r_state.uv_max_y = 1.0f;
 		}
+	} else if (p_c.is_a("WindComponentData")) {
+		if (r_state.wind) {
+			return false;
+		}
+		r_state.wind = true;
+		r_state.wind_direction = number(p_c, "WindDirection").value_or(0.0f);
+		r_state.wind_strength = number(p_c, "WindStrength").value_or(0.0f);
 	} else if (p_c.is_a("FogComponentData")) {
 		if (r_state.fog) {
 			return false;
@@ -364,6 +371,11 @@ void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 		r_state.outdoor_sky = lerp3(r_state.outdoor_sky, p_a.outdoor_sky, p_w);
 		r_state.outdoor_ground = lerp3(r_state.outdoor_ground, p_a.outdoor_ground, p_w);
 		r_state.sun_specular_scale = lerp1(r_state.sun_specular_scale, p_a.sun_specular_scale, p_w);
+	}
+	if (p_a.wind && take) {
+		r_state.wind = true;
+		r_state.wind_direction = p_a.wind_direction;
+		r_state.wind_strength = p_a.wind_strength;
 	}
 	if (p_a.enlighten) {
 		r_state.enlighten = true;
@@ -642,7 +654,8 @@ core::Result<LookEnvironment> read_look_environment(const EbxResolver &p_db, con
 	}
 
 	const char *kinds[] = { "OutdoorLightComponentData", "EnlightenComponentData", "SkyComponentData",
-		"FogComponentData", "TonemapComponentData", "ColorCorrectionComponentData", "CameraParamsComponentData" };
+		"FogComponentData", "TonemapComponentData", "ColorCorrectionComponentData", "CameraParamsComponentData",
+		"WindComponentData" };
 	for (const char *kind : kinds) {
 		const Ve *best = nullptr;
 		std::optional<EbxInstance> best_component;

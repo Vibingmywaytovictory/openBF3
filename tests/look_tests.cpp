@@ -1103,11 +1103,11 @@ TEST_SUITE("render-look") {
 			const char *level;
 			const char *mode;
 			LookTonemap method;
-			float middle_gray, min_exposure, max_exposure, adjust_time, view_distance;
+			float middle_gray, min_exposure, max_exposure, adjust_time, view_distance, wind_direction, wind_strength;
 		};
 		const Expected expected[] = {
-			{ "MP_007", "ConquestSmall0", LookTonemap::FilmicNeutral, 0.12f, 1.1f, 3.0f, 0.8f, 0.0f },
-			{ "MP_018", "TeamDeathMatch0", LookTonemap::Filmic, 0.25f, 1.25f, 3.0f, 0.5f, 20000.0f },
+			{ "MP_007", "ConquestSmall0", LookTonemap::FilmicNeutral, 0.12f, 1.1f, 3.0f, 0.8f, 0.0f, 91.485f, 2.0f },
+			{ "MP_018", "TeamDeathMatch0", LookTonemap::Filmic, 0.25f, 1.25f, 3.0f, 0.5f, 20000.0f, 211.258f, 2.0f },
 		};
 		for (const Expected &e : expected) {
 			Result<std::unique_ptr<level::LoadedLevel>> loaded = level::load_level(*install, e.level, e.mode);
@@ -1120,6 +1120,11 @@ TEST_SUITE("render-look") {
 			std::printf("render.look %s: tonemap %s, middle grey %.3f, exposure %.2f..%.2f over %.2f s (%s)\n", e.level,
 					look_tonemap_name(f.tonemap), double(f.middle_gray), double(f.min_exposure), double(f.max_exposure),
 					double(f.exposure_time), env->base.source.c_str());
+			std::printf("render.look %s: wind %.3f degrees at %.2f\n", e.level, double(env->base.wind_direction),
+					double(env->base.wind_strength));
+			CHECK(env->base.wind);
+			CHECK(near(env->base.wind_direction, e.wind_direction));
+			CHECK(near(env->base.wind_strength, e.wind_strength));
 			CHECK(env->base.tonemap);
 			CHECK(f.tonemap == e.method);
 			CHECK(near(f.middle_gray, e.middle_gray));

@@ -38,7 +38,7 @@ const char *look_tonemap_name(LookTonemap p_tonemap);
 
 struct LookEnvState {
 	bool light = false, enlighten = false, sky = false, fog = false, tonemap = false, correction = false,
-		 camera = false, view = false;
+		 camera = false, view = false, wind = false;
 
 	LookVec3 sun_color{ 1.0f, 1.0f, 1.0f };
 	float sun_rotation_x = 200.0f;
@@ -74,6 +74,7 @@ struct LookEnvState {
 	int32_t lut = -1;
 	float sun_shadow_distance = 0.0f;
 	float view_distance = 0.0f, view_share = 0.0f;
+	float wind_direction = 0.0f, wind_strength = 0.0f;
 	std::string source;
 };
 
