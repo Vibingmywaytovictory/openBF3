@@ -7,6 +7,7 @@
 #include "bf3/anim/pose_math.h"
 #include "bf3/anim/skinning.h"
 #include "bf3/anim/temporal_lod.h"
+#include "bf3/anim/vault_anim.h"
 #include "bf3/core/result.h"
 
 #include <array>
@@ -54,6 +55,9 @@ struct CrowdSoldierInput {
 	bool revived = false;
 	bool sprinting = false;
 	bool holding = false;
+
+	uint8_t vault = kNoVaultAnim;
+	float vault_seconds = 0.0f;
 };
 
 struct CrowdConfig {
@@ -78,6 +82,7 @@ struct CrowdWeapon {
 	int32_t muzzle_joint = -1;
 	Xform muzzle_offset{};
 	uint8_t palette = 0;
+	std::array<const CrowdVaultClip *, kVaultAnimKinds> vault{};
 };
 
 struct CrowdTeam {
@@ -207,6 +212,7 @@ struct CrowdCombatStats {
 	uint32_t firing = 0;
 	uint32_t throwing = 0;
 	uint32_t dying = 0;
+	uint32_t vaulting = 0;
 	uint32_t weapon_palettes = 0;
 	uint32_t muzzles = 0;
 

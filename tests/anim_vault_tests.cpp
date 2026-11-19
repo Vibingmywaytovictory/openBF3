@@ -2,8 +2,10 @@
 
 #include "bf3/anim/clip_asset.h"
 #include "bf3/anim/crowd_clips.h"
+#include "bf3/anim/crowd_eval.h"
 #include "bf3/anim/pose.h"
 #include "bf3/anim/pose_math.h"
+#include "bf3/anim/skinning.h"
 #include "bf3/anim/vault_anim.h"
 #include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/install.h"
@@ -204,6 +206,97 @@ TEST_SUITE("anim-vault") {
 				CHECK(hips_rise > 0.3f);
 			}
 		}
+	}
+
+	TEST_CASE("vault 3p in the crowd: a vault input plays the clip from its time, the clip outlasts the input, then "
+			  "locomotion returns") {
+		VaultData *d = vault_or_skip();
+		if (d == nullptr) {
+			return;
+		}
+		auto c = find_vault_controllers(*d->library);
+		REQUIRE(c.ok());
+		const ChooserIndices idx = rifle(*d);
+		std::array<CrowdVaultClip, kVaultAnimKinds> clips;
+		for (size_t k = 0; k < kVaultAnimKinds; ++k) {
+			auto v = load_crowd_vault(d->clips, *d->library, *c, k, idx);
+			REQUIRE(v.ok());
+			clips[k] = std::move(*v);
+		}
+		EbxSkeleton ebx;
+		ebx.partition = "rig";
+		std::vector<Xform> rest;
+		model_pose(d->clips.rig, rest_pose(d->clips.rig), rest);
+		for (size_t i = 0; i < d->clips.rig.size(); ++i) {
+			ebx.bone_names.push_back(d->clips.rig.bone(i).name);
+			ebx.parents.push_back(d->clips.rig.bone(i).parent);
+			ebx.local_pose.push_back(mat_from_xform(d->clips.rig.bone(i).rest));
+			ebx.model_pose.push_back(mat_from_xform(rest[i]));
+		}
+		SkinBinds binds;
+		for (uint32_t i = 0; i < 4; ++i) {
+			REQUIRE(binds.bind(ebx, i, d->clips.rig).ok());
+		}
+		CrowdWeapon weapon;
+		weapon.binds = &binds;
+		for (size_t k = 0; k < kVaultAnimKinds; ++k) {
+			weapon.vault[k] = &clips[k];
+		}
+		CrowdTeam team;
+		team.binds = &binds;
+		team.weapons = std::span<const CrowdWeapon>(&weapon, 1);
+		const std::vector<CrowdTeam> teams{ team, team };
+		CrowdConfig config;
+		config.temporal_lod = false;
+		auto e = CrowdEvaluator::make(d->clips, teams, 1, config);
+		REQUIRE_MESSAGE(e.ok(), (e.ok() ? "" : e.error().message));
+		CrowdEvaluator &ev = **e;
+		const int32_t hips = d->clips.rig.find("Hips");
+		const size_t root = size_t(d->clips.root_joint);
+
+		std::vector<CrowdSoldierInput> in(1);
+		in[0].vault = 0;
+		in[0].vault_seconds = 0.4f;
+		ev.set_inputs(in, 1.0 / 60.0);
+		ev.evaluate_all_here();
+		uint8_t kind = kNoVaultAnim;
+		float seconds = 0.0f;
+		CHECK(ev.vault_of(0, kind, seconds));
+		CHECK(kind == 0);
+		CHECK(seconds == doctest::Approx(0.4));
+		CHECK(ev.combat_stats().vaulting == 1);
+		LocalPose pose;
+		bf3::core::ant::ClipPose scratch;
+		REQUIRE(sample_pose(
+				d->clips.rig, clips[0].clip.clip, clips[0].clip.tracks, clips[0].play.frame_at(0.4f), pose, scratch));
+		pose.joints[root].t = d->clips.rig.bone(root).rest.t;
+		std::vector<Xform> model;
+		model_pose(d->clips.rig, pose, model);
+		CHECK(std::fabs(ev.model(0)[size_t(hips)].t.y - model[size_t(hips)].t.y) < 1e-4f);
+
+		in[0].vault = kNoVaultAnim;
+		ev.set_inputs(in, 0.3);
+		ev.evaluate_all_here();
+		CHECK(ev.vault_of(0, kind, seconds));
+		CHECK(seconds == doctest::Approx(0.7));
+		ev.set_inputs(in, 0.5);
+		ev.evaluate_all_here();
+		CHECK(!ev.vault_of(0, kind, seconds));
+		CHECK(ev.combat_stats().vaulting == 0);
+
+		in[0].vault = 1;
+		in[0].vault_seconds = 0.9f;
+		ev.set_inputs(in, 1.0 / 60.0);
+		ev.evaluate_all_here();
+		REQUIRE(sample_pose(
+				d->clips.rig, clips[1].clip.clip, clips[1].clip.tracks, clips[1].play.frame_at(0.9f), pose, scratch));
+		const float rise = pose.joints[root].t.y - clips[1].root_start.y;
+		MESSAGE("up vault at 0.9 s: the clip's trajectory rises " << rise << " m above its start");
+		pose.joints[root].t = d->clips.rig.bone(root).rest.t;
+		pose.joints[root].t.y += rise;
+		model_pose(d->clips.rig, pose, model);
+		CHECK(rise > 0.5f);
+		CHECK(std::fabs(ev.model(0)[size_t(hips)].t.y - model[size_t(hips)].t.y) < 1e-4f);
 	}
 
 	TEST_CASE("install unchanged") {

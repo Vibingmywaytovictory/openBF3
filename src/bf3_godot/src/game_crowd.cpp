@@ -149,6 +149,8 @@ struct Bf3GameCrowd::Impl {
 		bool revived = false;
 		double revive_wait = -1.0;
 		uint8_t kit = 0;
+		bool vault_held = false;
+		float vault_y = 0.0f;
 	};
 	std::array<Slot, kSlotsPerTeam> slots{};
 	std::array<uint8_t, kSlotsPerTeam> plants{};
@@ -481,6 +483,8 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 		Slot &s = slots[o.slot];
 		const host::PresentedOtherWeapon *w = i < p_frame.other_weapons.size() && p_frame.other_weapons[i].valid ? &p_frame.other_weapons[i] : nullptr;
 		const uint8_t team = w != nullptr && w->team != 0 ? anim::crowd_team_of_wire(w->team) : (s.known ? s.team : uint8_t(0));
+		const bool same_life = s.known && s.generation == o.generation;
+		const float last_y = s.input.position.y;
 		if (!s.known || s.generation != o.generation) {
 			cam_new_life(o.slot, s);
 			s.dead = false;
@@ -531,6 +535,17 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 		}
 		in.weapon = s.weapon;
 		in.fire_seq = s.fire_seq;
+		in.vault = o.vault == present::kNoPresentedVault ? anim::kNoVaultAnim : o.vault;
+		in.vault_seconds = o.vault_seconds;
+		if (in.vault != anim::kNoVaultAnim) {
+			if (!s.vault_held) {
+				s.vault_held = true;
+				s.vault_y = same_life && !s.dead ? last_y : o.position.y;
+			}
+			in.position.y = s.vault_y;
+		} else {
+			s.vault_held = false;
+		}
 		s.input = in;
 		if ((o.flags & sim::soldier_flags::kAlive) != 0 && !s.dead) {
 			s.kit = row_kit(p_frame.frame, o.slot, s.kit);

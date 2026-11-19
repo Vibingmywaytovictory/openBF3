@@ -1,5 +1,4 @@
 #include "bf3/anim/crowd_eval.h"
-#include "bf3/anim/viewmodel_anim.h"
 
 #include "bf3/core/math.h"
 #include "bf3/core/util/finite.h"
@@ -468,6 +467,7 @@ struct CrowdEvaluator::Impl::Combat {
 		std::vector<Xform> weapon_local;
 		int32_t muzzle_joint = -1;
 		Xform muzzle_offset = xform_identity();
+		std::array<const CrowdVaultClip *, kVaultAnimKinds> vault{};
 	};
 	struct Team {
 		std::vector<Weapon> weapons;
@@ -515,7 +515,11 @@ struct CrowdEvaluator::Impl::Combat {
 
 		uint8_t stance = 0;
 		bool transition = false, moving = false, firing = false, throwing = false, dying = false, wrote_weapon = false,
-			 wrote_muzzle = false;
+			 wrote_muzzle = false, vaulting = false;
+		uint8_t vault = kNoVaultAnim;
+		double vault_since = 0.0;
+		std::array<uint8_t, 2> vault_out{ kNoVaultAnim, kNoVaultAnim };
+		std::array<float, 2> vault_seconds_out{};
 
 		uint64_t fallbacks = 0, bad_weapon = 0, bad_stance = 0, cancelled = 0, deaths = 0, hidden_count = 0;
 	};
@@ -607,6 +611,14 @@ core::Status CrowdEvaluator::Impl::Combat::append_weapon(
 	if (p_in.weapon_joints != nullptr) {
 		mw.weapon_joints = p_in.weapon_joints;
 		mw.weapon_local.assign(p_in.weapon_local.begin(), p_in.weapon_local.end());
+	}
+	for (size_t k = 0; k < kVaultAnimKinds; ++k) {
+		const CrowdVaultClip *v = p_in.vault[k];
+		if (v != nullptr && (v->clip.mask.size() != p_rig.size() || !(v->play.seconds() > 0.0f))) {
+			return core::make_error(
+					p_where + ": vault clip " + std::to_string(k) + " is not rig-sized or has no length");
+		}
+		mw.vault[k] = v;
 	}
 	if (p_in.muzzle_joint < -1 || p_in.muzzle_joint >= int32_t(p_rig.size())) {
 		return core::make_error(p_where + ": muzzle joint " + std::to_string(p_in.muzzle_joint) + " outside the rig");
@@ -856,7 +868,8 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 	Combat::Soldier &xs = x.soldiers[p_i];
 	s.skipped_lod = s.hidden = s.two_cycle = s.idle_mix = s.reloading = s.aiming = false;
 	s.loco_clips = 0;
-	xs.transition = xs.moving = xs.firing = xs.throwing = xs.dying = xs.wrote_weapon = xs.wrote_muzzle = false;
+	xs.transition = xs.moving = xs.firing = xs.throwing = xs.dying = xs.wrote_weapon = xs.wrote_muzzle = xs.vaulting =
+			false;
 	s.tier = int8_t(temporal_lod_tier(config.lod, s.input.camera_distance));
 	s.clock += dt;
 	const auto finish = [&] { s.done_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count(); };
@@ -890,6 +903,13 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 	}
 	xs.holding = s.input.holding;
 	xs.fire_seen = true;
+	if (xs.dead) {
+		xs.vault = kNoVaultAnim;
+	} else if (s.input.vault < kVaultAnimKinds && std::isfinite(s.input.vault_seconds) &&
+			s.input.vault_seconds >= 0.0f) {
+		xs.vault = s.input.vault;
+		xs.vault_since = s.clock - double(s.input.vault_seconds);
+	}
 	const double dead_age = xs.dead ? s.clock - xs.dead_since : 0.0;
 	xs.hidden = xs.dead && dead_age >= double(x.corpse_seconds);
 	if (xs.hidden && !xs.hide_counted) {
@@ -1073,8 +1093,29 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 		stance_pose(s.pose);
 	}
 
+	const CrowdVaultClip *vault_clip = nullptr;
+	float vault_age = 0.0f, vault_w = 0.0f;
+	if (xs.vault < kVaultAnimKinds) {
+		const CrowdVaultClip *c = weapon != nullptr ? weapon->vault[xs.vault] : nullptr;
+		const double age = s.clock - xs.vault_since;
+		if (c == nullptr || age >= double(c->play.seconds())) {
+			xs.vault = kNoVaultAnim;
+		} else if (age >= 0.0 &&
+				sample_pose(rig, c->clip.clip, c->clip.tracks, c->play.frame_at(float(age)), xs.extra, s.scratch)) {
+			vault_clip = c;
+			vault_age = float(age);
+			vault_w = c->blend_in_seconds > 0.0f ? std::min(1.0f, vault_age / c->blend_in_seconds) : 1.0f;
+			override_masked(s.pose, xs.extra, c->clip.mask, vault_w);
+			xs.vaulting = true;
+		}
+	}
+
 	if (clips->root_joint >= 0 && size_t(clips->root_joint) < s.pose.joints.size()) {
-		s.pose.joints[size_t(clips->root_joint)].t = rig.bone(size_t(clips->root_joint)).rest.t;
+		const size_t root = size_t(clips->root_joint);
+		s.pose.joints[root].t = rig.bone(root).rest.t;
+		if (vault_clip != nullptr) {
+			s.pose.joints[root].t.y += vault_w * (xs.extra.joints[root].t.y - vault_clip->root_start.y);
+		}
 	}
 
 	if (weapon_joints != nullptr && !weapon_local.empty()) {
@@ -1163,7 +1204,7 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 		}
 	}
 
-	if (!xs.dead) {
+	if (!xs.dead && !xs.vaulting) {
 		const float pitch = kick != 0.0f ? s.input.pitch + kick : s.input.pitch;
 		const bool up = pitch > 0.0f;
 		const float full_deg = up ? aim_stance.up_full_deg : aim_stance.down_full_deg;
@@ -1182,6 +1223,8 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 	skin_matrices(s.model[back], team.binds->binds(), s.palette[back]);
 	s.binds[back] = uint32_t(team.binds->size());
 	xs.weapon[back] = widx;
+	xs.vault_out[back] = vault_clip != nullptr ? xs.vault : kNoVaultAnim;
+	xs.vault_seconds_out[back] = vault_age;
 	xs.muzzle_ok[back] = false;
 	xs.weapon_binds[back] = 0;
 	if (weapon != nullptr) {
@@ -1271,10 +1314,17 @@ bool CrowdEvaluator::drawn(uint32_t p_i) const {
 }
 
 bool CrowdEvaluator::vault_of(uint32_t p_i, uint8_t &r_kind, float &r_seconds) const {
-	(void)p_i;
+	const Impl &m = *impl_;
 	r_kind = kNoVaultAnim;
 	r_seconds = 0.0f;
-	return false;
+	if (!m.combat || p_i >= m.soldiers.size() || p_i >= m.combat->soldiers.size()) {
+		return false;
+	}
+	const Impl::Combat::Soldier &xs = m.combat->soldiers[p_i];
+	const uint8_t front = m.soldiers[p_i].front;
+	r_kind = xs.vault_out[front];
+	r_seconds = xs.vault_seconds_out[front];
+	return r_kind != kNoVaultAnim;
 }
 
 CrowdCombatStats CrowdEvaluator::combat_stats() const {
@@ -1310,6 +1360,7 @@ CrowdCombatStats CrowdEvaluator::combat_stats() const {
 		r.firing += xs.firing ? 1 : 0;
 		r.throwing += xs.throwing ? 1 : 0;
 		r.dying += xs.dying ? 1 : 0;
+		r.vaulting += xs.vaulting ? 1 : 0;
 		r.weapon_palettes += xs.wrote_weapon ? 1 : 0;
 		r.muzzles += xs.wrote_muzzle ? 1 : 0;
 	}

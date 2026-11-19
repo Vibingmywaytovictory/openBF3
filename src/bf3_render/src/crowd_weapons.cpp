@@ -276,8 +276,35 @@ core::Result<MuzzleEntry> muzzle_entry(const core::EbxLibrary &p_library, const 
 	return best;
 }
 
-core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_spec, const SoldierAssets &p_assets, const SoldierTeam &p_team,
-		const std::vector<std::string> &p_databases, core::Cache *p_cache, CrowdWeaponPart &r_part, std::vector<std::string> &r_notes) {
+std::string load_vault_clips(const SoldierAssets &p_assets, const anim::VaultControllers &p_vault, uint32_t p_ant_ref,
+		CrowdWeaponPart &r_part) {
+	core::Result<uint32_t> type = anim::weapon_type_index(*p_assets.library, p_ant_ref);
+	if (!type) {
+		return "; no vault clips (" + type.error().message + ")";
+	}
+	anim::ChooserIndices idx;
+	idx.weapon_type = *type;
+	std::string out = "; vault";
+	for (size_t k = 0; k < anim::kVaultAnimKinds; ++k) {
+		core::Result<anim::CrowdVaultClip> v =
+				anim::load_crowd_vault(p_assets.clips, *p_assets.library, p_vault, k, idx);
+		if (!v) {
+			out += " " + p_vault.third_person[k].name + ": " + v.error().message;
+			continue;
+		}
+		r_part.vault[k] = std::move(*v);
+		r_part.have_vault[k] = true;
+		char line[96];
+		std::snprintf(line, sizeof(line), " %s %.3f s", r_part.vault[k].controller.c_str(),
+				double(r_part.vault[k].play.seconds()));
+		out += line;
+	}
+	return out;
+}
+
+core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_spec, const SoldierAssets &p_assets,
+		const SoldierTeam &p_team, const std::vector<std::string> &p_databases, core::Cache *p_cache,
+		const anim::VaultControllers *p_vault, CrowdWeaponPart &r_part, std::vector<std::string> &r_notes) {
 	const anim::Skeleton &rig = p_assets.clips.rig;
 	CrowdWeaponSpec &spec = r_part.spec;
 	std::optional<core::EbxInstance> data;
@@ -363,6 +390,13 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 		}
 	}
 
+	std::string vault_line;
+	if (data && p_vault != nullptr) {
+		core::Result<uint32_t> ref = weapon_ant_ref(*data, spec.weapon_unlock);
+		vault_line = ref ? load_vault_clips(p_assets, *p_vault, *ref, r_part)
+						 : "; no vault clips (" + ref.error().message + ")";
+	}
+
 	std::optional<core::gameplay::WeaponDef> def;
 	if (!spec.weapon_def.empty()) {
 		core::Result<core::gameplay::WeaponDef> w = core::gameplay::resolve_weapon(p_lib, spec.weapon_def);
@@ -435,16 +469,15 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 	} else if (def) {
 		muzzle_line = "no muzzle (no Wep_Root)";
 	}
-	char line[512];
+	char line[768];
 	std::snprintf(line, sizeof(line),
 			"item def %u %s: mesh %s and %zu accessory meshes, %zu binds, %llu vertices, %llu triangles; %s; %s",
 			unsigned(spec.def), spec.weapon_def.c_str(), spec.mesh.c_str(), r_part.accessory_meshes.size(),
 			r_part.binds.size(), (unsigned long long)r_part.vertices, (unsigned long long)r_part.triangles,
-			(reload_line + throw_line).c_str(), muzzle_line.c_str());
+			(reload_line + throw_line + vault_line).c_str(), muzzle_line.c_str());
 	r_notes.push_back(line);
 	return core::Status::success();
 }
-
 }
 
 core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::InstallReader &p_install, const SoldierSpec &p_spec, const SoldierAssets &p_assets,
@@ -481,11 +514,16 @@ core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::Ebx
 	auto set = std::make_unique<CrowdWeaponSet>();
 	const core::EbxLibrary &lib = p_library;
 	const std::vector<std::string> databases = variation_database_names(lib);
+	const core::Result<anim::VaultControllers> vault = anim::find_vault_controllers(*p_assets.library);
+	if (!vault) {
+		set->notes.push_back("no vault clips: " + vault.error().message);
+	}
 	for (size_t t = 0; t < p_items.size(); ++t) {
 		for (size_t i = 0; i < p_items[t].size(); ++i) {
 			CrowdWeaponPart part;
 			part.spec = p_items[t][i];
-			const core::Status st = prepare_item(lib, p_spec, p_assets, p_assets.teams[t], databases, p_cache, part, set->notes);
+			const core::Status st = prepare_item(lib, p_spec, p_assets, p_assets.teams[t], databases, p_cache,
+					vault ? &*vault : nullptr, part, set->notes);
 			if (!st.ok()) {
 				if (i == 0) {
 					return core::error_at("crowd weapons: team " + std::to_string(t) + " item 0", st.error());

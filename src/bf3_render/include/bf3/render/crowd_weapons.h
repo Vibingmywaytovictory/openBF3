@@ -36,6 +36,8 @@ struct CrowdWeaponPart {
 	float reload_rate = 1.0f;
 	bool have_throw = false;
 	anim::CrowdThrowClips throw_clips;
+	std::array<bool, anim::kVaultAnimKinds> have_vault{};
+	std::array<anim::CrowdVaultClip, anim::kVaultAnimKinds> vault;
 	int32_t muzzle_joint = -1;
 	anim::Xform muzzle_offset = anim::xform_identity();
 	uint64_t vertices = 0, triangles = 0;
@@ -101,6 +103,9 @@ inline std::vector<anim::CrowdWeapon> crowd_weapons_of(const CrowdWeaponSet &p_s
 		w.weapon_local = part.weapon_local;
 		w.muzzle_joint = part.muzzle_joint;
 		w.muzzle_offset = part.muzzle_offset;
+		for (size_t k = 0; k < anim::kVaultAnimKinds; ++k) {
+			w.vault[k] = part.have_vault[k] ? &part.vault[k] : nullptr;
+		}
 		out.push_back(w);
 	}
 	return out;
