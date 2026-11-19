@@ -82,7 +82,7 @@ static_assert(std::is_trivially_copyable_v<sim::Command>);
 
 static_assert(sizeof(host::ShotView) == 16);
 static_assert(sizeof(host::PresentEvent) == 64);
-static_assert(sizeof(net::OtherPose) == 60);
+static_assert(sizeof(net::OtherPose) == 64);
 static_assert(sizeof(core::gameplay::CapsuleLocal) == 32);
 static_assert(sizeof(fx::FxInstance) == 80);
 static_assert(std::is_trivially_copyable_v<host::ShotView>);
@@ -366,7 +366,7 @@ TEST_SUITE("m2a-contract") {
 		CHECK(sizeof(sim::Command) == 24);
 		CHECK(sizeof(host::ShotView) == 16);
 		CHECK(sizeof(host::PresentEvent) == 64);
-		CHECK(sizeof(net::OtherPose) == 60);
+		CHECK(sizeof(net::OtherPose) == 64);
 		CHECK((sw::weapon_buttons::kAll & ~sim::buttons::kWireMask) == 0);
 
 		for (uint32_t bits = 0; bits < 8; ++bits) {
@@ -452,7 +452,7 @@ TEST_SUITE("m2a-contract") {
 		CHECK(sv.main_bits == 0);
 		CHECK(sv.others_bits == 0);
 		if constexpr (kNtLanded) {
-			CHECK(net::kProtocolVersion == 17);
+			CHECK(net::kProtocolVersion == 18);
 		} else {
 			CHECK(net::kProtocolVersion == 1);
 			pending("nt", "kProtocolVersion == 2", "nt bumps the version with the v2 codecs");

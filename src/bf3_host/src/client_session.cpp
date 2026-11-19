@@ -341,6 +341,8 @@ PresentedSoldier presented_of(const net::OtherPose &p_pose) {
 	s.extrapolated = p_pose.extrapolated;
 	s.target_pose = sim::Pose(std::min<uint8_t>(p_pose.target_pose, uint8_t(sim::kPoseCount - 1)));
 	s.transition = float(p_pose.transition) / 255.0f;
+	s.vault = p_pose.vault_kind == net::kNoOtherVault ? present::kNoPresentedVault : p_pose.vault_kind;
+	s.vault_seconds = p_pose.vault_seconds;
 	return s;
 }
 

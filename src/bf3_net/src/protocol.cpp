@@ -3,6 +3,7 @@
 #include "bf3/core/util/finite.h"
 #include "bf3/net/bit_stream.h"
 #include "bf3/net/weapons_wire.h"
+#include "bf3/sim/vault.h"
 #include "bf3/sim/vehicles/vehicle_targets.h"
 #include "bit_archive.h"
 #include "ghost_delta.h"
@@ -320,7 +321,8 @@ uint8_t transition_progress(const sim::SoldierState &p_s) {
 constexpr bool other_in_range(const OtherSoldier &p_o) {
 	return p_o.team <= kMaxTeam && p_o.slot < kMaxSlots && p_o.pitch >= -kOtherPitchMaxCode * 4 &&
 			p_o.pitch <= kOtherPitchMaxCode * 4 && valid_pose(uint8_t(p_o.pose)) &&
-			valid_pose(uint8_t(p_o.target_pose)) && uint8_t(p_o.mode) < sim::kMoveModeCount;
+			valid_pose(uint8_t(p_o.target_pose)) && uint8_t(p_o.mode) < sim::kMoveModeCount &&
+			p_o.vault_kind < sim::kVaultKindCount;
 }
 
 template <class A, MaybeConst<OtherSoldier> O>
@@ -410,7 +412,7 @@ bool usable_base(const OtherBaseline &p_base, const OtherSoldier &p_other, sim::
 GhostEntry choose_form(const OtherSoldier &p_other, std::span<const OtherBaseline> p_bases, size_t p_index,
 		uint16_t p_seq, sim::Tick p_tick, size_t &r_bits) {
 	GhostEntry e;
-	r_bits = kOtherBits;
+	r_bits = kOtherBits + (p_other.mode == sim::MoveMode::AnimationControlled ? kOtherVaultBits : 0u);
 	if (p_index >= p_bases.size() || !usable_base(p_bases[p_index], p_other, p_tick)) {
 		return e;
 	}
@@ -420,7 +422,7 @@ GhostEntry choose_form(const OtherSoldier &p_other, std::span<const OtherBaselin
 	d.base_tick = p_bases[p_index].tick;
 	d.base = &p_bases[p_index].record;
 	const size_t bits = count_bits([&](auto &r_a) { ghost_entry(r_a, p_other, d, p_seq, p_tick, nullptr); });
-	if (bits < kOtherBits) {
+	if (bits < r_bits) {
 		r_bits = bits;
 		return d;
 	}
@@ -2376,6 +2378,10 @@ OtherSoldier quantize_other(uint8_t p_slot, const sim::SoldierState &p_state) {
 	o.transition = transition_progress(p_state);
 	o.mode = p_state.mode;
 	o.flags = uint8_t(p_state.flags & 0xFF);
+	if (p_state.mode == sim::MoveMode::AnimationControlled) {
+		o.vault_kind = p_state.vault.kind;
+		o.vault_ticks = uint8_t(std::min<uint32_t>(p_state.vault.ticks, kOtherVaultTicksMax));
+	}
 	return o;
 }
 

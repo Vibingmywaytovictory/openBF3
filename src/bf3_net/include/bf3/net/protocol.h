@@ -26,7 +26,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 17;
+inline constexpr uint16_t kProtocolVersion = 18;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -340,6 +340,8 @@ struct OtherSoldier {
 	uint8_t transition = 0;
 	sim::MoveMode mode = sim::MoveMode::OnGround;
 	uint8_t flags = 0;
+	uint8_t vault_kind = 0;
+	uint8_t vault_ticks = 0;
 
 	uint8_t weapon = 0xFF;
 	uint8_t weapon_phase = 0;

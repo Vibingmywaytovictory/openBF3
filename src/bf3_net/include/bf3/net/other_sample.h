@@ -22,6 +22,8 @@ static_assert(std::is_trivially_copyable_v<TimedOther>);
 
 enum class SampleKind : uint8_t { Interpolate = 0, Extrapolate = 1, Hold = 2 };
 
+inline constexpr uint8_t kNoOtherVault = 0xFF;
+
 struct OtherPose {
 	uint8_t slot = 0;
 	uint8_t generation = 0;
@@ -40,6 +42,8 @@ struct OtherPose {
 	uint32_t tick_a = 0;
 	uint32_t tick_b = 0;
 	uint8_t kind = 0;
+	uint8_t vault_kind = kNoOtherVault;
+	float vault_seconds = 0;
 };
 static_assert(std::is_trivially_copyable_v<OtherPose>);
 

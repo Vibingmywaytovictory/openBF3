@@ -15,6 +15,8 @@
 
 namespace bf3::present {
 
+inline constexpr uint8_t kNoPresentedVault = 0xFF;
+
 struct PresentedSoldier {
 	uint8_t slot = 0;
 	uint8_t generation = 0;
@@ -30,6 +32,8 @@ struct PresentedSoldier {
 
 	sim::Pose target_pose = sim::Pose::Stand;
 	float transition = 0.0f;
+	uint8_t vault = kNoPresentedVault;
+	float vault_seconds = 0.0f;
 };
 
 struct PresentedOtherWeapon {

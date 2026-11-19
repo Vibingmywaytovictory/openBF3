@@ -57,10 +57,28 @@ bool same_vec(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 }
 
 bool same_other(const OtherSoldier &p_a, const OtherSoldier &p_b) {
-	return p_a.slot == p_b.slot && p_a.generation == p_b.generation && same_vec(p_a.position, p_b.position) && same_vec(p_a.velocity, p_b.velocity) &&
-			p_a.yaw == p_b.yaw && p_a.pitch == p_b.pitch && p_a.pose == p_b.pose && p_a.target_pose == p_b.target_pose && p_a.transition == p_b.transition &&
-			p_a.mode == p_b.mode && p_a.flags == p_b.flags && p_a.weapon == p_b.weapon && p_a.weapon_phase == p_b.weapon_phase && p_a.firing == p_b.firing &&
-			p_a.ads == p_b.ads && p_a.reload_seq == p_b.reload_seq && p_a.burst_seq == p_b.burst_seq;
+	return p_a.slot == p_b.slot && p_a.generation == p_b.generation && same_vec(p_a.position, p_b.position) &&
+			same_vec(p_a.velocity, p_b.velocity) && p_a.yaw == p_b.yaw && p_a.pitch == p_b.pitch &&
+			p_a.pose == p_b.pose && p_a.target_pose == p_b.target_pose && p_a.transition == p_b.transition &&
+			p_a.mode == p_b.mode && p_a.flags == p_b.flags && p_a.weapon == p_b.weapon &&
+			p_a.weapon_phase == p_b.weapon_phase && p_a.firing == p_b.firing && p_a.ads == p_b.ads &&
+			p_a.reload_seq == p_b.reload_seq && p_a.burst_seq == p_b.burst_seq && p_a.vault_kind == p_b.vault_kind &&
+			p_a.vault_ticks == p_b.vault_ticks;
+}
+
+void set_vault(OtherPose &r_out, std::span<const TimedOther *const> p_newest_first, double p_render) {
+	for (const TimedOther *s : p_newest_first) {
+		if (s == nullptr || s->soldier.mode != sim::MoveMode::AnimationControlled) {
+			continue;
+		}
+		const double start = double(s->server_tick) - double(s->soldier.vault_ticks);
+		if (p_render < start) {
+			continue;
+		}
+		r_out.vault_kind = s->soldier.vault_kind;
+		r_out.vault_seconds = float((p_render - start) * double(sim::kTickSeconds));
+		return;
+	}
 }
 
 }
@@ -110,6 +128,7 @@ OtherPose sample_other(std::span<const TimedOther> p_samples, double p_render_ti
 	const double max_extra_ticks = std::max(0.0, p_max_extrapolate_ticks);
 	const TimedOther &sa = p_samples[sel.index_a];
 	OtherPose out;
+	const TimedOther *const newest_b = sel.kind == SampleKind::Interpolate ? &p_samples[sel.index_b] : nullptr;
 	if (render <= double(sa.server_tick)) {
 		out = present_sample(p_pose_eye_heights, sa.soldier);
 	} else if (sel.kind == SampleKind::Interpolate) {
@@ -137,6 +156,8 @@ OtherPose sample_other(std::span<const TimedOther> p_samples, double p_render_ti
 			out.position[k] = sa.soldier.position[k] + sa.soldier.velocity[k] * secs;
 		}
 	}
+	const std::array<const TimedOther *, 2> newest_first{ newest_b, &sa };
+	set_vault(out, newest_first, render);
 	out.extrapolated = sel.extrapolated;
 	out.held = sel.held;
 	out.tick_a = sel.tick_a;
@@ -209,10 +230,14 @@ size_t rebuild_track(std::span<const TimedOther> p_candidates, uint32_t p_view_t
 }
 
 bool same_bits(const OtherPose &p_a, const OtherPose &p_b) {
-	return p_a.slot == p_b.slot && p_a.generation == p_b.generation && p_a.pose == p_b.pose && p_a.target_pose == p_b.target_pose &&
-			p_a.transition == p_b.transition && p_a.mode == p_b.mode && p_a.flags == p_b.flags && p_a.extrapolated == p_b.extrapolated && p_a.held == p_b.held &&
-			same_vec(p_a.position, p_b.position) && same_vec(p_a.velocity, p_b.velocity) && same_float(p_a.yaw, p_b.yaw) && same_float(p_a.pitch, p_b.pitch) &&
-			same_float(p_a.eye_height, p_b.eye_height) && p_a.tick_a == p_b.tick_a && p_a.tick_b == p_b.tick_b && p_a.kind == p_b.kind;
+	return p_a.slot == p_b.slot && p_a.generation == p_b.generation && p_a.pose == p_b.pose &&
+			p_a.target_pose == p_b.target_pose && p_a.transition == p_b.transition && p_a.mode == p_b.mode &&
+			p_a.flags == p_b.flags && p_a.extrapolated == p_b.extrapolated && p_a.held == p_b.held &&
+			same_vec(p_a.position, p_b.position) && same_vec(p_a.velocity, p_b.velocity) &&
+			same_float(p_a.yaw, p_b.yaw) && same_float(p_a.pitch, p_b.pitch) &&
+			same_float(p_a.eye_height, p_b.eye_height) && p_a.tick_a == p_b.tick_a && p_a.tick_b == p_b.tick_b &&
+			p_a.kind == p_b.kind && p_a.vault_kind == p_b.vault_kind &&
+			same_float(p_a.vault_seconds, p_b.vault_seconds);
 }
 
 bool same_bits(const TimedOther &p_a, const TimedOther &p_b) {

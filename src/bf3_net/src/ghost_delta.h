@@ -19,6 +19,8 @@ inline constexpr unsigned kGhostBackBits = 5;
 inline constexpr uint8_t kGhostSpecialSlot = 0x80;
 inline constexpr unsigned kOtherPoseBits = 24;
 inline constexpr unsigned kOtherGearBits = 21;
+inline constexpr unsigned kOtherVaultBits = 10;
+inline constexpr uint32_t kOtherVaultTicksMax = (1u << (kOtherVaultBits - 2)) - 1u;
 inline constexpr uint32_t kMaxDeltaTicks = 4096;
 static_assert(kMaxBaselineBack == (1u << kGhostBackBits) - 1u);
 
@@ -39,9 +41,14 @@ struct OtherCodes {
 	int32_t pitch = 0;
 	uint32_t pose = 0;
 	uint32_t gear = 0;
+	uint32_t vault = 0;
 
 	bool operator==(const OtherCodes &) const = default;
 };
+
+constexpr bool pose_code_vaults(uint32_t p_pose) {
+	return ((p_pose >> 12) & 15u) == uint32_t(sim::MoveMode::AnimationControlled);
+}
 
 constexpr OtherCodes other_codes(const OtherSoldier &p_o) {
 	OtherCodes c;
@@ -59,6 +66,9 @@ constexpr OtherCodes other_codes(const OtherSoldier &p_o) {
 	c.gear = uint32_t(p_o.weapon) | ((uint32_t(p_o.weapon_phase) & 7u) << 8) | (uint32_t(p_o.firing) << 11) |
 			(uint32_t(p_o.ads) << 12) | ((uint32_t(p_o.reload_seq) & 3u) << 13) |
 			((uint32_t(p_o.burst_seq) & 15u) << 15) | ((uint32_t(p_o.team) & 3u) << 19);
+	c.vault = pose_code_vaults(c.pose)
+			? (uint32_t(p_o.vault_kind) & 3u) | (std::min<uint32_t>(p_o.vault_ticks, kOtherVaultTicksMax) << 2)
+			: 0u;
 	return c;
 }
 
@@ -86,6 +96,8 @@ constexpr OtherSoldier other_of_codes(uint8_t p_slot, const OtherCodes &p_c) {
 	o.reload_seq = uint8_t((p_c.gear >> 13) & 3u);
 	o.burst_seq = uint8_t((p_c.gear >> 15) & 15u);
 	o.team = uint8_t((p_c.gear >> 19) & 3u);
+	o.vault_kind = uint8_t(p_c.vault & 3u);
+	o.vault_ticks = uint8_t(p_c.vault >> 2);
 	return o;
 }
 
@@ -106,6 +118,11 @@ template <class A, MaybeConst<OtherCodes> C> constexpr void serialize(A &r_a, C 
 	r_a.bits(r_c.pitch, quant::kSoldierPitchBits);
 	r_a.bits(r_c.pose, kOtherPoseBits);
 	r_a.bits(r_c.gear, kOtherGearBits);
+	if (pose_code_vaults(r_c.pose)) {
+		r_a.bits(r_c.vault, kOtherVaultBits);
+	} else {
+		r_a.store(r_c.vault, [] { return 0u; });
+	}
 }
 
 constexpr bool fits_signed(int64_t p_value, unsigned p_bits) {
@@ -198,6 +215,17 @@ constexpr void delta(A &r_a, C &r_c, const OtherCodes &p_base, uint32_t p_dt, bo
 		r_a.bits(r_c.gear, kOtherGearBits);
 	} else {
 		r_a.store(r_c.gear, [&] { return p_base.gear; });
+	}
+	if (pose_code_vaults(r_c.pose)) {
+		bool vault = r_c.vault != p_base.vault;
+		r_a.bits(vault, 1);
+		if (vault) {
+			r_a.bits(r_c.vault, kOtherVaultBits);
+		} else {
+			r_a.store(r_c.vault, [&] { return p_base.vault; });
+		}
+	} else {
+		r_a.store(r_c.vault, [] { return 0u; });
 	}
 	r_a.store(r_c.generation, [&] { return p_base.generation; });
 }

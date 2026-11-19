@@ -571,6 +571,28 @@ TEST_SUITE("sim-lagcomp-unit") {
 		}
 	}
 
+	TEST_CASE("sample_other: a vault's kind and time from the newest vaulting sample at or before the render time") {
+		std::array<net::TimedOther, 3> l{ net::TimedOther{ 10, rec(1, 0.0f, 6.0f, 0) },
+			net::TimedOther{ 13, rec(1, 0.2f, 6.0f, 0) }, net::TimedOther{ 16, rec(1, 0.4f, 6.0f, 0) } };
+		for (size_t i = 1; i < l.size(); ++i) {
+			l[i].soldier.mode = sim::MoveMode::AnimationControlled;
+			l[i].soldier.vault_kind = 1;
+			l[i].soldier.vault_ticks = uint8_t(2 + 3 * (i - 1));
+		}
+		const std::span<const net::TimedOther> s(l);
+		CHECK(net::sample_other(s, 10.5, kEyes, kMaxExtraTicks).vault_kind == net::kNoOtherVault);
+		const net::OtherPose at_start = net::sample_other(s, 11.5, kEyes, kMaxExtraTicks);
+		CHECK(at_start.vault_kind == 1);
+		CHECK(at_start.vault_seconds == doctest::Approx(0.5 * double(sim::kTickSeconds)));
+		const net::OtherPose later = net::sample_other(s, 14.0, kEyes, kMaxExtraTicks);
+		CHECK(later.vault_kind == 1);
+		CHECK(later.vault_seconds == doctest::Approx(3.0 * double(sim::kTickSeconds)));
+		l[2].soldier.mode = sim::MoveMode::OnGround;
+		l[2].soldier.vault_ticks = 0;
+		const net::OtherPose ended = net::sample_other(s, 17.0, kEyes, kMaxExtraTicks);
+		CHECK(ended.vault_kind == net::kNoOtherVault);
+	}
+
 	TEST_CASE("time rule: rewind_time_q8 = sim_time_q8(t) - clamp(view_back - 256, 0, max x 256)") {
 
 		CHECK(net::sim_time_q8(0) == 0);
