@@ -14,6 +14,7 @@
 #include "bf3/render/terrain_look.h"
 #include "bf3/render/terrain_scatter.h"
 #include "bf3/render/texture_prep.h"
+#include "bf3/render/water.h"
 
 #include <array>
 #include <cstdint>
@@ -64,6 +65,8 @@ struct SceneTerrainPlan {
 	std::vector<SceneTerrainCombo> combos;
 	SceneScatterPlan scatter;
 	std::vector<SceneDecalShader> decals;
+	std::vector<SceneWaterShader> water;
+	SceneTerrainTexture water_envmap;
 };
 struct SceneTerrainOptions {
 	float spacing = 4.0f;
@@ -181,6 +184,7 @@ struct PreparedTerrain {
 	std::shared_ptr<const TerrainScatter> scatter;
 	std::vector<std::pair<std::string, std::string>> scatter_failures;
 	TerrainDecalStats decals;
+	TerrainWaterStats water;
 };
 
 core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mount, const LevelScenePlan &p_plan,

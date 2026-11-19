@@ -15,6 +15,7 @@
 #include "bf3/render/shader_database.h"
 #include "bf3/render/shader_translate.h"
 #include "bf3/render/texture_prep.h"
+#include "bf3/render/water.h"
 #include "dxbc_test_support.h"
 #include "test_support.h"
 
@@ -478,7 +479,23 @@ TEST_SUITE("render-programs-unit") {
 		LookEnvState state;
 		state.outdoor_sky = { 0.25f, 0.5f, 0.75f };
 		CHECK(look_engine_global(state, "outdoorLightTopColor") == std::array<float, 4>{ 0.25f, 0.5f, 0.75f, 0.0f });
-		CHECK(!look_engine_global(state, "outdoorLightDir").has_value());
+		for (std::string_view name : kWaterGlobals) {
+			CHECK_MESSAGE(look_engine_global(LookEnvState{}, name).has_value(), name);
+		}
+		state.sun_rotation_x = 90.0f;
+		state.sun_rotation_y = 0.0f;
+		state.sun_color = { 1.0f, 2.0f, 3.0f };
+		state.sun_specular_scale = 2.0f;
+		state.envmap_8bit_scale = 0.25f;
+		const std::optional<std::array<float, 4>> to_sun = look_engine_global(state, "outdoorLightDir");
+		REQUIRE(to_sun.has_value());
+		CHECK((*to_sun)[0] == doctest::Approx(1.0f));
+		CHECK((*to_sun)[1] == doctest::Approx(0.0f));
+		CHECK((*to_sun)[2] == doctest::Approx(0.0f).epsilon(1e-6));
+		CHECK(look_engine_global(state, "outdoorLightKeySpecularColorAndHemisphereVisibility") ==
+				std::array<float, 4>{ 2.0f, 4.0f, 6.0f, 1.0f });
+		CHECK(look_engine_global(state, "outdoorLightSkyEnvmap8BitTexInvScale") ==
+				std::array<float, 4>{ 4.0f, 0.0f, 0.0f, 0.0f });
 		const std::vector<uint8_t> other_blob = hemisphere_pixel_program(0);
 		bf3::core::Result<dxbc::Program> other = dxbc::parse(other_blob);
 		REQUIRE(other.ok());

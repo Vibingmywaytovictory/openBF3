@@ -131,6 +131,7 @@ bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::
 		r_state.sun_rotation_y = number(p_c, "SunRotationY").value_or(r_state.sun_rotation_y);
 		r_state.outdoor_sky = vec3(p_c, "SkyColor").value_or(r_state.outdoor_sky);
 		r_state.outdoor_ground = vec3(p_c, "GroundColor").value_or(r_state.outdoor_ground);
+		r_state.sun_specular_scale = number(p_c, "SunSpecularScale").value_or(r_state.sun_specular_scale);
 	} else if (p_c.is_a("EnlightenComponentData")) {
 		if (r_state.enlighten || !flag(p_c, "SkyBoxEnable", true)) {
 			return false;
@@ -153,6 +154,8 @@ bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::
 		r_state.panorama = texture_name(p_db, p_c, "PanoramicTexture");
 		r_state.panorama_alpha = texture_name(p_db, p_c, "PanoramicAlphaTexture");
 		r_state.gradient = texture_name(p_db, p_c, "SkyGradientTexture");
+		r_state.static_envmap = texture_name(p_db, p_c, "StaticEnvmapTexture");
+		r_state.envmap_8bit_scale = number(p_c, "SkyEnvmap8BitTexScale").value_or(r_state.envmap_8bit_scale);
 		r_state.sky_brightness = number(p_c, "BrightnessScale").value_or(1.0f);
 		r_state.sky_rotation = number(p_c, "PanoramicRotation").value_or(0.0f);
 		r_state.uv_min_y = number(p_c, "PanoramicUVMinY").value_or(0.0f);
@@ -360,6 +363,7 @@ void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 		r_state.sun_rotation_y = lerp1(r_state.sun_rotation_y, p_a.sun_rotation_y, p_w);
 		r_state.outdoor_sky = lerp3(r_state.outdoor_sky, p_a.outdoor_sky, p_w);
 		r_state.outdoor_ground = lerp3(r_state.outdoor_ground, p_a.outdoor_ground, p_w);
+		r_state.sun_specular_scale = lerp1(r_state.sun_specular_scale, p_a.sun_specular_scale, p_w);
 	}
 	if (p_a.enlighten) {
 		r_state.enlighten = true;
@@ -382,8 +386,10 @@ void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 			r_state.uv_min_y = p_a.uv_min_y;
 			r_state.uv_max_y = p_a.uv_max_y;
 			r_state.sky_rotation = p_a.sky_rotation;
+			r_state.static_envmap = p_a.static_envmap;
 		}
 		r_state.sky_brightness = lerp1(r_state.sky_brightness, p_a.sky_brightness, p_w);
+		r_state.envmap_8bit_scale = lerp1(r_state.envmap_8bit_scale, p_a.envmap_8bit_scale, p_w);
 		r_state.horizon = lerp3(r_state.horizon, p_a.horizon, p_w);
 	}
 	if (p_a.fog) {
@@ -540,6 +546,18 @@ std::optional<std::array<float, 4>> look_engine_global(const LookEnvState &p_sta
 		return std::array<float, 4>{ p_state.outdoor_ground[0], p_state.outdoor_ground[1], p_state.outdoor_ground[2],
 			0.0f };
 	}
+	if (p_name == "outdoorLightDir") {
+		const LookVec3 to_light = look_frame_of(p_state).sun_direction;
+		return std::array<float, 4>{ -to_light[0], -to_light[1], -to_light[2], 0.0f };
+	}
+	if (p_name == "outdoorLightKeySpecularColorAndHemisphereVisibility") {
+		const float s = p_state.sun_specular_scale;
+		return std::array<float, 4>{ p_state.sun_color[0] * s, p_state.sun_color[1] * s, p_state.sun_color[2] * s,
+			1.0f };
+	}
+	if (p_name == "outdoorLightSkyEnvmap8BitTexInvScale" && p_state.envmap_8bit_scale > 0.0f) {
+		return std::array<float, 4>{ 1.0f / p_state.envmap_8bit_scale, 0.0f, 0.0f, 0.0f };
+	}
 	return std::nullopt;
 }
 
@@ -674,6 +692,7 @@ core::Result<LookEnvironment> read_look_environment(const EbxResolver &p_db, con
 					env.base.grade_cube = probe.grade_cube;
 				}
 				if (probe.sky) {
+					env.base.static_envmap = probe.static_envmap;
 					env.base.panorama = probe.panorama;
 					env.base.panorama_alpha = probe.panorama_alpha;
 					env.base.gradient = probe.gradient;

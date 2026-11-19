@@ -51,6 +51,7 @@ enum class ProgramBlend : uint8_t {
 	Mix,
 	Add,
 	Multiply,
+	Premultiplied,
 };
 
 struct ProgramConstantLane {
@@ -92,6 +93,7 @@ struct ProgramRequest {
 	std::function<bool(uint32_t)> srgb;
 	std::function<uint32_t(uint32_t)> texture_usage;
 	ProgramAnalysis *analysis = nullptr;
+	std::span<const std::string_view> engine_globals = kEngineGlobals;
 };
 
 struct TranslatedProgram {

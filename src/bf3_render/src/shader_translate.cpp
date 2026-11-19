@@ -1560,7 +1560,8 @@ private:
 				continue;
 			}
 			if (cb->name == kGlobals && component < 4 &&
-					std::find(kEngineGlobals.begin(), kEngineGlobals.end(), var->name) != kEngineGlobals.end()) {
+					std::find(request_.engine_globals.begin(), request_.engine_globals.end(), var->name) !=
+							request_.engine_globals.end()) {
 				external.lanes[c] = ProgramConstantLane{ var->name, component, true };
 				lanes[c] = external.uniform + "." + kLanes[c];
 				uses_external = true;
@@ -1607,9 +1608,10 @@ private:
 		if (request_.target == ProgramTarget::Deferred) {
 			code += "blend_mix, depth_draw_opaque, diffuse_burley, specular_schlick_ggx";
 		} else {
-			code += request_.blend == ProgramBlend::Add		   ? "blend_add"
-					: request_.blend == ProgramBlend::Multiply ? "blend_mul"
-															   : "blend_mix";
+			code += request_.blend == ProgramBlend::Add				? "blend_add"
+					: request_.blend == ProgramBlend::Multiply		? "blend_mul"
+					: request_.blend == ProgramBlend::Premultiplied ? "blend_premul_alpha"
+																	: "blend_mix";
 			code += ", depth_draw_never, unshaded";
 		}
 		code += request_.double_sided ? ", cull_disabled;\n" : ", cull_back;\n";
@@ -1659,7 +1661,7 @@ uniform float roughness_value = 0.6;
 	}
 )";
 		}
-		if (request_.blend == ProgramBlend::Mix) {
+		if (request_.blend == ProgramBlend::Mix || request_.blend == ProgramBlend::Premultiplied) {
 			return "\tALBEDO = o0.rgb;\n\tALPHA = o0.a;\n";
 		}
 		return "\tALBEDO = o0.rgb;\n\tALPHA = 1.0;\n";

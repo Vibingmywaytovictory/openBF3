@@ -44,6 +44,7 @@ struct LookEnvState {
 	float sun_rotation_x = 200.0f;
 	float sun_rotation_y = 35.0f;
 	LookVec3 outdoor_sky{}, outdoor_ground{};
+	float sun_specular_scale = 1.0f;
 
 	LookVec3 sky_color{ 0.06f, 0.1f, 0.15f }, ground_color{ 0.1f, 0.1f, 0.1f };
 	float enlighten_sun_scale = 1.0f;
@@ -51,7 +52,8 @@ struct LookEnvState {
 	float skybox_sun_size = 0.0f, skybox_back_size = 0.0f;
 	float back_rotation_x = 0.0f, back_rotation_y = 0.0f;
 
-	std::string panorama, panorama_alpha, gradient;
+	std::string panorama, panorama_alpha, gradient, static_envmap;
+	float envmap_8bit_scale = 1.0f;
 	float sky_brightness = 1.0f, sky_rotation = 0.0f, uv_min_y = 0.0f, uv_max_y = 1.0f;
 	LookVec3 horizon{ 0.5f, 0.55f, 0.6f };
 	bool horizon_decoded = false;

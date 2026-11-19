@@ -13,6 +13,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace bf3::core {
@@ -79,6 +80,7 @@ struct TerrainMaterial {
 	std::optional<uint32_t> view_slot;
 	std::vector<std::array<float, 4>> constants;
 	std::vector<TerrainTextureBinding> textures;
+	std::vector<std::pair<std::string, std::array<float, 4>>> uniforms;
 	int32_t render_priority = 0;
 };
 

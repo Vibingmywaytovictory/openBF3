@@ -82,6 +82,8 @@ struct DecalCounts {
 	std::string asphalt;
 	std::vector<uint8_t> layers_under_asphalt;
 	uint32_t asphalt_records = 0;
+	uint32_t water_records = 0;
+	size_t water_shapes = 0;
 };
 
 constexpr double kRoadLayerMargin = 64.0;
@@ -186,10 +188,19 @@ void check_terrain_decals(const char *p_level, const char *p_mode, const DecalCo
 	REQUIRE_MESSAGE(terrain.ok(), (terrain.ok() ? std::string() : terrain.error().message));
 	REQUIRE(terrain->look.has_value());
 
-	DrawnDecals drawn;
-	size_t decal_surfaces = 0;
+	DrawnDecals drawn, water;
+	size_t decal_surfaces = 0, water_surfaces = 0;
 	for (const render::PreparedSurface &s : terrain->mesh.surfaces) {
-		if (s.material_name != "terrain") {
+		const bool is_water = std::any_of(plan->terrains[0].water.begin(), plan->terrains[0].water.end(),
+				[&](const render::SceneWaterShader &w) { return w.shader == s.material_name; });
+		if (is_water) {
+			water.add(s);
+			++water_surfaces;
+			REQUIRE(s.material_index < terrain->look->materials.size());
+			const std::string &code = terrain->look->materials[s.material_index].code;
+			CHECK(code.find("blend_premul_alpha") != std::string::npos);
+			CHECK(code.find("uniform samplerCube t") != std::string::npos);
+		} else if (s.material_name != "terrain") {
 			drawn.add(s);
 			++decal_surfaces;
 			REQUIRE(s.material_index < terrain->look->materials.size());
@@ -267,6 +278,74 @@ void check_terrain_decals(const char *p_level, const char *p_mode, const DecalCo
 		CHECK(under == p_data.layers_under_asphalt);
 		std::printf("\n");
 	}
+	size_t water_shapes = 0, water_shapes_drawn = 0;
+	for (const char *type : { "RiverData", "LakeData" }) {
+		for (const EbxInstance &shape : partition->instances_of(type)) {
+			const std::optional<EbxValue> list = shape.get("Points");
+			const OptionalEbxArray array = list ? list->as_array() : OptionalEbxArray();
+			REQUIRE(bool(array));
+			std::vector<Vec3> at;
+			for (const EbxValue &v : *array) {
+				const std::optional<EbxStruct> st = v.as_struct();
+				const std::optional<Vec3> p = st ? st->vec3() : std::nullopt;
+				REQUIRE(p.has_value());
+				at.push_back(*p);
+			}
+			if (std::string_view(type) == "RiverData" && at.size() > 2) {
+				at.erase(at.begin());
+				at.pop_back();
+			} else if (std::string_view(type) == "LakeData" && at.size() > 2) {
+				std::vector<Vec3> outline = at;
+				at.clear();
+				float lo_x = INFINITY, lo_z = INFINITY, hi_x = -INFINITY, hi_z = -INFINITY;
+				for (const Vec3 &p : outline) {
+					lo_x = std::min(lo_x, p.x), hi_x = std::max(hi_x, p.x);
+					lo_z = std::min(lo_z, p.z), hi_z = std::max(hi_z, p.z);
+				}
+				constexpr int kLakeSamples = 32;
+				for (int iz = 0; iz < kLakeSamples; ++iz) {
+					for (int ix = 0; ix < kLakeSamples; ++ix) {
+						const float x = lo_x + (hi_x - lo_x) * (float(ix) + 0.5f) / float(kLakeSamples);
+						const float z = lo_z + (hi_z - lo_z) * (float(iz) + 0.5f) / float(kLakeSamples);
+						bool inside = false;
+						for (size_t i = 0, j = outline.size() - 1; i < outline.size(); j = i++) {
+							const Vec3 &a = outline[i], &b = outline[j];
+							if ((a.z > z) != (b.z > z) && x < (b.x - a.x) * (z - a.z) / (b.z - a.z) + a.x) {
+								inside = !inside;
+							}
+						}
+						if (inside) {
+							at.push_back(Vec3{ x, 0.0f, z });
+						}
+					}
+				}
+			}
+			size_t covered = 0;
+			for (const Vec3 &p : at) {
+				covered += water.covers(p.x, p.z) ? 1 : 0;
+			}
+			std::printf("%s %s: %s with %zu points (a lake's are a grid inside its outline), %zu under a drawn water "
+						"triangle\n",
+					p_level, p_mode, type, at.size(), covered);
+			++water_shapes;
+			water_shapes_drawn += covered * 2 >= at.size() && covered > 0 ? 1 : 0;
+		}
+	}
+	const render::TerrainWaterStats &ws = terrain->water;
+	std::printf("%s %s: water records %u of %u, shaders %u of %u, %zu surfaces, %llu triangles; %zu of %zu river and "
+				"lake shapes under drawn water\n",
+			p_level, p_mode, ws.drawn_records, ws.records, ws.drawn_shaders, ws.shaders, water_surfaces,
+			(unsigned long long)ws.triangles, water_shapes_drawn, water_shapes);
+	for (const auto &[shader, why] : ws.undrawn) {
+		std::printf("  water not drawn: %s: %s\n", shader.c_str(), why.c_str());
+	}
+	CHECK(ws.records == p_data.water_records);
+	CHECK(ws.drawn_records == ws.records);
+	CHECK(ws.drawn_shaders == ws.shaders);
+	CHECK(ws.undrawn.empty());
+	CHECK(water_surfaces == ws.surfaces);
+	CHECK(water_shapes == p_data.water_shapes);
+	CHECK(water_shapes_drawn == water_shapes);
 	const render::TerrainDecalStats &stats = terrain->decals;
 	std::printf("%s %s: %zu of %zu road and decal shapes drawn, %zu more have no length (%zu of %zu control points "
 				"under a drawn triangle); records "
@@ -439,15 +518,16 @@ TEST_SUITE("terrain-decals-draw-unit") {
 TEST_SUITE("terrain-decals-draw") {
 	TEST_CASE("terrain decals: MP_007 ConquestLarge0 draws its roads and quad decals") {
 		check_terrain_decals("MP_007", "ConquestLarge0",
-				DecalCounts{ 156, 1, 281, 5, {}, "levels/mp_007/shaders/mp_007_roadasphalt2d", {}, 72 });
+				DecalCounts{ 156, 1, 281, 5, {}, "levels/mp_007/shaders/mp_007_roadasphalt2d", {}, 72, 42, 4 });
 	}
 
 	TEST_CASE("terrain decals: MP_Subway ConquestLarge0 draws its roads and quad decals") {
-		check_terrain_decals("MP_Subway", "ConquestLarge0", DecalCounts{ 75, 0, 44, 3 });
+		check_terrain_decals("MP_Subway", "ConquestLarge0", DecalCounts{ 75, 0, 44, 3, {}, {}, {}, 0, 25, 2 });
 	}
 
 	TEST_CASE("terrain decals: MP_018 ConquestLarge0 draws its roads and quad decals") {
 		check_terrain_decals("MP_018", "ConquestLarge0",
-				DecalCounts{ 260, 0, 503, 7, {}, "levels/mp_018/terrain/shaders/mp018_road_01_2d", { 7 }, 121 });
+				DecalCounts{
+						260, 0, 503, 7, {}, "levels/mp_018/terrain/shaders/mp018_road_01_2d", { 7 }, 121, 556, 1 });
 	}
 }

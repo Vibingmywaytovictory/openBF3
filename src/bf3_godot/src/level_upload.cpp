@@ -537,6 +537,14 @@ void LevelUpload::run_task() {
 					line += "; not drawn: " + shader + ": " + why;
 				}
 				UtilityFunctions::print(to_godot(line));
+				const render::TerrainWaterStats &ws = item.terrain->water;
+				std::string water = "[level] terrain water: " + std::to_string(ws.drawn_records) + " of " +
+						std::to_string(ws.records) + " records drawn, " + std::to_string(ws.drawn_shaders) + " of " +
+						std::to_string(ws.shaders) + " shaders, " + std::to_string(ws.triangles) + " triangles";
+				for (const auto &[shader, why] : ws.undrawn) {
+					water += "; not drawn: " + shader + ": " + why;
+				}
+				UtilityFunctions::print(to_godot(water));
 				for (const render::TerrainImage &img : item.terrain->look->images) {
 					done.images.push_back(terrain_image(img));
 				}
@@ -778,7 +786,12 @@ void LevelUpload::create_terrain_look(const Done &p_done) {
 		for (const std::array<float, 4> &c : m.constants) {
 			constants.push_back(Vector4(c[0], c[1], c[2], c[3]));
 		}
-		rs->material_set_param(material, StringName(("cb" + std::to_string(m.constant_slot)).c_str()), constants);
+		if (!m.constants.empty()) {
+			rs->material_set_param(material, StringName(("cb" + std::to_string(m.constant_slot)).c_str()), constants);
+		}
+		for (const auto &[name, value] : m.uniforms) {
+			rs->material_set_param(material, StringName(name.c_str()), Vector4(value[0], value[1], value[2], value[3]));
+		}
 		for (const render::TerrainTextureBinding &b : m.textures) {
 			const std::string param = "t" + std::to_string(b.slot);
 			if (b.image >= 0) {

@@ -1023,6 +1023,10 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 						*p_options.mount, resolver->shaders(), terrain.asset,
 						[&](const std::string &p_name) { return int32_t(builder.texture(p_name, TextureRole::Data)); },
 						plan.failures);
+				terrain.water = plan_terrain_water(
+						*p_options.mount, resolver->shaders(), terrain.asset,
+						[&](const std::string &p_name) { return int32_t(builder.texture(p_name, TextureRole::Data)); },
+						plan.failures);
 			}
 			plan.terrains.push_back(std::move(terrain));
 		}
@@ -1042,6 +1046,17 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 			const LookEnvState &base = plan.look_environment.base;
 			bind_engine_globals(plan, base);
 			const auto sky_texture = [&](const std::string &p_name) { return p_name.empty() ? -1 : int32_t(builder.texture(p_name, TextureRole::Color)); };
+			std::map<std::string, bool> envmap_srgb;
+			for (SceneTerrainPlan &terrain : plan.terrains) {
+				if (!terrain.water.empty() && !base.static_envmap.empty()) {
+					terrain.water_envmap = plan_terrain_texture(
+							*p_options.mount, 0, base.static_envmap,
+							[&](const std::string &p_name) {
+								return int32_t(builder.texture(p_name, TextureRole::Color));
+							},
+							envmap_srgb, plan.failures);
+				}
+			}
 			if (base.sky) {
 				plan.sky_panorama = sky_texture(base.panorama);
 				plan.sky_panorama_alpha = sky_texture(base.panorama_alpha);
@@ -1248,7 +1263,7 @@ core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mo
 			out.scatter_failures.emplace_back(where, built.error().message);
 		}
 	}
-	if (!plan.decals.empty()) {
+	if (!plan.decals.empty() || !plan.water.empty()) {
 		const std::string decals_name = terrain_decals_name(plan.asset);
 		auto decals_res = p_mount.read_res(decals_name);
 		if (!decals_res) {
@@ -1260,6 +1275,8 @@ core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mo
 			return core::make_error("res " + decals_name + ": " + e.message());
 		}
 		out.decals = add_terrain_decals(decals, grid, t, crop, plan.decals, *out.look, out.mesh);
+		out.water = add_terrain_water(
+				decals, plan.water, p_plan.look_environment.base, plan.water_envmap, *out.look, out.mesh);
 	}
 	return out;
 }
