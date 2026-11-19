@@ -196,6 +196,7 @@ public:
 	const Loadout &loadout(uint8_t p_slot) const;
 	LoadoutChoices loadout_choices(uint8_t p_slot) const;
 	void step_soldier(uint8_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after);
+	void hold_soldier(uint8_t p_slot, sim::Tick p_tick);
 	void step_projectiles(uint32_t p_tick, std::span<const sim::SoldierState> p_states);
 	void apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states, CombatEventSink &r_sink);
 	void add_damage(std::span<const sim::weapons::DamageEvent> p_events);

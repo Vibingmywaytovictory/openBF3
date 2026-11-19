@@ -88,6 +88,7 @@ struct WeaponLaneStats {
 	uint64_t replayed_ticks = 0;
 	uint64_t dead_ticks = 0;
 	uint64_t gaps = 0;
+	uint64_t held_ticks = 0;
 };
 
 class WeaponLane {
@@ -101,6 +102,7 @@ public:
 	void clear();
 
 	WeaponPredictionEntry step(const WeaponPredictionEntry &p_from, const Command &p_command, const SoldierState &p_before, const SoldierState &p_after);
+	WeaponPredictionEntry hold(const WeaponPredictionEntry &p_from, const Command &p_command);
 
 	void set_sink(WeaponEmitSink *p_sink);
 	void set_suppression(const weapons::SuppressionDef &p_def, const weapons::SuppressionState &p_state);
@@ -128,6 +130,7 @@ class WeaponReplay {
 public:
 	WeaponReplay(WeaponLane *p_lane, const SoldierState &p_base);
 	void step(const Command &p_command, const SoldierState &p_before, const SoldierState &p_after);
+	void hold(const Command &p_command);
 
 private:
 	WeaponLane *lane_ = nullptr;

@@ -212,12 +212,13 @@ bool OwnPrediction::step(const sim::PredictionEntry *p_base, const sim::Command 
 		return false;
 	}
 	sim::SoldierState state = p_base->state;
-	if (const std::optional<sim::Vec3> seat = seats_ != nullptr ? seats_->seat_at(p_command.tick) : std::nullopt) {
+	const std::optional<sim::Vec3> seat = seats_ != nullptr ? seats_->seat_at(p_command.tick) : std::nullopt;
+	if (seat) {
 		sim::seat_step(state, p_command, *seat);
 	} else {
 		motor_.step(state, p_command, gunplay_.motor_modifiers(state.life, motor_.params()));
 	}
-	gunplay_.predict(p_command, p_base->state, state, *world_);
+	gunplay_.predict(p_command, p_base->state, state, *world_, seat.has_value());
 	events_acc_ |= state.events;
 	ring_->put({ p_command, state, true });
 	return true;

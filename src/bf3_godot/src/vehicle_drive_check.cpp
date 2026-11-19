@@ -49,6 +49,9 @@ constexpr double kTurretSettle = 2.0;
 constexpr float kTurretTurn = 1.0f;
 constexpr float kTurretYawTolerance = 0.05f;
 constexpr float kCameraRideTolerance = 0.05f;
+constexpr double kFireHold = 0.5;
+constexpr double kSwitchTimeout = 4.0;
+constexpr double kSwitchHold = 1.0;
 
 float heading(const std::array<float, 4> &p_q) {
 	return std::atan2(2.0f * (p_q[0] * p_q[2] + p_q[3] * p_q[1]), 1.0f - 2.0f * (p_q[0] * p_q[0] + p_q[1] * p_q[1]));
@@ -190,6 +193,90 @@ void VehicleDriveRun::track_fade(const VehicleDriveInputs &p_in) {
 	shown_black_ = p_in.vehicle_black;
 }
 
+bool VehicleDriveRun::after_exit(InputMapper &r_mapper, const VehicleDriveInputs &p_in) {
+	const host::PresentationFrame &f = *frame_;
+	const net::WeaponsWire &w = f.own_weapons_curr;
+	switch (phase_) {
+		case Phase::ExitFire:
+			if (t_ < kSettle || !f.own_weapons_valid || !r_mapper.weapons_allowed()) {
+				if (t_ > kScreenTimeout) {
+					(void)fail("exit_fire", "no live infantry weapon after leaving the Growler");
+					return true;
+				}
+				return false;
+			}
+			exit_magazine_ = w.slots[0].magazine;
+			exit_shots_ = own_shots_;
+			r_mapper.script_hold(InputMapper::WeaponAction::Fire, true);
+			enter(Phase::ExitFired);
+			return false;
+		case Phase::ExitFired: {
+			if (t_ < kFireHold) {
+				return false;
+			}
+			r_mapper.script_hold(InputMapper::WeaponAction::Fire, false);
+			if (t_ < kFireHold + kSettle) {
+				return false;
+			}
+			const uint64_t fired = own_shots_ - exit_shots_;
+			row("exit_fire",
+					w.active == 0 && fired >= 2u && w.slots[0].mode == spawn_mode_ &&
+							w.slots[0].magazine == exit_magazine_ - int32_t(fired),
+					fmt("the primary held %.1f s after leaving the Growler fired %llu shots in mode %u (%u before "
+						"the ride), magazine %d -> %d %.1f s after the release",
+							kFireHold, (unsigned long long)fired, unsigned(w.slots[0].mode), unsigned(spawn_mode_),
+							int(exit_magazine_), int(w.slots[0].magazine), kSettle));
+			shoot(p_in, "exit_fire");
+			visits_ = { 1 };
+			for (const uint8_t s : { uint8_t(2), uint8_t(4), uint8_t(5) }) {
+				if (w.slots[s].def != sim::weapons::kNoWeapon) {
+					visits_.push_back(s);
+				}
+			}
+			visits_.push_back(0);
+			visit_ = 0;
+			held_for_ = 0.0;
+			last_t_ = 0.0;
+			r_mapper.script_select(visits_[0]);
+			enter(Phase::ExitSwitch);
+			return false;
+		}
+		case Phase::ExitSwitch: {
+			const uint8_t want = visits_[visit_];
+			held_for_ = w.active == want && w.pending == 0xFF ? held_for_ + (t_ - last_t_) : 0.0;
+			last_t_ = t_;
+			if (held_for_ < kSwitchHold) {
+				if (t_ > kSwitchTimeout) {
+					row("exit_switch", false,
+							fmt("after leaving the Growler slot %u was selected; %.1f s later slot %u is in hand",
+									unsigned(want), t_, unsigned(w.active)));
+					r_mapper.script_select(0xFF);
+					return true;
+				}
+				return false;
+			}
+			if (++visit_ < visits_.size()) {
+				held_for_ = 0.0;
+				r_mapper.script_select(visits_[visit_]);
+				enter(Phase::ExitSwitch);
+				last_t_ = 0.0;
+				return false;
+			}
+			std::string order;
+			for (const uint8_t s : visits_) {
+				order += (order.empty() ? "" : ", ") + std::to_string(unsigned(s));
+			}
+			row("exit_switch", true,
+					fmt("after leaving the Growler slots %s each came to hand and stayed %.1f s", order.c_str(),
+							kSwitchHold));
+			r_mapper.script_select(0xFF);
+			return true;
+		}
+		default:
+			return true;
+	}
+}
+
 void VehicleDriveRun::row(const std::string &p_name, bool p_pass, const std::string &p_detail) {
 	++rows_;
 	failures_ += p_pass ? 0 : 1;
@@ -219,6 +306,8 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 	const host::PresentationFrame &f = r_session.frame();
 	InputMapper &mapper = r_session.mapper();
 	t_ += p_delta;
+	frame_ = &f;
+	own_shots_ = p_in.own_shots;
 	if (p_in.vehicles == nullptr || !p_in.vehicles->built()) {
 		return t_ > kScreenTimeout ? fail("built", "the vehicles were not loaded or built") : false;
 	}
@@ -230,7 +319,7 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			if (in_round && p_in.alive) {
 				mapper.set_scripted(true);
 				mapper.release_all();
-				enter(Phase::Pick);
+				enter(Phase::ArmFire);
 				return false;
 			}
 			if (!in_round || !p_in.spawn_screen) {
@@ -252,8 +341,38 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 						? fail("deploy", fmt("not alive %.0f s after the spawn screen", kDeployTimeout))
 						: false;
 			}
+			enter(Phase::ArmFire);
+			return false;
+		case Phase::ArmFire: {
+			if (t_ < kSettle || !f.own_weapons_valid || f.own_weapons_curr.active != 0) {
+				return t_ > kScreenTimeout ? fail("arm_fire", "no primary weapon in hand") : false;
+			}
+			const net::WeaponSlotWire &primary = f.own_weapons_curr.slots[0];
+			spawn_mode_ = primary.mode;
+			spawn_magazine_ = primary.magazine;
+			armed_shots_ = p_in.own_shots;
+			mapper.script_hold(InputMapper::WeaponAction::Fire, true);
+			enter(Phase::ArmSettle);
+			return false;
+		}
+		case Phase::ArmSettle: {
+			if (t_ < kFireHold) {
+				return false;
+			}
+			mapper.script_hold(InputMapper::WeaponAction::Fire, false);
+			if (t_ < kFireHold + kSettle) {
+				return false;
+			}
+			const net::WeaponSlotWire &primary = f.own_weapons_curr.slots[0];
+			armed_magazine_ = primary.magazine;
+			armed_shots_ = p_in.own_shots - armed_shots_;
+			row("arm_fire", armed_shots_ >= 2u && armed_magazine_ == spawn_magazine_ - int32_t(armed_shots_),
+					fmt("the primary held %.1f s before the ride fired %llu shots in mode %u, magazine %d -> %d",
+							kFireHold, (unsigned long long)armed_shots_, unsigned(spawn_mode_), int(spawn_magazine_),
+							int(armed_magazine_)));
 			enter(Phase::Pick);
 			return false;
+		}
 		case Phase::Pick: {
 			const host::PresentedVehicle *best = parked(f, lv, kJeep);
 			if (best == nullptr || t_ < kPickSettle) {
@@ -455,13 +574,21 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			row("exit", p_in.alive && away > 1.0f && away < 6.0f && p_in.camera_counter == 0,
 					fmt("out %.2f m from the Growler's centre, camera counter %u", double(away),
 							unsigned(p_in.camera_counter)));
+			enter(Phase::ExitFire);
+			return false;
+		}
+		case Phase::ExitFire:
+		case Phase::ExitFired:
+		case Phase::ExitSwitch:
+			if (!after_exit(mapper, p_in)) {
+				return false;
+			}
 			if (!zoom_) {
 				phase_ = Phase::Done;
 				return true;
 			}
 			enter(Phase::TankPick);
 			return false;
-		}
 		case Phase::TankPick: {
 			const host::PresentedVehicle *best = parked(f, lv, kTank);
 			if (best == nullptr) {

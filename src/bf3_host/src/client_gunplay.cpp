@@ -677,8 +677,8 @@ void ClientGunplay::command_made(sim::Command &r_command, const InputSample &p_i
 	}
 }
 
-void ClientGunplay::predict(const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after,
-		const sim::CollisionWorld &p_world) {
+void ClientGunplay::predict(const sim::Command &p_command, const sim::SoldierState &p_before,
+		const sim::SoldierState &p_after, const sim::CollisionWorld &p_world, bool p_seated) {
 	if (!on_ || p_command.tick == 0) {
 		return;
 	}
@@ -688,7 +688,7 @@ void ClientGunplay::predict(const sim::Command &p_command, const sim::SoldierSta
 	}
 	if (b != nullptr) {
 		const sim::WeaponPredictionEntry from = *b;
-		lane_->put(lane_->step(from, p_command, p_before, p_after));
+		lane_->put(p_seated ? lane_->hold(from, p_command) : lane_->step(from, p_command, p_before, p_after));
 	}
 	if (projectiles_ != nullptr) {
 		projectiles_->step_own(p_command.tick, p_world, records_, events_.own_staging());

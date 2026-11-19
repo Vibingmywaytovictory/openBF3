@@ -1653,6 +1653,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		in.hud = g.native_hud;
 		in.camera = cameras_.first_person();
 		in.camera_counter = g.vehicle_camera;
+		in.own_shots = g.own_shots_seen;
 		in.flash = g.tdm != nullptr ? g.tdm->eor_flash.get() : nullptr;
 		in.vehicle_black = g.vehicle_black;
 		in.deploy = [this] {

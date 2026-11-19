@@ -156,6 +156,8 @@ core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTab
 void step_soldier_weapons(const WeaponTable &p_table, SoldierWeaponsState &r_state, const Command &p_command, const WeaponContext &p_context,
 		uint64_t p_match_seed, WeaponTickOutput &r_out);
 
+void hold_soldier_weapons(SoldierWeaponsState &r_state, Tick p_tick);
+
 uint64_t soldier_weapons_hash(const SoldierWeaponsState &p_state);
 
 SwayContext weapon_sway_context(const MotorParams &p_motor, const SoldierState &p_after, const Command &p_command);

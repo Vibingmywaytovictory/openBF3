@@ -888,6 +888,16 @@ void Gunplay::step_soldier(uint8_t p_slot, const sim::Command &p_command, const 
 	m.weapons_acc_ms += ms_since(start);
 }
 
+void Gunplay::hold_soldier(uint8_t p_slot, sim::Tick p_tick) {
+	Impl &m = *impl_;
+	if (p_slot >= m.slots.size() || !m.slots[p_slot].armed) {
+		return;
+	}
+	Impl::Slot &s = m.slots[p_slot];
+	sw::hold_soldier_weapons(s.weapons, p_tick);
+	s.shot_last_tick = false;
+}
+
 void Gunplay::step_projectiles(uint32_t p_tick, std::span<const sim::SoldierState> p_states) {
 	Impl &m = *impl_;
 	m.stats.weapons_ms = m.weapons_acc_ms;

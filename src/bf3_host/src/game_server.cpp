@@ -320,6 +320,8 @@ struct GameServer::Impl {
 			++times.motor_steps;
 			if (was_alive && !s.dummy && !seated) {
 				combat.step_soldier(i, body.last, before, body.state);
+			} else if (was_alive && !s.dummy) {
+				combat.hold_soldier(i, body.last.tick);
 			}
 			if (was_alive && !soldier_alive(body.state) && !s.dummy) {
 				spawner.died(i, n);

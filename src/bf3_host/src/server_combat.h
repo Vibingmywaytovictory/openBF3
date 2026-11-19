@@ -37,6 +37,7 @@ public:
 	void ack(size_t p_slot, const net::CommandPacket &p_packet);
 	void note_command(size_t p_slot, const sim::Command &p_command);
 	void step_soldier(size_t p_slot, const sim::Command &p_command, const sim::SoldierState &p_before, const sim::SoldierState &p_after);
+	void hold_soldier(size_t p_slot, sim::Tick p_tick);
 	sim::Command clamp_pitch(size_t p_slot, const sim::Command &p_command, sim::Pose p_pose) const;
 	sim::MotorModifiers motor_modifiers(size_t p_slot, const sim::MotorParams &p_params) const;
 

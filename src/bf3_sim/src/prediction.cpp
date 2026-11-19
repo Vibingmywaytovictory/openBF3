@@ -106,10 +106,11 @@ CatchUpStats catch_up(const SoldierMotor &p_motor, const MotorModifiers &p_modif
 		const SoldierState weapon_before = state;
 		if (const std::optional<Vec3> seat = p_seats != nullptr ? p_seats->seat_at(t) : std::nullopt) {
 			seat_step(state, cmd, *seat);
+			weapon_replay.hold(cmd);
 		} else {
 			p_motor.step(state, cmd, p_modifiers);
+			weapon_replay.step(cmd, weapon_before, state);
 		}
-		weapon_replay.step(cmd, weapon_before, state);
 		if (survives(t)) {
 			r_ring.put({ cmd, state, sent });
 		}
@@ -208,6 +209,23 @@ WeaponPredictionEntry WeaponLane::step(const WeaponPredictionEntry &p_from, cons
 	return out;
 }
 
+WeaponPredictionEntry WeaponLane::hold(const WeaponPredictionEntry &p_from, const Command &p_command) {
+	WeaponPredictionEntry out = p_from;
+	out.tick = p_command.tick;
+	weapons::hold_soldier_weapons(out.state, p_command.tick);
+	++stats_.held_ticks;
+	if (p_command.tick > emitted_through_) {
+		emitted_through_ = p_command.tick;
+		++stats_.emitted_ticks;
+		if (sink_ != nullptr) {
+			sink_->emitted(p_command, weapons::WeaponTickOutput(), out);
+		}
+	} else {
+		++stats_.replayed_ticks;
+	}
+	return out;
+}
+
 void WeaponLane::set_sink(WeaponEmitSink *p_sink) {
 	sink_ = p_sink;
 }
@@ -265,6 +283,14 @@ void WeaponReplay::step(const Command &p_command, const SoldierState &p_before, 
 		return;
 	}
 	current_ = lane_->step(current_, p_command, p_before, p_after);
+	lane_->put(current_);
+}
+
+void WeaponReplay::hold(const Command &p_command) {
+	if (!active_) {
+		return;
+	}
+	current_ = lane_->hold(current_, p_command);
 	lane_->put(current_);
 }
 

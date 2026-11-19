@@ -1158,6 +1158,8 @@ add_test(NAME host.vehicles.predict COMMAND test_host_tdm --test-suite=host-vehi
 add_test(NAME host.vehicles.predict.tank COMMAND test_host_tdm --test-suite=host-vehicles-predict-tank)
 add_test(NAME host.vehicles.gunnery COMMAND test_host_tdm --test-suite=host-vehicles-gunnery)
 set_tests_properties(host.vehicles.scope host.vehicles.predict host.vehicles.predict.tank host.vehicles.gunnery PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME host.vehicles.exit_weapons COMMAND test_host_tdm --test-suite=host-vehicles-exit-weapons)
+set_tests_properties(host.vehicles.exit_weapons PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 add_test(NAME host.vehicles.blend.unit COMMAND test_host_tdm --test-suite=host-vehicles-blend-unit)
 set_tests_properties(host.vehicles.blend.unit PROPERTIES TIMEOUT 60)
 add_test(NAME host.vehicles.reconcile COMMAND test_host_tdm --test-suite=host-vehicles-reconcile)

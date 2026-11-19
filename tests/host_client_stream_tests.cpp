@@ -2011,3 +2011,132 @@ TEST_SUITE("host-vehicles-gunnery") {
 		m.close();
 	}
 }
+
+TEST_SUITE("host-vehicles-exit-weapons") {
+	TEST_CASE("vehicles: a soldier who fired, chose a fire mode and rode a Growler on MP_007 ConquestSmall0 keeps his "
+			  "weapons after he leaves it: the server fires his primary in that mode, the magazine counts down on "
+			  "server and client, and he switches to his sidearm, each gadget and back") {
+		tt::TdmLevel *level = tt::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		namespace sw = sim::weapons;
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		VehicleMatch m(*level, 67);
+		StreamClient &rider = m.add("rider", 1u, "lat=20,seed=5");
+		m.ticks(sim::seconds_to_ticks(tt::latest_initial_delay(lv)) + 300u);
+		REQUIRE(VehicleMatch::alive(rider));
+		const uint8_t slot = rider.frame->stats.slot;
+		const host::Gunplay &gunplay = *m.server.gunplay();
+		const auto held = [&](bool p_fire, uint8_t p_mode_counter, uint8_t p_select, uint32_t p_extra) {
+			sw::WeaponInput in;
+			in.fire = p_fire;
+			in.fire_mode_counter = p_mode_counter;
+			in.select_slot = p_select;
+			rider.input.held_buttons = sw::with_weapon_input(p_extra, in);
+		};
+		const auto server = [&] { return gunplay.weapons(slot); };
+		const auto client = [&] { return rider.frame->own_weapons_curr; };
+		const uint8_t chosen = 1;
+
+		held(false, 0, 0xFF, 0);
+		m.ticks(10);
+		const uint8_t spawn_mode = server().slots[0].mode;
+		held(false, chosen, 0xFF, 0);
+		m.ticks(60);
+		const sw::WeaponSlotState spawned = server().slots[0];
+		REQUIRE(server().active == 0);
+		const uint8_t mode = spawned.mode;
+		held(true, chosen, 0xFF, 0);
+		m.ticks(20);
+		held(false, chosen, 0xFF, 0);
+		m.ticks(60);
+		const int32_t before_ride = server().slots[0].magazine;
+		std::printf("host.vehicles.exit_weapons: before the ride the primary (def %u) is in mode %u after the fire "
+					"mode key, its magazine %d of %d at spawn\n",
+				unsigned(spawned.def), unsigned(mode), int(before_ride), int(spawned.magazine));
+
+		const host::PresentedVehicle *jeep = m.parked(*rider.frame, "vehicles/growleritv/growleritv");
+		REQUIRE(jeep != nullptr);
+		const uint16_t spawner = jeep->spawner;
+		const std::optional<sim::Vec3> beside =
+				m.beside(jeep->com_position, lv.kinds[lv.spawners[spawner].kind].entry_radius);
+		REQUIRE(beside.has_value());
+		net::DebugRequest teleport;
+		teleport.kind = net::DebugKind::Teleport;
+		teleport.id = 1;
+		teleport.position = *beside;
+		rider.loop.send_debug(teleport);
+		m.ticks(30);
+		const auto in_seat = [&] {
+			const host::PresentedVehicle *v = VehicleMatch::vehicle(*rider.frame, spawner);
+			return v != nullptr && v->occupants[0] == slot;
+		};
+		const auto pulse_use = [&](bool p_want_seated) {
+			for (uint32_t press = 0; press < 3 && in_seat() != p_want_seated; ++press) {
+				held(false, chosen, 0xFF, sim::buttons::kUse);
+				m.ticks(4);
+				held(false, chosen, 0xFF, 0);
+				for (uint32_t waited = 0; waited < 60 && in_seat() != p_want_seated; ++waited) {
+					m.tick();
+				}
+			}
+			return in_seat() == p_want_seated;
+		};
+		REQUIRE(pulse_use(true));
+		const uint64_t shots_boarded = gunplay.stats().shots;
+		for (uint32_t t = 0; t < 60; ++t) {
+			rider.input.held_buttons = t % 20u < 10u ? sim::buttons::kFire : 0u;
+			m.tick();
+		}
+		const uint64_t seated_shots = gunplay.stats().shots - shots_boarded;
+		REQUIRE(pulse_use(false));
+		m.ticks(60);
+
+		const uint64_t failures_out = gunplay.stats().weapon_precondition_failures;
+		const uint64_t shots_out = gunplay.stats().shots;
+		const int32_t magazine_out = server().slots[0].magazine;
+		for (uint32_t tap = 0; tap < 3; ++tap) {
+			held(true, chosen, 0xFF, 0);
+			m.ticks(4);
+			held(false, chosen, 0xFF, 0);
+			m.ticks(16);
+		}
+		m.ticks(60);
+		const uint64_t fired = gunplay.stats().shots - shots_out;
+		const int32_t magazine_after = server().slots[0].magazine;
+		const int32_t client_magazine = client().slots[0].magazine;
+		std::printf("host.vehicles.exit_weapons: %llu soldier shots while seated; after leaving the Growler the "
+					"server fired %llu primary shots for three trigger pulls in mode %u, magazine %d -> %d on the "
+					"server and %d on the client, %llu weapon precondition failures\n",
+				(unsigned long long)seated_shots, (unsigned long long)fired, unsigned(server().slots[0].mode),
+				int(magazine_out), int(magazine_after), int(client_magazine),
+				(unsigned long long)(gunplay.stats().weapon_precondition_failures - failures_out));
+		CHECK(mode != spawn_mode);
+		CHECK(before_ride < spawned.magazine);
+		CHECK(seated_shots == 0u);
+		CHECK(gunplay.stats().weapon_precondition_failures == failures_out);
+		CHECK(fired >= 2u);
+		CHECK(server().slots[0].mode == mode);
+		CHECK(magazine_after == magazine_out - int32_t(fired));
+		CHECK(client_magazine == magazine_after);
+
+		std::vector<uint8_t> visits{ 1 };
+		for (const uint8_t s : { uint8_t(2), uint8_t(4), uint8_t(5) }) {
+			if (server().slots[s].def != sw::kNoWeapon) {
+				visits.push_back(s);
+			}
+		}
+		visits.push_back(0);
+		for (const uint8_t s : visits) {
+			held(false, chosen, s, 0);
+			m.ticks(90);
+			std::printf("host.vehicles.exit_weapons: select slot %u: server active %u, client active %u\n", unsigned(s),
+					unsigned(server().active), unsigned(client().active));
+			CHECK(server().active == s);
+			CHECK(client().active == s);
+		}
+		CHECK(visits.size() >= 3u);
+		m.close();
+	}
+}

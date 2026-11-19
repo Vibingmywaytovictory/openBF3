@@ -46,6 +46,12 @@ void Combat::step_soldier(size_t p_slot, const sim::Command &p_command, const si
 	gunplay_->step_soldier(uint8_t(p_slot), p_command, p_before, p_after);
 }
 
+void Combat::hold_soldier(size_t p_slot, sim::Tick p_tick) {
+	if (gunplay_ != nullptr) {
+		gunplay_->hold_soldier(uint8_t(p_slot), p_tick);
+	}
+}
+
 sim::Command Combat::clamp_pitch(size_t p_slot, const sim::Command &p_command, sim::Pose p_pose) const {
 	return gunplay_ != nullptr ? gunplay_->clamp_pitch(uint8_t(p_slot), p_command, p_pose) : p_command;
 }

@@ -5,9 +5,14 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace godot {
 class Camera3D;
+}
+
+namespace bf3::host {
+struct PresentationFrame;
 }
 
 namespace bf3::godot_side {
@@ -15,6 +20,7 @@ namespace bf3::godot_side {
 class Bf3LevelSession;
 class Bf3NativeHud;
 class Bf3Viewmodel;
+class InputMapper;
 class EorFlash;
 class GameVehicles;
 
@@ -27,6 +33,7 @@ struct VehicleDriveInputs {
 	Bf3NativeHud *hud = nullptr;
 	const godot::Camera3D *camera = nullptr;
 	uint32_t camera_counter = 0;
+	uint64_t own_shots = 0;
 	const EorFlash *flash = nullptr;
 	float vehicle_black = 0.0f;
 	std::function<void()> deploy;
@@ -43,6 +50,8 @@ private:
 	enum class Phase : uint8_t {
 		WaitScreen,
 		Deploying,
+		ArmFire,
+		ArmSettle,
 		Pick,
 		Walk,
 		Enter,
@@ -52,6 +61,9 @@ private:
 		Stop,
 		Seat,
 		Exit,
+		ExitFire,
+		ExitFired,
+		ExitSwitch,
 		TankPick,
 		TankWalk,
 		TankEnter,
@@ -71,6 +83,7 @@ private:
 	void hud_row(const VehicleDriveInputs &p_in, uint8_t p_seat);
 	void turret_rows(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in);
 	void track_fade(const VehicleDriveInputs &p_in);
+	bool after_exit(InputMapper &r_mapper, const VehicleDriveInputs &p_in);
 
 	std::string shots_;
 	bool zoom_ = false;
@@ -90,6 +103,18 @@ private:
 	godot::Transform3D last_wheel_;
 	uint32_t wheel_frames_ = 0;
 	uint32_t wheel_turns_ = 0;
+	int32_t spawn_mode_ = -1;
+	int32_t spawn_magazine_ = 0;
+	int32_t armed_magazine_ = 0;
+	int32_t exit_magazine_ = 0;
+	uint64_t exit_shots_ = 0;
+	uint64_t armed_shots_ = 0;
+	std::vector<uint8_t> visits_;
+	size_t visit_ = 0;
+	double held_for_ = 0.0;
+	double last_t_ = 0.0;
+	uint64_t own_shots_ = 0;
+	const bf3::host::PresentationFrame *frame_ = nullptr;
 	uint32_t rows_ = 0;
 	uint32_t failures_ = 0;
 };
