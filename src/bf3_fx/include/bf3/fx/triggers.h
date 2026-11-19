@@ -48,6 +48,7 @@ inline constexpr uint32_t kMaxAttached = 512;
 inline constexpr float kTracerFallbackSpeed = 600.0f;
 inline constexpr float kTracerFallbackTtl = 1.5f;
 
+inline constexpr uint32_t kTriggerOwnerBase = 0x80000000u;
 inline constexpr float kFallbackMuzzleRight = 0.15f;
 inline constexpr float kFallbackMuzzleUp = -0.12f;
 inline constexpr float kFallbackMuzzleForward = 0.55f;

@@ -893,6 +893,63 @@ TEST_CASE("impacts: cell choice by seed, spread cone, mirror, decal and sound cu
 	CHECK(t.stats().double_starts == 0);
 }
 
+TEST_CASE("impacts: MaxInstanceCount limits each shooter's instances, so four shooters keep four lights and none is "
+		  "stuck") {
+	std::unique_ptr<Syn> s = make_syn();
+	DocBuilder light = simple_doc(77, 8, 240, 1, 0.2f);
+	fxt::set(light.tmpl(), "ActAsPointLight", flag(true));
+	fxt::set(light.tmpl(), "PointLightRadius", f32(3));
+	fxt::set(light.tmpl(), "PointLightColor", fxt::v3(20, 6, 2));
+	fxt::set(light.tmpl(), "PointLightMinClamp", f32(1));
+	REQUIRE(s->db.set("fx/syn/light_doc", light.p));
+	EffectBuilder metal(s->seeds.at(kImpactMetal), 1);
+	fxt::set(metal.entity(), "CullDistance", f32(50));
+	metal.emitter(77);
+	REQUIRE(s->db.set(kImpactMetal, metal.done()));
+
+	FxWorld world;
+	FxTriggerConfig cfg;
+	cfg.own_slot = 1;
+	cfg.match_seed = kMatch;
+	FxTriggers t(world, *s->library, s->fire, cfg);
+	const auto lit_outputs = [&world] {
+		std::set<uint32_t> effects;
+		for (const EmitterOutput &o : world.outputs()) {
+			if (o.light_count > 0) {
+				effects.insert(o.effect.slot);
+			}
+		}
+		return effects.size();
+	};
+	constexpr uint8_t kShooters = 4;
+	for (uint8_t k = 0; k < kShooters; ++k) {
+		const hk::PresentEvent e = impact(uint8_t(2 + k), 700, kMetal, { float(k), 1, 8 }, { 0, 0, -1 });
+		t.on_events(std::span<const hk::PresentEvent>(&e, 1), clock_at(0), kNear);
+		REQUIRE(starts_of(t, kImpactMetal).size() == 1);
+		CHECK(starts_of(t, kImpactMetal)[0]->started);
+	}
+	fx_step_frame(world, 1.0f / 60.0f);
+	CHECK(world.stats().stolen_instances == 0);
+	CHECK(world.stats().live_effects == kShooters);
+	CHECK(lit_outputs() == kShooters);
+
+	const hk::PresentEvent again = impact(2, 701, kMetal, { 0, 1, 9 }, { 0, 0, -1 });
+	t.on_events(std::span<const hk::PresentEvent>(&again, 1), clock_at(0), kNear);
+	fx_step_frame(world, 1.0f / 60.0f);
+	CHECK(world.stats().stolen_instances == 1);
+	CHECK(world.stats().live_effects == kShooters);
+	CHECK(lit_outputs() == kShooters);
+	MESSAGE("metal impacts from " << int(kShooters) << " shooters: " << world.stats().live_effects << " live, "
+								  << lit_outputs() << " lit, " << world.stats().stolen_instances
+								  << " reset by the same shooter's next hit");
+
+	for (int i = 0; i < 240; ++i) {
+		fx_step_frame(world, 1.0f / 60.0f);
+	}
+	CHECK(world.stats().live_effects == 0);
+	CHECK(world.lights().empty());
+}
+
 TEST_CASE("soldier cells: own contact, Hit confirmation, remote Hit, own victim, zones, seeds") {
 	std::unique_ptr<Syn> s = make_syn();
 	FxWorld world;

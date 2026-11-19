@@ -953,6 +953,7 @@ struct FxTriggers::Impl {
 		es.tier = config.tier;
 		es.first_person = p_first_person;
 		es.start_age = p_age;
+		es.owner = kTriggerOwnerBase | p_e.slot;
 		core::Result<EffectHandle> h = world.start(p_def, es);
 		if (!h) {
 			++stats.start_failures;
