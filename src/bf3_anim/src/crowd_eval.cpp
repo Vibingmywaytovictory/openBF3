@@ -1113,7 +1113,7 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 	if (clips->root_joint >= 0 && size_t(clips->root_joint) < s.pose.joints.size()) {
 		const size_t root = size_t(clips->root_joint);
 		s.pose.joints[root].t = rig.bone(root).rest.t;
-		if (vault_clip != nullptr) {
+		if (vault_clip != nullptr && s.input.vault < kVaultAnimKinds) {
 			s.pose.joints[root].t.y += vault_w * (xs.extra.joints[root].t.y - vault_clip->root_start.y);
 		}
 	}

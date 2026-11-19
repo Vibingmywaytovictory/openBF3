@@ -297,6 +297,16 @@ TEST_SUITE("anim-vault") {
 		model_pose(d->clips.rig, pose, model);
 		CHECK(rise > 0.5f);
 		CHECK(std::fabs(ev.model(0)[size_t(hips)].t.y - model[size_t(hips)].t.y) < 1e-4f);
+
+		in[0].vault = kNoVaultAnim;
+		ev.set_inputs(in, 1.0 / 60.0);
+		ev.evaluate_all_here();
+		CHECK(ev.vault_of(0, kind, seconds));
+		REQUIRE(sample_pose(d->clips.rig, clips[1].clip.clip, clips[1].clip.tracks, clips[1].play.frame_at(seconds),
+				pose, scratch));
+		pose.joints[root].t = d->clips.rig.bone(root).rest.t;
+		model_pose(d->clips.rig, pose, model);
+		CHECK(std::fabs(ev.model(0)[size_t(hips)].t.y - model[size_t(hips)].t.y) < 1e-4f);
 	}
 
 	TEST_CASE("install unchanged") {
