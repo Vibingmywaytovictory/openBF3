@@ -3,6 +3,7 @@
 #include "bf3/core/util/elapsed.h"
 
 #include "godot_util.h"
+#include "level_lights.h"
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -227,6 +228,7 @@ bool Bf3FxRenderer::ensure_resources() {
 		l.light = rs->omni_light_create();
 		rs->light_set_shadow(l.light, false);
 		rs->light_set_param(l.light, RenderingServer::LIGHT_PARAM_SPECULAR, 0.5f);
+		rs->light_set_param(l.light, RenderingServer::LIGHT_PARAM_ATTENUATION, kLevelLightAttenuation);
 		l.instance = rs->instance_create2(l.light, scenario_);
 		rs->instance_set_visible(l.instance, false);
 		l.shown = false;
