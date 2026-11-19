@@ -1326,9 +1326,34 @@ uint32_t drive_predicted(tt::TdmLevel &r_level, const char *p_blueprint, const c
 	REQUIRE(VehicleMatch::alive(driver));
 	REQUIRE(VehicleMatch::alive(watcher));
 	const host::PresentationFrame &df = *driver.frame;
-	const host::PresentedVehicle *parked = m.parked(df, p_blueprint);
+	const host::PresentedVehicle *parked = nullptr;
+	float most_clear = -1.0f;
+	std::vector<sim::Vec3> others;
+	for (uint8_t i = 0; i < df.vehicle_count; ++i) {
+		others.push_back(df.vehicles[i].com_position);
+	}
+	for (uint8_t i = 0; i < df.vehicle_count; ++i) {
+		const host::PresentedVehicle &v = df.vehicles[i];
+		if (v.spawner >= lv.spawners.size() || lv.kinds[lv.spawners[v.spawner].kind].blueprint != p_blueprint ||
+				tt::up_y_of(v.rotation) <= 0.95f) {
+			continue;
+		}
+		const float clear = tt::clear_run(*m.world, v.com_position, v.rotation, others, 120.0f);
+		if (clear > most_clear) {
+			most_clear = clear;
+			parked = &v;
+		}
+	}
 	REQUIRE(parked != nullptr);
 	spawner = parked->spawner;
+	std::vector<std::pair<uint16_t, sim::Vec3>> parked_others;
+	for (uint8_t i = 0; i < df.vehicle_count; ++i) {
+		const host::PresentedVehicle &o = df.vehicles[i];
+		const float drift = core::vec::length(o.linear_velocity);
+		if (o.spawner != *spawner && tt::up_y_of(o.rotation) > 0.95f && drift < 0.05f) {
+			parked_others.emplace_back(o.spawner, o.com_position);
+		}
+	}
 	const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[*spawner].kind];
 	const std::optional<sim::Vec3> beside = m.beside(parked->com_position, kind.entry_radius);
 	REQUIRE(beside.has_value());
@@ -1347,8 +1372,13 @@ uint32_t drive_predicted(tt::TdmLevel &r_level, const char *p_blueprint, const c
 	const uint64_t entry_reconciled = reconciled_before - entry_before;
 	std::map<sim::Tick, sim::Vec3> drawn_at;
 	const uint32_t drive_ticks = 480;
+	const sim::Vec3 from = parked->com_position;
+	bool past_clear = false;
 	for (uint32_t t = 0; t < drive_ticks; ++t) {
-		driver.input.move_forward = 1.0f;
+		if (const host::PresentedVehicle *at = own_vehicle(df)) {
+			past_clear = past_clear || core::vec::horizontal_distance(at->com_position, from) > most_clear - 10.0f;
+		}
+		driver.input.move_forward = past_clear ? 0.0f : 1.0f;
 		driver.input.move_right = p_steer(t);
 		tick();
 		const host::PresentedVehicle *v = own_vehicle(df);
@@ -1366,6 +1396,12 @@ uint32_t drive_predicted(tt::TdmLevel &r_level, const char *p_blueprint, const c
 		tick();
 	}
 	const uint64_t reconciled = df.stats.reconciliations - reconciled_before;
+	for (const auto &[other, at] : parked_others) {
+		const host::PresentedVehicle *o = VehicleMatch::vehicle(df, other);
+		REQUIRE_MESSAGE(o != nullptr, "spawner " << other);
+		REQUIRE_MESSAGE(core::vec::length(core::vec::sub(o->com_position, at)) < 0.1f,
+				"the driven vehicle hit spawner " << other << ", which the driver's client world does not hold");
+	}
 	std::vector<float> errors;
 	float travelled = 0.0f;
 	std::optional<sim::Vec3> first;

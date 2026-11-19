@@ -4423,6 +4423,10 @@ bool parked_upright(const std::array<float, 4> &p_rotation, const sim::Vec3 &p_v
 	return tdm::up_y_of(p_rotation) > 0.98f && speed_of(p_velocity) < 0.05f;
 }
 
+}
+
+namespace bf3::test::tdm {
+
 float clear_run(const sim::CollisionWorld &p_world, const sim::Vec3 &p_from, const std::array<float, 4> &p_rotation,
 		std::span<const sim::Vec3> p_vehicles, float p_length) {
 	const std::array<float, 2> f = heading_of(p_rotation);
@@ -4542,7 +4546,7 @@ TEST_SUITE("host-vehicles") {
 					others.push_back(o.state.body.com_position);
 				}
 				const float clear =
-						clear_run(*m->world, w.state.body.com_position, w.state.body.rotation, others, 120.0f);
+						tdm::clear_run(*m->world, w.state.body.com_position, w.state.body.rotation, others, 120.0f);
 				std::printf("vehicles: Growler of spawner %u, parked upright, has %.0f m clear ahead\n",
 						unsigned(w.spawner), double(clear));
 				if (clear > target_clear) {
@@ -4885,7 +4889,7 @@ TEST_SUITE("host-vehicles-net") {
 				const host::PresentedVehicle &v = frame->vehicles[i];
 				if (v.spawner < lv.spawners.size() && parked_upright(v.rotation, v.linear_velocity) &&
 						lv.kinds[lv.spawners[v.spawner].kind].blueprint == "vehicles/growleritv/growleritv") {
-					const float clear = clear_run(*m->world, v.com_position, v.rotation, others, 30.0f);
+					const float clear = tdm::clear_run(*m->world, v.com_position, v.rotation, others, 30.0f);
 					if (clear > best_clear) {
 						best = &v;
 						best_clear = clear;
@@ -5306,7 +5310,7 @@ TEST_SUITE("host-vehicles-armor") {
 					continue;
 				}
 				const float clear =
-						clear_run(*m->world, w.state.body.com_position, w.state.body.rotation, others, 60.0f);
+						tdm::clear_run(*m->world, w.state.body.com_position, w.state.body.rotation, others, 60.0f);
 				if (clear > tank_clear) {
 					tank = &w;
 					tank_clear = clear;
@@ -6600,8 +6604,8 @@ TEST_SUITE("host-vehicles-damage-team") {
 								!parked_upright(w.state.body.rotation, w.state.body.linear_velocity)) {
 							continue;
 						}
-						const float c =
-								clear_run(*m->world, w.state.body.com_position, w.state.body.rotation, others, 40.0f);
+						const float c = tdm::clear_run(
+								*m->world, w.state.body.com_position, w.state.body.rotation, others, 40.0f);
 						if (c > hull_clear) {
 							hull = w.spawner;
 							hull_clear = c;
@@ -7765,7 +7769,7 @@ void park_jeep(tdm::TdmLevel &r_level, ParkedJeep &r_out, bool p_tracked = false
 						continue;
 					}
 					const float c =
-							clear_run(*m.world, w.state.body.com_position, w.state.body.rotation, others, 40.0f);
+							tdm::clear_run(*m.world, w.state.body.com_position, w.state.body.rotation, others, 40.0f);
 					if (c > hull_clear) {
 						hull = w.spawner;
 						hull_clear = c;

@@ -115,6 +115,9 @@ struct LockStand {
 	sim::Vec3 aim{};
 };
 
+float clear_run(const sim::CollisionWorld &p_world, const sim::Vec3 &p_from, const std::array<float, 4> &p_rotation,
+		std::span<const sim::Vec3> p_vehicles, float p_length);
+
 std::optional<LockStand> mbt_lock_stand(const host::SharedLevel &p_level, const sim::CollisionWorld &p_world,
 		const sim::SoldierMotor &p_motor, std::span<const net::VehicleWire> p_vehicles, uint8_t p_team);
 
