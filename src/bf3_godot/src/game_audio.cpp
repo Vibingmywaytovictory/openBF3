@@ -525,6 +525,10 @@ uint64_t Bf3GameAudio::one_shot_join_requests() const {
 	return impl_->pool != nullptr ? impl_->pool->join_requests() : 0;
 }
 
+uint64_t Bf3GameAudio::movement_vaults() const {
+	return impl_->movement != nullptr ? impl_->movement->stats().vaults : 0;
+}
+
 std::vector<std::string> Bf3GameAudio::weapon_patches(bool p_explosive, uint32_t p_one_shot_event) const {
 	std::vector<std::string> out;
 	if (!impl_->table) {

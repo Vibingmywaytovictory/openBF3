@@ -63,6 +63,7 @@ public:
 	std::span<const fx::MuzzleSample> muzzles() const;
 	std::span<const uint8_t> foot_plants() const;
 	GameCrowdStats stats() const;
+	bool vault_of(uint8_t p_slot, uint8_t &r_kind, float &r_seconds) const;
 	void shutdown();
 
 private:

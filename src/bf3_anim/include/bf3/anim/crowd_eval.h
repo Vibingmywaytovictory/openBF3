@@ -149,6 +149,7 @@ public:
 			uint32_t p_soldiers, const CrowdConfig &p_config);
 
 	bool drawn(uint32_t p_i) const;
+	bool vault_of(uint32_t p_i, uint8_t &r_kind, float &r_seconds) const;
 
 	CrowdCombatStats combat_stats() const;
 

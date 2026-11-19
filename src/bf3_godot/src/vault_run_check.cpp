@@ -1,7 +1,9 @@
 #include "vault_run_check.h"
 
 #include "level_session.h"
+#include "viewmodel.h"
 
+#include "bf3/core/math.h"
 #include "bf3/core/util/format.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/level_load.h"
@@ -37,7 +39,24 @@ constexpr std::array<double, 3> kShotTimes{ 0.12, 0.3, 0.5 };
 constexpr float kCameraBack = 0.6f;
 constexpr float kCameraUp = 1.9f;
 constexpr float kCameraPitch = -0.2f;
+constexpr float kClipTimeTolerance = 2.0f * sim::kTickSeconds;
+constexpr float kCameraMovedMetres = 0.001f;
+constexpr float kCameraMovedDegrees = 0.1f;
+constexpr uint8_t kNoClip = 0xFF;
+}
 
+VaultRunViewmodel vault_run_viewmodel(const Bf3Viewmodel *p_viewmodel) {
+	VaultRunViewmodel v;
+	if (p_viewmodel == nullptr || !p_viewmodel->is_visible()) {
+		return v;
+	}
+	const anim::ViewmodelOutput &o = p_viewmodel->output();
+	v.clip = o.vault_clip;
+	v.seconds = o.vault_seconds;
+	const anim::Vec3 t = o.camera_offset.t;
+	v.camera_metres = std::sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
+	v.camera_degrees = 2.0f * std::acos(std::clamp(std::fabs(o.camera_offset.q.w), 0.0f, 1.0f)) / core::kDegToRadF;
+	return v;
 }
 
 VaultRunCheck::VaultRunCheck(std::string p_shots) :
@@ -105,6 +124,50 @@ void VaultRunCheck::runner_rows(const Runner &p_runner, const sim::SoldierState 
 				"start",
 					kAfterSeconds, double(sim::vault_spot_along(*spot_, p_state.position)), double(spot_->face),
 					double(p_state.position[1] - spot_->feet[1])));
+}
+
+void VaultRunCheck::watch_own_clip(const sim::SoldierState &p_state, const VaultRunInputs &p_in) {
+	if (!own_.pressed || !p_in.own_viewmodel) {
+		return;
+	}
+	const VaultRunViewmodel v = p_in.own_viewmodel();
+	if (v.clip == kNoClip) {
+		return;
+	}
+	++own_.clip_frames;
+	own_.wrong_clip += own_.vaulted && v.clip != own_.kind ? 1u : 0u;
+	own_.clip_seconds = std::max(own_.clip_seconds, v.seconds);
+	if (p_state.mode == sim::MoveMode::AnimationControlled) {
+		++own_.timed;
+		own_.time_error =
+				std::max(own_.time_error, std::fabs(v.seconds - float(p_state.vault.ticks) * sim::kTickSeconds));
+	}
+	own_.camera_metres = std::max(own_.camera_metres, v.camera_metres);
+	own_.camera_degrees = std::max(own_.camera_degrees, v.camera_degrees);
+}
+
+void VaultRunCheck::watch_other_clip(const VaultRunInputs &p_in) {
+	if (!other_.pressed || !p_in.crowd_vault) {
+		return;
+	}
+	uint8_t kind = kNoClip;
+	float seconds = 0.0f;
+	if (!p_in.crowd_vault(other_slot_, kind, seconds)) {
+		return;
+	}
+	++other_.clip_frames;
+	other_.wrong_clip += other_.vaulted && kind != other_.kind ? 1u : 0u;
+	other_.clip_seconds = std::max(other_.clip_seconds, seconds);
+}
+
+void VaultRunCheck::clip_rows(const Runner &p_runner, const char *p_who, const char *p_clip) {
+	const std::string who(p_who);
+	const bool timed = who != "own" || (p_runner.timed > 0 && p_runner.time_error <= kClipTimeTolerance);
+	row(who + ".vault_clip", p_runner.vaulted && p_runner.clip_frames > 0 && p_runner.wrong_clip == 0 && timed,
+			fmt("%s vault clip on %u frames (%u of another kind), up to %.3f s into it; %u animation-controlled frames "
+				"within %.3f s of the move's ticks (limit %.3f s)",
+					p_clip, p_runner.clip_frames, p_runner.wrong_clip, double(p_runner.clip_seconds), p_runner.timed,
+					double(p_runner.time_error), double(kClipTimeTolerance)));
 }
 
 void VaultRunCheck::drive_other(bool p_forward) {
@@ -197,11 +260,22 @@ bool VaultRunCheck::step(Bf3LevelSession &r_session, const VaultRunInputs &p_in,
 			if (!own_.pressed && spot_->face - sim::vault_spot_along(*spot_, f.own_curr.position) <= kPressAt) {
 				mapper.script_press(InputAction::Jump);
 				own_.pressed = true;
+				own_.vaults_before = p_in.foley_vaults ? p_in.foley_vaults() : 0;
 			}
 			follow(own_, f.own_curr, p_in, "own", p_delta);
+			watch_own_clip(f.own_curr, p_in);
 			if (own_.since_press >= kAfterSeconds || t_ > kRunTimeout) {
 				mapper.script_hold(InputAction::Forward, false);
+				own_.vaults_after = p_in.foley_vaults ? p_in.foley_vaults() : 0;
 				runner_rows(own_, f.own_curr, "own");
+				clip_rows(own_, "own", "1p");
+				row("own.camera",
+						own_.camera_metres >= kCameraMovedMetres || own_.camera_degrees >= kCameraMovedDegrees,
+						fmt("the 1p vault clip moves the camera up to %.3f m and %.1f deg off the pose without it",
+								double(own_.camera_metres), double(own_.camera_degrees)));
+				row("own.vault_sound", own_.vaults_after > own_.vaults_before,
+						fmt("the movement patch got %u Vault events during the run",
+								unsigned(own_.vaults_after - own_.vaults_before)));
 				t_ = 0.0;
 				phase_ = Phase::OwnAfter;
 			}
@@ -251,6 +325,7 @@ bool VaultRunCheck::step(Bf3LevelSession &r_session, const VaultRunInputs &p_in,
 			drive_other(false);
 			teleport(*other_client_);
 			(void)other_client_->read_presentation(*other_frame_);
+			other_slot_ = other_frame_->stats.slot;
 			if (!arrived(other_frame_->own_curr.position)) {
 				if (t_ > kArriveTimeout) {
 					row("other.placed", false,
@@ -277,9 +352,11 @@ bool VaultRunCheck::step(Bf3LevelSession &r_session, const VaultRunInputs &p_in,
 			}
 			drive_other(true);
 			follow(other_, state, p_in, "other", p_delta);
+			watch_other_clip(p_in);
 			if (other_.since_press >= kAfterSeconds || t_ > kRunTimeout) {
 				drive_other(false);
 				runner_rows(other_, state, "other");
+				clip_rows(other_, "other", "3p (the first client's crowd)");
 				phase_ = Phase::OtherAfter;
 			}
 			return false;

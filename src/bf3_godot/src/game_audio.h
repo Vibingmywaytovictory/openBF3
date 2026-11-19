@@ -86,6 +86,7 @@ public:
 	const audio::SoundCategoryTable &sound_categories() const;
 	bool one_shot_tracked(audio::InstanceHandle p_handle) const;
 	uint64_t one_shot_join_requests() const;
+	uint64_t movement_vaults() const;
 	std::vector<std::string> weapon_patches(bool p_explosive, uint32_t p_one_shot_event) const;
 	audio::SoundFateTotals sound_fates() const;
 	std::string_view scope_name(uint16_t p_scope) const;

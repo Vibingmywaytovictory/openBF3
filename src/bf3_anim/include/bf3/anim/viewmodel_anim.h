@@ -133,6 +133,7 @@ struct ViewmodelFrameInput {
 };
 
 inline constexpr size_t kMaxVmStepEventTags = 4;
+inline constexpr uint8_t kNoVaultAnim = 0xFF;
 
 struct ViewmodelOutput {
 	Xform weapon_offset;
@@ -154,6 +155,10 @@ struct ViewmodelOutput {
 	std::array<int32_t, kMaxVmStepEventTags> event_tags{};
 	uint8_t event_tag_count = 0;
 	bool loco_tagged = false;
+	uint8_t vault_clip = kNoVaultAnim;
+	float vault_frame = 0;
+	float vault_seconds = 0;
+	Xform camera_offset;
 };
 
 struct VmLocomotion;

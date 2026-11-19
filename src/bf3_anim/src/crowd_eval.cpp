@@ -1,4 +1,5 @@
 #include "bf3/anim/crowd_eval.h"
+#include "bf3/anim/viewmodel_anim.h"
 
 #include "bf3/core/math.h"
 #include "bf3/core/util/finite.h"
@@ -1267,6 +1268,13 @@ bool CrowdEvaluator::drawn(uint32_t p_i) const {
 		return false;
 	}
 	return !m.combat || !m.combat->soldiers[p_i].hidden;
+}
+
+bool CrowdEvaluator::vault_of(uint32_t p_i, uint8_t &r_kind, float &r_seconds) const {
+	(void)p_i;
+	r_kind = kNoVaultAnim;
+	r_seconds = 0.0f;
+	return false;
 }
 
 CrowdCombatStats CrowdEvaluator::combat_stats() const {

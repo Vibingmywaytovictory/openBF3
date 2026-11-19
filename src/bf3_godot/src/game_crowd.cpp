@@ -6,6 +6,7 @@
 #include "skin_upload.h"
 
 #include "bf3/anim/server_pose.h"
+#include "bf3/anim/viewmodel_anim.h"
 #include "bf3/audio/footstep_driver.h"
 #include "bf3/core/ant/ant_install_source.h"
 #include "bf3/core/install.h"
@@ -971,6 +972,16 @@ void Bf3GameCrowd::Impl::collect_plants() {
 
 std::span<const uint8_t> Bf3GameCrowd::foot_plants() const {
 	return impl_->built ? std::span<const uint8_t>(impl_->plants) : std::span<const uint8_t>();
+}
+
+bool Bf3GameCrowd::vault_of(uint8_t p_slot, uint8_t &r_kind, float &r_seconds) const {
+	const Impl &m = *impl_;
+	r_kind = anim::kNoVaultAnim;
+	r_seconds = 0.0f;
+	if (!m.built || m.eval == nullptr || p_slot >= kSlotsPerTeam || !m.slots[p_slot].known) {
+		return false;
+	}
+	return m.eval->vault_of(uint32_t(m.slots[p_slot].team) * kSlotsPerTeam + p_slot, r_kind, r_seconds);
 }
 
 GameCrowdStats Bf3GameCrowd::stats() const {

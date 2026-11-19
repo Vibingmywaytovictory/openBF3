@@ -1641,6 +1641,11 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		VaultRunInputs in;
 		in.alive = g.alive;
 		in.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		in.own_viewmodel = [&g] { return vault_run_viewmodel(g.own_viewmodel()); };
+		in.crowd_vault = [&g](uint8_t p_slot, uint8_t &r_kind, float &r_seconds) {
+			return g.crowd != nullptr && g.crowd->vault_of(p_slot, r_kind, r_seconds);
+		};
+		in.foley_vaults = [&g] { return g.audio != nullptr ? g.audio->movement_vaults() : uint64_t(0); };
 		if (g.vault_run->step(*this, in, p_delta)) {
 			g.finished = true;
 			UtilityFunctions::print(

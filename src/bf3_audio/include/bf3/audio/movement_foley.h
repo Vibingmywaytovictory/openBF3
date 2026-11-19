@@ -21,6 +21,7 @@ struct MovementFoleyStats {
 	uint64_t starts = 0;
 	uint64_t stops = 0;
 	uint64_t jumps = 0;
+	uint64_t vaults = 0;
 	uint64_t updates = 0;
 	uint64_t ended = 0;
 	uint64_t push_failures = 0;
