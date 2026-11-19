@@ -486,7 +486,7 @@ TEST_SUITE("render-programs-unit") {
 		state.sun_rotation_y = 0.0f;
 		state.sun_color = { 1.0f, 2.0f, 3.0f };
 		state.sun_specular_scale = 2.0f;
-		state.envmap_8bit_scale = 0.25f;
+		state.static_envmap_scale = 4.0f;
 		const std::optional<std::array<float, 4>> to_sun = look_engine_global(state, "outdoorLightDir");
 		REQUIRE(to_sun.has_value());
 		CHECK((*to_sun)[0] == doctest::Approx(1.0f));
