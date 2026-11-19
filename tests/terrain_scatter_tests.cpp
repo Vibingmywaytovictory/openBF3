@@ -286,6 +286,32 @@ TEST_SUITE("render-scatter-unit") {
 		CHECK(heights.bilinear(2.0f / 17.0f, 0.5f / 17.0f) == doctest::Approx(3.0).epsilon(0.001));
 	}
 
+	TEST_CASE("scatter: an instance stands on the drawn triangle's normal, turned by its yaw and scaled") {
+		const ScatterHeights heights = ScatterHeights::from_grid(slope_grid(), std::nullopt);
+		const std::optional<std::array<float, 3>> n = heights.normal(1.0f, 1.0f);
+		REQUIRE(n.has_value());
+		const std::optional<float> h0 = heights.surface(1.0f, 1.0f), hx = heights.surface(1.5f, 1.0f),
+								   hz = heights.surface(1.0f, 1.5f);
+		REQUIRE((h0 && hx && hz));
+		CHECK((*n)[0] * 0.5f + (*n)[1] * (*hx - *h0) == doctest::Approx(0.0).epsilon(0.0001));
+		CHECK((*n)[2] * 0.5f + (*n)[1] * (*hz - *h0) == doctest::Approx(0.0).epsilon(0.0001));
+		ScatterInstance inst{ { 1.0f, *h0, 1.0f }, 0.7f, { 2.0f, 3.0f } };
+		const std::array<float, 12> upright = scatter_instance_rows(inst);
+		CHECK(upright[5] == doctest::Approx(3.0f));
+		CHECK(upright[0] == doctest::Approx(2.0f * std::cos(0.7f)));
+		CHECK(upright[2] == doctest::Approx(2.0f * std::sin(0.7f)));
+		inst.up = *n;
+		const std::array<float, 12> tilted = scatter_instance_rows(inst);
+		for (size_t r = 0; r < 3; ++r) {
+			CHECK(tilted[r * 4 + 1] == doctest::Approx(3.0f * (*n)[r]));
+			CHECK(tilted[r * 4 + 3] == inst.position[r]);
+		}
+		CHECK(tilted[0] * tilted[1] + tilted[4] * tilted[5] + tilted[8] * tilted[9] ==
+				doctest::Approx(0.0).epsilon(0.0001));
+		CHECK(std::sqrt(tilted[0] * tilted[0] + tilted[4] * tilted[4] + tilted[8] * tilted[8]) ==
+				doctest::Approx(2.0f));
+	}
+
 	TEST_CASE("scatter: a MaskScale program runs on the CPU with its branch, mask sample and constants, a texture the "
 			  "data binds none to as zero") {
 		const core::res::TerrainStreamingTree tree = quadrant_tree();

@@ -71,6 +71,7 @@ private:
 			uint32_t type = 0;
 			uint32_t instances = 0;
 			double coverage = 0.0;
+			uint32_t tilted = 0;
 		};
 		std::vector<TypeCount> types;
 		bf3::render::ScatterCellStats stats;

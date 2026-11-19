@@ -255,6 +255,23 @@ std::optional<float> ScatterHeights::surface(float p_x, float p_z) const {
 	return hd + (hc - hd) * (1.0f - fx) + (hb - hd) * (1.0f - fz);
 }
 
+std::optional<std::array<float, 3>> ScatterHeights::normal(float p_x, float p_z) const {
+	if (!surface(p_x, p_z)) {
+		return std::nullopt;
+	}
+	const double gx = (double(p_x) - double(origin[0])) / double(spacing[0]);
+	const double gz = (double(p_z) - double(origin[1])) / double(spacing[1]);
+	const uint32_t x = uint32_t(gx);
+	const uint32_t z = uint32_t(gz);
+	const float ha = metres(x, z), hb = metres(x + 1, z), hc = metres(x, z + 1), hd = metres(x + 1, z + 1);
+	const bool first = float(gx - double(x)) + float(gz - double(z)) <= 1.0f;
+	const float dx = first ? hb - ha : hd - hc;
+	const float dz = first ? hc - ha : hd - hb;
+	const float nx = -dx * spacing[1], ny = spacing[0] * spacing[1], nz = -dz * spacing[0];
+	const float length = std::sqrt(nx * nx + ny * ny + nz * nz);
+	return std::array<float, 3>{ nx / length, ny / length, nz / length };
+}
+
 float ScatterHeights::bilinear(float p_u, float p_v) const {
 	if (width < 2 || height < 2) {
 		return 0.0f;

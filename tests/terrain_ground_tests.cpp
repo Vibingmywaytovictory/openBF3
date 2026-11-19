@@ -2,17 +2,24 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/res/terrain_mask_field.h"
+#include "bf3/core/util/text.h"
 #include "bf3/render/level_scene.h"
+#include "bf3/render/mesh_cache.h"
 #include "bf3/render/terrain_detail.h"
+#include "bf3/render/terrain_scatter.h"
 #include "test_support.h"
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <memory>
+#include <numbers>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace bf3;
@@ -70,6 +77,53 @@ std::array<float, 2> terrain_local(const render::LevelScenePlan &p_plan, float p
 	return { (p_x - t.trans.x) / t.scale, (p_z - t.trans.z) / t.scale };
 }
 
+constexpr int kSides = 8;
+
+struct RockRest {
+	float terrain = -INFINITY;
+	float plane = -INFINITY;
+	float flat = -INFINITY;
+	float bend = 0.0f;
+};
+
+RockRest rock_rest(const render::ScatterInstance &p_instance, const std::vector<float> &p_positions,
+		const render::ScatterHeights &p_heights) {
+	const std::array<float, 12> rows = render::scatter_instance_rows(p_instance);
+	std::array<float, kSides> on_terrain, on_plane, on_flat;
+	on_terrain.fill(INFINITY);
+	on_plane.fill(INFINITY);
+	on_flat.fill(INFINITY);
+	RockRest out;
+	for (size_t v = 0; v + 2 < p_positions.size(); v += 3) {
+		const float lx = p_positions[v], ly = p_positions[v + 1], lz = p_positions[v + 2];
+		const float x = rows[0] * lx + rows[1] * ly + rows[2] * lz + rows[3];
+		const float y = rows[4] * lx + rows[5] * ly + rows[6] * lz + rows[7];
+		const float z = rows[8] * lx + rows[9] * ly + rows[10] * lz + rows[11];
+		const std::optional<float> ground = p_heights.surface(x, z);
+		if (!ground) {
+			continue;
+		}
+		const std::optional<std::array<float, 3>> n = p_heights.normal(p_instance.position[0], p_instance.position[2]);
+		const std::array<float, 3> tangent = n ? *n : std::array<float, 3>{ 0.0f, 1.0f, 0.0f };
+		const float plane = p_instance.position[1] -
+				(tangent[0] * (x - p_instance.position[0]) + tangent[2] * (z - p_instance.position[2])) / tangent[1];
+		out.bend = std::fmax(out.bend, (plane - *ground) * tangent[1]);
+		const double angle = std::atan2(double(lz), double(lx));
+		const size_t side =
+				size_t(std::clamp(int((angle + std::numbers::pi) / (2.0 * std::numbers::pi) * kSides), 0, kSides - 1));
+		on_terrain[side] = std::fmin(on_terrain[side], (y - *ground) * tangent[1]);
+		on_plane[side] = std::fmin(on_plane[side], (y - plane) * tangent[1]);
+		on_flat[side] = std::fmin(on_flat[side], ly * p_instance.scale[1]);
+	}
+	for (size_t side = 0; side < kSides; ++side) {
+		if (std::isfinite(on_terrain[side])) {
+			out.terrain = std::fmax(out.terrain, on_terrain[side]);
+			out.plane = std::fmax(out.plane, on_plane[side]);
+			out.flat = std::fmax(out.flat, on_flat[side]);
+		}
+	}
+	return out;
+}
 }
 
 TEST_SUITE("render-terrain-detail-unit") {
@@ -158,5 +212,103 @@ TEST_SUITE("render-terrain-detail") {
 			CHECK(compared > 0);
 			CHECK(differ == 0);
 		}
+	}
+}
+
+TEST_SUITE("render-scatter-ground") {
+	TEST_CASE("scatter: every rock MP_007 scatters near the cameras rests on the slope under it as on flat ground") {
+		const Caspian *c = caspian();
+		if (c == nullptr) {
+			return;
+		}
+		REQUIRE(c->terrain.scatter != nullptr);
+		const render::TerrainScatter &scatter = *c->terrain.scatter;
+		const LevelMount &mount = c->level->mount();
+		std::map<int32_t, std::vector<float>> positions;
+		uint64_t instances = 0, floating = 0;
+		float worst = -INFINITY;
+		for (uint32_t t = 0; t < scatter.types().size(); ++t) {
+			const render::ScatterType &type = scatter.types()[t];
+			if (type.mesh < 0) {
+				continue;
+			}
+			const render::SceneMeshPlan &mesh_plan = c->plan.meshes[size_t(type.mesh)];
+			const std::string name = to_lower_ascii(c->plan.requests[mesh_plan.request].res);
+			if (name.find("rock") == std::string::npos) {
+				continue;
+			}
+			std::vector<float> &local = positions[type.mesh];
+			if (local.empty()) {
+				Result<render::CachedMesh> blob =
+						render::load_scene_request(nullptr, mount, c->plan, mesh_plan.request);
+				REQUIRE_MESSAGE(blob.ok(), (blob.ok() ? std::string() : blob.error().message));
+				Result<render::PreparedSceneMesh> mesh =
+						render::prepare_scene_mesh(nullptr, mount, c->plan, uint32_t(type.mesh), blob->mesh);
+				REQUIRE_MESSAGE(mesh.ok(), (mesh.ok() ? std::string() : mesh.error().message));
+				for (const render::PreparedSurface &s : mesh->lod0.surfaces) {
+					local.insert(local.end(), s.positions.begin(), s.positions.end());
+				}
+			}
+			REQUIRE(!local.empty());
+			std::map<std::tuple<int32_t, int32_t>, bool> seen;
+			uint64_t type_instances = 0, type_floating = 0;
+			float type_worst = -INFINITY, slope_at_worst = 0.0f, flat_at_worst = 0.0f, type_bend = 0.0f,
+				  steepest = 0.0f;
+			std::array<float, 3> steepest_at{};
+			for (const Camera &camera : kCaspianCameras) {
+				const auto [x, z] = terrain_local(c->plan, camera.x, camera.z);
+				for (const render::ScatterCellId &cell : scatter.cells_within(type.tree_level, x, z, 64.0f)) {
+					if (!seen.emplace(std::make_tuple(cell.x, cell.z), true).second) {
+						continue;
+					}
+					for (const render::ScatterBatch &batch : scatter.generate(cell)) {
+						if (batch.type != t) {
+							continue;
+						}
+						for (const render::ScatterInstance &inst : batch.instances) {
+							const RockRest rest = rock_rest(inst, local, scatter.heights());
+							const float gap = rest.plane;
+							const float flat = rest.flat;
+							++type_instances;
+							type_bend = std::fmax(type_bend, rest.bend);
+							const std::optional<std::array<float, 3>> slope =
+									scatter.heights().normal(inst.position[0], inst.position[2]);
+							if (slope && (*slope)[1] < 1.0f - steepest) {
+								steepest = 1.0f - (*slope)[1];
+								steepest_at = inst.position;
+							}
+							if (gap > flat + 1e-3f) {
+								++type_floating;
+							}
+							if (gap - flat > type_worst) {
+								type_worst = gap - flat;
+								flat_at_worst = flat;
+								const std::optional<std::array<float, 3>> n =
+										scatter.heights().normal(inst.position[0], inst.position[2]);
+								slope_at_worst =
+										n ? float(std::acos(double((*n)[1])) * 180.0 / std::numbers::pi) : 0.0f;
+							}
+						}
+					}
+				}
+			}
+			std::printf(
+					"render.scatter_ground MP_007 %s: %llu instances near the cameras, %llu float on a side over their "
+					"tangent plane, worst %.3f m over the mesh's own on flat ground (%.3f m) on a %.1f degree slope; "
+					"the "
+					"drawn terrain bends away under a rock by at most %.3f m; the steepest rock stands at (%.1f, %.1f, "
+					"%.1f)\n",
+					name.c_str(), static_cast<unsigned long long>(type_instances),
+					static_cast<unsigned long long>(type_floating), double(type_worst), double(flat_at_worst),
+					double(slope_at_worst), double(type_bend), double(steepest_at[0]), double(steepest_at[1]),
+					double(steepest_at[2]));
+			instances += type_instances;
+			floating += type_floating;
+			worst = std::fmax(worst, type_worst);
+		}
+		std::printf("render.scatter_ground MP_007: %llu rock instances, %llu float on a side, worst %.3f m\n",
+				static_cast<unsigned long long>(instances), static_cast<unsigned long long>(floating), double(worst));
+		CHECK(instances > 0);
+		CHECK(floating == 0);
 	}
 }

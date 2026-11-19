@@ -79,6 +79,7 @@ struct ScatterHeights {
 
 	float metres(uint32_t p_x, uint32_t p_z) const { return base + float(samples[size_t(p_z) * width + p_x]) * step; }
 	std::optional<float> surface(float p_x, float p_z) const;
+	std::optional<std::array<float, 3>> normal(float p_x, float p_z) const;
 	float bilinear(float p_u, float p_v) const;
 };
 
@@ -143,13 +144,17 @@ struct ScatterType {
 	float cell = 0.0f;
 	uint32_t candidates = 0;
 	float footprint = 0.0f;
+	bool upright = false;
 };
 
 struct ScatterInstance {
 	std::array<float, 3> position{};
 	float yaw = 0.0f;
 	std::array<float, 2> scale{};
+	std::array<float, 3> up{ 0.0f, 1.0f, 0.0f };
 };
+
+std::array<float, 12> scatter_instance_rows(const ScatterInstance &p_instance);
 
 struct ScatterBatch {
 	uint32_t type = 0;

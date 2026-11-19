@@ -117,13 +117,12 @@ void TerrainScatterDraw::upload(Cell &r_cell, const Result &p_result) {
 		PackedFloat32Array buffer;
 		buffer.resize(int64_t(batch.instances.size()) * 12);
 		float *w = buffer.ptrw();
+		uint32_t tilted = 0;
 		for (const render::ScatterInstance &inst : batch.instances) {
-			const float c = std::cos(inst.yaw) * inst.scale[0];
-			const float s = std::sin(inst.yaw) * inst.scale[0];
-			const float row[12] = { c, 0.0f, s, inst.position[0], 0.0f, inst.scale[1], 0.0f, inst.position[1], -s, 0.0f,
-				c, inst.position[2] };
-			std::copy(std::begin(row), std::end(row), w);
+			const std::array<float, 12> rows = render::scatter_instance_rows(inst);
+			std::copy(rows.begin(), rows.end(), w);
 			w += 12;
+			tilted += inst.up[1] < 1.0f ? 1 : 0;
 		}
 		const RID multimesh = rs->multimesh_create();
 		rs->multimesh_allocate_data(
@@ -136,7 +135,7 @@ void TerrainScatterDraw::upload(Cell &r_cell, const Result &p_result) {
 		rs->instance_set_visible(instance, r_cell.visible);
 		r_cell.multimeshes.push_back(multimesh);
 		r_cell.instances.push_back(instance);
-		r_cell.types.push_back(Cell::TypeCount{ batch.type, uint32_t(batch.instances.size()), batch.coverage });
+		r_cell.types.push_back(Cell::TypeCount{ batch.type, uint32_t(batch.instances.size()), batch.coverage, tilted });
 		++stats_.multimeshes;
 		stats_.instances += batch.instances.size();
 	}
@@ -253,7 +252,7 @@ void TerrainScatterDraw::report(const Vector3 &p_local) {
 	const std::span<const render::ScatterType> types = scatter_->types();
 	std::vector<uint64_t> instances(types.size(), 0);
 	std::vector<double> masks(types.size(), 0.0);
-	uint64_t candidates = 0, evaluated = 0, unmatched = 0;
+	uint64_t candidates = 0, evaluated = 0, unmatched = 0, tilted = 0;
 	double coverage = 0.0;
 	for (const auto &[key, cell] : cells_) {
 		if (!cell.ready || !cell.visible) {
@@ -262,6 +261,7 @@ void TerrainScatterDraw::report(const Vector3 &p_local) {
 		for (const Cell::TypeCount &t : cell.types) {
 			instances[t.type] += t.instances;
 			masks[t.type] += t.coverage;
+			tilted += t.tilted;
 		}
 		candidates += cell.stats.candidates;
 		evaluated += cell.stats.evaluated;
@@ -275,16 +275,18 @@ void TerrainScatterDraw::report(const Vector3 &p_local) {
 		per_type += fmt(" %zu:%llu/%.0f", t, static_cast<unsigned long long>(instances[t]), std::floor(masks[t]));
 	}
 	stats_.types_drawn = drawn_types;
-	UtilityFunctions::print(to_godot(fmt("[scatter] %s at (%.1f, %.1f): %llu cells drawn, %llu instances in %llu "
-										 "multimeshes, %llu of %zu types drawn, "
-										 "%llu candidates, %llu evaluated (mask sum %.0f), %llu without a program, "
-										 "generate %.3f s, cells made %llu freed %llu, per type%s",
+	UtilityFunctions::print(to_godot(fmt(
+			"[scatter] %s at (%.1f, %.1f): %llu cells drawn, %llu instances in %llu "
+			"multimeshes, %llu of %zu types drawn, "
+			"%llu tilted to the terrain under them, %llu candidates, %llu evaluated (mask sum %.0f), %llu "
+			"without a program, "
+			"generate %.3f s, cells made %llu freed %llu, per type%s",
 			name_.c_str(), double(p_local.x), double(p_local.z), static_cast<unsigned long long>(stats_.cells_drawn),
 			static_cast<unsigned long long>(stats_.instances_drawn),
 			static_cast<unsigned long long>(stats_.multimeshes), static_cast<unsigned long long>(drawn_types),
-			types.size(), static_cast<unsigned long long>(candidates), static_cast<unsigned long long>(evaluated),
-			coverage, static_cast<unsigned long long>(unmatched), stats_.generate_seconds,
-			static_cast<unsigned long long>(stats_.cells_generated),
+			types.size(), static_cast<unsigned long long>(tilted), static_cast<unsigned long long>(candidates),
+			static_cast<unsigned long long>(evaluated), coverage, static_cast<unsigned long long>(unmatched),
+			stats_.generate_seconds, static_cast<unsigned long long>(stats_.cells_generated),
 			static_cast<unsigned long long>(stats_.cells_freed), per_type.c_str())));
 }
 

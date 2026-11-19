@@ -21,6 +21,7 @@ constexpr std::string_view kComboSuffix = "__maskscale2d__0";
 constexpr std::string_view kScattered = "ms";
 constexpr std::string_view kMasking = "m";
 constexpr size_t kMaxScatterImages = 64;
+constexpr size_t kUprightByte = 66;
 
 using core::to_lower_ascii;
 
@@ -36,6 +37,26 @@ uint32_t cell_seed(const ScatterCellId &p_cell, uint32_t p_type) {
 	return uint32_t(h ^ (h >> 32));
 }
 
+}
+
+std::array<float, 12> scatter_instance_rows(const ScatterInstance &p_instance) {
+	const float c = std::cos(p_instance.yaw) * p_instance.scale[0];
+	const float s = std::sin(p_instance.yaw) * p_instance.scale[0];
+	const std::array<std::array<float, 3>, 3> upright = { { { c, 0.0f, s }, { 0.0f, p_instance.scale[1], 0.0f },
+			{ -s, 0.0f, c } } };
+	const auto &[ux, uy, uz] = p_instance.up;
+	const float k = 1.0f / (1.0f + uy);
+	const std::array<std::array<float, 3>, 3> tilt = { { { 1.0f - ux * ux * k, ux, -ux * uz * k }, { -ux, uy, -uz },
+			{ -ux * uz * k, uz, 1.0f - uz * uz * k } } };
+	std::array<float, 12> out{};
+	for (size_t r = 0; r < 3; ++r) {
+		for (size_t col = 0; col < 3; ++col) {
+			out[r * 4 + col] =
+					tilt[r][0] * upright[0][col] + tilt[r][1] * upright[1][col] + tilt[r][2] * upright[2][col];
+		}
+		out[r * 4 + 3] = p_instance.position[r];
+	}
+	return out;
 }
 
 std::optional<ScatterComboName> terrain_scatter_combo(std::string_view p_shader, std::string_view p_asset) {
@@ -240,6 +261,7 @@ core::Result<std::shared_ptr<const TerrainScatter>> TerrainScatter::build(
 		const double area = double(rect[2] - rect[0]) * double(rect[3] - rect[1]);
 		type.candidates = uint32_t(std::clamp(std::round(double(type.density) * area), 0.0, cap));
 		type.footprint = type.candidates > 0 ? float(std::sqrt(area / double(type.candidates))) : 0.0f;
+		type.upright = source.data.record[kUprightByte] != 0;
 		out->types_.push_back(type);
 		if (type.mesh >= 0 && type.candidates > 0 && type.layer < out->masks_.layers() &&
 				std::find(out->levels_.begin(), out->levels_.end(), type.tree_level) == out->levels_.end()) {
@@ -383,8 +405,11 @@ std::vector<ScatterBatch> TerrainScatter::generate(const ScatterCellId &p_cell, 
 			if (!(sx > 0.0f) || !(sy > 0.0f) || !std::isfinite(sx) || !std::isfinite(sy)) {
 				continue;
 			}
-			batch.instances.push_back(
-					ScatterInstance{ { x, *y, z }, turn * 2.0f * std::numbers::pi_v<float>, { sx, sy } });
+			ScatterInstance instance{ { x, *y, z }, turn * 2.0f * std::numbers::pi_v<float>, { sx, sy } };
+			if (const std::optional<std::array<float, 3>> up = type.upright ? std::nullopt : heights_.normal(x, z)) {
+				instance.up = *up;
+			}
+			batch.instances.push_back(instance);
 		}
 		stats.instances += batch.instances.size();
 		stats.coverage += batch.coverage;
