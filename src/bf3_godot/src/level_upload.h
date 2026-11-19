@@ -28,6 +28,13 @@ godot::Transform3D instance_transform(const bf3::core::level::LevelTransform &p_
 
 godot::Dictionary encode_rs_surface(const bf3::render::PreparedSurface &p_surface, const godot::RID &p_material);
 
+std::string look_shader_code(int p_alpha_mode, bool p_double_sided);
+
+int64_t look_uv(uint8_t p_channel);
+
+void set_look_params(const godot::RID &p_material, const bf3::render::MaterialSlot &p_slot, bool p_has_albedo,
+		bool p_glass, const std::optional<std::array<float, 3>> &p_flat, bool p_flat_unlit);
+
 struct UploadStats {
 
 	uint64_t tasks = 0;

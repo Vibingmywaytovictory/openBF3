@@ -1396,7 +1396,9 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			UtilityFunctions::print(to_godot("[game] vehicles built: " + std::to_string(vs.kinds) + " kinds, " +
 					std::to_string(vs.parts) + " mesh parts, " + std::to_string(vs.wheel_parts) + " of them wheels, " +
 					std::to_string(vs.turret_parts) + " on turrets, " + std::to_string(vs.unheld_parts) +
-					" of unheld unlocks not drawn"));
+					" of unheld unlocks not drawn; " + std::to_string(vs.program_materials) +
+					" materials drawn through their shader's program, " + std::to_string(vs.look_materials) +
+					" through the resolved look"));
 		}
 	}
 	if (g.vehicles != nullptr && g.vehicles->built()) {

@@ -169,6 +169,8 @@ target_sources(bf3_godot PRIVATE
     src/game_vehicles.cpp
     src/game_vehicles.h
     src/game_deployables.cpp
+    src/vehicle_looks.cpp
+    src/vehicle_looks.h
 )
 
 target_sources(bf3_godot PRIVATE

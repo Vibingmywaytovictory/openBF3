@@ -1,6 +1,7 @@
 #include "bf3/render/vehicle_meshes.h"
 
 #include "bf3/core/util/elapsed.h"
+#include "bf3/core/util/text.h"
 #include "bf3/render/mesh_cache.h"
 #include "bf3/render/slot_textures.h"
 
@@ -85,7 +86,7 @@ const VehicleMeshKind *VehicleMeshSet::kind(const std::string &p_blueprint) cons
 
 const PreparedTexture *VehicleMeshSet::texture(const std::string &p_name) const {
 	for (const PreparedTexture &t : textures) {
-		if (t.name == p_name) {
+		if (core::iequals_ascii(t.name, p_name)) {
 			return &t;
 		}
 	}
@@ -211,7 +212,7 @@ core::Result<std::unique_ptr<VehicleMeshSet>> load_vehicle_meshes(const core::Eb
 			}
 			std::vector<LookMaterial> looks(materials->slots.size());
 			for (size_t i = 0; look && i < looks.size(); ++i) {
-				looks[i] = look->resolve(materials->slots[i], name);
+				looks[i] = look->resolve(materials->slots[i], name, LookPrograms::Deferred);
 			}
 			kind.looks.push_back(std::move(looks));
 			kind.materials.push_back(std::move(*materials));
@@ -225,6 +226,7 @@ core::Result<std::unique_ptr<VehicleMeshSet>> load_vehicle_meshes(const core::Eb
 	for (const VehicleMeshKind &kind : set->kinds) {
 		for (size_t p = 0; p < kind.parts.size(); ++p) {
 			wants.add(kind.materials[kind.part_mesh[p]], kind.parts[p].prepared.surfaces);
+			wants.add_looks(kind.looks[kind.part_mesh[p]], kind.parts[p].prepared.surfaces);
 		}
 	}
 	set->textures = load_slot_textures(p_mount, wants, "vehicle", set->notes);

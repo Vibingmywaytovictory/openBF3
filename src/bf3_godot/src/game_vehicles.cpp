@@ -2,6 +2,7 @@
 
 #include "game_fx.h"
 #include "render_bridge.h"
+#include "vehicle_looks.h"
 #include "viewmodel_muzzle.h"
 
 #include "bf3/host/level_load.h"
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <set>
 #include <span>
@@ -32,28 +34,19 @@ Transform3D godot_transform(const core::Transform &p_t) {
 	return Transform3D(Basis(to_vector(p_t.right), to_vector(p_t.up), to_vector(p_t.forward)), to_vector(p_t.trans));
 }
 
-void apply_vehicle_look(const Ref<StandardMaterial3D> &p_m, const render::LookMaterial &p_look) {
+void apply_blended_look(const Ref<StandardMaterial3D> &p_m, const render::LookMaterial &p_look,
+		const std::function<Ref<Texture2D>(const std::string &)> &p_find_texture) {
 	if (p_look.double_sided) {
 		p_m->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
 	}
-	if (p_look.blend == render::LookBlend::AlphaTest) {
-		p_m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
-		return;
-	}
-	if (p_look.blend != render::LookBlend::Blend) {
-		return;
-	}
 	p_m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
-	if (p_look.glass) {
-		if (!p_look.color) {
-			p_m->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, Ref<Texture2D>());
-			p_m->set_albedo(Color(
-					render::kLookGlassTint, render::kLookGlassTint, render::kLookGlassTint, render::kLookGlassOpacity));
-		} else {
-			p_m->set_albedo(Color(1.0f, 1.0f, 1.0f, render::kLookGlassOpacity));
+	if (p_m->get_texture(BaseMaterial3D::TEXTURE_ALBEDO).is_null() && p_look.color &&
+			p_look.color->channel == render::kLookUv0) {
+		if (const Ref<Texture2D> colour = p_find_texture(p_look.color->name); colour.is_valid()) {
+			p_m->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, colour);
+			p_m->set_albedo(Color(1, 1, 1));
+			p_m->set_uv1_scale(Vector3(p_look.color->scale, p_look.color->scale, 1.0f));
 		}
-		p_m->set_roughness(0.1f);
-		return;
 	}
 	const render::ViewmodelBlend mode = render::viewmodel_blend_of(p_look.solution_blend.value_or(0));
 	p_m->set_blend_mode(mode == render::ViewmodelBlend::Add	   ? BaseMaterial3D::BLEND_MODE_ADD
@@ -145,6 +138,7 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 		textures[p_name] = tex;
 		return tex;
 	};
+	VehicleLooks vehicle_looks(find_texture);
 	const auto make_parts = [&](const render::VehicleMeshKind *mk, const std::vector<int8_t> &wheel_of,
 									const host::LevelVehicleKind *p_kind, std::vector<Part> &r_parts) {
 		for (size_t p = 0; p < mk->parts.size(); ++p) {
@@ -157,13 +151,22 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 			});
 			std::vector<Ref<Material>> materials;
 			for (const render::PreparedSurface &s : drawn.surfaces) {
-				Ref<StandardMaterial3D> m;
+				Ref<Material> m;
 				if (s.material_index < slots.slots.size()) {
-					m = make_standard_material(
-							slots.slots[s.material_index], !s.tangents.empty(), find_texture, MaterialOptions{});
-					if (s.material_index < looks.size()) {
-						apply_vehicle_look(m, looks[s.material_index]);
-						stats_.glass_surfaces += looks[s.material_index].glass ? 1u : 0u;
+					const render::MaterialSlot &slot = slots.slots[s.material_index];
+					const render::LookMaterial *look =
+							s.material_index < looks.size() ? &looks[s.material_index] : nullptr;
+					if (look != nullptr) {
+						m = vehicle_looks.material(*look, slot, !s.tangents.empty());
+						stats_.glass_surfaces += look->glass ? 1u : 0u;
+					}
+					if (m.is_null()) {
+						Ref<StandardMaterial3D> standard =
+								make_standard_material(slot, !s.tangents.empty(), find_texture, MaterialOptions{});
+						if (look != nullptr) {
+							apply_blended_look(standard, *look, find_texture);
+						}
+						m = standard;
 					}
 				}
 				materials.push_back(m);
@@ -234,6 +237,8 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 		}
 	}
 	damage_fx_.emplace(std::move(visuals));
+	stats_.program_materials = vehicle_looks.program_materials();
+	stats_.look_materials = vehicle_looks.look_materials();
 	root_ = memnew(Node3D);
 	root_->set_name("Vehicles");
 	p_parent->add_child(root_);

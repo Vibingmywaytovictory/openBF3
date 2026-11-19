@@ -21,6 +21,29 @@ void SlotTextureWants::add(const MeshMaterials &p_materials, std::span<const Pre
 	}
 }
 
+void SlotTextureWants::add_looks(std::span<const LookMaterial> p_looks, std::span<const PreparedSurface> p_surfaces) {
+	const auto want = [&](const std::string &p_name, TextureRole p_role) {
+		if (!p_name.empty() && seen.insert(p_name).second) {
+			wanted.emplace_back(p_name, p_role);
+		}
+	};
+	for (const PreparedSurface &s : p_surfaces) {
+		if (s.material_index >= p_looks.size()) {
+			continue;
+		}
+		const LookMaterial &look = p_looks[s.material_index];
+		if (look.normal) {
+			want(look.normal->name, TextureRole::Normal);
+		}
+		if (look.color) {
+			want(look.color->name, TextureRole::Color);
+		}
+		for (const std::string &name : look.graph_textures) {
+			want(name, TextureRole::Data);
+		}
+	}
+}
+
 std::vector<PreparedTexture> load_slot_textures(const core::LevelMount &p_mount, const SlotTextureWants &p_wants,
 		std::string_view p_what, std::vector<std::string> &r_notes) {
 	const auto &wanted = p_wants.wanted;

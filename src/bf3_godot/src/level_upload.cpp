@@ -203,6 +203,45 @@ void fragment() {
 }
 }
 
+std::string look_shader_code(int p_alpha_mode, bool p_double_sided) {
+	return shader_code_l1(p_alpha_mode, p_double_sided);
+}
+
+int64_t look_uv(uint8_t p_channel) {
+	return int64_t(p_channel == render::kLookUvOverlay ? render::kLookUv0 : p_channel);
+}
+
+void set_look_params(const RID &p_material, const render::MaterialSlot &p_slot, bool p_has_albedo, bool p_glass,
+		const std::optional<std::array<float, 3>> &p_flat, bool p_flat_unlit) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	Color tint = p_has_albedo ? Color(1, 1, 1) : Color(0.55f, 0.55f, 0.55f);
+	if (const std::array<float, 4> *dark = p_slot.vector("DiffuseDarkening")) {
+		tint = Color(tint.r * (*dark)[0], tint.g * (*dark)[1], tint.b * (*dark)[2]);
+	}
+	float roughness = 0.6f;
+	if (const std::array<float, 4> *smooth = p_slot.vector("SmoothnessRegular")) {
+		roughness = std::clamp(1.0f - (*smooth)[0], 0.05f, 1.0f);
+	}
+	if (p_glass) {
+		roughness = 0.1f;
+		if (!p_has_albedo) {
+			tint = Color(render::kLookGlassTint, render::kLookGlassTint, render::kLookGlassTint);
+		}
+	}
+	if (p_flat) {
+		const std::array<float, 3> &flat = *p_flat;
+		if (p_flat_unlit) {
+			tint = Color(0, 0, 0);
+			rs->material_set_param(p_material, "specular_value", 0.0f);
+			rs->material_set_param(p_material, "emission_value", Vector3(flat[0], flat[1], flat[2]));
+		} else {
+			tint = Color(flat[0], flat[1], flat[2]);
+		}
+	}
+	rs->material_set_param(p_material, "albedo_tint", tint);
+	rs->material_set_param(p_material, "roughness_value", roughness);
+}
+
 Transform3D instance_transform(const bf3::core::level::LevelTransform &p_t) {
 
 	const float s = p_t.scale;
@@ -670,9 +709,9 @@ void LevelUpload::create_materials(double p_deadline_us) {
 						rs->material_set_param(m, to_godot(constants[c].uniform), Vector4(v[0], v[1], v[2], v[3]));
 					}
 				}
-				rs->material_set_param(m, "albedo_uv", int64_t(mp.albedo_uv == render::kLookUvOverlay ? render::kLookUv0 : mp.albedo_uv));
+				rs->material_set_param(m, "albedo_uv", look_uv(mp.albedo_uv));
 				rs->material_set_param(m, "albedo_scale", mp.albedo_scale);
-				rs->material_set_param(m, "normal_uv", int64_t(mp.normal_uv == render::kLookUvOverlay ? render::kLookUv0 : mp.normal_uv));
+				rs->material_set_param(m, "normal_uv", look_uv(mp.normal_uv));
 				rs->material_set_param(m, "normal_scale", mp.normal_scale);
 				if (mp.glass) {
 					rs->material_set_param(m, "glass_opacity", render::kLookGlassOpacity);
@@ -684,32 +723,10 @@ void LevelUpload::create_materials(double p_deadline_us) {
 				rs->material_set_shader(m, shaders_[(mp.alpha_test ? 2 : 0) + (mp.double_sided ? 1 : 0)]);
 			}
 
-			Color tint = mp.albedo >= 0 ? Color(1, 1, 1) : Color(0.55f, 0.55f, 0.55f);
-			if (const std::array<float, 4> *dark = mp.slot.vector("DiffuseDarkening")) {
-				tint = Color(tint.r * (*dark)[0], tint.g * (*dark)[1], tint.b * (*dark)[2]);
-			}
-			float roughness = 0.6f;
-			if (const std::array<float, 4> *smooth = mp.slot.vector("SmoothnessRegular")) {
-				roughness = std::clamp(1.0f - (*smooth)[0], 0.05f, 1.0f);
-			}
-			if (plan.look == render::SceneLook::L1 && mp.glass) {
-				roughness = 0.1f;
-				if (mp.albedo < 0) {
-					tint = Color(render::kLookGlassTint, render::kLookGlassTint, render::kLookGlassTint);
-				}
-			}
-			if (plan.look == render::SceneLook::L1 && mp.look && mp.look->flat_colour && mp.program < 0) {
-				const std::array<float, 3> &flat = *mp.look->flat_colour;
-				if (mp.look->flat_unlit) {
-					tint = Color(0, 0, 0);
-					rs->material_set_param(m, "specular_value", 0.0f);
-					rs->material_set_param(m, "emission_value", Vector3(flat[0], flat[1], flat[2]));
-				} else {
-					tint = Color(flat[0], flat[1], flat[2]);
-				}
-			}
-			rs->material_set_param(m, "albedo_tint", tint);
-			rs->material_set_param(m, "roughness_value", roughness);
+			const bool l1 = plan.look == render::SceneLook::L1;
+			const bool flat = l1 && mp.look && mp.look->flat_colour && mp.program < 0;
+			set_look_params(m, mp.slot, mp.albedo >= 0, l1 && mp.glass, flat ? mp.look->flat_colour : std::nullopt,
+					flat && mp.look->flat_unlit);
 			materials_[next_material_] = m;
 		} else {
 			const render::SceneTerrainPlan &tp = plan.terrains[next_material_ - plan.materials.size()];

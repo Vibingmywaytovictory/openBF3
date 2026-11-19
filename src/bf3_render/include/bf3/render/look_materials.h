@@ -75,6 +75,11 @@ struct LookLayer {
 	std::string name;
 };
 
+enum class LookPrograms : uint8_t {
+	Masks,
+	Deferred,
+};
+
 struct GraphProgram {
 	TranslatedProgram translated;
 };
@@ -95,6 +100,7 @@ struct LookMaterial {
 	std::vector<ShaderValue> values;
 	std::shared_ptr<const GraphProgram> graph;
 	std::vector<std::string> graph_textures;
+	std::vector<std::string> graph_parameters;
 	std::vector<std::array<float, 4>> graph_constants;
 	std::string graph_refusal;
 	std::optional<float> alpha_cut;
@@ -133,7 +139,8 @@ public:
 	LookResolver(ShaderLookup p_shaders, std::map<std::string, HeaderInfo> p_headers, std::vector<std::string> p_texture_names = {});
 	~LookResolver();
 
-	LookMaterial resolve(const MaterialSlot &p_slot, std::string_view p_mesh);
+	LookMaterial resolve(
+			const MaterialSlot &p_slot, std::string_view p_mesh, LookPrograms p_programs = LookPrograms::Masks);
 
 	const ShaderLookup &shaders() const { return shaders_; }
 	const std::vector<std::pair<std::string, std::string>> &failures() const { return failures_; }
@@ -152,8 +159,8 @@ private:
 	ProgramInfo &program_info(const SurfaceShader &p_shader);
 	core::Result<TranslatedProgram> translate(
 			const ProgramInfo &p_info, uint64_t p_srgb, ProgramAnalysis *r_analysis = nullptr);
-	void attach_program(
-			LookMaterial &r_out, const SurfaceShader &p_shader, const MaterialSlot &p_slot, bool p_hidden_mask);
+	void attach_program(LookMaterial &r_out, const SurfaceShader &p_shader, const MaterialSlot &p_slot,
+			bool p_hidden_mask, LookPrograms p_programs = LookPrograms::Masks);
 
 	const core::LevelMount *mount_ = nullptr;
 	ShaderLookup shaders_;

@@ -884,8 +884,9 @@ core::Result<TranslatedProgram> LookResolver::translate(
 	return translate_program(request);
 }
 
-void LookResolver::attach_program(
-		LookMaterial &r_out, const SurfaceShader &p_shader, const MaterialSlot &p_slot, bool p_hidden_mask) {
+void LookResolver::attach_program(LookMaterial &r_out, const SurfaceShader &p_shader, const MaterialSlot &p_slot,
+		bool p_hidden_mask, LookPrograms p_programs) {
+	const bool deferred = p_programs == LookPrograms::Deferred;
 	ProgramInfo &info = program_info(p_shader);
 	if (!r_out.color) {
 		r_out.flat_colour = info.flat_colour;
@@ -908,12 +909,18 @@ void LookResolver::attach_program(
 		return;
 	}
 	std::vector<std::string> textures;
+	std::vector<std::string> parameters;
 	uint64_t srgb = 0;
 	for (size_t i = 0; i < info.used.size(); ++i) {
 		const ProgramBinding &b = info.bindings.at(info.used[i]);
+		parameters.push_back(b.parameter.empty() ? b.name : b.parameter);
 		const std::string name = b.parameter.empty() ? b.name : to_lower_ascii(p_slot.texture(b.parameter));
-		const HeaderInfo *h = name.empty() ? nullptr : header(name);
 		const bool cube = std::find(info.cubes.begin(), info.cubes.end(), info.used[i]) != info.cubes.end();
+		if (deferred && name.empty() && !b.parameter.empty() && !cube) {
+			textures.push_back(name);
+			continue;
+		}
+		const HeaderInfo *h = name.empty() ? nullptr : header(name);
 		if (h == nullptr || h->kind != (cube ? core::res::TextureKind::Cube : core::res::TextureKind::Texture2D)) {
 			r_out.graph_refusal = "texture " + (b.parameter.empty() ? name : b.parameter + " " + name) + " is not a " +
 					(cube ? "cube" : "2D") + " texture";
@@ -933,7 +940,7 @@ void LookResolver::attach_program(
 		r_out.graph_plain = true;
 		return;
 	}
-	if (info.target == ProgramTarget::Deferred && !mask_colour && !pages) {
+	if (info.target == ProgramTarget::Deferred && !mask_colour && !pages && !deferred) {
 		return;
 	}
 	auto variant = info.variants.find(srgb);
@@ -966,10 +973,11 @@ void LookResolver::attach_program(
 	}
 	r_out.graph = variant->second;
 	r_out.graph_textures = std::move(textures);
+	r_out.graph_parameters = std::move(parameters);
 	r_out.graph_constants = std::move(constants);
 }
 
-LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view p_mesh) {
+LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view p_mesh, LookPrograms p_programs) {
 	const Clock::time_point start = Clock::now();
 	LookMaterial out;
 	std::vector<std::string> shader_names;
@@ -1167,7 +1175,7 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	out.color = std::move(color);
 	if (shader != nullptr && !out.graph && out.blend != LookBlend::Blend &&
 			!contains_any(shader_name, kCharacterBackdropWords)) {
-		attach_program(out, *shader, p_slot, false);
+		attach_program(out, *shader, p_slot, false, p_programs);
 	}
 	if (shader != nullptr) {
 		if (!shader->solutions.empty()) {

@@ -50,6 +50,8 @@ struct GameVehiclesStats {
 	uint64_t husk_effects = 0;
 	uint32_t husks_live = 0;
 	uint64_t fx_failures = 0;
+	uint32_t program_materials = 0;
+	uint32_t look_materials = 0;
 };
 
 struct OwnVehicleSeat {

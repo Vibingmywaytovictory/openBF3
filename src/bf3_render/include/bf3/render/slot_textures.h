@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/superbundle_mount.h"
+#include "bf3/render/look_materials.h"
 #include "bf3/render/material_lookup.h"
 #include "bf3/render/mesh_prep.h"
 #include "bf3/render/texture_prep.h"
@@ -19,6 +20,7 @@ struct SlotTextureWants {
 	std::set<std::string> seen;
 
 	void add(const MeshMaterials &p_materials, std::span<const PreparedSurface> p_surfaces);
+	void add_looks(std::span<const LookMaterial> p_looks, std::span<const PreparedSurface> p_surfaces);
 };
 
 std::vector<PreparedTexture> load_slot_textures(const core::LevelMount &p_mount, const SlotTextureWants &p_wants,

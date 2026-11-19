@@ -28,6 +28,7 @@ godot_run(SKIP_WITHOUT_INSTALL TIMEOUT ${timeout}
         "--bf3-cache=${cache}" ${audio_args} ${zoom_args})
 godot_require_pass("VEHICLE DRIVE: PASS")
 godot_require_pass("\\[level\\] install unchanged: yes")
+godot_require_pass("\\[game\\] vehicles built: [^\n]*; [1-9][0-9]* materials drawn through their shader's program")
 if(ZOOM)
     godot_require_pass("VEHICLE DRIVE ROW tank_drive PASS")
     godot_require_pass("VEHICLE DRIVE ROW tank_turn PASS")
