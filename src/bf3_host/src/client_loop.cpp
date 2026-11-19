@@ -156,7 +156,8 @@ void ClientLoop::client_tick(uint64_t p_now) {
 		prediction.fill_base(c);
 		const sim::PredictionEntry *base = prediction.entry(c - 1u);
 		cmd = input.sample(c, prediction.own_life(), prediction.spawn_state());
-		gunplay.command_made(cmd, input.latest(), prediction.own_life(), p_now, link.have_snapshot(), link.newest_seq(), *build);
+		gunplay.command_made(cmd, input.latest(), prediction.own_life(), p_now,
+				vehicle_prediction.seat_at(c).has_value(), link.have_snapshot(), link.newest_seq(), *build);
 		match.restrict(cmd);
 		vehicle_prediction.step(cmd);
 		if (prediction.step(base, cmd)) {

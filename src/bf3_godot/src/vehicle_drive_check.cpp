@@ -41,6 +41,8 @@ constexpr float kDriveMetres = 4.0f;
 constexpr float kOffLine = 1.5f;
 constexpr const char *kJeep = "vehicles/growleritv/growleritv";
 constexpr const char *kTank = "vehicles/m1a2/m1abrams";
+constexpr const char *kIfv = "vehicles/bmp2/bmp2";
+constexpr double kGunHold = 1.0;
 constexpr double kZoomSettle = 0.5;
 constexpr double kTankThrottle = 3.0;
 constexpr double kTankSteer = 2.0;
@@ -277,6 +279,153 @@ bool VehicleDriveRun::after_exit(InputMapper &r_mapper, const VehicleDriveInputs
 	}
 }
 
+bool VehicleDriveRun::guns(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in) {
+	const host::PresentationFrame &f = r_session.frame();
+	InputMapper &mapper = r_session.mapper();
+	const host::LevelVehicles &lv = *p_in.vehicles->level();
+	const std::optional<OwnVehicleSeat> seat = p_in.vehicles->own_seat();
+	const char *name = ifv_ ? "ifv" : "tank";
+	switch (phase_) {
+		case Phase::GunPick: {
+			const host::PresentedVehicle *best = parked(f, lv, kIfv);
+			if (best == nullptr || t_ < kPickSettle) {
+				return t_ > kPickTimeout ? fail("ifv_pick", fmt("no parked upright BMP-2 after %.0f s", kPickTimeout))
+										 : false;
+			}
+			host::ClientSession *client = r_session.client();
+			if (client == nullptr) {
+				return fail("ifv_pick", "no client session");
+			}
+			spawner_ = best->spawner;
+			const float reach = 0.6f * lv.kinds[lv.spawners[spawner_].kind].entry_radius;
+			const std::optional<GameVehicleView> view = p_in.vehicles->view(spawner_);
+			const Vector3 side = view ? view->body.basis.get_column(0) : Vector3(1, 0, 0);
+			const float n = std::max(1e-3f, std::sqrt(side.x * side.x + side.z * side.z));
+			net::DebugRequest q;
+			q.kind = net::DebugKind::Teleport;
+			q.id = ++request_id_;
+			q.position = { best->com_position[0] + reach * side.x / n, best->com_position[1] + 0.5f,
+				best->com_position[2] + reach * side.z / n };
+			q.yaw = sim::quantize_yaw(-0.5f * sim::kPi);
+			client->send_debug(q);
+			row("ifv_pick", true,
+					fmt("BMP-2 of spawner %u at (%.1f, %.1f, %.1f)", unsigned(spawner_), double(best->com_position[0]),
+							double(best->com_position[1]), double(best->com_position[2])));
+			enter(Phase::GunWalk);
+			return false;
+		}
+		case Phase::GunWalk: {
+			const host::PresentedVehicle *v = presented(f, spawner_);
+			if (v == nullptr) {
+				return fail("ifv_walk", "the BMP-2 went away");
+			}
+			const float dx = f.own_curr.position[0] - v->com_position[0],
+						dz = f.own_curr.position[2] - v->com_position[2];
+			const float reach = lv.kinds[lv.spawners[spawner_].kind].entry_radius;
+			if (std::sqrt(dx * dx + dz * dz) > reach || t_ < 0.5) {
+				return t_ > kWalkTimeout
+						? fail("ifv_walk",
+								  fmt("not within %.2f m of the BMP-2 after %.0f s", double(reach), kWalkTimeout))
+						: false;
+			}
+			mapper.script_hold(InputMapper::VehicleAction::Use, true);
+			enter(Phase::GunEnter);
+			return false;
+		}
+		case Phase::GunEnter:
+			if (t_ >= kKeyHold) {
+				mapper.script_hold(InputMapper::VehicleAction::Use, false);
+			}
+			if (!seat || seat->spawner != spawner_ || t_ < kSettle) {
+				return t_ > kSeatTimeout ? fail("ifv_enter", "the use key did not seat the soldier in the BMP-2")
+										 : false;
+			}
+			mapper.script_hold(InputMapper::VehicleAction::Use, false);
+			row("ifv_enter", seat->seat == 0,
+					fmt("seat %u of spawner %u", unsigned(seat->seat), unsigned(seat->spawner)));
+			gun_seat_ = 0;
+			enter(Phase::GunFire);
+			return false;
+		case Phase::GunFire:
+			if (!seat || seat->spawner != spawner_ || seat->seat != gun_seat_) {
+				return t_ > kSeatTimeout
+						? fail(std::string(name) + "_fire",
+								  fmt("not in seat %u of spawner %u", unsigned(gun_seat_ + 1u), unsigned(spawner_)))
+						: false;
+			}
+			gun_before_ = f.stats.vehicle_shots;
+			sounds_before_ = p_in.weapon_sounds;
+			mapper.script_hold(InputMapper::WeaponAction::Fire, true);
+			enter(Phase::GunFired);
+			return false;
+		case Phase::GunFired: {
+			if (t_ < kGunHold) {
+				return false;
+			}
+			mapper.script_hold(InputMapper::WeaponAction::Fire, false);
+			if (t_ < kGunHold + kSettle) {
+				return false;
+			}
+			const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[spawner_].kind];
+			const core::gameplay::WeaponDef *def = nullptr;
+			std::string firing;
+			for (size_t w = 0; kind.armament != nullptr && w < kind.armament->weapons.size() &&
+					w < kind.weapon_defs.size() && def == nullptr;
+					++w) {
+				const sim::vehicles::ArmamentWeapon &a = kind.armament->weapons[w];
+				if (a.seat == int8_t(gun_seat_) && sim::vehicles::weapon_in_stance(a, 0) &&
+						kind.weapon_defs[w] < lv.weapons.size()) {
+					def = &lv.weapons[kind.weapon_defs[w]];
+					firing = a.firing;
+				}
+			}
+			const uint64_t fired = f.stats.vehicle_shots - gun_before_;
+			const uint64_t heard = p_in.weapon_sounds - sounds_before_;
+			const bool automatic = def != nullptr && def->fire.logic == core::gameplay::FireLogic::Automatic;
+			const bool one_per_reload =
+					def != nullptr && def->fire.magazine_capacity == 1 && def->fire.reload_time > float(kGunHold);
+			const bool rule =
+					def != nullptr && (automatic ? fired >= 2u : (one_per_reload ? fired == 1u : fired >= 1u));
+			const std::string row_name = std::string(name) + (gun_seat_ == 0 ? "_main_gun" : "_gunner");
+			row(row_name, seat.has_value() && seat->seat == gun_seat_ && rule && p_in.audio && heard > 0u,
+					fmt("seat %u's fire key held %.1f s presented %llu vehicle shots and started %llu weapon sounds "
+						"(audio %s); the seat's weapon %s: logic %d, %.0f rounds/min, magazine %d, reload %.2f s",
+							unsigned(gun_seat_ + 1u), kGunHold, (unsigned long long)fired, (unsigned long long)heard,
+							p_in.audio ? "on" : "off", def != nullptr ? firing.c_str() : "none",
+							def != nullptr ? int(def->fire.logic) : -1,
+							def != nullptr ? double(def->fire.rate_of_fire) : 0.0,
+							def != nullptr ? int(def->fire.magazine_capacity) : 0,
+							def != nullptr ? double(def->fire.reload_time) : 0.0));
+			shoot(p_in, (row_name + "_3p").c_str());
+			if (gun_seat_ != 0) {
+				phase_ = Phase::Done;
+				return true;
+			}
+			mapper.script_hold(InputMapper::VehicleAction::Seat2, true);
+			enter(Phase::GunSeat);
+			return false;
+		}
+		case Phase::GunSeat:
+			if (t_ >= kKeyHold) {
+				mapper.script_hold(InputMapper::VehicleAction::Seat2, false);
+			}
+			if (!seat || seat->seat != 1) {
+				return t_ > kSeatTimeout
+						? fail(std::string(name) + "_gunner", "the second seat key did not move him to the gunner seat")
+						: false;
+			}
+			mapper.script_hold(InputMapper::VehicleAction::Seat2, false);
+			if (t_ < kSettle) {
+				return false;
+			}
+			gun_seat_ = 1;
+			enter(Phase::GunFire);
+			return false;
+		default:
+			return true;
+	}
+}
+
 void VehicleDriveRun::row(const std::string &p_name, bool p_pass, const std::string &p_detail) {
 	++rows_;
 	failures_ += p_pass ? 0 : 1;
@@ -370,7 +519,7 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 					fmt("the primary held %.1f s before the ride fired %llu shots in mode %u, magazine %d -> %d",
 							kFireHold, (unsigned long long)armed_shots_, unsigned(spawn_mode_), int(spawn_magazine_),
 							int(armed_magazine_)));
-			enter(Phase::Pick);
+			enter(ifv_ ? Phase::GunPick : Phase::Pick);
 			return false;
 		}
 		case Phase::Pick: {
@@ -773,8 +922,16 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 				return false;
 			}
 			shoot(p_in, "tank_3p");
-			phase_ = Phase::Done;
-			return true;
+			gun_seat_ = 0;
+			enter(Phase::GunFire);
+			return false;
+		case Phase::GunPick:
+		case Phase::GunWalk:
+		case Phase::GunEnter:
+		case Phase::GunFire:
+		case Phase::GunFired:
+		case Phase::GunSeat:
+			return guns(r_session, p_in);
 		case Phase::Done:
 			return true;
 	}

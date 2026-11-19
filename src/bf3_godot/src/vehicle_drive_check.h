@@ -34,6 +34,8 @@ struct VehicleDriveInputs {
 	const godot::Camera3D *camera = nullptr;
 	uint32_t camera_counter = 0;
 	uint64_t own_shots = 0;
+	bool audio = false;
+	uint64_t weapon_sounds = 0;
 	const EorFlash *flash = nullptr;
 	float vehicle_black = 0.0f;
 	std::function<void()> deploy;
@@ -42,7 +44,8 @@ struct VehicleDriveInputs {
 
 class VehicleDriveRun {
 public:
-	VehicleDriveRun(std::string p_shots, bool p_zoom) : shots_(std::move(p_shots)), zoom_(p_zoom) {}
+	VehicleDriveRun(std::string p_shots, bool p_zoom, bool p_ifv) :
+			shots_(std::move(p_shots)), zoom_(p_zoom), ifv_(p_ifv) {}
 	bool step(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in, double p_delta);
 	int exit_code() const { return failures_ == 0 && rows_ > 0 ? 0 : 1; }
 
@@ -73,6 +76,12 @@ private:
 		TankTurn,
 		TurretTurn,
 		TankChase,
+		GunPick,
+		GunWalk,
+		GunEnter,
+		GunFire,
+		GunFired,
+		GunSeat,
 		Done
 	};
 
@@ -84,9 +93,14 @@ private:
 	void turret_rows(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in);
 	void track_fade(const VehicleDriveInputs &p_in);
 	bool after_exit(InputMapper &r_mapper, const VehicleDriveInputs &p_in);
+	bool guns(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in);
 
 	std::string shots_;
 	bool zoom_ = false;
+	bool ifv_ = false;
+	uint8_t gun_seat_ = 0;
+	uint64_t gun_before_ = 0;
+	uint64_t sounds_before_ = 0;
 	float regular_fov_ = 0.0f;
 	float turn_ = 0.0f;
 	float shown_black_ = 0.0f;

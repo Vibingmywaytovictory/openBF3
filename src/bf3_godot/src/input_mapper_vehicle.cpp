@@ -2,6 +2,7 @@
 
 #include "bf3/sim/vehicles/vehicle_input.h"
 
+#include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/input_map.hpp>
@@ -146,6 +147,10 @@ void InputMapper::vehicle_sample(bf3::host::InputSample &r_sample) const {
 	if (held(vehicle_.seated ? VehicleAction::Exit : VehicleAction::Use)) {
 		r_sample.held_buttons |= sim::buttons::kUse;
 	}
+	if (vehicle_.seated && seat_weapons_live()) {
+		r_sample.held_buttons |= held(WeaponAction::Fire) ? sim::buttons::kFire : 0u;
+		r_sample.held_buttons |= held(WeaponAction::Reload) ? sim::buttons::kReload : 0u;
+	}
 	std::optional<uint8_t> seat;
 	for (uint8_t k = 0; k < sim::vehicles::kSeatKeys && !seat; ++k) {
 		if (held(VehicleAction(uint8_t(VehicleAction::Seat1) + k))) {
@@ -153,6 +158,11 @@ void InputMapper::vehicle_sample(bf3::host::InputSample &r_sample) const {
 		}
 	}
 	r_sample.held_buttons = sim::vehicles::with_seat_request(r_sample.held_buttons, seat);
+}
+
+bool InputMapper::seat_weapons_live() const {
+	return weapon_.enabled && !tdm_.rose_open &&
+			(scripted_ || captured_ || DisplayServer::get_singleton()->get_name() == String("headless"));
 }
 
 void InputMapper::vehicle_axes(bf3::host::InputSample &r_sample) const {

@@ -542,7 +542,7 @@ bool InputMapper::weapon_handle_event(const Ref<InputEvent> &p_event) {
 			return false;
 		}
 		if (p_event->is_action_pressed(weapon_action_name(WeaponAction::Fire), false, false)) {
-			if (weapon_.allowed && !weapon_.swallow_fire && !tdm_.rose_open) {
+			if ((weapon_.allowed || vehicle_.seated) && !weapon_.swallow_fire && !tdm_.rose_open) {
 				++weapon_.fire_presses;
 			}
 		} else if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP && weapon_.allowed) {
@@ -588,7 +588,7 @@ void InputMapper::script_hold(WeaponAction p_action, bool p_held) {
 void InputMapper::script_press(WeaponAction p_action) {
 	switch (p_action) {
 		case WeaponAction::Fire:
-			if (weapon_.allowed && !free_camera_) {
+			if ((weapon_.allowed || vehicle_.seated) && !free_camera_) {
 				++weapon_.fire_presses;
 			}
 			break;

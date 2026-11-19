@@ -619,8 +619,8 @@ bool ClientGunplay::reconcile_after_match(const sim::SoldierState &p_s) {
 	return weapon_reconciliations_ + weapon_ring_misses_ != before;
 }
 
-void ClientGunplay::command_made(sim::Command &r_command, const InputSample &p_input, uint32_t p_own_life, uint64_t p_now, bool p_have_snapshot,
-		uint16_t p_newest_seq, const PresentationFrame &p_built) {
+void ClientGunplay::command_made(sim::Command &r_command, const InputSample &p_input, uint32_t p_own_life,
+		uint64_t p_now, bool p_seated, bool p_have_snapshot, uint16_t p_newest_seq, const PresentationFrame &p_built) {
 	const InputSample &s = p_input;
 	const bool pressed = fire_seen_ && s.fire_presses != last_fire_presses_;
 	fire_seen_ = true;
@@ -628,7 +628,7 @@ void ClientGunplay::command_made(sim::Command &r_command, const InputSample &p_i
 	if (pressed && s.life >= p_own_life && !s.free_camera) {
 		r_command.buttons |= sim::buttons::kFire;
 	}
-	if ((r_command.buttons & sim::buttons::kFire) != 0 && fire_needs_lock(r_command) &&
+	if ((r_command.buttons & sim::buttons::kFire) != 0 && !p_seated && fire_needs_lock(r_command) &&
 			!(own_lock_ && own_lock_->locked)) {
 		r_command.buttons &= ~sim::buttons::kFire;
 		++lock_stripped_fire_;

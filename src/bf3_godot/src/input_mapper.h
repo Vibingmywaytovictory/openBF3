@@ -266,6 +266,7 @@ private:
 	void vehicle_poll();
 	void vehicle_sample(bf3::host::InputSample &r_sample) const;
 	void vehicle_axes(bf3::host::InputSample &r_sample) const;
+	bool seat_weapons_live() const;
 	struct VehicleKeys {
 		bool installed = false;
 		bool seated = false;

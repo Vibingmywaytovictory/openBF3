@@ -1313,6 +1313,7 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_godot_row(godot.vehicle_drive godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DZOOM=1)
     openbf3_godot_row(godot.vehicle_drive.lag godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DNETSIM=lat=50)
     openbf3_godot_row(godot.vehicle_drive.audio godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DAUDIO=1)
+    openbf3_godot_row(godot.vehicle_drive.ifv godot_vehicle_drive.cmake WINDOW TIMEOUT 240 ARGS -DIFV=1)
     set_tests_properties(godot.gadgets_draw godot.vault_run godot.vehicle_drive godot.vehicle_drive.lag godot.vehicle_drive.audio PROPERTIES RUN_SERIAL TRUE)
     openbf3_cost(godot.gadgets_draw 1 30)
     openbf3_cost(godot.vault_run 1 17)

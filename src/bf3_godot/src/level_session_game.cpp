@@ -312,8 +312,8 @@ void Bf3LevelSession::game_parse_args() {
 		g.gadgets_draw = std::make_unique<GadgetsDrawRun>();
 	}
 	if (has_check_arg("vehicle-drive")) {
-		g.vehicle_drive =
-				std::make_unique<VehicleDriveRun>(user_arg_value("vehicle-shots"), has_user_arg("vehicle-zoom"));
+		g.vehicle_drive = std::make_unique<VehicleDriveRun>(
+				user_arg_value("vehicle-shots"), has_user_arg("vehicle-zoom"), has_user_arg("vehicle-ifv"));
 	}
 	if (has_check_arg("vault-run")) {
 		g.vault_run = std::make_unique<VaultRunCheck>(user_arg_value("vault-shots"));
@@ -1686,6 +1686,11 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		in.camera = cameras_.first_person();
 		in.camera_counter = g.vehicle_camera;
 		in.own_shots = g.own_shots_seen;
+		if (g.audio != nullptr) {
+			const audio::WeaponAudioStats router = g.audio->stats().router;
+			in.audio = true;
+			in.weapon_sounds = router.bursts + router.one_shots;
+		}
 		in.flash = g.tdm != nullptr ? g.tdm->eor_flash.get() : nullptr;
 		in.vehicle_black = g.vehicle_black;
 		in.deploy = [this] {
