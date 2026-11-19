@@ -3,10 +3,10 @@
 #include "game_frame.h"
 
 #include "bf3/core/result.h"
-#include "bf3/host/logic_effect_feed.h"
 #include "bf3/fx/placed_effects.h"
 #include "bf3/fx/simulator.h"
 #include "bf3/fx/triggers.h"
+#include "bf3/host/logic_effect_feed.h"
 
 #include <cstdint>
 #include <memory>
@@ -41,6 +41,8 @@ struct GameFxStats {
 	uint64_t muzzles_dropped = 0;
 	uint64_t start_effect_calls = 0, start_effect_failures = 0;
 	uint32_t texture_fallbacks = 0;
+	uint32_t effect_meshes = 0, effect_meshes_failed = 0;
+	uint32_t mesh_particles = 0, mesh_particles_undrawn = 0;
 	double load_seconds = 0;
 	fx::PlacedEffectStats placed;
 };

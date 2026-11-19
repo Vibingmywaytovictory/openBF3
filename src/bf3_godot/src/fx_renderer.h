@@ -3,6 +3,7 @@
 #include "bf3/fx/atlas_pixels.h"
 #include "bf3/fx/render_prep.h"
 #include "bf3/fx/simulator.h"
+#include "fx_meshes.h"
 
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/node3d.hpp>
@@ -62,6 +63,7 @@ public:
 	void draw(const bf3::fx::FxWorld &p_world, const bf3::fx::FxView &p_view, const bf3::fx::EmitterAtlas &p_atlas);
 
 	void hide_all();
+	void set_meshes(FxMeshes *p_meshes) { meshes_ = p_meshes; }
 
 	void clear();
 
@@ -97,7 +99,7 @@ private:
 	std::array<Light, bf3::fx::kMaxFxLights> lights_{};
 	godot::RID scenario_;
 	godot::Ref<godot::Resource> quad_mesh_;
-	godot::Ref<godot::Resource> box_mesh_;
+	FxMeshes *meshes_ = nullptr;
 	godot::Ref<godot::Texture2D> base_atlas_;
 	godot::Ref<godot::Texture2D> normal_atlas_;
 	godot::Ref<godot::ImageTexture> params_tex_;

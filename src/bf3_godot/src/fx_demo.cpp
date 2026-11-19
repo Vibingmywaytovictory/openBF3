@@ -1,5 +1,7 @@
 #include "fx_demo.h"
 
+#include "fx_meshes.h"
+
 #include "godot_cache.h"
 #include "godot_util.h"
 #include "level_session.h"
@@ -16,6 +18,9 @@
 #include "bf3/core/util/text.h"
 #include "bf3/fx/atlas_pixels.h"
 #include "bf3/fx/effect_compiler.h"
+#include "bf3/fx/placed_effects.h"
+#include "bf3/fx/triggers.h"
+#include "bf3/render/effect_meshes.h"
 #include "bf3/sim/collision_world.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
@@ -24,6 +29,7 @@
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -174,6 +180,7 @@ struct Bf3FxDemo::Loaded {
 	fx::AtlasPixels pixels;
 	std::unique_ptr<fx::EffectLibrary> library;
 	std::shared_ptr<const fx::EffectDef> oilfire, muzzle, fillout, shell, smoke, stress;
+	FxMeshes meshes;
 	std::optional<uint8_t> bullet;
 	std::string error;
 	std::vector<std::string> notes;
@@ -330,6 +337,17 @@ void Bf3FxDemo::start_loader() {
 				out->oilfire = std::make_shared<const fx::EffectDef>(std::move(*d));
 			}
 			out->stress = light_stress_def();
+			std::vector<std::string> mesh_names;
+			for (const std::shared_ptr<const fx::EffectDef> &d :
+					{ out->muzzle, out->fillout, out->shell, out->smoke, out->oilfire, out->stress }) {
+				fx::collect_mesh_names(*d, mesh_names);
+			}
+			for (const std::string &n : fx::impact_effect_names(*out->impacts)) {
+				if (bf3::core::Result<std::shared_ptr<const fx::EffectDef>> d = out->library->get(n)) {
+					fx::collect_mesh_names(**d, mesh_names);
+				}
+			}
+			out->meshes.load(bf3::render::load_effect_meshes(lib, lib.mount(0), mesh_names, out->cache.get()));
 			out->seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 		};
 		body();
@@ -570,6 +588,11 @@ bool Bf3FxDemo::build(std::string *r_error) {
 		*r_error = err;
 		return false;
 	}
+	if (!loaded_->meshes.build(renderer_->get_world_3d()->get_scenario(), &err)) {
+		*r_error = err;
+		return false;
+	}
+	renderer_->set_meshes(&loaded_->meshes);
 	const fx::EmitterAtlas &atlas = *loaded_->atlas;
 	atlas_entries_ = uint32_t(atlas.entries().size());
 	for (const fx::AtlasEntry &e : atlas.entries()) {
@@ -870,8 +893,8 @@ void Bf3FxDemo::report_and_finish() {
 		report_.push_back("           " + l);
 	}
 	row("stats", true,
-			fmt("mesh stand-ins (last frame) %u, params uploads %llu, MultiMesh capacity %u", ps.mesh_standins, (unsigned long long)renderer_->stats().params_uploads,
-					renderer_->stats().capacity));
+			fmt("mesh particles (last frame) %u, params uploads %llu, MultiMesh capacity %u", ps.mesh_instances,
+					(unsigned long long)renderer_->stats().params_uploads, renderer_->stats().capacity));
 	for (const std::string &n : notes_) {
 		report_.push_back("           " + n);
 	}
@@ -903,7 +926,11 @@ void Bf3FxDemo::shutdown() {
 		loader_.join();
 	}
 	if (renderer_ != nullptr) {
+		renderer_->set_meshes(nullptr);
 		renderer_->clear();
+	}
+	if (loaded_) {
+		loaded_->meshes.clear();
 	}
 	world_.reset();
 	world_collision_.reset();

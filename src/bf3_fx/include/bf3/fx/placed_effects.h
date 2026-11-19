@@ -6,19 +6,15 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace bf3::fx {
 
 inline constexpr uint32_t kNoPlacedLogicNode = 0xFFFFFFFFu;
 
-struct DrawableEffect {
-	std::shared_ptr<const EffectDef> def;
-	uint32_t mesh_emitters = 0;
-};
-
-DrawableEffect without_mesh_emitters(const std::shared_ptr<const EffectDef> &p_def);
-
+uint32_t mesh_emitter_count(const EffectDef &p_def);
+void collect_mesh_names(const EffectDef &p_def, std::vector<std::string> &r_names);
 
 struct PlacedEffectStats {
 	uint32_t placed = 0;

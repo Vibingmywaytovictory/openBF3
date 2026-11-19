@@ -88,6 +88,8 @@ target_sources(bf3_render PRIVATE
 target_sources(bf3_render PRIVATE
     include/bf3/render/deployed_gadgets.h
     src/deployed_gadgets.cpp
+    include/bf3/render/effect_meshes.h
+    src/effect_meshes.cpp
     include/bf3/render/slot_textures.h
     src/slot_textures.cpp
     include/bf3/render/vehicle_meshes.h

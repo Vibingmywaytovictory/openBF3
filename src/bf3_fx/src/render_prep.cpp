@@ -194,6 +194,7 @@ struct RenderPrep::Impl {
 	std::vector<FxLight> lights;
 	std::vector<FxLight> candidates;
 	std::vector<FxEmitterParams> params;
+	std::vector<const std::string *> row_meshes;
 	std::array<std::vector<OutputRef>, kMaxFxBatches> per_batch;
 	std::unordered_map<const EmitterDef *, Resolved> resolved;
 	const EmitterAtlas *atlas = nullptr;
@@ -259,6 +260,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 	const Vec3 view_up = axes.up;
 
 	m.params.resize(outputs.size());
+	m.row_meshes.assign(outputs.size(), nullptr);
 	m.candidates.clear();
 	for (std::vector<OutputRef> &b : m.per_batch) {
 		b.clear();
@@ -272,6 +274,9 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 			continue;
 		}
 		const EmitterDef &e = o.def->emitters[o.emitter];
+		if (e.tmpl.emittable == EmittableType::ParticleMesh && !e.tmpl.mesh.empty()) {
+			m.row_meshes[i] = &e.tmpl.mesh;
+		}
 		const Resolved &r = m.resolve(e, p_atlas);
 		if (r.fallback && o.particle_count > 0) {
 			++unresolved;
@@ -339,7 +344,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 
 	m.batches.clear();
 	m.instances.resize(particles.size());
-	uint32_t written = 0, standins = 0, first_person = 0;
+	uint32_t written = 0, mesh_instances = 0, first_person = 0;
 	for (size_t pass = 0; pass < kFxPassCount; ++pass) {
 		for (const FxBlend blend : kBlendDrawOrder) {
 			for (size_t sc = 0; sc < kFxShaderClassCount; ++sc) {
@@ -407,9 +412,9 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 								const Vec3 c1{ -cy * sz + sy * sx * cz, cx * cz, sy * sz + cy * sx * cz };
 								const Vec3 c2{ sy * cx, -sx, cy * cx };
 								const float sz3 = p.size.z != 0.0f ? p.size.z : p.size.x;
-								const float u = kFxMeshStandinMeters;
-								put_transform(in.transform, scale(c0, p.size.x * u), scale(c1, p.size.y * u), scale(c2, sz3 * u), p.position);
-								++standins;
+								put_transform(in.transform, scale(c0, p.size.x), scale(c1, p.size.y), scale(c2, sz3),
+										p.position);
+								++mesh_instances;
 								break;
 							}
 						}
@@ -457,7 +462,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 	st.lights_dropped += m.candidates.size() - keep;
 	st.unresolved_textures += unresolved;
 	st.unresolved_this_frame = unresolved;
-	st.mesh_standins = standins;
+	st.mesh_instances = mesh_instances;
 	st.first_person_instances = first_person;
 	++st.frames;
 	st.prepare_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
@@ -477,6 +482,10 @@ std::span<const FxLight> RenderPrep::lights() const {
 
 std::span<const FxEmitterParams> RenderPrep::emitter_params() const {
 	return impl_->params;
+}
+
+const std::string *RenderPrep::row_mesh(uint32_t p_row) const {
+	return p_row < impl_->row_meshes.size() ? impl_->row_meshes[p_row] : nullptr;
 }
 
 const RenderPrepStats &RenderPrep::stats() const {

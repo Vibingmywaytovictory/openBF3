@@ -65,7 +65,7 @@ void check_placed_effects(const char *p_level, const char *p_mode, const PlacedC
 	for (const level::PlacedObject &o : (*world)->objects) {
 		effect_objects += o.kind == level::ObjectKind::Effect ? 1 : 0;
 	}
-	std::map<std::string, fx::DrawableEffect> defs;
+	std::map<std::string, std::shared_ptr<const fx::EffectDef>> defs;
 	fx::PlacedEffects effects;
 	size_t auto_start = 0, mesh_emitters = 0;
 	for (const level::PlacedEffect &e : *placed) {
@@ -75,21 +75,19 @@ void check_placed_effects(const char *p_level, const char *p_mode, const PlacedC
 			ctx.db = &lvl.db();
 			Result<fx::EffectDef> def = fx::compile_effect(e.blueprint, ctx);
 			REQUIRE_MESSAGE(def.ok(), e.blueprint << ": " << (def.ok() ? std::string() : def.error().message));
-			found = defs.emplace(e.blueprint,
-								fx::without_mesh_emitters(std::make_shared<const fx::EffectDef>(std::move(*def))))
-							.first;
+			found = defs.emplace(e.blueprint, std::make_shared<const fx::EffectDef>(std::move(*def))).first;
 		}
-		mesh_emitters += found->second.mesh_emitters;
+		mesh_emitters += fx::mesh_emitter_count(*found->second);
 		auto_start += e.auto_start ? 1 : 0;
 		fx::Transform t;
 		t.right = e.transform.right;
 		t.up = e.transform.up;
 		t.forward = e.transform.forward;
 		t.trans = e.transform.trans;
-		effects.add(found->second.def, t, e.auto_start);
+		effects.add(found->second, t, e.auto_start);
 	}
-	std::printf("%s %s: %zu effect objects, %zu placed effects of %zu blueprints, %zu start at load, %zu mesh emitters "
-				"not drawn\n",
+	std::printf(
+			"%s %s: %zu effect objects, %zu placed effects of %zu blueprints, %zu start at load, %zu mesh emitters\n",
 			p_level, p_mode, effect_objects, placed->size(), defs.size(), auto_start, mesh_emitters);
 	CHECK(placed->size() == effect_objects);
 	CHECK(placed->size() == p_data.placed);
@@ -200,19 +198,20 @@ TEST_SUITE("placed-effects-unit") {
 		CHECK(placed.stats().running == 1);
 	}
 
-	TEST_CASE("placed effects: mesh particle emitters are left out, not drawn as boxes") {
+	TEST_CASE("placed effects: mesh particle emitters are counted and their meshes named once") {
 		fx::EmitterDef quad = fxt::emitter_def("quad", 4, 2.0f, 1.0f);
 		fx::EmitterDef mesh = fxt::emitter_def("mesh", 4, 2.0f, 1.0f);
 		mesh.tmpl.emittable = fx::EmittableType::ParticleMesh;
-		const std::shared_ptr<const fx::EffectDef> def = fxt::effect_def("placed/mixed", { quad, mesh }, { 0, 1 });
-		const fx::DrawableEffect drawable = fx::without_mesh_emitters(def);
-		CHECK(drawable.mesh_emitters == 1);
-		REQUIRE(drawable.def != nullptr);
-		REQUIRE(drawable.def->components.size() == 1);
-		CHECK(drawable.def->components[0].emitter == 0);
-		const fx::DrawableEffect plain = fx::without_mesh_emitters(fxt::effect_def("placed/quad", { quad }));
-		CHECK(plain.mesh_emitters == 0);
-		CHECK(plain.def->components.size() == 1);
+		mesh.tmpl.mesh = "fx/meshparticles/a_mesh";
+		const std::shared_ptr<const fx::EffectDef> def =
+				fxt::effect_def("placed/mixed", { quad, mesh, mesh }, { 0, 1, 2 });
+		CHECK(fx::mesh_emitter_count(*def) == 2);
+		std::vector<std::string> names;
+		fx::collect_mesh_names(*def, names);
+		fx::collect_mesh_names(*def, names);
+		REQUIRE(names.size() == 1);
+		CHECK(names[0] == "fx/meshparticles/a_mesh");
+		CHECK(fx::mesh_emitter_count(*fxt::effect_def("placed/quad", { quad })) == 0);
 	}
 }
 

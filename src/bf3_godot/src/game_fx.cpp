@@ -1,6 +1,7 @@
 #include "game_fx.h"
 
 #include "fx_decals.h"
+#include "fx_meshes.h"
 #include "fx_renderer.h"
 #include "godot_util.h"
 #include "viewmodel_muzzle.h"
@@ -19,14 +20,17 @@
 #include "bf3/fx/impact_table.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_vehicles.h"
+#include "bf3/render/effect_meshes.h"
 #include "bf3/sim/logic/conquest_data.h"
 
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -66,6 +70,7 @@ struct Bf3GameFx::Impl {
 	std::vector<host::PresentEvent> events;
 	std::unique_ptr<fx::FxTriggers> triggers;
 	fx::PlacedEffects placed;
+	FxMeshes meshes;
 	std::vector<std::optional<sim::logic::PlacedLogicKey>> placed_keys;
 	const core::gameplay::LogicGraph *logic_graph = nullptr;
 	uint64_t logic_generation = 0;
@@ -366,26 +371,69 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 		m.notes.push_back(fmt("preload: %zu blueprints (%zu fire, %zu impact, %zu vehicle), %zu failed, %.3f s",
 				names.size(), m.fire->blueprints().size(), fx::impact_effect_names(*m.impacts).size(), vehicle_names,
 				failed, seconds_since(tp)));
-		std::map<std::string, fx::DrawableEffect, std::less<>> drawable;
+		{
+			const auto tm = std::chrono::steady_clock::now();
+			std::vector<std::string> mesh_names;
+			std::vector<std::shared_ptr<const fx::EffectDef>> defs;
+			for (const std::string &n : names) {
+				if (core::Result<std::shared_ptr<const fx::EffectDef>> def = m.library->get(n)) {
+					fx::collect_mesh_names(**def, mesh_names);
+					defs.push_back(*def);
+				}
+			}
+			m.meshes.load(render::load_effect_meshes(lib, lib.mount(0), mesh_names, p_in.cache));
+			m.stats.effect_meshes = uint32_t(mesh_names.size()) - m.meshes.stats().failed;
+			m.stats.effect_meshes_failed = m.meshes.stats().failed;
+			m.notes.push_back(fmt("effect meshes: %u of %zu loaded, %.2f s", m.stats.effect_meshes, mesh_names.size(),
+					seconds_since(tm)));
+			m.note_errors("effect mesh", m.meshes.notes());
+			std::array<uint32_t, fx::kEmittableTypeCount> kinds{};
+			uint32_t mesh_loaded = 0, lights = 0;
+			for (const std::shared_ptr<const fx::EffectDef> &def : defs) {
+				for (const fx::EmitterDef &e : def->emitters) {
+					++kinds[size_t(e.tmpl.emittable) % kinds.size()];
+					mesh_loaded += e.tmpl.emittable == fx::EmittableType::ParticleMesh && m.meshes.loaded(e.tmpl.mesh)
+							? 1u
+							: 0u;
+					lights += (e.tmpl.flags & fx::kEmitterActAsPointLight) != 0 ? 1u : 0u;
+				}
+			}
+			std::string census =
+					fmt("effects census: %zu of %zu blueprints compiled, emitters", defs.size(), names.size());
+			for (size_t k = 0; k < kinds.size(); ++k) {
+				census += fmt(" %.*s %u", int(fx::emittable_type_name(fx::EmittableType(k)).size()),
+						fx::emittable_type_name(fx::EmittableType(k)).data(), kinds[k]);
+			}
+			census += fmt(
+					", %u ParticleMesh emitters with their mesh loaded, %u point-light emitters", mesh_loaded, lights);
+			m.notes.push_back(census);
+		}
+		std::map<std::string, std::shared_ptr<const fx::EffectDef>, std::less<>> drawable;
 		uint32_t undrawn = 0;
 		for (const core::level::PlacedEffect &e : placed) {
 			auto found = drawable.find(e.blueprint);
 			if (found == drawable.end()) {
-				fx::DrawableEffect d;
+				std::shared_ptr<const fx::EffectDef> d;
 				if (core::Result<std::shared_ptr<const fx::EffectDef>> def = m.library->get(e.blueprint)) {
-					d = fx::without_mesh_emitters(*def);
+					d = *def;
 				} else {
 					m.notes.push_back("placed effect " + e.blueprint + ": " + def.error().message);
 				}
 				found = drawable.emplace(e.blueprint, std::move(d)).first;
 			}
-			undrawn += found->second.mesh_emitters;
+			if (found->second != nullptr) {
+				std::vector<std::string> meshes;
+				fx::collect_mesh_names(*found->second, meshes);
+				for (const std::string &mesh : meshes) {
+					undrawn += m.meshes.loaded(mesh) ? 0u : 1u;
+				}
+			}
 			fx::Transform at;
 			at.right = e.transform.right;
 			at.up = e.transform.up;
 			at.forward = e.transform.forward;
 			at.trans = e.transform.trans;
-			m.placed.add(found->second.def, at, e.auto_start);
+			m.placed.add(found->second, at, e.auto_start);
 			m.placed_keys.push_back(sim::logic::placed_logic_key(*p_in.db->world, e.object));
 		}
 		m.placed.set_undrawn_mesh_emitters(undrawn);
@@ -469,6 +517,10 @@ bool Bf3GameFx::build(Node3D *p_parent, std::string *r_error) {
 	if (!m.decals.build(m.renderer, m.decal_assets, &err)) {
 		return fail("Bf3GameFx::build: " + err);
 	}
+	if (m.renderer->get_world_3d().is_null() || !m.meshes.build(m.renderer->get_world_3d()->get_scenario(), &err)) {
+		return fail("Bf3GameFx::build: " + (err.empty() ? std::string("effect meshes: no world") : err));
+	}
+	m.renderer->set_meshes(&m.meshes);
 	m.stats.decal_textures = m.decals.stats().textures;
 	m.built = true;
 	return true;
@@ -542,6 +594,8 @@ void Bf3GameFx::step(const GameFrame &p_frame) {
 	m.stats.effects_live = m.world->stats().live_effects;
 	m.stats.particles = uint32_t(m.world->particles().size());
 	m.stats.drawn_instances = renderer->stats().drawn_instances;
+	m.stats.mesh_particles = m.meshes.stats().drawn;
+	m.stats.mesh_particles_undrawn = m.meshes.stats().unknown;
 	m.stats.lights = renderer->stats().lights;
 	m.stats.texture_fallbacks = uint32_t(renderer->prep().stats().unresolved_textures);
 	const FxDecalStats &ds = m.decals.stats();
@@ -689,6 +743,10 @@ void Bf3GameFx::shutdown() {
 	}
 	m.placed.forget();
 	m.decals.clear();
+	if (Bf3FxRenderer *r = m.live_renderer()) {
+		r->set_meshes(nullptr);
+	}
+	m.meshes.clear();
 	if (Bf3FxRenderer *r = m.live_renderer()) {
 		r->clear();
 		if (r->is_inside_tree()) {

@@ -4,7 +4,6 @@
 
 #include "godot_util.h"
 
-#include <godot_cpp/classes/box_mesh.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/quad_mesh.hpp>
@@ -155,6 +154,9 @@ void Bf3FxRenderer::set_debug_view(int p_mode) {
 void Bf3FxRenderer::set_first_person_projection(float p_fov_override, float p_z_clip_scale) {
 	fp_fov_ = p_fov_override;
 	fp_z_clip_ = p_z_clip_scale;
+	if (meshes_ != nullptr) {
+		meshes_->set_first_person_projection(fp_fov_, fp_z_clip_);
+	}
 	for (Batch &b : batches_) {
 		if (b.material.is_valid()) {
 			b.material->set_shader_parameter("fp_fov_override", fp_fov_);
@@ -176,10 +178,6 @@ bool Bf3FxRenderer::ensure_resources() {
 	quad.instantiate();
 	quad->set_size(Vector2(1, 1));
 	quad_mesh_ = quad;
-	Ref<BoxMesh> box;
-	box.instantiate();
-	box->set_size(Vector3(1, 1, 1));
-	box_mesh_ = box;
 	std::array<Ref<Shader>, fx::kFxBlendCount> shaders;
 	for (size_t b = 0; b < fx::kFxBlendCount; ++b) {
 		shaders[b] = ResourceLoader::get_singleton()->load(shader_path(fx::FxBlend(b)));
@@ -213,7 +211,7 @@ bool Bf3FxRenderer::ensure_resources() {
 		b.material->set_shader_parameter("normal_atlas", normal_atlas_);
 		b.material->set_shader_parameter("fx_params", params_tex_);
 		b.multimesh = rs->multimesh_create();
-		rs->multimesh_set_mesh(b.multimesh, (key.shader == fx::FxShaderClass::Mesh ? box_mesh_ : quad_mesh_)->get_rid());
+		rs->multimesh_set_mesh(b.multimesh, quad_mesh_->get_rid());
 		b.capacity = kFxMinCapacity;
 		rs->multimesh_allocate_data(b.multimesh, int32_t(b.capacity), RenderingServer::MULTIMESH_TRANSFORM_3D, true, true);
 		rs->multimesh_set_visible_instances(b.multimesh, 0);
@@ -263,7 +261,6 @@ void Bf3FxRenderer::clear() {
 	batches_ = {};
 	lights_ = {};
 	quad_mesh_.unref();
-	box_mesh_.unref();
 	params_tex_.unref();
 	resources_ = false;
 }
@@ -348,7 +345,7 @@ void Bf3FxRenderer::draw(const fx::FxWorld &p_world, const fx::FxView &p_view, c
 	for (size_t i = 0; i < fx::kMaxFxBatches; ++i) {
 		Batch &b = batches_[i];
 		const fx::FxBatch *src = by_index[i];
-		if (src == nullptr || src->instance_count == 0) {
+		if (src == nullptr || src->instance_count == 0 || src->key.shader == fx::FxShaderClass::Mesh) {
 			if (b.shown) {
 				rs->instance_set_visible(b.instance, false);
 				rs->multimesh_set_visible_instances(b.multimesh, 0);
@@ -402,6 +399,10 @@ void Bf3FxRenderer::draw(const fx::FxWorld &p_world, const fx::FxView &p_view, c
 			l.shown = true;
 		}
 	}
+	if (meshes_ != nullptr) {
+		meshes_->draw(prep_);
+		drawn += meshes_->stats().drawn;
+	}
 	stats_.upload_ms = ms_since(t0);
 	stats_.drawn_instances = drawn;
 	stats_.batches = uint32_t(prep_.batches().size());
@@ -426,6 +427,9 @@ void Bf3FxRenderer::hide_all() {
 			rs->instance_set_visible(l.instance, false);
 			l.shown = false;
 		}
+	}
+	if (meshes_ != nullptr) {
+		meshes_->hide();
 	}
 	stats_.drawn_instances = 0;
 	stats_.lights = 0;

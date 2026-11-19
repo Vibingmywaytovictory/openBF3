@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string>
 #include <type_traits>
 
 namespace bf3::fx {
@@ -27,7 +28,6 @@ inline constexpr size_t kFxBlendCount = size_t(FxBlend::Count);
 inline constexpr size_t kFxPassCount = size_t(FxPass::Count);
 static_assert(kFxShaderClassCount * kFxBlendCount * kFxPassCount == kMaxFxBatches);
 
-inline constexpr float kFxMeshStandinMeters = 0.03f;
 
 struct FxInstance {
 	float transform[12];
@@ -103,7 +103,7 @@ struct RenderPrepStats {
 	uint64_t lights_dropped = 0;
 	uint64_t unresolved_textures = 0;
 	uint32_t unresolved_this_frame = 0;
-	uint32_t mesh_standins = 0;
+	uint32_t mesh_instances = 0;
 	uint32_t first_person_instances = 0;
 	uint64_t frames = 0;
 	double prepare_ms = 0;
@@ -121,6 +121,7 @@ public:
 	std::span<const FxBatch> batches() const;
 	std::span<const FxLight> lights() const;
 	std::span<const FxEmitterParams> emitter_params() const;
+	const std::string *row_mesh(uint32_t p_row) const;
 	const RenderPrepStats &stats() const;
 
 private:

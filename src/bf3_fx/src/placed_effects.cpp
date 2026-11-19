@@ -18,33 +18,26 @@ float distance(const Vec3 &p_a, const Vec3 &p_b) {
 
 }
 
-DrawableEffect without_mesh_emitters(const std::shared_ptr<const EffectDef> &p_def) {
-	DrawableEffect out;
-	out.def = p_def;
-	if (!p_def) {
-		return out;
+uint32_t mesh_emitter_count(const EffectDef &p_def) {
+	uint32_t n = 0;
+	for (const EffectComponentDef &c : p_def.components) {
+		n += c.kind == ComponentKind::Emitter && mesh_emitter(p_def, c.emitter) ? 1u : 0u;
 	}
-	for (const EffectComponentDef &c : p_def->components) {
-		out.mesh_emitters += c.kind == ComponentKind::Emitter && mesh_emitter(*p_def, c.emitter) ? 1u : 0u;
-	}
-	for (const EmitterDef &e : p_def->emitters) {
+	for (const EmitterDef &e : p_def.emitters) {
 		for (const uint32_t child : e.children) {
-			out.mesh_emitters +=
-					e.tmpl.emittable != EmittableType::ParticleMesh && mesh_emitter(*p_def, child) ? 1u : 0u;
+			n += e.tmpl.emittable != EmittableType::ParticleMesh && mesh_emitter(p_def, child) ? 1u : 0u;
 		}
 	}
-	if (out.mesh_emitters == 0) {
-		return out;
+	return n;
+}
+
+void collect_mesh_names(const EffectDef &p_def, std::vector<std::string> &r_names) {
+	for (const EmitterDef &e : p_def.emitters) {
+		if (e.tmpl.emittable == EmittableType::ParticleMesh && !e.tmpl.mesh.empty() &&
+				std::find(r_names.begin(), r_names.end(), e.tmpl.mesh) == r_names.end()) {
+			r_names.push_back(e.tmpl.mesh);
+		}
 	}
-	EffectDef copy = *p_def;
-	std::erase_if(copy.components, [&](const EffectComponentDef &c) {
-		return c.kind == ComponentKind::Emitter && mesh_emitter(*p_def, c.emitter);
-	});
-	for (EmitterDef &e : copy.emitters) {
-		std::erase_if(e.children, [&](uint32_t p_child) { return mesh_emitter(*p_def, p_child); });
-	}
-	out.def = std::make_shared<const EffectDef>(std::move(copy));
-	return out;
 }
 
 void PlacedEffects::add(std::shared_ptr<const EffectDef> p_def, const Transform &p_transform, bool p_auto_start) {

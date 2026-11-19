@@ -289,17 +289,18 @@ TEST_CASE("prepare: unresolved textures fall back to the default entry and are c
 	CHECK(prep.stats().frames == 2);
 }
 
-TEST_CASE("prepare: Waq and mesh stand-in transforms") {
+TEST_CASE("prepare: Waq and mesh particle transforms, each mesh particle scaled by its size") {
 	const EmitterAtlas atlas = make_atlas();
 	FxWorld w;
 	EmitterDef waq = burst("w", 2, EmittableType::WorldAlignedQuad);
 	EmitterDef mesh = burst("m", 3, EmittableType::ParticleMesh);
+	mesh.tmpl.mesh = "fx/meshes/m";
 	REQUIRE(w.start(fxt::effect_def("waq", { waq }), at(0, 0, 3)).ok());
 	REQUIRE(w.start(fxt::effect_def("mesh", { mesh }), at(0, 0, 4, 2)).ok());
 	fx_step_frame(w, 1.0f / 60.0f);
 	RenderPrep prep;
 	prep.prepare(w, view_along_z(), atlas);
-	CHECK(prep.stats().mesh_standins == 3);
+	CHECK(prep.stats().mesh_instances == 3);
 
 	FxWorld w2;
 	REQUIRE(w2.start(fxt::effect_def("bare", { burst("b", 2, EmittableType::ParticleMesh, 0, "") }), at(0, 0, 4, 3)).ok());
@@ -307,7 +308,7 @@ TEST_CASE("prepare: Waq and mesh stand-in transforms") {
 	RenderPrep prep2;
 	prep2.prepare(w2, view_along_z(), atlas);
 	CHECK(prep2.stats().unresolved_this_frame == 0);
-	CHECK(prep2.stats().mesh_standins == 2);
+	CHECK(prep2.stats().mesh_instances == 2);
 	REQUIRE(prep2.emitter_params().size() == 1);
 	CHECK(prep2.emitter_params()[0].base_rect[2] == kFxRectWhite);
 	for (const FxBatch &b : prep.batches()) {
@@ -319,12 +320,20 @@ TEST_CASE("prepare: Waq and mesh stand-in transforms") {
 			CHECK(in.transform[10] == 0.0f);
 		}
 		if (b.key.shader == FxShaderClass::Mesh) {
-
+			float size = 0.0f;
+			for (const ParticleVertex &p : w.particles()) {
+				size = std::max(size, p.size.x);
+			}
+			REQUIRE(size > 0.0f);
 			for (uint32_t i = 0; i < b.instance_count; ++i) {
-				const float *t = prep.instances()[b.first_instance + i].transform;
+				const FxInstance &mi = prep.instances()[b.first_instance + i];
+				const float *t = mi.transform;
 				for (int c = 0; c < 3; ++c) {
-					CHECK(std::sqrt(t[c] * t[c] + t[4 + c] * t[4 + c] + t[8 + c] * t[8 + c]) == doctest::Approx(kFxMeshStandinMeters));
+					CHECK(std::sqrt(t[c] * t[c] + t[4 + c] * t[4 + c] + t[8 + c] * t[8 + c]) == doctest::Approx(size));
 				}
+				const std::string *mesh_name = prep.row_mesh(row_of(mi));
+				REQUIRE(mesh_name != nullptr);
+				CHECK(*mesh_name == "fx/meshes/m");
 			}
 		}
 	}

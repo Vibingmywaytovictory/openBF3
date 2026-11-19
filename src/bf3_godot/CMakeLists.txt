@@ -112,6 +112,7 @@ target_sources(bf3_godot PRIVATE
 
 target_sources(bf3_godot PRIVATE
     src/fx_renderer.cpp
+    src/fx_meshes.cpp
     src/fx_renderer.h
 )
 target_link_libraries(bf3_godot PRIVATE bf3_fx)
