@@ -1,9 +1,12 @@
 #include "bf3/core/level/census.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
+#include "bf3/core/res/terrain_decals.h"
+#include "bf3/core/res/terrain_mask_field.h"
 #include "bf3/core/util/text.h"
 #include "bf3/render/level_scene.h"
 #include "bf3/render/roads.h"
+#include "terrain_test_support.h"
 #include "test_support.h"
 
 #include <doctest/doctest.h>
@@ -74,7 +77,92 @@ struct DecalCounts {
 	uint32_t records = 0;
 	uint32_t shaders = 0;
 	std::vector<std::string> refused;
+	std::string asphalt;
+	std::vector<uint8_t> layers_under_asphalt;
 };
+
+constexpr double kRoadLayerMargin = 64.0;
+
+struct RasterContrast {
+	size_t pairs = 0;
+	double colour_across = 0.0;
+	double colour_sides = 0.0;
+	std::vector<double> mask_road;
+	std::vector<double> mask_sides;
+};
+
+RasterContrast road_raster_contrast(
+		const level::LoadedLevel &p_level, const render::SceneTerrainPlan &p_terrain, const std::string &p_shader) {
+	RasterContrast out;
+	auto res = p_level.mount().read_res(render::terrain_decals_name(p_terrain.asset));
+	REQUIRE(res.ok());
+	res::TerrainDecals decals;
+	REQUIRE(res::TerrainDecals::parse(res->second, decals).ok());
+	test::LoadedTerrainTree tree;
+	REQUIRE(test::load_terrain_tree(p_level.mount(), p_terrain.asset, tree));
+	REQUIRE(tree.tree.colour.has_value());
+	test::TerrainChunks chunks(p_level.mount());
+	const res::TerrainChunkFetch fetch = chunks.fetch();
+	res::TerrainMaskField masks;
+	REQUIRE(res::TerrainMaskField::build(tree.tree, fetch, masks).ok());
+	const res::TerrainColourTree &colour = *tree.tree.colour;
+	const uint8_t depth = colour.max_level();
+	const float texel = (colour.bounds[2] - colour.bounds[0]) / float(uint32_t(1) << depth) /
+			float(colour.texels_per_side - res::kTerrainColourBorder);
+	const auto luma = [&](const std::array<float, 2> &p_at) {
+		res::TerrainRegion region;
+		region.origin = p_at;
+		region.texel = texel;
+		region.width = 1;
+		region.height = 1;
+		std::vector<uint8_t> rgba;
+		REQUIRE(tree.tree.colour_grid(region, depth, fetch, rgba).ok());
+		REQUIRE(rgba.size() == 4);
+		return (0.299 * rgba[0] + 0.587 * rgba[1] + 0.114 * rgba[2]) / 255.0;
+	};
+	const level::LevelTransform &t = p_terrain.transform;
+	const auto local = [&](const Vec3 &p_at) {
+		return std::array<float, 2>{ (p_at[0] - t.trans[0]) / t.scale, (p_at[2] - t.trans[2]) / t.scale };
+	};
+	out.mask_road.assign(masks.layers(), 0.0);
+	out.mask_sides.assign(masks.layers(), 0.0);
+	const res::TerrainDecalSet &set = decals.planar;
+	for (const res::TerrainDecalRecord &r : set.records) {
+		if (to_lower_ascii(r.shader) != p_shader) {
+			continue;
+		}
+		for (uint32_t a = r.first_vertex; a < r.end_vertex; ++a) {
+			for (uint32_t b = r.first_vertex; b < r.end_vertex; ++b) {
+				const res::TerrainDecalVertex &left = set.vertices[a], &right = set.vertices[b];
+				if (!(left.uv[0] == 0.0f && right.uv[0] == 1.0f && left.uv[1] == right.uv[1])) {
+					continue;
+				}
+				const std::array<float, 2> l = local(left.position), q = local(right.position);
+				const std::array<float, 2> on{ (l[0] + q[0]) * 0.5f, (l[1] + q[1]) * 0.5f };
+				const std::array<float, 2> beyond_left{ 2.0f * l[0] - q[0], 2.0f * l[1] - q[1] };
+				const std::array<float, 2> beyond_right{ 2.0f * q[0] - l[0], 2.0f * q[1] - l[1] };
+				const double c_on = luma(on), c_left = luma(beyond_left), c_right = luma(beyond_right);
+				out.colour_across += std::fabs(c_on - (c_left + c_right) * 0.5);
+				out.colour_sides += std::fabs(c_left - c_right);
+				for (uint8_t layer = 0; layer < masks.layers(); ++layer) {
+					out.mask_road[layer] += masks.coverage(layer, on[0], on[1]);
+					out.mask_sides[layer] += (masks.coverage(layer, beyond_left[0], beyond_left[1]) +
+													 masks.coverage(layer, beyond_right[0], beyond_right[1])) *
+							0.5;
+				}
+				++out.pairs;
+			}
+		}
+	}
+	REQUIRE(out.pairs > 0);
+	out.colour_across /= double(out.pairs);
+	out.colour_sides /= double(out.pairs);
+	for (size_t layer = 0; layer < out.mask_road.size(); ++layer) {
+		out.mask_road[layer] /= double(out.pairs);
+		out.mask_sides[layer] /= double(out.pairs);
+	}
+	return out;
+}
 
 void check_terrain_decals(const char *p_level, const char *p_mode, const DecalCounts &p_data) {
 	test::Mounted *m = test::shared_mount_or_skip();
@@ -158,6 +246,23 @@ void check_terrain_decals(const char *p_level, const char *p_mode, const DecalCo
 			points_drawn += covered;
 			shapes_drawn += covered * 2 >= at.size() && covered > 0 ? 1 : 0;
 		}
+	}
+	if (!p_data.asphalt.empty()) {
+		const RasterContrast contrast = road_raster_contrast(lvl, plan->terrains[0], p_data.asphalt);
+		std::printf(
+				"%s %s: %zu %s cross sections; colour raster luma, road centre against the mean a road width beyond "
+				"both edges %.4f, one side against the other %.4f; mask coverage on the road and beyond it, by layer:",
+				p_level, p_mode, contrast.pairs, p_data.asphalt.c_str(), contrast.colour_across, contrast.colour_sides);
+		std::vector<uint8_t> under;
+		for (size_t layer = 0; layer < contrast.mask_road.size(); ++layer) {
+			std::printf(" %zu %.3f/%.3f", layer, contrast.mask_road[layer], contrast.mask_sides[layer]);
+			if (contrast.mask_road[layer] - contrast.mask_sides[layer] > kRoadLayerMargin) {
+				under.push_back(uint8_t(layer));
+			}
+		}
+		CHECK(contrast.colour_across < contrast.colour_sides);
+		CHECK(under == p_data.layers_under_asphalt);
+		std::printf("\n");
 	}
 	const render::TerrainDecalStats &stats = terrain->decals;
 	std::printf("%s %s: %zu of %zu road and decal shapes drawn, %zu more have no length (%zu of %zu control points "
@@ -259,7 +364,8 @@ TEST_SUITE("terrain-decals-draw-unit") {
 TEST_SUITE("terrain-decals-draw") {
 	TEST_CASE("terrain decals: MP_007 ConquestLarge0 draws its roads and quad decals") {
 		check_terrain_decals("MP_007", "ConquestLarge0",
-				DecalCounts{ 156, 1, 281, 5, { "levels/mp_007/shaders/mp_007_roadasphalt2d" } });
+				DecalCounts{ 156, 1, 281, 5, { "levels/mp_007/shaders/mp_007_roadasphalt2d" },
+						"levels/mp_007/shaders/mp_007_roadasphalt2d" });
 	}
 
 	TEST_CASE("terrain decals: MP_Subway ConquestLarge0 draws its roads and quad decals") {
@@ -268,6 +374,7 @@ TEST_SUITE("terrain-decals-draw") {
 
 	TEST_CASE("terrain decals: MP_018 ConquestLarge0 draws its roads and quad decals") {
 		check_terrain_decals("MP_018", "ConquestLarge0",
-				DecalCounts{ 260, 0, 503, 7, { "levels/mp_018/terrain/shaders/mp018_road_01_2d" } });
+				DecalCounts{ 260, 0, 503, 7, { "levels/mp_018/terrain/shaders/mp018_road_01_2d" },
+						"levels/mp_018/terrain/shaders/mp018_road_01_2d", { 7 } });
 	}
 }

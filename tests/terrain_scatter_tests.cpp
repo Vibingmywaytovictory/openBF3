@@ -10,6 +10,7 @@
 #include "bf3/render/look_materials.h"
 #include "bf3/render/terrain_scatter.h"
 #include "dxbc_test_support.h"
+#include "terrain_test_support.h"
 #include "test_support.h"
 
 #include <doctest/doctest.h>
@@ -165,19 +166,7 @@ constexpr LevelTypes kLevels[] = {
 	{ "XP5_004", "levels/xp5_004/xp5_004_terrain/xp5_004_terrain", 13 },
 };
 
-struct LoadedTree {
-	core::res::TerrainStreamingTree tree;
-	std::string name;
-};
-
-bool load_tree(const LevelMount &p_mount, const std::string &p_asset, LoadedTree &r_out) {
-	auto terrain = p_mount.read_res(p_asset);
-	if (!terrain || !core::res::terrain_streaming_tree_name(terrain->second, r_out.name).ok()) {
-		return false;
-	}
-	auto bytes = p_mount.read_res(r_out.name);
-	return bytes && core::res::TerrainStreamingTree::parse(bytes->second, r_out.tree).ok();
-}
+using LoadedTree = test::LoadedTerrainTree;
 
 struct BuiltScatter {
 	SceneScatterPlan plan;
@@ -200,19 +189,8 @@ void build_scatter(
 				return int32_t(r_out.meshes.size() - 1);
 			},
 			r_out.failures);
-	std::map<std::array<uint8_t, 16>, std::vector<uint8_t>> chunks;
-	const core::res::TerrainChunkFetch fetch =
-			[&](const core::res::ChunkId &p_id) -> std::optional<std::vector<uint8_t>> {
-		auto found = chunks.find(p_id.bytes);
-		if (found == chunks.end()) {
-			Result<std::vector<uint8_t>> c = p_mount.read_chunk(Guid::from_bytes(p_id.bytes.data()));
-			if (!c) {
-				return std::nullopt;
-			}
-			found = chunks.emplace(p_id.bytes, std::move(*c)).first;
-		}
-		return found->second;
-	};
+	test::TerrainChunks chunks(p_mount);
+	const core::res::TerrainChunkFetch fetch = chunks.fetch();
 	core::res::HeightGrid grid;
 	const core::res::ResError heights = p_tree.tree.height_grid(4, fetch, grid);
 	if (!heights.ok()) {
@@ -375,7 +353,7 @@ TEST_SUITE("render-scatter") {
 				return out;
 			}
 			LoadedTree tree;
-			if (!load_tree(*mount, level.asset, tree) || !tree.tree.mask) {
+			if (!test::load_terrain_tree(*mount, level.asset, tree) || !tree.tree.mask) {
 				out.error = "streaming tree";
 				return out;
 			}
@@ -440,7 +418,7 @@ TEST_SUITE("render-scatter") {
 		REQUIRE(mount->load_all_bundles().ok());
 		const std::string asset = "levels/mp_007/terrain/mp_007";
 		LoadedTree tree;
-		REQUIRE(load_tree(*mount, asset, tree));
+		REQUIRE(test::load_terrain_tree(*mount, asset, tree));
 		BuiltScatter built;
 		build_scatter(*mount, asset, tree, built);
 		const SceneScatterPlan &plan = built.plan;

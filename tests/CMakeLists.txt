@@ -312,7 +312,8 @@ add_test(NAME render.terrain.unit COMMAND test_terrain_look --test-suite=render-
 add_test(NAME render.terrain COMMAND test_terrain_look --test-suite=render-terrain)
 set_tests_properties(render.terrain PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(render.terrain.unit render.terrain PROPERTIES TIMEOUT 300)
-openbf3_test(test_terrain_scatter test_main.cpp terrain_scatter_tests.cpp dxbc_test_support.h test_support.h)
+openbf3_test(test_terrain_scatter test_main.cpp terrain_scatter_tests.cpp dxbc_test_support.h terrain_test_support.h
+    test_support.h)
 target_link_libraries(test_terrain_scatter PRIVATE bf3_render)
 add_test(NAME render.terrain_scatter.unit COMMAND test_terrain_scatter --test-suite=render-scatter-unit)
 add_test(NAME render.terrain_scatter COMMAND test_terrain_scatter --test-suite=render-scatter)
@@ -1575,7 +1576,7 @@ add_test(NAME fx.placed_effects.unit COMMAND test_placed_effects --test-suite=pl
 add_test(NAME fx.placed_effects COMMAND test_placed_effects --test-suite=placed-effects)
 set_tests_properties(fx.placed_effects PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(fx.placed_effects.unit fx.placed_effects PROPERTIES TIMEOUT 300)
-openbf3_test(test_terrain_decals_draw test_main.cpp terrain_decals_draw_tests.cpp test_support.h)
+openbf3_test(test_terrain_decals_draw test_main.cpp terrain_decals_draw_tests.cpp terrain_test_support.h test_support.h)
 target_link_libraries(test_terrain_decals_draw PRIVATE bf3_render)
 add_test(NAME render.terrain_decals.unit COMMAND test_terrain_decals_draw --test-suite=terrain-decals-draw-unit)
 add_test(NAME render.terrain_decals COMMAND test_terrain_decals_draw --test-suite=terrain-decals-draw)
