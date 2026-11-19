@@ -1006,6 +1006,7 @@ set_tests_properties(render.viewmodel_reload_moving PROPERTIES SKIP_RETURN_CODE 
 openbf3_cost(render.viewmodel_reload_moving 2 8)
 add_test(NAME render.viewmodel_vault COMMAND test_render_catalog_weapons --test-suite=render-viewmodel-vault)
 set_tests_properties(render.viewmodel_vault PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+openbf3_cost(render.viewmodel_vault 2 7)
 
 openbf3_test(test_audio_router test_main.cpp audio_router_tests.cpp test_support.h weapons_support.h)
 target_link_libraries(test_audio_router PRIVATE bf3_audio bf3_client_audio bf3_host bf3_fx bf3_core bf3_sim_harness)

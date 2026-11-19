@@ -232,12 +232,7 @@ void vm_vault_set(VmVaultRun &r_run, const Skeleton &p_rig, const VmVault &p_vau
 	}
 }
 
-bool vm_vault_apply(VmVaultRun &r_run, const Skeleton &p_rig, double p_time_s, uint8_t p_kind, float p_seconds,
-		LocalPose &r_pose, ViewmodelOutput &r_out) {
-	r_out.vault_clip = kNoVaultAnim;
-	r_out.vault_frame = 0.0f;
-	r_out.vault_seconds = 0.0f;
-	r_out.camera_offset = xform_identity();
+bool vm_vault_latch(VmVaultRun &r_run, double p_time_s, uint8_t p_kind, float p_seconds) {
 	if (p_kind < kVaultAnimKinds && core::finite(p_seconds) && p_seconds >= 0.0f && std::isfinite(p_time_s)) {
 		r_run.kind = p_kind;
 		r_run.start_s = p_time_s - double(p_seconds);
@@ -245,12 +240,25 @@ bool vm_vault_apply(VmVaultRun &r_run, const Skeleton &p_rig, double p_time_s, u
 	if (r_run.kind >= kVaultAnimKinds) {
 		return false;
 	}
-	const size_t k = r_run.kind;
 	const double age = p_time_s - r_run.start_s;
-	if (!r_run.ok[k] || !(age >= 0.0) || age >= double(r_run.vault.play[k].seconds())) {
+	if (!r_run.ok[r_run.kind] || !(age >= 0.0) || age >= double(r_run.vault.play[r_run.kind].seconds())) {
 		r_run.kind = kNoVaultAnim;
 		return false;
 	}
+	return true;
+}
+
+bool vm_vault_apply(VmVaultRun &r_run, const Skeleton &p_rig, double p_time_s, uint8_t p_kind, float p_seconds,
+		LocalPose &r_pose, ViewmodelOutput &r_out) {
+	r_out.vault_clip = kNoVaultAnim;
+	r_out.vault_frame = 0.0f;
+	r_out.vault_seconds = 0.0f;
+	r_out.camera_offset = xform_identity();
+	if (!vm_vault_latch(r_run, p_time_s, p_kind, p_seconds)) {
+		return false;
+	}
+	const size_t k = r_run.kind;
+	const double age = p_time_s - r_run.start_s;
 	const VmClipRef &c = r_run.vault.clips[k];
 	const float frame = std::min(r_run.vault.play[k].frame_at(float(age)), float(c.tracks->end_frame));
 	r_run.delta = identity_pose(p_rig);

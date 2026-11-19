@@ -88,6 +88,7 @@ struct VmVaultRun {
 };
 
 void vm_vault_set(VmVaultRun &r_run, const Skeleton &p_rig, const VmVault &p_vault);
+bool vm_vault_latch(VmVaultRun &r_run, double p_time_s, uint8_t p_kind, float p_seconds);
 bool vm_vault_apply(VmVaultRun &r_run, const Skeleton &p_rig, double p_time_s, uint8_t p_kind, float p_seconds,
 		LocalPose &r_pose, ViewmodelOutput &r_out);
 }

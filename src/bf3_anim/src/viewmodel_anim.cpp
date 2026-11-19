@@ -855,6 +855,7 @@ struct ViewmodelAnimator::Impl {
 		last_ads = ads;
 		base = idle;
 		uint32_t base_clip = uint32_t(VmClip::Idle);
+		const bool vault_on = has_vault && vm_vault_latch(vault_run, t, p_input.vault, p_input.vault_seconds);
 		const VmClip zoom_role = ads_dir > 0 ? VmClip::ZoomIn : VmClip::ZoomOut;
 		const VmClipRef &zr = ref(zoom_role);
 		if (ads_dir != 0 && ads > 0.0f && ads < 1.0f) {
@@ -882,6 +883,11 @@ struct ViewmodelAnimator::Impl {
 		}
 		if (sprint_w > 0.5f) {
 			base_clip = uint32_t(VmClip::Sprint);
+		}
+		if (vault_on) {
+			base = idle;
+			base_clip = uint32_t(VmClip::Idle);
+			sprint_w = 0.0f;
 		}
 
 		r_pose = base;
