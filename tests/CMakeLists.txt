@@ -1068,7 +1068,7 @@ set_tests_properties(audio.hdr.unit PROPERTIES TIMEOUT 120)
 set_tests_properties(audio.hdr.install PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 
 openbf3_test(test_host_tdm test_main.cpp host_tdm_server_tests.cpp host_tdm_client_tests.cpp tdm_fixture.h gunplay_fixture.h test_support.h)
-target_link_libraries(test_host_tdm PRIVATE bf3_host)
+target_link_libraries(test_host_tdm PRIVATE bf3_host bf3_sim_harness)
 target_compile_definitions(test_host_tdm PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
     "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\""
     "OPENBF3_TDM_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/tdm_tuning.cfg\"")
@@ -1194,6 +1194,9 @@ openbf3_cost(host.vehicles.modes 1 22)
 openbf3_cost(host.vehicles.drivable 2 8)
 openbf3_cost(host.vehicles.drivable.large 2 11)
 openbf3_cost(host.vehicles.settle.level 2 13)
+add_test(NAME host.vehicles.handling COMMAND test_host_tdm --test-suite=host-vehicles-handling)
+set_tests_properties(host.vehicles.handling PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+openbf3_cost(host.vehicles.handling 2 8)
 openbf3_cost(host.vehicles.gunnery 1 8)
 openbf3_cost(host.vehicles.exit_weapons 1 8)
 openbf3_cost(host.vehicles.heat 1 8)

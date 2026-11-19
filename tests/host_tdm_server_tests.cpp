@@ -39,6 +39,7 @@
 #include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_install.h"
 #include "bf3/sim/weapons/weapon_rng.h"
+#include "bf3/sim_harness/vehicle_replay.h"
 
 #include <algorithm>
 #include <array>
@@ -9134,5 +9135,121 @@ TEST_SUITE("host-vehicles-settle-level") {
 			check_settled(mode, settle_every_spawner(*level));
 			tdm::check_install_unchanged(*level);
 		}
+	}
+}
+
+namespace {
+
+struct FullLock {
+	float entry_kmh = 0.0f;
+	float lowest_up = 1.0f;
+	float largest_tick_loss_kmh = 0.0f;
+	std::string error;
+};
+
+FullLock full_lock_from(const std::shared_ptr<const sim::StaticWorldShapes> &p_ground,
+		const std::shared_ptr<const sim::VehicleModel> &p_model, float p_entry_kmh) {
+	FullLock out;
+	sim::VehicleWorldOptions options;
+	options.max_vehicles = 1;
+	options.tuning = p_model->tuning;
+	core::Result<std::unique_ptr<sim::VehicleWorld>> world = sim::VehicleWorld::create(p_ground, options);
+	sim::VehiclePlacement at;
+	at.position = { 0.0f, 0.05f, 0.0f };
+	if (!world.ok() || !(*world)->add_vehicle(0, p_model, at).ok()) {
+		out.error = world.ok() ? std::string("add_vehicle failed") : world.error().message;
+		return out;
+	}
+	const sim::VehicleSlot slot = 0;
+	sim::VehicleCommand c;
+	c.flags = sim::vehicle_flags::kDriven;
+	const auto step = [&] {
+		return (*world)
+				->step(std::span<const sim::VehicleSlot>(&slot, 1), std::span<const sim::VehicleCommand>(&c, 1))
+				.ok();
+	};
+	for (uint32_t t = 0; t < sim::seconds_to_ticks(2.0f); ++t) {
+		if (!step()) {
+			out.error = "step failed";
+			return out;
+		}
+	}
+	c.throttle = 127;
+	for (uint32_t t = 0;
+			t < sim::seconds_to_ticks(20.0f) && speed_of((*world)->state(0).body.linear_velocity) * 3.6f < p_entry_kmh;
+			++t) {
+		if (!step()) {
+			out.error = "step failed";
+			return out;
+		}
+	}
+	out.entry_kmh = speed_of((*world)->state(0).body.linear_velocity) * 3.6f;
+	c.steer = -127;
+	float before = out.entry_kmh;
+	for (uint32_t t = 0; t < sim::seconds_to_ticks(3.0f); ++t) {
+		if (!step()) {
+			out.error = "step failed";
+			return out;
+		}
+		const sim::VehicleState s = (*world)->state(0);
+		const float kmh = speed_of(s.body.linear_velocity) * 3.6f;
+		out.largest_tick_loss_kmh = std::max(out.largest_tick_loss_kmh, before - kmh);
+		out.lowest_up = std::min(out.lowest_up, tdm::up_y_of(s.body.rotation));
+		before = kmh;
+	}
+	return out;
+}
+
+}
+
+TEST_SUITE("host-vehicles-handling") {
+	TEST_CASE("vehicles: MP_007 ConquestLarge0: each land vehicle kind on flat ground, 0-60 km/h, speed at 6 s, top "
+			  "speed, braking from 60 km/h, turning circle and a full-lock turn from 30 km/h beside the data's top "
+			  "gear speed and RpmMax (report only)") {
+		std::unique_ptr<tdm::TdmLevel> level = tdm::load_tdm_level("MP_007", "ConquestLarge0", false);
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		std::vector<size_t> kinds;
+		for (const host::LevelVehicleSpawner &s : lv.spawners) {
+			if (lv.kinds[s.kind].model != nullptr && std::find(kinds.begin(), kinds.end(), s.kind) == kinds.end()) {
+				kinds.push_back(s.kind);
+			}
+		}
+		std::sort(kinds.begin(), kinds.end());
+		const std::vector<core::Result<sim::VehicleHandling>> measured =
+				core::parallel_map<core::Result<sim::VehicleHandling>>(kinds.size(),
+						[&](size_t p_i) { return sim::measure_vehicle_handling(lv.kinds[kinds[p_i]].model); });
+		sim::SyntheticVehicleGround flat;
+		flat.features = false;
+		const core::Result<std::shared_ptr<const sim::StaticWorldShapes>> ground =
+				sim::build_synthetic_vehicle_ground(flat);
+		REQUIRE_MESSAGE(ground.ok(), (ground.ok() ? std::string() : ground.error().message));
+		const std::vector<FullLock> locks = core::parallel_map<FullLock>(
+				kinds.size(), [&](size_t p_i) { return full_lock_from(*ground, lv.kinds[kinds[p_i]].model, 30.0f); });
+		for (size_t i = 0; i < kinds.size(); ++i) {
+			REQUIRE_MESSAGE(locks[i].error.empty(), locks[i].error);
+			std::printf("host.vehicles.handling: %s: full lock from %.1f km/h on flat ground: lowest up axis y %.3f, "
+						"largest speed loss in one tick %.1f km/h\n",
+					lv.kinds[kinds[i]].blueprint.c_str(), double(locks[i].entry_kmh), double(locks[i].lowest_up),
+					double(locks[i].largest_tick_loss_kmh));
+		}
+		for (size_t i = 0; i < kinds.size(); ++i) {
+			const host::LevelVehicleKind &kind = lv.kinds[kinds[i]];
+			const sim::LandDriveModel &land = kind.model->land;
+			REQUIRE_MESSAGE(measured[i].ok(), kind.blueprint << ": " << measured[i].error().message);
+			const sim::VehicleHandling &h = *measured[i];
+			std::printf("host.vehicles.handling: %s: 0-60 km/h %.2f s, %.1f km/h at 6 s, top %.1f km/h, braking from "
+						"60 km/h %.1f m, turning circle %.1f m; data: top gear %u up to %.0f km/h, RpmMax %.0f\n",
+					kind.blueprint.c_str(), double(h.time_0_60_kmh), double(h.speed_at_6s_kmh), double(h.top_speed_kmh),
+					double(h.brake_distance_60_m), double(h.turning_circle_m), unsigned(land.forward_gears),
+					double(land.forward_gears > 0 ? land.forward_speeds[land.forward_gears - 1u] : 0.0f),
+					double(land.engine.rpm_max));
+			CHECK(std::isfinite(h.top_speed_kmh));
+			CHECK(h.top_speed_kmh > 0.0f);
+		}
+		CHECK(kinds.size() >= 6u);
+		tdm::check_install_unchanged(*level);
 	}
 }
