@@ -146,7 +146,7 @@ void VaultRunCheck::watch_own_clip(const sim::SoldierState &p_state, const Vault
 	own_.camera_degrees = std::max(own_.camera_degrees, v.camera_degrees);
 }
 
-void VaultRunCheck::watch_other_clip(const VaultRunInputs &p_in) {
+void VaultRunCheck::watch_other_clip(const sim::SoldierState &p_state, const VaultRunInputs &p_in) {
 	if (!other_.pressed || !p_in.crowd_vault) {
 		return;
 	}
@@ -158,16 +158,30 @@ void VaultRunCheck::watch_other_clip(const VaultRunInputs &p_in) {
 	++other_.clip_frames;
 	other_.wrong_clip += other_.vaulted && kind != other_.kind ? 1u : 0u;
 	other_.clip_seconds = std::max(other_.clip_seconds, seconds);
+	if (p_state.mode == sim::MoveMode::AnimationControlled) {
+		++other_.timed;
+		const float ahead = seconds - float(p_state.vault.ticks) * sim::kTickSeconds;
+		other_.lead = std::max(other_.lead, ahead);
+		other_.lag = std::max(other_.lag, -ahead);
+	}
 }
 
 void VaultRunCheck::clip_rows(const Runner &p_runner, const char *p_who, const char *p_clip) {
 	const std::string who(p_who);
-	const bool timed = who != "own" || (p_runner.timed > 0 && p_runner.time_error <= kClipTimeTolerance);
+	const bool own = who == "own";
+	const bool timed = p_runner.timed > 0 &&
+			(own ? p_runner.time_error <= kClipTimeTolerance : p_runner.lead <= kClipTimeTolerance);
 	row(who + ".vault_clip", p_runner.vaulted && p_runner.clip_frames > 0 && p_runner.wrong_clip == 0 && timed,
-			fmt("%s vault clip on %u frames (%u of another kind), up to %.3f s into it; %u animation-controlled frames "
-				"within %.3f s of the move's ticks (limit %.3f s)",
-					p_clip, p_runner.clip_frames, p_runner.wrong_clip, double(p_runner.clip_seconds), p_runner.timed,
-					double(p_runner.time_error), double(kClipTimeTolerance)));
+			own ? fmt("%s vault clip on %u frames (%u of another kind), up to %.3f s into it; on the %u "
+					  "animation-controlled frames its time is the move's ticks within %.3f s (limit %.3f s)",
+						  p_clip, p_runner.clip_frames, p_runner.wrong_clip, double(p_runner.clip_seconds),
+						  p_runner.timed, double(p_runner.time_error), double(kClipTimeTolerance))
+				: fmt("%s vault clip on %u frames (%u of another kind), up to %.3f s into it; on the %u frames the "
+					  "vaulter's own move runs the clip trails its ticks by up to %.3f s and never leads them by more "
+					  "than %.3f s (limit %.3f s)",
+						  p_clip, p_runner.clip_frames, p_runner.wrong_clip, double(p_runner.clip_seconds),
+						  p_runner.timed, double(p_runner.lag), double(std::max(0.0f, p_runner.lead)),
+						  double(kClipTimeTolerance)));
 }
 
 void VaultRunCheck::drive_other(bool p_forward) {
@@ -352,7 +366,7 @@ bool VaultRunCheck::step(Bf3LevelSession &r_session, const VaultRunInputs &p_in,
 			}
 			drive_other(true);
 			follow(other_, state, p_in, "other", p_delta);
-			watch_other_clip(p_in);
+			watch_other_clip(state, p_in);
 			if (other_.since_press >= kAfterSeconds || t_ > kRunTimeout) {
 				drive_other(false);
 				runner_rows(other_, state, "other");

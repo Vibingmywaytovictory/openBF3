@@ -74,6 +74,8 @@ private:
 		uint32_t timed = 0;
 		float clip_seconds = 0.0f;
 		float time_error = 0.0f;
+		float lead = -1.0f;
+		float lag = 0.0f;
 		float camera_metres = 0.0f;
 		float camera_degrees = 0.0f;
 		uint64_t vaults_before = 0;
@@ -87,7 +89,7 @@ private:
 			double p_delta);
 	void runner_rows(const Runner &p_runner, const bf3::sim::SoldierState &p_state, const char *p_who);
 	void watch_own_clip(const bf3::sim::SoldierState &p_state, const VaultRunInputs &p_in);
-	void watch_other_clip(const VaultRunInputs &p_in);
+	void watch_other_clip(const bf3::sim::SoldierState &p_state, const VaultRunInputs &p_in);
 	void clip_rows(const Runner &p_runner, const char *p_who, const char *p_clip);
 	void drive_other(bool p_forward);
 	void aim_free_camera(Bf3LevelSession &r_session);

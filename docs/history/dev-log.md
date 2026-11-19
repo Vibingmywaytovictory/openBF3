@@ -3510,3 +3510,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Vault sound: the own movement patch soldier_movement_sounds_mp gets its Vault event (it plays clothes_vest_vault_wave) when the soldier turns AnimationControlled (core.audio.footsteps, godot.vault_run own.vault_sound PASS).
 * Remote up vaults: the crowd adds the 3P clip's trajectory rise only while the move runs, so the rig does not climb on top of the body that has already risen (anim.vault).
 * 1P vaults over the idle pose: the vault layer replaces the sprint and zoom base as the data's layer does (its base is the IdlePose chooser); 22 of Metro's 28 kit default items have all three 1P clips, the repair tool one, the two empty gadget slots none (render.viewmodel_vault, 6.7 s, 16 s CPU).
+* godot.vault_run checks the remote clip's time: it trails the vaulter's own ticks by the view delay (0.34 s here) and never leads them (godot.vault_run).
