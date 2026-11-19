@@ -68,6 +68,7 @@ struct ShaderVertexProgram {
 struct ShaderConstants {
 	std::vector<std::pair<uint32_t, std::string>> textures;
 	std::vector<ShaderValue> values;
+	std::vector<TextureSampler> samplers;
 };
 
 struct ShaderSolution {

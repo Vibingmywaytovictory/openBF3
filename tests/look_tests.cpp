@@ -9,6 +9,7 @@
 #include "bf3/core/level/world.h"
 #include "bf3/core/res/res_loader.h"
 #include "bf3/core/util/text.h"
+#include "bf3/render/dxbc.h"
 #include "bf3/render/level_scene.h"
 #include "bf3/render/look_environment.h"
 #include "bf3/render/look_exposure.h"
@@ -16,6 +17,7 @@
 #include "bf3/render/shader_database.h"
 #include "test_support.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -54,15 +56,24 @@ void set64(std::vector<uint8_t> &r_out, size_t p_at, uint64_t p_v) {
 
 constexpr const char *kShaderName = "levels/test/shaders/wallshader";
 
-std::vector<uint8_t> constant_block(uint8_t p_textures, const char *p_texture_name) {
+std::vector<uint8_t> constant_block(uint8_t p_textures, const char *p_texture_name, uint8_t p_samplers = 0) {
 	const size_t header = 0x40, textures_at = header, values_at = textures_at + size_t(p_textures) * 0x98;
-	std::vector<uint8_t> b(values_at + 0x3C, 0);
+	const size_t samplers_at = values_at + 0x3C;
+	std::vector<uint8_t> b(samplers_at + size_t(p_samplers) * 64, 0);
 	const uint32_t size = uint32_t(b.size());
 	std::memcpy(b.data(), &size, 4);
 	set64(b, 0x10, textures_at);
 	set64(b, 0x18, values_at);
+	set64(b, 0x28, samplers_at);
 	b[0x35] = p_textures;
 	b[0x36] = 1;
+	b[0x38] = p_samplers;
+	for (uint8_t k = 0; k < p_samplers; ++k) {
+		const uint32_t fields[5] = { k, 0x55, k + 1u, 1, 3 };
+		std::memcpy(b.data() + samplers_at + 64 * k, fields, sizeof(fields));
+		const float border[4] = { 0.25f * float(k), 0.0f, 0.0f, 1.0f };
+		std::memcpy(b.data() + samplers_at + 64 * k + 32, border, sizeof(border));
+	}
 	for (size_t t = 0; t < p_textures; ++t) {
 		std::string name = p_texture_name;
 		if (p_textures > 1) {
@@ -76,12 +87,14 @@ std::vector<uint8_t> constant_block(uint8_t p_textures, const char *p_texture_na
 	return b;
 }
 
-std::vector<uint8_t> synthetic_database(uint8_t p_block_textures = 1, uint32_t p_uses = 1, uint8_t p_solution_flags = 1, uint8_t p_surface = 0) {
+std::vector<uint8_t> synthetic_database(uint8_t p_block_textures = 1, uint32_t p_uses = 1, uint8_t p_solution_flags = 1,
+		uint8_t p_surface = 0, uint8_t p_samplers = 0) {
 	std::vector<uint8_t> body;
 	put32(body, kShaderDatabaseVersion);
 	put32(body, 0);
 	put32(body, 1);
-	const std::vector<uint8_t> block = constant_block(p_block_textures, "levels/test/textures/wall_grime_mask");
+	const std::vector<uint8_t> block =
+			constant_block(p_block_textures, "levels/test/textures/wall_grime_mask", p_samplers);
 	body.insert(body.end(), block.begin(), block.end());
 	put32(body, 0);
 	put32(body, 0);
@@ -174,6 +187,27 @@ TEST_SUITE("render-look-unit") {
 		ShaderLookup lookup((*db)[0]);
 		CHECK(lookup.by_name("Levels/Test/Shaders/WallShader") != nullptr);
 		CHECK(lookup.by_name("levels/test/shaders/other") == nullptr);
+	}
+
+	TEST_CASE("render.look.unit: a constant block's sampler states: slot, three address modes and a border colour") {
+		Result<std::vector<ShaderDatabase>> db =
+				parse_shader_database(synthetic_database(1, 1, 1, 0, 4), nullptr, true);
+		REQUIRE(db.ok());
+		REQUIRE((*db)[0].shaders.size() == 1);
+		const ShaderSolution &solution = (*db)[0].shaders[0].solutions.at(0);
+		REQUIRE(solution.pixel_constants != nullptr);
+		const std::vector<TextureSampler> &samplers = solution.pixel_constants->samplers;
+		REQUIRE(samplers.size() == 4);
+		for (uint32_t k = 0; k < 4; ++k) {
+			CHECK(samplers[k].slot == k);
+			CHECK(samplers[k].address == std::array<uint32_t, 3>{ k + 1u, 1u, 3u });
+			CHECK(samplers[k].border == std::array<float, 4>{ 0.25f * float(k), 0.0f, 0.0f, 1.0f });
+		}
+		std::vector<uint8_t> overrun = synthetic_database(1, 1, 1, 0, 1);
+		const size_t count_at = 12 + 12 + 0x38;
+		REQUIRE(overrun[count_at] == 1);
+		overrun[count_at] = 2;
+		CHECK_FALSE(parse_shader_database(overrun, nullptr, true).ok());
 	}
 
 	TEST_CASE("render.look.unit: shader database truncations and mutations fail cleanly") {
@@ -845,7 +879,8 @@ TEST_SUITE("render-look") {
 		CHECK(work < limit);
 		Result<std::vector<ShaderDatabase>> kept = parse_shader_database(raw->bytes(), nullptr, true);
 		REQUIRE(kept.ok());
-		size_t solutions = 0, with_programs = 0, registered = 0, path_programs = 0;
+		size_t solutions = 0, with_programs = 0, registered = 0, path_programs = 0, sampler_bindings = 0,
+			   sampler_states = 0;
 		for (size_t p = 0; p < kept->size(); ++p) {
 			for (const SurfaceShader &s : (*kept)[p].shaders) {
 				for (const ShaderSolution &sol : s.solutions) {
@@ -864,6 +899,24 @@ TEST_SUITE("render-look") {
 							registered += reg > 0 && !name.empty() ? 1 : 0;
 						}
 					}
+					if (dxbc && sol.pixel_constants) {
+						Result<bf3::render::dxbc::Program> program = bf3::render::dxbc::parse(*sol.pixel_program);
+						REQUIRE(program.ok());
+						for (const bf3::render::dxbc::Binding &b : program->bindings) {
+							if (b.type != uint32_t(bf3::render::dxbc::BindingType::Sampler)) {
+								continue;
+							}
+							++sampler_bindings;
+							const std::vector<TextureSampler> &states = sol.pixel_constants->samplers;
+							const auto state = std::find_if(states.begin(), states.end(),
+									[&](const TextureSampler &t) { return t.slot == b.bind_point; });
+							sampler_states += state != states.end() &&
+											std::all_of(state->address.begin(), state->address.end(),
+													[](uint32_t a) { return a >= 1 && a <= 5; })
+									? 1
+									: 0;
+						}
+					}
 				}
 			}
 		}
@@ -871,8 +924,13 @@ TEST_SUITE("render-look") {
 					"programs, %zu registered "
 					"textures\n",
 				with_programs, solutions, registered);
+		std::printf(
+				"render.look shaderdb samplers: %zu of %zu sampler bindings have a state with address modes 1 to 5\n",
+				sampler_states, sampler_bindings);
 		CHECK(with_programs == solutions);
 		CHECK(registered > 0);
+		CHECK(sampler_bindings > 0);
+		CHECK(sampler_states == sampler_bindings);
 		CHECK(path_programs == 0);
 		CHECK(db->front().shaders.front().solutions.front().pixel_program == nullptr);
 

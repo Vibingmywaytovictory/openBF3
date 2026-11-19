@@ -14,6 +14,20 @@
 
 namespace bf3::render {
 
+enum class TextureAddress : uint32_t {
+	Wrap = 1,
+	Mirror = 2,
+	Clamp = 3,
+	Border = 4,
+	MirrorOnce = 5,
+};
+
+struct TextureSampler {
+	uint32_t slot = 0;
+	std::array<uint32_t, 3> address{ 1, 1, 1 };
+	std::array<float, 4> border{};
+};
+
 struct PixelTranslation {
 	std::string body;
 	uint32_t temps = 0;

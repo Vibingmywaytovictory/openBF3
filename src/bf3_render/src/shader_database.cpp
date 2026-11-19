@@ -31,6 +31,11 @@ constexpr size_t kTexturesAt = 0x10;
 constexpr size_t kValuesAt = 0x18;
 constexpr size_t kTextureCountAt = 0x35;
 constexpr size_t kValueCountAt = 0x36;
+constexpr size_t kSamplersAt = 0x28;
+constexpr size_t kSamplerCountAt = 0x38;
+constexpr size_t kSamplerBytes = 64;
+constexpr size_t kSamplerAddressAt = 8;
+constexpr size_t kSamplerBorderAt = 32;
 
 constexpr size_t kMinShaderBytes = 4 + 4 + 1 + 35 + 4 + 4 + 4;
 
@@ -289,11 +294,12 @@ struct ConstantBlock {
 	std::vector<std::string> textures;
 	std::vector<uint32_t> texture_slots;
 	std::vector<ShaderValue> values;
+	std::vector<TextureSampler> samplers;
 };
 
 core::Result<ConstantBlock> parse_block(std::span<const uint8_t> p_block, size_t p_at) {
 	const auto bad = [&](const char *p_what) { return core::make_error(std::string(p_what) + " in constant block at " + std::to_string(p_at)); };
-	if (p_block.size() < kValueCountAt + 1) {
+	if (p_block.size() < kSamplerCountAt + 1) {
 		return bad("short constant block");
 	}
 	ConstantBlock out;
@@ -320,6 +326,17 @@ core::Result<ConstantBlock> parse_block(std::span<const uint8_t> p_block, size_t
 			v.value[c] = rdf(p + kValueDefaultAt + 4 * c);
 		}
 		out.values.push_back(std::move(v));
+	}));
+	BF3_TRY(entries(kSamplersAt, kSamplerCountAt, kSamplerBytes, kSamplerBytes, [&](const uint8_t *p) {
+		TextureSampler sampler;
+		sampler.slot = rd32(p);
+		for (size_t a = 0; a < 3; ++a) {
+			sampler.address[a] = rd32(p + kSamplerAddressAt + 4 * a);
+		}
+		for (size_t c = 0; c < 4; ++c) {
+			sampler.border[c] = rdf(p + kSamplerBorderAt + 4 * c);
+		}
+		out.samplers.push_back(sampler);
 	}));
 	return out;
 }
@@ -418,6 +435,7 @@ core::Result<ShaderDatabase> parse_path(std::span<const uint8_t> p_body, uint32_
 				kept->textures.emplace_back(block.texture_slots[t], block.textures[t]);
 			}
 			kept->values = block.values;
+			kept->samplers = block.samplers;
 			kept_constants.push_back(std::move(kept));
 		}
 	}
