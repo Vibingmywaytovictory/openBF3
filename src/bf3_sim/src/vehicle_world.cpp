@@ -469,13 +469,6 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	JPH::WheeledVehicleControllerSettings *controller = new JPH::WheeledVehicleControllerSettings;
 	controller->mTransmission.mMode = JPH::ETransmissionMode::Manual;
 	vehicle.mController = controller;
-	for (size_t i = 0; i < m.anti_roll_bars; ++i) {
-		JPH::VehicleAntiRollBar bar;
-		bar.mLeftWheel = m.anti_roll_wheels[i][0];
-		bar.mRightWheel = m.anti_roll_wheels[i][1];
-		bar.mStiffness = m.anti_roll_stiffness[i];
-		vehicle.mAntiRollBars.push_back(bar);
-	}
 
 	Impl::Vehicle &v = w.vehicles[p_slot];
 	v.constraint = new JPH::VehicleConstraint(*created, vehicle);

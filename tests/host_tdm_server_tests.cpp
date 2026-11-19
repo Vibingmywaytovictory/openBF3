@@ -14,6 +14,7 @@
 #include "bf3/core/gameplay/mode_def.h"
 #include "bf3/core/level/eor_camera.h"
 #include "bf3/core/math.h"
+#include "bf3/core/thread_pool.h"
 #include "bf3/core/ui/text_db.h"
 #include "bf3/core/util/text.h"
 #include "bf3/host/bot_fill.h"
@@ -8861,5 +8862,277 @@ TEST_SUITE("host-vehicles-modes") {
 		CHECK(live_disabled == 0);
 		CHECK(m->rules().stats().runtime_faults == 0u);
 		tdm::check_install_unchanged(*level);
+	}
+}
+
+namespace {
+
+struct ParkedLook {
+	uint16_t spawner = 0;
+	std::string blueprint;
+	float up = 1.0f;
+	float speed = 0.0f;
+	float tilt_rate = 0.0f;
+};
+
+float tilt_rate_of(const sim::Vec3 &p_angular_velocity) {
+	return std::max(std::fabs(p_angular_velocity[0]), std::fabs(p_angular_velocity[2]));
+}
+
+std::vector<ParkedLook> settle_every_spawner(const tdm::TdmLevel &p_level) {
+	const host::LevelVehicles &lv = *p_level.shared->vehicles;
+	std::vector<std::string> errors(lv.spawners.size());
+	std::vector<ParkedLook> out = core::parallel_map<ParkedLook>(lv.spawners.size(), [&](size_t p_index) {
+		const host::LevelVehicleSpawner &s = lv.spawners[p_index];
+		ParkedLook look;
+		look.spawner = uint16_t(p_index);
+		look.blueprint = lv.kinds[s.kind].blueprint;
+		sim::VehicleWorldOptions options;
+		options.max_vehicles = 1;
+		options.tuning = lv.tuning;
+		core::Result<std::unique_ptr<sim::VehicleWorld>> world =
+				sim::VehicleWorld::create(p_level.shared->static_world, options);
+		if (!world.ok() || !(*world)->add_vehicle(0, lv.kinds[s.kind].model, s.placement).ok()) {
+			errors[p_index] = world.ok() ? std::string("add_vehicle failed") : world.error().message;
+			return look;
+		}
+		const sim::VehicleSlot slot = 0;
+		const sim::VehicleCommand idle;
+		for (uint32_t t = 0; t < sim::seconds_to_ticks(10.0f); ++t) {
+			if (!(*world)->step(std::span<const sim::VehicleSlot>(&slot, 1),
+								 std::span<const sim::VehicleCommand>(&idle, 1))
+							.ok()) {
+				errors[p_index] = "step failed";
+				return look;
+			}
+			const sim::VehicleState st = (*world)->state(0);
+			look.up = std::min(look.up, tdm::up_y_of(st.body.rotation));
+			if (t >= sim::seconds_to_ticks(5.0f)) {
+				look.tilt_rate = std::max(look.tilt_rate, tilt_rate_of(st.body.angular_velocity));
+			}
+			look.speed = speed_of(st.body.linear_velocity);
+		}
+		return look;
+	});
+	for (const std::string &e : errors) {
+		REQUIRE_MESSAGE(e.empty(), e);
+	}
+	return out;
+}
+
+void check_settled(const char *p_mode, const std::vector<ParkedLook> &p_looks) {
+	size_t resting = 0;
+	for (const ParkedLook &l : p_looks) {
+		const bool rests = l.up > 0.95f && l.speed < 0.05f && l.tilt_rate < 0.05f;
+		resting += rests ? 1u : 0u;
+		std::printf("host.vehicles.settle.level: MP_007 %s spawner %u %s: lowest up axis y %.3f over 10 s, %.3f m/s at "
+					"10 s, largest pitch or roll rate %.3f rad/s from 5 s on%s\n",
+				p_mode, unsigned(l.spawner), l.blueprint.c_str(), double(l.up), double(l.speed), double(l.tilt_rate),
+				rests ? "" : " (NOT at rest)");
+		CHECK_MESSAGE(rests, l.blueprint << " on spawner " << l.spawner);
+	}
+	std::printf("host.vehicles.settle.level: MP_007 %s: %zu of %zu land spawners' vehicles rest upright\n", p_mode,
+			resting, p_looks.size());
+	CHECK(!p_looks.empty());
+}
+
+constexpr float kDrivableRun = 10.0f;
+constexpr float kDrivableRoom = 20.0f;
+
+struct DriveTry {
+	uint16_t spawner = 0;
+	std::string blueprint;
+	bool parked = false;
+	bool entered = false;
+	bool reverse = false;
+	float run = 0.0f;
+	float clear = 0.0f;
+	float top_speed = 0.0f;
+	float others_moved = 0.0f;
+};
+
+std::array<float, 4> turned_around(const std::array<float, 4> &p_q) {
+	return { -p_q[2], p_q[3], p_q[0], -p_q[1] };
+}
+
+float hull_half_width(const sim::VehicleModel &p_model) {
+	float half = 0.0f;
+	for (const sim::ChassisPiece &piece : p_model.chassis) {
+		for (const sim::Vec3 &p : piece.points) {
+			half = std::max(half, std::fabs(p[0]) + piece.convex_radius);
+		}
+	}
+	return half;
+}
+
+std::vector<DriveTry> drive_every_vehicle(const tdm::TdmLevel &p_level, const char *p_mode, uint64_t p_seed) {
+	const host::LevelVehicles &lv = *p_level.shared->vehicles;
+	std::unique_ptr<Match> m = start_match(p_level, false, p_seed, 0, 1);
+	tdm::ScriptedPeer &p = m->join("driver");
+	p.ready();
+	REQUIRE(wait_in_round(*m));
+	REQUIRE(m->until([&] { return is_alive(m->state(p.slot())); }, 600));
+	VehicleWatch watch;
+	const auto run = [&](uint32_t p_ticks) {
+		for (uint32_t t = 0; t < p_ticks; ++t) {
+			m->tick();
+			watch.take(m->out, p.peer());
+		}
+	};
+	run(sim::seconds_to_ticks(tdm::latest_initial_delay(lv)) + 120u);
+	std::vector<DriveTry> tries;
+	for (size_t i = 0; i < lv.spawners.size(); ++i) {
+		if (const std::optional<sim::VehicleState> s = m->server.vehicle_state(uint16_t(i))) {
+			DriveTry d;
+			d.spawner = uint16_t(i);
+			d.blueprint = lv.kinds[lv.spawners[i].kind].blueprint;
+			d.parked = tdm::up_y_of(s->body.rotation) > 0.95f && speed_of(s->body.linear_velocity) < 0.05f;
+			tries.push_back(d);
+		}
+	}
+	uint32_t buttons = 0;
+	int8_t forward = 0;
+	m->scripts[0] = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+		sim::Command c = sim::idle_command(p_tick, p_state.yaw, p_state.pitch, p_state.target_pose);
+		c.buttons |= buttons;
+		c.move_forward = forward;
+		return c;
+	};
+	const uint8_t slot = uint8_t(p.slot());
+	for (DriveTry &d : tries) {
+		const std::optional<sim::VehicleState> parked = m->server.vehicle_state(d.spawner);
+		if (!parked || !is_alive(m->state(p.slot()))) {
+			continue;
+		}
+		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[d.spawner].kind];
+		const std::array<float, 4> &q = parked->body.rotation;
+		const sim::Vec3 right{ 1.0f - 2.0f * (q[1] * q[1] + q[2] * q[2]), 0.0f, 2.0f * (q[0] * q[2] - q[3] * q[1]) };
+		const float side = hull_half_width(*kind.model) + 0.6f;
+		const sim::Vec3 &com = parked->body.com_position;
+		const sim::Vec3 beside =
+				ground_at(*m->world, com[0] + side * right[0], com[2] + side * right[2], com[1] + 5.0f);
+		m->teleport(p, beside);
+		if (!m->until([&] { return horizontal(m->state(p.slot())->position, beside) < 0.5f; }, 30)) {
+			continue;
+		}
+		run(2);
+		buttons = sim::buttons::kUse;
+		run(2);
+		buttons = 0;
+		d.entered = m->until(
+				[&] {
+					watch.take(m->out, p.peer());
+					const net::VehicleWire *w = watch.of(d.spawner);
+					return w != nullptr && w->occupants[0] == slot;
+				},
+				30);
+		if (!d.entered) {
+			continue;
+		}
+		const sim::VehicleState at_start = *m->server.vehicle_state(d.spawner);
+		std::vector<sim::Vec3> others;
+		std::vector<uint16_t> other_ids;
+		for (size_t o = 0; o < lv.spawners.size(); ++o) {
+			if (o != d.spawner && m->server.vehicle_state(uint16_t(o))) {
+				others.push_back(m->server.vehicle_state(uint16_t(o))->body.com_position);
+				other_ids.push_back(uint16_t(o));
+			}
+		}
+		const sim::Vec3 &start = at_start.body.com_position;
+		const float ahead = tdm::clear_run(*m->world, start, at_start.body.rotation, others, 60.0f);
+		const float behind = tdm::clear_run(*m->world, start, turned_around(at_start.body.rotation), others, 60.0f);
+		d.reverse = ahead < kDrivableRoom && behind > ahead;
+		d.clear = d.reverse ? behind : ahead;
+		const int8_t pedal = d.reverse ? int8_t(-127) : int8_t(127);
+		forward = pedal;
+		for (uint32_t t = 0; t < sim::seconds_to_ticks(10.0f) && d.run < kDrivableRun; ++t) {
+			run(1);
+			if (const std::optional<sim::VehicleState> s = m->server.vehicle_state(d.spawner)) {
+				d.top_speed = std::max(d.top_speed, speed_of(s->body.linear_velocity));
+				d.run = std::max(d.run, horizontal(s->body.com_position, start));
+			}
+		}
+		forward = int8_t(-pedal);
+		for (uint32_t t = 0; t < sim::seconds_to_ticks(5.0f); ++t) {
+			run(1);
+			const std::optional<sim::VehicleState> s = m->server.vehicle_state(d.spawner);
+			if (!s || speed_of(s->body.linear_velocity) < 1.0f) {
+				break;
+			}
+		}
+		forward = 0;
+		run(sim::seconds_to_ticks(1.0f));
+		buttons = sim::buttons::kUse;
+		run(2);
+		buttons = 0;
+		run(30);
+		for (size_t o = 0; o < other_ids.size(); ++o) {
+			if (other_ids[o] < d.spawner) {
+				continue;
+			}
+			if (const std::optional<sim::VehicleState> s = m->server.vehicle_state(other_ids[o])) {
+				d.others_moved = std::max(d.others_moved, horizontal(s->body.com_position, others[o]));
+			}
+		}
+	}
+	CHECK(m->rules().stats().runtime_faults == 0u);
+	return tries;
+}
+
+void check_drivable(const char *p_mode, const std::vector<DriveTry> &p_tries) {
+	size_t drove = 0, reversed = 0;
+	for (const DriveTry &d : p_tries) {
+		reversed += d.reverse ? 1u : 0u;
+		const bool ok = d.parked && d.entered && d.run >= kDrivableRun && d.others_moved < 0.1f;
+		drove += ok ? 1u : 0u;
+		std::printf("host.vehicles.drivable: MP_007 %s spawner %u %s: %s before entry, %s, %.1f m %s at full "
+					"throttle (%.0f m clear), top %.1f km/h, vehicles not yet driven moved %.2f m%s\n",
+				p_mode, unsigned(d.spawner), d.blueprint.c_str(), d.parked ? "parked upright" : "NOT parked upright",
+				d.entered ? "entered" : "NOT entered", double(d.run), d.reverse ? "backward" : "forward",
+				double(d.clear), double(3.6f * d.top_speed), double(d.others_moved), ok ? "" : " (NOT driven)");
+		CHECK_MESSAGE(ok, d.blueprint << " on spawner " << d.spawner);
+	}
+	std::printf("host.vehicles.drivable: MP_007 %s: %zu live land vehicles, %zu entered and driven %.0f m without "
+				"moving one not yet driven, %zu of them backward\n",
+			p_mode, p_tries.size(), drove, double(kDrivableRun), reversed);
+	CHECK(!p_tries.empty());
+}
+
+}
+
+TEST_SUITE("host-vehicles-drivable") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: every live land vehicle stands parked upright, a scripted soldier "
+			  "enters it from beside its hull with the use key and drives it 10 m at full throttle, backward when "
+			  "boxed in ahead, without moving another vehicle") {
+		std::unique_ptr<tdm::TdmLevel> level = tdm::load_tdm_level("MP_007", "ConquestSmall0", false);
+		if (level == nullptr) {
+			return;
+		}
+		check_drivable("ConquestSmall0", drive_every_vehicle(*level, "ConquestSmall0", 81u));
+		tdm::check_install_unchanged(*level);
+	}
+	TEST_CASE("vehicles: MP_007 ConquestLarge0: every live land vehicle stands parked upright, a scripted soldier "
+			  "enters it from beside its hull with the use key and drives it 10 m at full throttle, backward when "
+			  "boxed in ahead, without moving another vehicle") {
+		std::unique_ptr<tdm::TdmLevel> level = tdm::load_tdm_level("MP_007", "ConquestLarge0", false);
+		if (level == nullptr) {
+			return;
+		}
+		check_drivable("ConquestLarge0", drive_every_vehicle(*level, "ConquestLarge0", 82u));
+		tdm::check_install_unchanged(*level);
+	}
+}
+
+TEST_SUITE("host-vehicles-settle-level") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0 and ConquestLarge0: each land spawner's vehicle, alone on the level, "
+			  "comes to rest upright within 10 s of its spawn and does not rock") {
+		for (const char *mode : { "ConquestSmall0", "ConquestLarge0" }) {
+			std::unique_ptr<tdm::TdmLevel> level = tdm::load_tdm_level("MP_007", mode, false);
+			if (level == nullptr) {
+				return;
+			}
+			check_settled(mode, settle_every_spawner(*level));
+			tdm::check_install_unchanged(*level);
+		}
 	}
 }

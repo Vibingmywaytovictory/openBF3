@@ -63,7 +63,6 @@ struct VehicleTuning {
 	SteerAngleModel steer_model = SteerAngleModel::ScaledLock;
 	float steer_max_degrees = 32.0f;
 
-	float anti_roll_scale = 10000.0f;
 	float drag_scale = 1.0f;
 	float max_pitch_roll_degrees = 180.0f;
 
@@ -146,10 +145,6 @@ struct VehicleModel {
 
 	std::array<VehicleWheelModel, kMaxVehicleWheels> wheels{};
 	uint8_t wheel_count = 0;
-
-	std::array<std::array<int8_t, 2>, 2> anti_roll_wheels{};
-	std::array<float, 2> anti_roll_stiffness{};
-	uint8_t anti_roll_bars = 0;
 
 	std::array<std::array<float, 2>, kMaxModelCurvePoints> steer_sensitivity{};
 	uint8_t steer_points = 0;

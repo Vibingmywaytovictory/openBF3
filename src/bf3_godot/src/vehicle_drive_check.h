@@ -55,6 +55,8 @@ private:
 		Deploying,
 		ArmFire,
 		ArmSettle,
+		Parked,
+		ParkedLook,
 		Pick,
 		Walk,
 		Enter,

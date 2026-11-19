@@ -31,6 +31,7 @@ constexpr double kDeployTimeout = 30.0;
 constexpr double kDeployPressEvery = 2.0;
 constexpr double kPickTimeout = 60.0;
 constexpr double kPickSettle = 3.0;
+constexpr float kParkedLookMetres = 7.0f;
 constexpr double kWalkTimeout = 5.0;
 constexpr double kKeyHold = 0.3;
 constexpr double kSeatTimeout = 3.0;
@@ -504,6 +505,54 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			enter(Phase::ArmSettle);
 			return false;
 		}
+		case Phase::Parked: {
+			if (t_ < kPickSettle || parked(f, lv, kJeep) == nullptr) {
+				return t_ > kPickTimeout ? fail("parked", fmt("no parked upright Growler after %.0f s", kPickTimeout))
+										 : false;
+			}
+			uint32_t live = 0, upright = 0;
+			const host::PresentedVehicle *lowest = nullptr;
+			for (size_t i = 0; i < f.vehicle_count && i < f.vehicles.size(); ++i) {
+				const host::PresentedVehicle &v = f.vehicles[i];
+				++live;
+				const bool rests = sim::vehicles::hull_up_y(v.rotation) > 0.95f && speed(v.linear_velocity) < 0.05f;
+				upright += rests ? 1u : 0u;
+				if (lv.kinds[lv.spawners[v.spawner].kind].blueprint == kJeep &&
+						(lowest == nullptr ||
+								sim::vehicles::hull_up_y(v.rotation) < sim::vehicles::hull_up_y(lowest->rotation))) {
+					lowest = &v;
+				}
+			}
+			row("parked", live > 0 && upright == live,
+					fmt("%u of %u live vehicles at rest upright %.0f s into the round; the least upright Growler, "
+						"spawner %u, has up axis y %.2f and %.2f m/s",
+							upright, live, t_, lowest != nullptr ? unsigned(lowest->spawner) : 0u,
+							lowest != nullptr ? double(sim::vehicles::hull_up_y(lowest->rotation)) : 0.0,
+							lowest != nullptr ? double(speed(lowest->linear_velocity)) : 0.0));
+			host::ClientSession *client = r_session.client();
+			if (lowest == nullptr || client == nullptr) {
+				return fail("parked", "no Growler or no client session");
+			}
+			spawner_ = lowest->spawner;
+			net::DebugRequest q;
+			q.kind = net::DebugKind::Teleport;
+			q.id = ++request_id_;
+			q.position = { lowest->com_position[0] - kParkedLookMetres, lowest->com_position[1] + 0.5f,
+				lowest->com_position[2] };
+			q.yaw = sim::quantize_yaw(0.5f * sim::kPi);
+			client->send_debug(q);
+			mapper.script_view(0.5f * sim::kPi, 0.0f);
+			enter(Phase::ParkedLook);
+			return false;
+		}
+		case Phase::ParkedLook:
+			mapper.script_view(0.5f * sim::kPi, 0.0f);
+			if (t_ < kSettle) {
+				return false;
+			}
+			shoot(p_in, "parked_growler");
+			enter(Phase::Pick);
+			return false;
 		case Phase::ArmSettle: {
 			if (t_ < kFireHold) {
 				return false;
@@ -519,7 +568,7 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 					fmt("the primary held %.1f s before the ride fired %llu shots in mode %u, magazine %d -> %d",
 							kFireHold, (unsigned long long)armed_shots_, unsigned(spawn_mode_), int(spawn_magazine_),
 							int(armed_magazine_)));
-			enter(ifv_ ? Phase::GunPick : Phase::Pick);
+			enter(ifv_ ? Phase::GunPick : Phase::Parked);
 			return false;
 		}
 		case Phase::Pick: {

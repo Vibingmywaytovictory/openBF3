@@ -559,9 +559,6 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK(m->wheels[0].driven == 1);
 		CHECK(m->wheels[3].driven == 1);
 		CHECK(m->wheels[0].diff_gear_ratio == doctest::Approx(3.8f));
-		CHECK(m->anti_roll_bars == 2);
-		CHECK(m->anti_roll_stiffness[0] == doctest::Approx(12000.0f));
-		CHECK(m->anti_roll_stiffness[1] == doctest::Approx(5000.0f));
 		CHECK(m->land.curve_points == 7);
 		CHECK(m->land.torque_points[1] == 450.0f);
 		CHECK(m->land.rpm_points[6] == 4500.0f);

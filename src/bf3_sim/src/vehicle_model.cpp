@@ -109,11 +109,6 @@ uint64_t digest_of(const VehicleModel &p_m) {
 	for (size_t i = 0; i < l.steer_inertia_points; ++i) {
 		d.add(l.steer_inertia[i]);
 	}
-	d.add(p_m.anti_roll_bars);
-	for (size_t i = 0; i < p_m.anti_roll_bars; ++i) {
-		d.add(p_m.anti_roll_wheels[i]);
-		d.add(p_m.anti_roll_stiffness[i]);
-	}
 	d.add(p_m.steer_points);
 	for (size_t i = 0; i < p_m.steer_points; ++i) {
 		d.add(p_m.steer_sensitivity[i]);
@@ -333,31 +328,6 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		}
 		if (!any_driven) {
 			return fail("no driven wheels");
-		}
-
-		const float stiffness[2] = { ch.anti_roll_front * p_tuning.anti_roll_scale, ch.anti_roll_rear * p_tuning.anti_roll_scale };
-		const size_t axles[2] = { 0, axle_z.size() - 1 };
-		for (size_t b = 0; b < 2; ++b) {
-			if (!(stiffness[b] > 0.0f) || !finite(stiffness[b]) || (b == 1 && axles[1] == axles[0])) {
-				continue;
-			}
-			int8_t left = -1, right = -1;
-			for (size_t k = 0; k < m->wheel_count; ++k) {
-				const VehicleWheelModel &w = m->wheels[k];
-				if (w.axle != axles[b]) {
-					continue;
-				}
-				if (w.side == 0 && left < 0) {
-					left = int8_t(k);
-				} else if (w.side == 1 && right < 0) {
-					right = int8_t(k);
-				}
-			}
-			if (left >= 0 && right >= 0) {
-				m->anti_roll_wheels[m->anti_roll_bars] = { left, right };
-				m->anti_roll_stiffness[m->anti_roll_bars] = stiffness[b];
-				++m->anti_roll_bars;
-			}
 		}
 	}
 

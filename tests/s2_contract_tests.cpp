@@ -167,9 +167,9 @@ TEST_CASE("s2 contract: default plain values") {
 TEST_CASE("s2 contract: vehicle_tuning.cfg names exactly the VehicleTuning keys") {
 	const std::set<std::string> expected = { "gravity", "ground_friction", "static_sag_fraction", "damping_ratio",
 		"suspension_min_fraction", "wheel_angular_damping", "brake_torque_per_force", "hand_brake_torque",
-		"longitudinal_grip", "lateral_grip", "tester", "steer_model", "steer_max_degrees", "anti_roll_scale",
-		"drag_scale", "max_pitch_roll_degrees", "stand_still_speed", "wheel_drive_share", "collision_steps",
-		"velocity_steps", "position_steps" };
+		"longitudinal_grip", "lateral_grip", "tester", "steer_model", "steer_max_degrees", "drag_scale",
+		"max_pitch_roll_degrees", "stand_still_speed", "wheel_drive_share", "collision_steps", "velocity_steps",
+		"position_steps" };
 	std::ifstream f(OPENBF3_VEHICLE_TUNING_CFG, std::ios::binary);
 	REQUIRE(f.good());
 	std::set<std::string> found;
