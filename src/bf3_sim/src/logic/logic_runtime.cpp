@@ -305,6 +305,7 @@ struct LogicRuntime::State {
 	std::vector<LogicWatchHit> hits;
 	std::vector<LogicUnhandledPort> unhandled;
 	std::optional<LogicGhost> pending_ghost;
+	std::optional<Tick> ghost_seen;
 	LogicTrace trace;
 	Tick tick = 0;
 	uint32_t seq = 0;
@@ -779,9 +780,14 @@ struct LogicRuntime::State {
 			if (st.flag && st.start == local) {
 				continue;
 			}
+			const bool live = !st.flag && ghost_seen && start > *ghost_seen;
 			sequence_resume(node, local);
+			if (live) {
+				fire(node, port::kOnStarted, LogicContext{});
+			}
 			++stats.ghost_changes;
 		}
+		ghost_seen = p_ghost.tick;
 	}
 
 	void sequence_stop(uint32_t p_node, bool p_notify, const LogicContext &p_context) {
