@@ -2,6 +2,7 @@
 
 #include "collision_world_internal.h"
 #include "jolt_runtime.h"
+#include "soldier_water.h"
 #include "vehicles/vehicle_obstacles_internal.h"
 
 #include <Jolt/Math/Trigonometry.h>
@@ -167,6 +168,7 @@ struct SoldierMotor::Impl {
 	JPH::Ref<JPH::CharacterVirtual> character;
 	const VehicleObstacles *obstacles = nullptr;
 	std::unique_ptr<ObstacleContacts> touches = std::make_unique<ObstacleContacts>();
+	const WaterSurface *water = nullptr;
 
 	const CollisionWorld::Impl &w() const { return world->impl(); }
 
@@ -176,6 +178,8 @@ struct SoldierMotor::Impl {
 	void request_move_pose(SoldierState &r_s, uint8_t p_pose) const;
 	void begin_vault(SoldierState &r_s, const VaultStart &p_start) const;
 	void step_vault(SoldierState &r_s, bool p_blocked, MotorStepInfo *r_info) const;
+	void step_swim(SoldierState &r_s, const Command &p_command, const WaterDepth &p_water, bool p_blocked,
+			MotorStepInfo *r_info) const;
 };
 
 void SoldierMotor::Impl::begin_pose(SoldierState &r_s, Pose p_to) const {
@@ -299,6 +303,83 @@ void SoldierMotor::Impl::step_vault(SoldierState &r_s, bool p_blocked, MotorStep
 	}
 }
 
+void SoldierMotor::Impl::step_swim(SoldierState &r_s, const Command &p_command, const WaterDepth &p_water,
+		bool p_blocked, MotorStepInfo *r_info) const {
+	const float dt = kTickSeconds;
+	const CollisionWorld::Impl &cw = w();
+	const uint32_t mask = query_mask::kMovement;
+	const MotorTuning &tun = params.tuning;
+	JPH::CharacterVirtual &ch = *character;
+	SoldierState &s = r_s;
+	const float yaw = yaw_radians(s.yaw);
+	const StateSpeed &speed = params.poses[size_t(smaller_pose(s.pose, s.target_pose))].swimming;
+	float f = axis_value(p_command.move_forward);
+	float rgt = axis_value(p_command.move_right);
+	const float mag2 = f * f + rgt * rgt;
+	const bool sprinting = (p_command.buttons & buttons::kSprint) != 0 && f > 0.0f && speed.sprint_multiplier > 0.0f;
+	float target[2] = { 0.0f, 0.0f };
+	float target_speed = 0.0f;
+	if (mag2 > 0.0f) {
+		float mag = std::sqrt(mag2);
+		if (mag > 1.0f) {
+			f /= mag;
+			rgt /= mag;
+			mag = 1.0f;
+		}
+		float value = directional_speed(speed, f, rgt) * eval(params.poses[size_t(s.pose)].throttle, mag);
+		if (sprinting) {
+			value *= speed.sprint_multiplier * params.body_sprint_multiplier;
+		}
+		const float sy = JPH::Sin(yaw);
+		const float cy = JPH::Cos(yaw);
+		const float lf = f / mag;
+		const float lr = rgt / mag;
+		target[0] = (sy * lf - cy * lr) * value;
+		target[1] = (cy * lf + sy * lr) * value;
+		target_speed = value;
+	}
+	float vh[2] = { s.velocity[0], s.velocity[2] };
+	if (mag2 <= 0.0f) {
+		apply_gain(tun.deceleration_model, speed.deceleration_factor, target, vh);
+	} else if (sprinting) {
+		apply_gain(tun.sprint_model, speed.sprint_factor, target, vh);
+	} else {
+		apply_gain(tun.acceleration_model, speed.acceleration_factor, target, vh);
+	}
+	const float vy = swim_vertical_speed(params.swim, p_water, s.position[1], dt);
+	const JPH::Vec3 p0 = JPH::Vec3(ch.GetPosition());
+	ch.SetLinearVelocity(JPH::Vec3(vh[0], vy, vh[1]));
+	JPH::CharacterVirtual::ExtendedUpdateSettings update;
+	update.mStickToFloorStepDown = JPH::Vec3::sZero();
+	update.mWalkStairsStepUp = JPH::Vec3::sZero();
+	ch.ExtendedUpdate(dt, JPH::Vec3::sZero(), update, cw.broadphase_filter(mask), cw.object_filter(mask),
+			cw.body_filter, cw.shape_filter, *cw.temp);
+	const JPH::Vec3 p1 = JPH::Vec3(ch.GetPosition());
+	const JPH::Vec3 v_after = ch.GetLinearVelocity();
+	s.position = from_jolt(p1);
+	s.velocity = { v_after.GetX(), (p1 - p0).GetY() / dt, v_after.GetZ() };
+	const JPH::CharacterBase::EGroundState ground_state = ch.GetGroundState();
+	if (ground_state == JPH::CharacterBase::EGroundState::OnGround ||
+			ground_state == JPH::CharacterBase::EGroundState::OnSteepGround) {
+		const JPH::Vec3 n = ch.GetGroundNormal();
+		s.ground_normal = n.LengthSq() > 1e-6f ? from_jolt(n.Normalized()) : Vec3{ 0.0f, 1.0f, 0.0f };
+	} else {
+		s.ground_normal = { 0.0f, 1.0f, 0.0f };
+	}
+	uint16_t flags = soldier_flags::kAlive;
+	flags |= sprinting ? soldier_flags::kSprinting : 0;
+	flags |= p_blocked ? soldier_flags::kStandBlocked : 0;
+	flags |= s.protect_ticks > 0 ? soldier_flags::kSpawnProtected : 0;
+	s.flags = flags;
+	s.air_ticks = 0;
+	if (r_info != nullptr) {
+		r_info->target_speed = target_speed;
+		r_info->horizontal_speed = std::sqrt(s.velocity[0] * s.velocity[0] + s.velocity[2] * s.velocity[2]);
+		r_info->pose_blocked = p_blocked;
+		r_info->contacts = uint32_t(ch.GetActiveContacts().size());
+	}
+}
+
 bool SoldierMotor::Impl::footprint_free(const Vec3 &p_feet, uint16_t p_yaw) const {
 	const PoseParams &prone = params.poses[size_t(Pose::Prone)];
 	const float half_x = 0.5f * (prone.box_min_expand[0] + prone.box_max_expand[0]);
@@ -416,6 +497,10 @@ std::span<const ObstacleContact> SoldierMotor::obstacle_contacts() const {
 	return impl_->touches->contacts;
 }
 
+void SoldierMotor::set_water(const WaterSurface *p_water) {
+	impl_->water = p_water;
+}
+
 MotorModifiers motor_modifiers(const MotorParams &p_params) {
 	MotorModifiers out;
 	out.body_sprint_multiplier = p_params.body_sprint_multiplier;
@@ -461,7 +546,8 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 	if (s.jump_penalty_ticks > 0) {
 		--s.jump_penalty_ticks;
 	}
-	const bool grounded0 = (s.flags & soldier_flags::kGrounded) != 0;
+	bool grounded0 = (s.flags & soldier_flags::kGrounded) != 0;
+	const WaterDepth water = water_depth(m.water, s.position);
 	const float forward_in = axis_value(p_command.move_forward);
 	const float right_in = axis_value(p_command.move_right);
 	const bool sprint_held = (p_command.buttons & buttons::kSprint) != 0 && forward_in > 0.0f;
@@ -497,6 +583,9 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 		if (tun.sprint_stands_up && sprint_held && requested != Pose::Stand) {
 			requested = Pose::Stand;
 		}
+		if (requested != Pose::Stand && requested != s.pose && water_blocks_low_pose(p, water)) {
+			requested = s.pose;
+		}
 		if (requested == s.pose) {
 			s.target_pose = s.pose;
 			blocked = false;
@@ -511,6 +600,12 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 			}
 			blocked = true;
 		}
+	}
+	if (s.mode != MoveMode::AnimationControlled && water_forces_stand(p, water, s.target_pose) &&
+			(s.transition_ticks == 0 || p.swim.pose_change_during_transition) &&
+			m.pose_fits(Pose::Stand, s.position, s.yaw)) {
+		m.begin_pose(s, Pose::Stand);
+		blocked = false;
 	}
 	const Pose move_pose = smaller_pose(s.pose, s.target_pose);
 
@@ -530,6 +625,26 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 		const JPH::Vec3 n = ch.GetGroundNormal();
 		if (n.LengthSq() > 1e-6f) {
 			ground_plane = n.Normalized();
+		}
+	}
+	if (s.mode != MoveMode::AnimationControlled && p.swim.present) {
+		SwimTest test;
+		test.supported = ch.IsSupported();
+		test.swimming = s.mode == MoveMode::Swimming;
+		test.forward = forward_in;
+		test.right = right_in;
+		test.ground_normal = from_jolt(ground_plane);
+		test.yaw = yaw;
+		const bool in_water = soldier_in_water(p.swim, water, test, *m.world, s.position);
+		if (in_water && (s.mode == MoveMode::OnGround || s.mode == MoveMode::InAir || s.mode == MoveMode::Falling)) {
+			s.mode = MoveMode::Swimming;
+		} else if (!in_water && s.mode == MoveMode::Swimming && test.supported) {
+			s.mode = MoveMode::OnGround;
+			grounded0 = true;
+		}
+		if (s.mode == MoveMode::Swimming) {
+			m.step_swim(s, p_command, water, blocked, r_info);
+			return;
 		}
 	}
 	if (s.mode != MoveMode::AnimationControlled && p.vault.present && (p_command.buttons & buttons::kJump) != 0 &&

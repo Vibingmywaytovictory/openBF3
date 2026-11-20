@@ -23,6 +23,7 @@ struct SoldierDef;
 namespace bf3::sim {
 
 class CollisionWorld;
+class WaterSurface;
 
 enum class GainModel : uint8_t {
 
@@ -184,6 +185,7 @@ public:
 
 	void set_obstacles(const VehicleObstacles *p_obstacles);
 	std::span<const ObstacleContact> obstacle_contacts() const;
+	void set_water(const WaterSurface *p_water);
 
 private:
 	struct Impl;

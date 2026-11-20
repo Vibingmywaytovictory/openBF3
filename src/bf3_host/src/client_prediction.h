@@ -38,6 +38,7 @@ public:
 	void attach_weapons(sim::WeaponLane *p_lane) { ring_->attach_weapons(p_lane); }
 	void set_seats(const sim::SeatSource *p_seats) { seats_ = p_seats; }
 	void set_obstacles(const sim::VehicleObstacles *p_obstacles) { motor_.set_obstacles(p_obstacles); }
+	void set_water(const sim::WaterSurface *p_water) { motor_.set_water(p_water); }
 	void discard_after(sim::Tick p_tick) { ring_->discard_after(p_tick); }
 
 	bool have_own() const { return have_own_; }

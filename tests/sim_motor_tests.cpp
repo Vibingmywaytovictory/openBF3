@@ -7,6 +7,7 @@
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/collision_soup.h"
 #include "bf3/core/level/spawn_points.h"
+#include "bf3/core/level/water_mesh.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/sim/bots/walker_brain.h"
 #include "bf3/sim/collision_world.h"
@@ -20,6 +21,7 @@
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/water.h"
 #include "bf3/sim_harness/vault_spots.h"
+#include "bf3/sim_harness/water_spots.h"
 #include "test_scratch.h"
 #include "test_support.h"
 
@@ -2860,6 +2862,46 @@ TEST_SUITE("sim-vault-levels") {
 	}
 }
 
+namespace {
+
+std::vector<StaticTriangle> river_world() {
+	std::vector<StaticTriangle> t;
+	add_floor(t, -50.0f, -40.0f, 50.0f, 0.0f, 0.0f);
+	add_quad(t, { -50.0f, 0.0f, 0.0f }, { -50.0f, -4.0f, 10.0f }, { 50.0f, -4.0f, 10.0f }, { 50.0f, 0.0f, 0.0f });
+	add_floor(t, -50.0f, 10.0f, 50.0f, 60.0f, -4.0f);
+	add_floor(t, 100.0f, 10.0f, 120.0f, 60.0f, -2.0f);
+	add_floor(t, 120.0f, 10.0f, 140.0f, 60.0f, -1.5f);
+	add_floor(t, 140.0f, 10.0f, 160.0f, 60.0f, -1.25f);
+	return t;
+}
+
+constexpr float kRiverSurface = -1.0f;
+
+std::shared_ptr<const WaterSurface> river_water() {
+	WaterBodyMesh mesh;
+	const float y = kRiverSurface;
+	mesh.triangles.push_back({ Vec3{ -60.0f, y, 2.0f }, Vec3{ -60.0f, y, 70.0f }, Vec3{ 170.0f, y, 70.0f } });
+	mesh.triangles.push_back({ Vec3{ -60.0f, y, 2.0f }, Vec3{ 170.0f, y, 70.0f }, Vec3{ 170.0f, y, 2.0f } });
+	core::Result<std::shared_ptr<const WaterSurface>> w = WaterSurface::build(std::span<const WaterBodyMesh>(&mesh, 1));
+	REQUIRE(w.ok());
+	return *w;
+}
+
+bool any_event(const std::vector<SoldierState> &p_states, uint16_t p_event) {
+	return std::any_of(
+			p_states.begin(), p_states.end(), [&](const SoldierState &s) { return (s.events & p_event) != 0; });
+}
+
+bool ever_mode(const std::vector<SoldierState> &p_states, MoveMode p_mode) {
+	return std::any_of(p_states.begin(), p_states.end(), [&](const SoldierState &s) { return s.mode == p_mode; });
+}
+
+bool ever_pose(const std::vector<SoldierState> &p_states, Pose p_pose) {
+	return std::any_of(p_states.begin(), p_states.end(), [&](const SoldierState &s) { return s.pose == p_pose; });
+}
+
+}
+
 TEST_SUITE("sim-swim-unit") {
 	TEST_CASE(
 			"sim.swim: the water surface is the height of the triangle under a point, the highest of several, and none "
@@ -2884,5 +2926,168 @@ TEST_SUITE("sim-swim-unit") {
 		WaterBodyMesh bad;
 		bad.triangles.push_back({ Vec3{ 0.0f, INFINITY, 0.0f }, Vec3{ 1.0f, 0.0f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f } });
 		CHECK_FALSE(WaterSurface::build(std::span<const WaterBodyMesh>(&bad, 1)).ok());
+	}
+
+	TEST_CASE("sim.swim: a soldier walking down a bank into water deeper than WaterDepthLimit swims with the feet "
+			  "BodyUnderWater under the surface, cannot jump or crouch there, and walks back out") {
+		const MotorParams params = params_with(shipped_tuning());
+		REQUIRE(params.swim.present);
+		CHECK(params.swim.depth_limit == doctest::Approx(1.4f));
+		CHECK(params.swim.body_under_water == doctest::Approx(1.4f));
+		Rig r = rig_of(river_world(), params);
+		const std::shared_ptr<const WaterSurface> water = river_water();
+		r.motor->set_water(water.get());
+		SoldierState s = at_rest(*r.motor, { 0.0f, 0.0f, -5.0f });
+		const std::vector<SoldierState> in = run(*r.motor, s, 300, [](Tick t) { return move_command(t, 127, 0, 0); });
+		const auto first =
+				std::find_if(in.begin(), in.end(), [](const SoldierState &x) { return x.mode == MoveMode::Swimming; });
+		REQUIRE(first != in.end());
+		const SoldierState &before = *(first - 1);
+		std::printf("swim: starts at tick %td, feet %.3f m, %.3f m under the surface the tick before\n",
+				first - in.begin(), double(first->position[1]), double(kRiverSurface - before.position[1]));
+		CHECK(kRiverSurface - before.position[1] > params.swim.depth_limit);
+		CHECK(kRiverSurface - before.position[1] < params.swim.depth_limit + 0.2f);
+		const std::vector<SoldierState> still =
+				run(*r.motor, s, 120, [](Tick t) { return idle_command(t, 0, 0, Pose::Stand); });
+		CHECK(s.mode == MoveMode::Swimming);
+		CHECK(s.position[1] == doctest::Approx(kRiverSurface - params.swim.body_under_water).epsilon(0.001));
+		CHECK(std::fabs(s.velocity[1]) < 0.01f);
+		CHECK_FALSE(grounded(s));
+		CHECK(s.position[2] > 10.0f);
+		CHECK(s.health == doctest::Approx(params.max_health));
+		CHECK_FALSE(any_event(in, soldier_events::kDamaged));
+		CHECK_FALSE(any_event(still, soldier_events::kDamaged));
+		const std::vector<SoldierState> jumps =
+				run(*r.motor, s, 30, [](Tick t) { return move_command(t, 0, 0, 0, Pose::Stand, buttons::kJump); });
+		CHECK_FALSE(any_event(jumps, soldier_events::kJumped));
+		CHECK(s.mode == MoveMode::Swimming);
+		const std::vector<SoldierState> crouch =
+				run(*r.motor, s, 60, [](Tick t) { return move_command(t, 0, 0, 0, Pose::Crouch); });
+		CHECK_FALSE(ever_pose(crouch, Pose::Crouch));
+		CHECK(s.target_pose == Pose::Stand);
+		run(*r.motor, s, 300, [](Tick t) { return move_command(t, 127, 0, 0); });
+		CHECK(horizontal(s.velocity) == doctest::Approx(3.0f).epsilon(0.02));
+		const std::vector<SoldierState> out =
+				run(*r.motor, s, 1200, [](Tick t) { return move_command(t, 127, 0, 0x8000); });
+		std::printf("swim: walked back out to (%.2f, %.2f, %.2f), mode %u\n", double(s.position[0]),
+				double(s.position[1]), double(s.position[2]), unsigned(s.mode));
+		CHECK(s.mode == MoveMode::OnGround);
+		CHECK(grounded(s));
+		CHECK(s.position[2] < 0.0f);
+		CHECK(s.position[1] == doctest::Approx(0.0f).epsilon(0.02));
+		CHECK_FALSE(any_event(out, soldier_events::kDamaged));
+		CHECK(s.health == doctest::Approx(params.max_health));
+	}
+
+	TEST_CASE("sim.swim: a soldier falling into deep water swims without fall damage") {
+		const MotorParams params = params_with(shipped_tuning());
+		Rig r = rig_of(river_world(), params);
+		const std::shared_ptr<const WaterSurface> water = river_water();
+		r.motor->set_water(water.get());
+		SoldierState s = r.motor->spawn_state({ 0.0f, 12.0f, 30.0f }, 0, 1, 1000, false);
+		const std::vector<SoldierState> fall =
+				run(*r.motor, s, 240, [](Tick t) { return idle_command(t, 0, 0, Pose::Stand); });
+		CHECK(s.mode == MoveMode::Swimming);
+		CHECK(s.position[1] == doctest::Approx(kRiverSurface - params.swim.body_under_water).epsilon(0.001));
+		CHECK_FALSE(any_event(fall, soldier_events::kDamaged));
+		CHECK_FALSE(any_event(fall, soldier_events::kLanded));
+		CHECK(s.health == doctest::Approx(params.max_health));
+	}
+
+	TEST_CASE(
+			"sim.swim: in shallow water the soldier walks on the bottom; crouch is refused from Crouch Height - 0.3 m "
+			"and prone from Prone Height - 0.1 m deep") {
+		const MotorParams params = params_with(shipped_tuning());
+		Rig r = rig_of(river_world(), params);
+		const std::shared_ptr<const WaterSurface> water = river_water();
+		r.motor->set_water(water.get());
+		struct Plateau {
+			float x;
+			float y;
+			bool crouch;
+			bool prone;
+		};
+		for (const Plateau p : { Plateau{ 110.0f, -2.0f, false, false }, Plateau{ 130.0f, -1.5f, true, false },
+					 Plateau{ 150.0f, -1.25f, true, false } }) {
+			CAPTURE(p.y);
+			SoldierState s = at_rest(*r.motor, { p.x, p.y, 20.0f });
+			const std::vector<SoldierState> walk =
+					run(*r.motor, s, 120, [](Tick t) { return move_command(t, 127, 0, 0); });
+			CHECK_FALSE(ever_mode(walk, MoveMode::Swimming));
+			CHECK(grounded(s));
+			CHECK(s.position[1] == doctest::Approx(p.y).epsilon(0.02));
+			const std::vector<SoldierState> crouch =
+					run(*r.motor, s, 60, [](Tick t) { return move_command(t, 0, 0, 0, Pose::Crouch); });
+			CHECK(ever_pose(crouch, Pose::Crouch) == p.crouch);
+			run(*r.motor, s, 60, [](Tick t) { return move_command(t, 0, 0, 0, Pose::Stand); });
+			const std::vector<SoldierState> prone =
+					run(*r.motor, s, 90, [](Tick t) { return move_command(t, 0, 0, 0, Pose::Prone); });
+			CHECK(ever_pose(prone, Pose::Prone) == p.prone);
+			CHECK_FALSE(ever_mode(prone, MoveMode::Swimming));
+		}
+		SoldierState dry = at_rest(*r.motor, { 0.0f, 0.0f, -20.0f });
+		const std::vector<SoldierState> prone =
+				run(*r.motor, dry, 90, [](Tick t) { return move_command(t, 0, 0, 0, Pose::Prone); });
+		CHECK(ever_pose(prone, Pose::Prone));
+	}
+}
+
+TEST_SUITE("sim-swim-levels") {
+	TEST_CASE("sim.swim: Caspian Border: a soldier walking from a bank into the river swims at the surface the data "
+			  "gives, not on the river bed, and walks back out") {
+		Metro *m = loaded_level("MP_007", "ConquestLarge0");
+		if (m == nullptr) {
+			return;
+		}
+		core::Result<std::vector<core::level::WaterMesh>> meshes =
+				core::level::read_water_meshes(*m->collision.level, *m->collision.world);
+		REQUIRE_MESSAGE(meshes.ok(), (meshes.ok() ? std::string() : meshes.error().message));
+		REQUIRE(meshes->size() == 1);
+		std::vector<WaterBodyMesh> bodies;
+		float lo = INFINITY, hi = -INFINITY;
+		for (const core::level::WaterMesh &mesh : *meshes) {
+			for (const std::array<Vec3, 3> &t : mesh.triangles) {
+				for (const Vec3 &v : t) {
+					lo = std::min(lo, v[1]);
+					hi = std::max(hi, v[1]);
+				}
+			}
+			bodies.push_back(WaterBodyMesh{ mesh.triangles });
+			std::printf("MP_007 water mesh %s: %zu triangles\n", mesh.asset.c_str(), mesh.triangles.size());
+		}
+		std::printf("MP_007 water surface y %.3f..%.3f\n", double(lo), double(hi));
+		CHECK((*meshes)[0].triangles.size() == 412);
+		CHECK(lo == doctest::Approx(129.125f).epsilon(0.0001));
+		CHECK(hi == doctest::Approx(130.0f).epsilon(0.0001));
+		core::Result<std::shared_ptr<const WaterSurface>> water = WaterSurface::build(bodies);
+		REQUIRE(water.ok());
+		m->motor->set_water(water->get());
+		const std::optional<WaterSpot> spot = find_water_spot(*m->motor, *m->world, **water, m->points);
+		REQUIRE(spot.has_value());
+		std::printf("MP_007 water spot: bank (%.2f, %.2f, %.2f) yaw %u, %.1f m to (%.2f, %.2f) where the bed is %.2f m "
+					"under "
+					"the surface at %.2f\n",
+				double(spot->bank[0]), double(spot->bank[1]), double(spot->bank[2]), unsigned(spot->yaw),
+				double(spot->run), double(spot->deep[0]), double(spot->deep[2]), double(spot->surface - spot->deep[1]),
+				double(spot->surface));
+		const WaterSpotRun run_in = run_at_water_spot(*m->motor, *m->world, **water, *spot);
+		m->motor->set_water(nullptr);
+		std::printf("MP_007 water run: reached %d, %u ticks swimming from tick %u, feet %.3f m with the surface at "
+					"%.3f and "
+					"the bed at %.3f, mode %u; back out %d at (%.2f, %.2f, %.2f) mode %u, health %.1f\n",
+				int(run_in.reached), run_in.swim_ticks, run_in.first_swim_tick, double(run_in.in.position[1]),
+				double(run_in.surface), double(run_in.bed), unsigned(run_in.in.mode), int(run_in.left),
+				double(run_in.out.position[0]), double(run_in.out.position[1]), double(run_in.out.position[2]),
+				unsigned(run_in.out.mode), double(run_in.out.health));
+		CHECK(run_in.reached);
+		CHECK(run_in.in.mode == MoveMode::Swimming);
+		CHECK(run_in.in.position[1] ==
+				doctest::Approx(run_in.surface - m->params.swim.body_under_water).epsilon(0.0002));
+		CHECK(run_in.in.position[1] - run_in.bed >= 0.5f);
+		CHECK(run_in.left);
+		CHECK(run_in.out.health == doctest::Approx(m->params.max_health));
+		const core::SnapshotDiff diff = core::diff_snapshots(m->before, m->reader->snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+		std::printf("install.unchanged: %s\n", diff.clean() ? "clean" : diff.summary().c_str());
 	}
 }

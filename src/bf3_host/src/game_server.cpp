@@ -718,6 +718,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 			p_config.level->vehicles, p_config.level->static_world, p_config.vehicle_spawn_delay_modifier));
 	m.vehicles.configure_scope(p_config.max_slots, p_config.ghost_scope);
 	m.motor.set_obstacles(m.vehicles.on() ? &m.vehicles.obstacles() : nullptr);
+	m.motor.set_water(p_config.level->water.get());
 	m.handshake.configure(p_config.game_build.value_or(net::game_build()), *p_config.level, p_config.max_slots);
 	m.loads.configure(p_config.max_slots, p_config.load, p_config.round_id);
 	for (size_t i = 0; i < m.slots.size(); ++i) {

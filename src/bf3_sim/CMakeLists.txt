@@ -41,6 +41,8 @@ target_sources(bf3_sim PRIVATE
     src/prediction.cpp
     include/bf3/sim/water.h
     src/water.cpp
+    src/soldier_water.h
+    src/soldier_water.cpp
 )
 
 target_sources(bf3_sim PRIVATE
