@@ -735,7 +735,9 @@ LookResolver::ProgramInfo &LookResolver::program_info(const SurfaceShader &p_sha
 		return *programs_.emplace(&p_shader, std::move(info)).first->second;
 	};
 	constexpr std::string_view kTexturePrefix = "texture_";
-	std::string last = "no solution draws its target with a texture";
+	constexpr std::string_view kNoTexturedSolution = "no solution draws its target with a texture";
+	constexpr std::string_view kNoTargetSolution = "no solution writes its target";
+	std::string last(kNoTexturedSolution);
 	std::optional<TranslatedProgram> probe;
 	FlatOutputs flat;
 	const auto finish_flat = [&]() {
@@ -783,7 +785,11 @@ LookResolver::ProgramInfo &LookResolver::program_info(const SurfaceShader &p_sha
 				});
 		const bool samples = std::any_of(pixel->code.begin(), pixel->code.end(),
 				[](const dxbc::Instruction &p_i) { return p_i.is(dxbc::Op::Sample); });
-		if (!target || !samples) {
+		if (!target) {
+			last = last == kNoTexturedSolution ? kNoTargetSolution : last;
+			continue;
+		}
+		if (!samples && info->target != ProgramTarget::Deferred) {
 			continue;
 		}
 		core::Result<dxbc::Program> vertex = dxbc::parse(s.vertex_program->bytes);
