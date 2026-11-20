@@ -446,7 +446,7 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
         -DPATCH_POINT=-120,141.0,780 -DPATCH_EXPOSURE=0.5 -DPATCH_HALF=32)
     set_tests_properties(godot.sun_light PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.sun_light.metro godot_sun_light.cmake WINDOW TIMEOUT 400
-        ARGS -DLEVEL=MP_Subway -DMODE=TeamDeathMatchC0 -DGLOSS=574 -DGBUFFER=619
+        ARGS -DLEVEL=MP_Subway -DMODE=TeamDeathMatchC0 -DGLOSS=588 -DGBUFFER=619
         "-DVIEWS=toward_street@-154.3,66.1,-493.9,200,0|away_street@-154.3,66.1,-493.9,20,5")
     set_tests_properties(godot.sun_light.metro PROPERTIES RUN_SERIAL TRUE)
 endif()

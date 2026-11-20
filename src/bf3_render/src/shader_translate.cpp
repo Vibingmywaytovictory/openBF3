@@ -27,6 +27,10 @@ constexpr uint32_t kSystemPosition = 1;
 constexpr uint32_t kGbufferAlbedo = 1;
 constexpr uint32_t kGbufferNormal = 0;
 constexpr uint16_t kImad = 35;
+constexpr uint16_t kItof = 43;
+constexpr uint16_t kSincos = 77;
+constexpr uint16_t kSin = 0x401;
+constexpr uint16_t kCos = 0x402;
 constexpr uint8_t kGlossLane = 3;
 constexpr const char *kViewConstants = "viewConstants";
 constexpr const char *kExternalPrefix = "external_";
@@ -61,6 +65,9 @@ std::optional<std::string> float_text(float p_value) {
 }
 
 bool componentwise(uint16_t p_opcode) {
+	if (p_opcode == kItof || p_opcode == kSin || p_opcode == kCos) {
+		return true;
+	}
 	switch (Op(p_opcode)) {
 		case Op::Add:
 		case Op::And:
@@ -71,6 +78,7 @@ bool componentwise(uint16_t p_opcode) {
 		case Op::Exp:
 		case Op::Frc:
 		case Op::Ge:
+		case Op::Iadd:
 		case Op::Ieq:
 		case Op::Log:
 		case Op::Lt:
@@ -172,6 +180,7 @@ public:
 		}
 		if (p_ins.is(Op::Else) || p_ins.is(Op::EndIf) || p_ins.is(Op::If)) {
 			mask_lanes_.clear();
+			int_lanes_.clear();
 		}
 		if (p_ins.is(Op::Else)) {
 			return std::string("} else {");
@@ -280,6 +289,18 @@ public:
 			}
 			const bool first = p_ins.operands[1].is(OperandType::Immediate32);
 			value = "mix(vec4(0.0), " + src[first ? 0 : 1] + ", notEqual(" + src[first ? 1 : 0] + ", vec4(0.0)))";
+		} else if (p_ins.is(Op::Iadd) && need(2)) {
+			if (!mask_lanes(p_ins.operands[1], p_ins) || !mask_lanes(p_ins.operands[2], p_ins)) {
+				return refuse("iadd of what is not two comparison masks: " + dxbc::format_instruction(p_ins));
+			}
+			value = "(-(" + src[0] + ") - (" + src[1] + "))";
+		} else if (op == kItof && need(1)) {
+			if (!int_lanes(p_ins.operands[1], p_ins)) {
+				return refuse("itof of what is not a sum of comparison masks: " + dxbc::format_instruction(p_ins));
+			}
+			value = src[0];
+		} else if ((op == kSin || op == kCos) && need(1)) {
+			value = std::string(op == kSin ? "sin(" : "cos(") + src[0] + ")";
 		} else if (p_ins.is(Op::Movc) && need(3)) {
 			value = "mix(" + src[2] + ", " + src[1] + ", notEqual(" + src[0] + ", vec4(0.0)))";
 		} else if (p_ins.is(Op::Mad) && need(3)) {
@@ -338,6 +359,11 @@ public:
 					mask_lanes_.insert(lane(d.index[0], c));
 				} else {
 					mask_lanes_.erase(lane(d.index[0], c));
+				}
+				if (p_ins.is(Op::Iadd)) {
+					int_lanes_.insert(lane(d.index[0], c));
+				} else {
+					int_lanes_.erase(lane(d.index[0], c));
 				}
 			}
 		}
@@ -425,7 +451,25 @@ private:
 		return true;
 	}
 
+	bool mask_lanes(const Operand &p_op, const Instruction &p_ins) const { return lanes_in(p_op, p_ins, mask_lanes_); }
+
+	bool int_lanes(const Operand &p_op, const Instruction &p_ins) const { return lanes_in(p_op, p_ins, int_lanes_); }
+
+	static bool lanes_in(const Operand &p_op, const Instruction &p_ins, const std::set<uint64_t> &p_set) {
+		if (!p_op.is(OperandType::Temp) || p_op.absolute) {
+			return false;
+		}
+		for (uint8_t c = 0; c < 4; ++c) {
+			if (((p_ins.operands[0].write_mask() >> c) & 1u) != 0 &&
+					p_set.count(lane(p_op.index[0], p_op.lane(c))) == 0) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	std::set<uint64_t> mask_lanes_;
+	std::set<uint64_t> int_lanes_;
 
 	core::Result<std::string> reg(const Operand &p_op) {
 		if (p_op.relative) {
@@ -1326,10 +1370,41 @@ bool colour_channel(uint32_t p_format) {
 	return p_format == kDxgiR8G8B8A8Unorm || p_format == kDxgiB8G8R8A8Unorm;
 }
 
+dxbc::Program split_sincos(const dxbc::Program &p_program) {
+	dxbc::Program out = p_program;
+	out.code.clear();
+	for (const Instruction &ins : p_program.code) {
+		if (ins.opcode != kSincos || ins.operands.size() != 3) {
+			out.code.push_back(ins);
+			continue;
+		}
+		const Operand &source = ins.operands[2];
+		const bool sin = !ins.operands[0].is(OperandType::Null);
+		const bool cos = !ins.operands[1].is(OperandType::Null);
+		const bool clobbers = sin && cos && source.is(OperandType::Temp) && ins.operands[0].is(OperandType::Temp) &&
+				ins.operands[0].index[0] == source.index[0];
+		if (clobbers) {
+			out.code.push_back(ins);
+			continue;
+		}
+		for (size_t d = 0; d < 2; ++d) {
+			if (!(d == 0 ? sin : cos)) {
+				continue;
+			}
+			Instruction part = ins;
+			part.opcode = d == 0 ? kSin : kCos;
+			part.operands = { ins.operands[d], source };
+			out.code.push_back(std::move(part));
+		}
+	}
+	return out;
+}
+
 class Translator {
 public:
 	Translator(const ProgramRequest &p_request, bool p_gloss) :
-			request_(p_request), ps_(*p_request.pixel), gloss_(p_gloss && p_request.target == ProgramTarget::Deferred) {
+			request_(p_request), ps_(split_sincos(*p_request.pixel)),
+			gloss_(p_gloss && p_request.target == ProgramTarget::Deferred) {
 		for (const dxbc::Binding &b : ps_.bindings) {
 			if (b.type == uint32_t(dxbc::BindingType::Texture) && b.dimension == dxbc::kDimensionTextureCube) {
 				emitter_.cubes.insert(b.bind_point);
@@ -1968,7 +2043,7 @@ uniform float roughness_value = 0.6;
 	}
 
 	const ProgramRequest &request_;
-	const dxbc::Program &ps_;
+	const dxbc::Program ps_;
 	std::vector<bool> needed_;
 	std::map<uint32_t, uint8_t> inputs_;
 	std::map<uint64_t, std::set<uint32_t>> input_usage_;
