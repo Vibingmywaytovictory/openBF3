@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <type_traits>
 
 namespace bf3::audio {
@@ -38,6 +39,9 @@ public:
 	void stop(MixerCore &r_mixer);
 	InstanceHandle handle() const { return handle_; }
 	const MovementFoleyStats &stats() const { return stats_; }
+	float speed() const { return speed_; }
+	void trace_next(SamplerTrace *r_trace);
+	bool trace_closed() const { return trace_closed_; }
 
 private:
 	bool start(MixerCore &r_mixer, const FootstepSoldier &p_own, float p_speed, const ListenerState &p_listener);
@@ -52,6 +56,28 @@ private:
 	float speed_ = 0.0f;
 	bool first_person_ = false;
 	sim::MoveMode mode_ = sim::MoveMode::OnGround;
+	SamplerTrace *trace_next_ = nullptr;
+	InstanceHandle traced_ = kNoInstance;
+	bool trace_closed_ = false;
 };
+
+struct SpeedLoop {
+	uint32_t node = 0;
+	uint32_t slots = 0;
+	core::audio::ConditionOp op = core::audio::ConditionOp::Unknown;
+	float threshold = 0.0f;
+};
+
+std::optional<SpeedLoop> speed_triggered_loop(const core::audio::SoundProgram &p_program);
+bool speed_loop_on(const SpeedLoop &p_loop, float p_speed);
+
+struct LoopVoices {
+	uint64_t starts = 0;
+	uint32_t max_busy = 0;
+	uint64_t stacked_frames = 0;
+	uint64_t longest_stack_frames = 0;
+};
+
+LoopVoices loop_voices(const SamplerTrace &p_trace, uint32_t p_node, uint64_t p_end_frame);
 
 }

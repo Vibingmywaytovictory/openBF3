@@ -2166,6 +2166,86 @@ TEST_SUITE("audio-footsteps") {
 		check_unchanged(*f);
 	}
 
+	TEST_CASE("MovementFoley: sprint-jumps that dip the speed under the breathing Trigger and back keep one breathing "
+			  "loop") {
+		Fixture *f = need_install();
+		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
+		REQUIRE(d.ok());
+		const StepPatch moves = step_patch(*f->install, *f->metro, d->movement);
+		const std::optional<ba::SpeedLoop> loop = ba::speed_triggered_loop(*moves.program);
+		REQUIRE(loop.has_value());
+		constexpr float kSprint = 6.5f, kAirborne = 5.0f, kStill = 0.0f;
+		CHECK(ba::speed_loop_on(*loop, kSprint));
+		CHECK_FALSE(ba::speed_loop_on(*loop, kAirborne));
+		ba::MixerConfig mc;
+		mc.max_instances = 16;
+		ba::MixerCore mixer(mc);
+		mixer.record_cuts(true);
+		ba::MovementFoley foley(moves.program, moves.bank, ba::AudioTuning{});
+		ba::SamplerTrace trace;
+		trace.entries.resize(4096);
+		foley.trace_next(&trace);
+		std::vector<float> out(2 * 800);
+		std::vector<ba::MixerCutEvent> cuts(256);
+		const ba::ListenerState listener{};
+		const auto drain = [&] {
+			REQUIRE(mixer.mix(out.data(), 800) == 800);
+			for (size_t n = mixer.poll_cuts(cuts); n > 0; n = mixer.poll_cuts(cuts)) {
+				for (size_t i = 0; i < n; ++i) {
+					foley.on_cut(cuts[i]);
+				}
+			}
+		};
+		struct Leg {
+			float speed;
+			int frames;
+		};
+		const std::array<Leg, 10> legs{ { { kSprint, 120 }, { kAirborne, 24 }, { kSprint, 60 }, { kAirborne, 24 },
+				{ kSprint, 60 }, { kAirborne, 24 }, { kSprint, 90 }, { kStill, 60 }, { kSprint, 90 },
+				{ kAirborne, 24 } } };
+		uint64_t edges = 0, frames = 0;
+		bool was_on = false;
+		for (const Leg &l : legs) {
+			for (int i = 0; i < l.frames; ++i) {
+				ba::FootstepSoldier own;
+				own.slot = 3;
+				own.local_player = true;
+				own.first_person = true;
+				own.velocity = ba::Vec3{ 0.0f, 0.0f, l.speed };
+				foley.step(mixer, &own, listener);
+				const bool on = ba::speed_loop_on(*loop, foley.speed());
+				edges += on && !was_on ? 1u : 0u;
+				was_on = on;
+				drain();
+				frames += 800;
+			}
+		}
+		ba::FootstepSoldier dead;
+		dead.slot = 3;
+		dead.local_player = true;
+		dead.mode = bf3::sim::MoveMode::Dead;
+		foley.step(mixer, &dead, listener);
+		for (int tail = 0; tail < 600 && !foley.trace_closed(); ++tail) {
+			drain();
+			frames += 800;
+		}
+		REQUIRE(foley.trace_closed());
+		const ba::LoopVoices v = ba::loop_voices(trace, loop->node, frames);
+		const uint64_t fade_frames =
+				uint64_t(std::ceil(ba::AudioTuning{}.release_fade_ms * 0.001f * float(ba::kMixRate)));
+		MESSAGE("breathing loop on node ", loop->node, " (", loop->slots, " slots, Trigger at Speed op ", int(loop->op),
+				" ", loop->threshold, "): ", edges, " rising edges of its Trigger, ", v.starts, " starts, at most ",
+				v.max_busy, " slots busy, ", v.stacked_frames, " frames with two loops, the longest ",
+				v.longest_stack_frames, " (release fade ", fade_frames, "); trace ", trace.count, " entries, ",
+				trace.dropped, " dropped");
+		CHECK(trace.dropped == 0);
+		CHECK(edges == 5);
+		CHECK(v.starts == 2);
+		CHECK(v.max_busy <= loop->slots);
+		CHECK(v.longest_stack_frames <= fade_frames);
+		check_unchanged(*f);
+	}
+
 	TEST_CASE("load_soldier_audio; FootstepGroundProbe over Metro's Concrete and Water pairs; footstep_soldiers") {
 		Fixture *f = need_install();
 		Result<bf3::sim::weapons::InstallWeapons> w = bf3::sim::weapons::open_install_weapons(f->install);

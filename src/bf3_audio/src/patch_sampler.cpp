@@ -215,6 +215,11 @@ NextSegment tail_or_end(const SamplerState &s) {
 	return {};
 }
 
+bool loops_unreleased(const SamplerState &s, ca::WaveId p_wave) {
+	return s.active && !s.released && !s.stepped && s.loop != ca::SamplerLoop::None && s.first_loop >= 0 &&
+			s.wave == p_wave;
+}
+
 }
 
 void PatchInstance::State::trace_entry(uint64_t p_frame, const SamplerState &p_sampler, uint8_t p_slot,
@@ -344,7 +349,7 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 		const std::pair<uint32_t, uint32_t> range = wave_index == UINT32_MAX ? std::pair<uint32_t, uint32_t>{ 0, 0 } : wave_variations[wave_index];
 		if (id == ca::kNoWave || range.second == 0) {
 			++stats.starved_slots;
-		} else {
+		} else if (!loops_unreleased(s, id)) {
 			const ca::SoundWaveInfo &wave = bank->waves()[id];
 			const ca::SoundPort &variation_port = port(n, cp::SmpVariation);
 			uint32_t v = 0;

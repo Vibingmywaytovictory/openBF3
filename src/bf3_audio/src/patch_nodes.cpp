@@ -41,6 +41,10 @@ float band_t(float p_control, float p_begin, float p_end) {
 	return (p_control - p_begin) / (p_end - p_begin);
 }
 
+}
+
+namespace detail {
+
 bool condition(ca::ConditionOp p_op, float x, float y) {
 	switch (p_op) {
 		case ca::ConditionOp::And:

@@ -26,6 +26,7 @@ inline constexpr uint16_t kNoSegment = 0xffff;
 
 using core::splitmix64;
 double uniform01(uint64_t p_seed, uint32_t p_node, uint32_t p_draw);
+bool condition(ca::ConditionOp p_op, float x, float y);
 
 inline bool on(float p_v) {
 	return p_v >= 0.5f;
