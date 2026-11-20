@@ -440,4 +440,47 @@ TEST_SUITE("sim-turret-rules-unit") {
 		CHECK_FALSE(recoil_impulse_due(back, 0.0f));
 		CHECK(back.muzzle == 0);
 	}
+
+	TEST_CASE(
+			"sim.vehicles.weapon_rules: R-A3 TV9 overheat, the lock, the penalty and the resume below the threshold") {
+		const OverheatRule rule{ 0.05f, 0.2f, 3.0f, 0.6f };
+		OverheatState s;
+		int shots = 0;
+		bool locked = false;
+		while (!locked && shots < 40) {
+			locked = overheat_shot(s, rule);
+			++shots;
+		}
+		CHECK(shots == 20);
+		CHECK(s.overheated);
+		CHECK(s.heat == 1.0f);
+		CHECK(s.penalty == 3.0f);
+
+		int penalty_ticks = 0;
+		while (s.penalty > 0.0f && penalty_ticks < 1000) {
+			overheat_tick(s, rule, kDt);
+			++penalty_ticks;
+			CHECK(s.heat == 1.0f);
+		}
+		int cooling_ticks = 0;
+		while (s.overheated && cooling_ticks < 1000) {
+			overheat_tick(s, rule, kDt);
+			++cooling_ticks;
+		}
+		std::printf(
+				"overheat TV9: the 20th shot locks; the 3 s penalty runs out after %d ticks and the heat falls below "
+				"0.6 after %d more (32-bit float timers at 30 Hz), heat %.4f\n",
+				penalty_ticks, cooling_ticks, double(s.heat));
+		CHECK(penalty_ticks == 91);
+		CHECK(cooling_ticks == 61);
+		CHECK(s.heat < 0.6f);
+		CHECK(s.heat > 0.59f);
+
+		OverheatState cool{ 0.5f, 0.0f, false };
+		overheat_tick(cool, OverheatRule{ 0.075f, vehicle_heat_drop_per_second(0.3f, 0.5f), 1.2f, 0.01f }, kDt);
+		CHECK(cool.heat == doctest::Approx(0.495f));
+		OverheatState floor{ 0.001f, 0.0f, false };
+		overheat_tick(floor, rule, kDt);
+		CHECK(floor.heat == 0.0f);
+	}
 }

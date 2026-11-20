@@ -27,4 +27,23 @@ constexpr float vehicle_heat_drop_per_second(float p_heat_drop_per_second, float
 	return p_heat_drop_per_second * p_overheat_drop_multiplier;
 }
 
+struct OverheatRule {
+	float heat_per_bullet = 0;
+	float drop_per_second = 0;
+	float penalty_time = 0;
+	float threshold = 0;
+};
+
+struct OverheatState {
+	float heat = 0;
+	float penalty = 0;
+	bool overheated = false;
+
+	bool operator==(const OverheatState &) const = default;
+};
+
+void overheat_tick(OverheatState &r_state, const OverheatRule &p_rule, float p_dt);
+
+bool overheat_shot(OverheatState &r_state, const OverheatRule &p_rule);
+
 }

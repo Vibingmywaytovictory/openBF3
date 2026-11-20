@@ -918,6 +918,7 @@ GameServerStats GameServer::stats() const {
 	g.rules_step_failures = m.match.step_failures();
 	g.spotting = m.spotting.stats();
 	g.vehicle_shots = m.vehicles.gunnery().stats().shots;
+	g.vehicle_overheats = m.vehicles.gunnery().stats().overheats;
 	g.vehicle_hits = m.vehicles.stats().hits;
 	g.vehicle_repairs = m.vehicles.stats().repairs;
 	g.vehicles_destroyed = m.vehicles.stats().destroyed;

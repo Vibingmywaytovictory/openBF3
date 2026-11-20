@@ -2012,6 +2012,149 @@ TEST_SUITE("host-vehicles-gunnery") {
 	}
 }
 
+TEST_SUITE("host-vehicles-heat") {
+	TEST_CASE("vehicles: the M1A2's remote HMG on MP_007 ConquestSmall0, fire held from the gunner seat, fires at the "
+			  "data's rate, locks on the shot whose HeatPerBullet reaches 1, stays silent through OverHeatPenaltyTime "
+			  "and the HeatDropPerSecond cooling to OverHeatThreshold, then fires again") {
+		tt::TdmLevel *level = tt::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		VehicleMatch m(*level, 68);
+		StreamClient &gunner = m.add("gunner", 1u, "lat=20,seed=6");
+		m.ticks(sim::seconds_to_ticks(tt::latest_initial_delay(lv)) + 300u);
+		REQUIRE(VehicleMatch::alive(gunner));
+		const host::PresentedVehicle *tank = m.parked(*gunner.frame, "vehicles/m1a2/m1abrams");
+		REQUIRE(tank != nullptr);
+		const uint16_t spawner = tank->spawner;
+		const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[spawner].kind];
+		REQUIRE(kind.armament != nullptr);
+		const core::gameplay::WeaponDef *def = nullptr;
+		for (size_t w = 0; w < kind.armament->weapons.size() && w < kind.weapon_defs.size(); ++w) {
+			const sim::vehicles::ArmamentWeapon &a = kind.armament->weapons[w];
+			if (a.seat == 1 && sim::vehicles::weapon_in_stance(a, 0) && kind.weapon_defs[w] < lv.weapons.size()) {
+				def = &lv.weapons[kind.weapon_defs[w]];
+			}
+		}
+		REQUIRE(def != nullptr);
+		const core::gameplay::FireFunction &fire = def->fire;
+		std::printf("host.vehicles.heat: seat 2 weapon: logic %d, %.0f rounds/min, PreFireDelay %.2f s, HeatPerBullet "
+					"%.4f, HeatDropPerSecond x OverheatDropPerSecondMultiplier %.4f, OverHeatPenaltyTime %.2f s, "
+					"OverHeatThreshold %.3f\n",
+				int(fire.logic), double(fire.rate_of_fire), double(fire.pre_fire_delay), double(fire.heat_per_bullet),
+				double(fire.heat_drop_per_second), double(fire.overheat_penalty_time), double(fire.overheat_threshold));
+		REQUIRE(fire.logic == core::gameplay::FireLogic::Automatic);
+		REQUIRE(fire.heat_per_bullet > 0.0f);
+		REQUIRE(fire.pre_fire_delay == 0.0f);
+		REQUIRE(fire.rate_of_fire > 0.0f);
+
+		const std::optional<sim::Vec3> beside = m.beside(tank->com_position, kind.entry_radius);
+		REQUIRE(beside.has_value());
+		net::DebugRequest teleport;
+		teleport.kind = net::DebugKind::Teleport;
+		teleport.id = 1;
+		teleport.position = *beside;
+		gunner.loop.send_debug(teleport);
+		const uint8_t slot = gunner.frame->stats.slot;
+		m.ticks(30);
+		REQUIRE(m.board(gunner, spawner, slot));
+		const auto in_gunner_seat = [&] {
+			const host::PresentedVehicle *v = VehicleMatch::vehicle(*gunner.frame, spawner);
+			return v != nullptr && v->occupants[1] == slot;
+		};
+		for (uint32_t waited = 0; waited < 240 && !in_gunner_seat(); ++waited) {
+			gunner.input.held_buttons = (waited / 8u) % 2u == 0u ? sim::vehicles::with_seat_request(0, uint8_t(1)) : 0u;
+			m.tick();
+		}
+		gunner.input.held_buttons = 0;
+		REQUIRE(in_gunner_seat());
+		gunner.input.pitch = 0.2f;
+		m.ticks(60);
+
+		const uint64_t shots_before = m.server.stats().vehicle_shots;
+		const uint64_t overheats_before = m.server.stats().vehicle_overheats;
+		std::vector<std::pair<uint32_t, uint64_t>> shot_ticks;
+		uint64_t last = shots_before;
+		const uint32_t hold = 720;
+		for (uint32_t t = 0; t < hold; ++t) {
+			gunner.input.held_buttons = sim::buttons::kFire;
+			m.tick();
+			const uint64_t now_shots = m.server.stats().vehicle_shots;
+			if (now_shots != last) {
+				shot_ticks.emplace_back(t, now_shots - last);
+				last = now_shots;
+			}
+		}
+		gunner.input.held_buttons = 0;
+		m.ticks(10);
+		REQUIRE(shot_ticks.size() >= 2u);
+
+		const float dt = sim::kTickSeconds;
+		const float interval_ticks = 60.0f / fire.rate_of_fire / dt;
+		const uint32_t first = shot_ticks.front().first;
+		float heat = 0.0f, penalty = 0.0f;
+		bool overheated = false;
+		std::optional<uint32_t> model_lock, model_resume;
+		size_t model_lock_shot = 0, shot_number = 0;
+		size_t at = 0;
+		for (uint32_t t = first; t < hold && !model_resume; ++t) {
+			if (penalty > 0.0f) {
+				penalty = std::max(0.0f, penalty - dt);
+			} else {
+				heat = std::max(0.0f, heat - fire.heat_drop_per_second * dt);
+				if (heat < fire.overheat_threshold && overheated) {
+					overheated = false;
+					model_resume = t;
+				}
+			}
+			while (!model_lock && at < shot_ticks.size() && shot_ticks[at].first == t) {
+				for (uint64_t k = 0; k < shot_ticks[at].second && !model_lock; ++k) {
+					++shot_number;
+					heat += fire.heat_per_bullet;
+					if (heat >= 1.0f) {
+						heat = 1.0f;
+						overheated = true;
+						penalty = fire.overheat_penalty_time;
+						model_lock = t;
+						model_lock_shot = shot_number;
+					}
+				}
+				++at;
+			}
+		}
+		REQUIRE(model_lock.has_value());
+		REQUIRE(model_resume.has_value());
+
+		size_t burst = 0;
+		uint64_t burst_shots = 0;
+		float worst_drift = 0.0f;
+		while (burst < shot_ticks.size() && shot_ticks[burst].first <= *model_lock) {
+			const float expected = float(burst_shots) * interval_ticks;
+			worst_drift = std::max(worst_drift, std::fabs(float(shot_ticks[burst].first - first) - expected));
+			burst_shots += shot_ticks[burst].second;
+			++burst;
+		}
+		const std::optional<uint32_t> resumed =
+				burst < shot_ticks.size() ? std::optional<uint32_t>(shot_ticks[burst].first) : std::nullopt;
+		std::printf("host.vehicles.heat: %llu shots in the first burst over %u ticks (interval %.3f ticks, worst drift "
+					"%.3f ticks); the data's heat locks on shot %zu in tick %u and lets it fire again in tick %u "
+					"(%.2f s silent); the server fired %zu shot ticks in all, resumed in tick %d, %llu overheats\n",
+				(unsigned long long)burst_shots, unsigned(*model_lock - first), double(interval_ticks),
+				double(worst_drift), model_lock_shot, unsigned(*model_lock - first), unsigned(*model_resume - first),
+				double(*model_resume - *model_lock) * double(dt), shot_ticks.size(),
+				resumed ? int(*resumed - first) : -1,
+				(unsigned long long)(m.server.stats().vehicle_overheats - overheats_before));
+		CHECK(worst_drift < 1.0f);
+		CHECK(burst_shots == model_lock_shot);
+		CHECK(m.server.stats().vehicle_overheats - overheats_before >= 1u);
+		REQUIRE(resumed.has_value());
+		CHECK(*resumed == *model_resume);
+		CHECK(shot_ticks.back().first > *model_resume);
+		m.close();
+	}
+}
+
 TEST_SUITE("host-vehicles-exit-weapons") {
 	TEST_CASE("vehicles: a soldier who fired, chose a fire mode and rode a Growler on MP_007 ConquestSmall0 keeps his "
 			  "weapons after he leaves it: the server fires his primary in that mode, the magazine counts down on "

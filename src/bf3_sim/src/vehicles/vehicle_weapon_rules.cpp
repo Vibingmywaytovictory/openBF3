@@ -1,5 +1,7 @@
 #include "bf3/sim/vehicles/vehicle_weapon_rules.h"
 
+#include <algorithm>
+
 namespace bf3::sim::vehicles {
 
 void recoil_impulse_begin(RecoilImpulseState &r_state) {
@@ -17,6 +19,28 @@ void recoil_impulse_shot(RecoilImpulseState &r_state, uint8_t p_muzzles) {
 
 bool recoil_impulse_due(const RecoilImpulseState &p_state, float p_impulse_strength) {
 	return p_state.counter == 1 && p_impulse_strength > 0.0f;
+}
+
+void overheat_tick(OverheatState &r_state, const OverheatRule &p_rule, float p_dt) {
+	if (r_state.penalty > 0.0f) {
+		r_state.penalty = std::max(0.0f, r_state.penalty - p_dt);
+		return;
+	}
+	r_state.heat = std::max(0.0f, r_state.heat - p_rule.drop_per_second * p_dt);
+	if (r_state.heat < p_rule.threshold) {
+		r_state.overheated = false;
+	}
+}
+
+bool overheat_shot(OverheatState &r_state, const OverheatRule &p_rule) {
+	r_state.heat += p_rule.heat_per_bullet;
+	if (r_state.heat < 1.0f) {
+		return false;
+	}
+	r_state.heat = 1.0f;
+	r_state.overheated = true;
+	r_state.penalty = p_rule.penalty_time;
+	return true;
 }
 
 }

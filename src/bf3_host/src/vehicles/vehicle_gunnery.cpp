@@ -58,6 +58,7 @@ core::Status VehicleGunnery::configure(const LevelVehicles &p_level,
 	table_.reset();
 	projectiles_.reset();
 	mounts_.clear();
+	heat_rules_.clear();
 	interval_shots_.clear();
 	if (p_level.weapons.empty() || p_materials == nullptr) {
 		return core::Status::success();
@@ -69,6 +70,10 @@ core::Status VehicleGunnery::configure(const LevelVehicles &p_level,
 	}
 	table_ = std::move(*table);
 	projectiles_ = std::make_unique<sw::ProjectileWorld>(table_);
+	for (const core::gameplay::WeaponDef &d : p_level.weapons) {
+		heat_rules_.push_back({ d.fire.heat_per_bullet, d.fire.heat_drop_per_second, d.fire.overheat_penalty_time,
+				d.fire.overheat_threshold });
+	}
 	return core::Status::success();
 }
 
@@ -100,6 +105,9 @@ void VehicleGunnery::fire(sim::Tick p_tick, size_t p_vehicle, const LevelVehicle
 		const uint16_t def = p_kind.weapon_defs[w];
 		const size_t seat = size_t(weapon.seat);
 		const uint8_t occupant = seat < p_occupants.size() ? p_occupants[seat] : uint8_t(0xFF);
+		if (def < heat_rules_.size()) {
+			sim::vehicles::overheat_tick(mount.heat, heat_rules_[def], sim::kTickSeconds);
+		}
 		if (def == kNoVehicleWeapon || occupant == 0xFF || seat >= p_commands.size() ||
 				!sim::vehicles::weapon_in_stance(weapon, 0)) {
 			mount.occupant = 0xFF;
@@ -120,7 +128,7 @@ void VehicleGunnery::fire(sim::Tick p_tick, size_t p_vehicle, const LevelVehicle
 		const core::Vec3 muzzle = frame.transform_point(weapon.spawn_offset);
 		sim::Command c = p_commands[seat];
 		c.tick = p_tick;
-		c.buttons &= sim::buttons::kFire | sim::buttons::kReload;
+		c.buttons &= mount.heat.overheated ? sim::buttons::kReload : sim::buttons::kFire | sim::buttons::kReload;
 		c.yaw = sim::quantize_yaw(std::atan2(direction[0], direction[2]));
 		c.pitch = sim::quantize_pitch(std::asin(std::clamp(direction[1], -1.0f, 1.0f)));
 		c.pose = sim::Pose::Stand;
@@ -132,6 +140,9 @@ void VehicleGunnery::fire(sim::Tick p_tick, size_t p_vehicle, const LevelVehicle
 		sw::step_soldier_weapons(*table_, mount.state, c, context, p_seed, tick_out_);
 		for (uint8_t i = 0; i < tick_out_.shot_count; ++i) {
 			++stats_.shots;
+			if (def < heat_rules_.size() && sim::vehicles::overheat_shot(mount.heat, heat_rules_[def])) {
+				++stats_.overheats;
+			}
 			interval_shots_.push_back(tick_out_.shots[i]);
 			if (!projectiles_->spawn(tick_out_.shots[i]).ok()) {
 				++stats_.refused;

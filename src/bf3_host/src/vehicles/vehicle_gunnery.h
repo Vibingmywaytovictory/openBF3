@@ -6,6 +6,7 @@
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/vehicles/vehicle_armament.h"
+#include "bf3/sim/vehicles/vehicle_weapon_rules.h"
 #include "bf3/sim/weapons/ballistics.h"
 #include "bf3/sim/weapons/hit_target.h"
 #include "bf3/sim/weapons/surface_materials.h"
@@ -30,6 +31,7 @@ struct VehicleGunneryStats {
 	uint64_t damage = 0;
 	uint64_t mount_failures = 0;
 	uint64_t blasts = 0;
+	uint64_t overheats = 0;
 };
 
 struct VehicleBlastHits {
@@ -77,10 +79,12 @@ private:
 	struct Mount {
 		sim::weapons::SoldierWeaponsState state;
 		uint8_t occupant = 0xFF;
+		sim::vehicles::OverheatState heat;
 	};
 
 	std::shared_ptr<const sim::weapons::WeaponTable> table_;
 	std::unique_ptr<sim::weapons::ProjectileWorld> projectiles_;
+	std::vector<sim::vehicles::OverheatRule> heat_rules_;
 	std::vector<std::array<Mount, sim::vehicles::kMaxArmamentWeapons>> mounts_;
 	sim::weapons::ProjectileStepOutput out_;
 	std::vector<sim::weapons::DamageEvent> vehicle_damage_;
