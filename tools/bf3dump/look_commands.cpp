@@ -9,6 +9,8 @@
 #include "bf3/render/level_scene.h"
 #include "bf3/render/mesh_cache.h"
 #include "bf3/render/program_database.h"
+#include "bf3/render/shader_database.h"
+#include "bf3/render/terrain_look.h"
 
 #include <algorithm>
 #include <chrono>
@@ -384,6 +386,55 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 						why.c_str());
 			}
 		}
+		for (const render::SceneMaterialPlan &m : l1->materials) {
+			const std::string name = m.slot.variation_shader.empty() ? m.slot.shader : m.slot.variation_shader;
+			const render::SurfaceShader *shader = resolver->shaders().by_name(to_lower_ascii(name));
+			if (shader == nullptr || m.program < 0) {
+				continue;
+			}
+			for (const render::ShaderSolution &s : shader->solutions) {
+				if (!s.pixel_program) {
+					continue;
+				}
+				Result<render::dxbc::Program> pixel = render::dxbc::parse(*s.pixel_program);
+				if (!pixel ||
+						std::none_of(pixel->outputs.begin(), pixel->outputs.end(),
+								[](const render::dxbc::SignatureElement &p_e) {
+									return p_e.name == "SV_Target" && p_e.reg == 1;
+								})) {
+					continue;
+				}
+				const Result<render::TerrainLane> specular = render::terrain_output_lane(*pixel, 1, 3);
+				if (specular && specular->literal) {
+					std::printf("gloss literal specular %s: o1.w %g\n", name.c_str(), double(*specular->literal));
+				}
+				break;
+			}
+		}
+		std::vector<uint8_t> drawn_use(l1->textures.size(), 0), look_use(l1->textures.size(), 0);
+		const auto mark = [](std::vector<uint8_t> &r_use, int32_t p_texture) {
+			if (p_texture >= 0 && size_t(p_texture) < r_use.size()) {
+				r_use[size_t(p_texture)] = 1;
+			}
+		};
+		for (const render::SceneMaterialPlan &m : l1->materials) {
+			const bool program = m.program >= 0;
+			std::vector<uint8_t> &l1_use = program ? look_use : drawn_use;
+			mark(l1_use, m.albedo);
+			for (int32_t layer : m.layers) {
+				mark(l1_use, layer);
+			}
+			mark(drawn_use, m.normal);
+			for (int32_t t : m.program_textures) {
+				mark(drawn_use, t);
+			}
+		}
+		size_t look_only = 0;
+		for (size_t i = 0; i < l1->textures.size(); ++i) {
+			look_only += look_use[i] != 0 && drawn_use[i] == 0 ? 1 : 0;
+		}
+		std::printf("gloss: %zu of %zu plan textures are read only by the looks of materials drawn through programs\n",
+				look_only, l1->textures.size());
 		std::printf(
 				"gloss: %zu of %zu level materials resolved with their program's lanes\n", gloss, l1->materials.size());
 		for (const auto &[why, count] : reasons) {
