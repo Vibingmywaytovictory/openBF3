@@ -15,7 +15,7 @@ list(LENGTH views view_count)
 string(REPLACE ";" "\\;" views_arg "${views}")
 set(patch_args "")
 if(DEFINED PATCH_POINT)
-    set(patch_args --look-off=scatter "--look-exposure=${PATCH_EXPOSURE}" "--shot-points=${PATCH_POINT}")
+    set(patch_args "--look-exposure=${PATCH_EXPOSURE}" "--shot-points=${PATCH_POINT}")
 endif()
 godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 300 REMOVE_ON_SKIP "${cache}"
     ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- --level=${LEVEL} --mode=${MODE}
@@ -39,8 +39,8 @@ if(DEFINED PATCH_POINT)
         RESULT_VARIABLE patch_rc OUTPUT_VARIABLE patch_out ERROR_VARIABLE patch_err)
     message("${ROW}: ${patch_out}${patch_err}")
     if(NOT patch_rc STREQUAL "0")
-        message(FATAL_ERROR "${ROW}: the terrain patch is brighter toward the sun than its view-independent spread, "
-            "while every terrain combination writes its specular lane o1.y as 0")
+        message(FATAL_ERROR "${ROW}: the grass-covered terrain patch is brighter toward the sun than its view-independent "
+            "spread, while the terrain combinations and the moorland grass write their specular lanes as 0")
     endif()
 endif()
 if(NOT out MATCHES "\\[level\\] light pass: ([0-9]+) of ([0-9]+) level materials \\(([0-9]+) with their program's smoothness and specular, of ([0-9]+) whose program's lanes slice\\), ([0-9]+) of ([0-9]+) terrain materials")

@@ -285,6 +285,28 @@ TEST_SUITE("render-terrain") {
 		}
 		std::printf("render.terrain combinations writing specular o1.y as 0: %zu of %zu\n", unlit, combos.size());
 		CHECK(unlit == combos.size());
+		const SurfaceShader *grass =
+				resolver->shaders().by_name("levels/mp_007/meshscatteringtypes/shaders/mp_007_moorlandgrass01");
+		REQUIRE(grass != nullptr);
+		size_t grass_solutions = 0, grass_unlit = 0;
+		for (const ShaderSolution &s : grass->solutions) {
+			const Result<dxbc::Program> program =
+					s.pixel_program ? dxbc::parse(*s.pixel_program) : Result<dxbc::Program>(core::make_error("none"));
+			if (!program ||
+					std::none_of(
+							program->outputs.begin(), program->outputs.end(), [](const dxbc::SignatureElement &p_e) {
+								return p_e.name == "SV_Target" && p_e.reg == 1;
+							})) {
+				continue;
+			}
+			++grass_solutions;
+			const Result<TerrainLane> specular = terrain_output_lane(*program, 1, 3);
+			grass_unlit += specular && specular->literal == 0.0f ? 1u : 0u;
+		}
+		std::printf("render.terrain MP_007 moorland grass G-buffer solutions writing specular o1.w as 0: %zu of %zu\n",
+				grass_unlit, grass_solutions);
+		CHECK(grass_solutions > 0);
+		CHECK(grass_unlit == grass_solutions);
 
 		core::res::HeightGrid heights;
 		const core::res::ResError he = tree.height_grid(5, fetch, heights);
