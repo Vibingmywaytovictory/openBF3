@@ -368,13 +368,20 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 		for (const render::SceneMaterialPlan &m : l1->materials) {
 			const render::LookMaterial look =
 					resolver->resolve(m.slot, std::string_view(), render::LookPrograms::Deferred);
+			std::string why;
 			if (look.graph && look.graph->translated.gloss) {
 				++gloss;
 			} else if (look.graph) {
-				++reasons["lanes refused: " + look.graph->translated.gloss_refusal];
+				why = "lanes refused: " + look.graph->translated.gloss_refusal;
 			} else {
-				++reasons[look.graph_plain ? std::string("one colour texture, no lanes")
-										   : "no program: " + look.graph_refusal];
+				why = look.graph_plain ? std::string("one colour texture, no lanes")
+									   : "no program: " + look.graph_refusal;
+			}
+			if (!why.empty()) {
+				++reasons[why];
+				std::printf("gloss material %s: %s\n",
+						(m.slot.variation_shader.empty() ? m.slot.shader : m.slot.variation_shader).c_str(),
+						why.c_str());
 			}
 		}
 		std::printf(

@@ -26,6 +26,7 @@ constexpr char kLanes[] = "xyzw";
 constexpr uint32_t kSystemPosition = 1;
 constexpr uint32_t kGbufferAlbedo = 1;
 constexpr uint32_t kGbufferNormal = 0;
+constexpr uint16_t kImad = 35;
 constexpr uint8_t kGlossLane = 3;
 constexpr const char *kViewConstants = "viewConstants";
 constexpr const char *kExternalPrefix = "external_";
@@ -705,7 +706,8 @@ std::optional<std::string> attribute_lane(VertexInputLane p_lane) {
 
 class VertexStage {
 public:
-	VertexStage(const dxbc::Program &p_vs, std::span<const VertexInputLanes> p_lanes) : vs_(p_vs), lanes_(p_lanes) {}
+	VertexStage(const dxbc::Program &p_vs, std::span<const VertexInputLanes> p_lanes) :
+			vs_(p_vs), source_temps_(p_vs.temps), lanes_(p_lanes) {}
 
 	std::string lane(uint32_t p_reg, uint8_t p_lane) {
 		wanted_.insert(lane_key(uint8_t(OperandType::Output), p_reg, p_lane));
@@ -724,6 +726,7 @@ public:
 
 	core::Result<std::string> body() {
 		BF3_TRY(flatten());
+		bone_rows();
 		BF3_TRY(trace_instance_rows());
 		BF3_TRY(slice());
 		Emitter emitter{ ConstantNames::Locals };
@@ -755,7 +758,8 @@ public:
 			locals += *l;
 		}
 		for (uint32_t r = 0; r < vs_.temps; ++r) {
-			locals += "\tvec4 r" + std::to_string(r) + " = vec4(0.0);\n";
+			locals += "\tvec4 r" + std::to_string(r) + " = " +
+					(r < source_temps_ ? std::string("vec4(0.0)") : model_row(r - source_temps_)) + ";\n";
 		}
 		std::string tail;
 		for (uint32_t reg : outputs()) {
@@ -766,6 +770,31 @@ public:
 	}
 
 private:
+	void bone_rows() {
+		for (Instruction &ins : vs_.code) {
+			for (size_t s = 1; s < ins.operands.size(); ++s) {
+				Operand &op = ins.operands[s];
+				uint32_t component = 0;
+				const dxbc::ConstantBuffer *cb = op.is(OperandType::ConstantBuffer) && op.dims == 2 && op.relative
+						? vs_.constant_buffer(op.index[0])
+						: nullptr;
+				const dxbc::Variable *v = cb != nullptr ? variable_at(op.index[0], op.index[1], 0, component) : nullptr;
+				if (cb == nullptr || cb->name != kGlobals || v == nullptr || v->name != kPartVectors) {
+					continue;
+				}
+				const uint32_t row = op.index[1] - v->offset / 16;
+				if (row >= kWorldRows) {
+					continue;
+				}
+				op.type = uint8_t(OperandType::Temp);
+				op.dims = 1;
+				op.relative = false;
+				op.index = { source_temps_ + row, 0, 0 };
+				vs_.temps = std::max(vs_.temps, source_temps_ + row + 1);
+			}
+		}
+	}
+
 	bool part_shown(size_t p_if) const {
 		const Instruction &branch = vs_.code[p_if];
 		if (!branch.nonzero || branch.operands.size() != 1 || !branch.operands[0].is(OperandType::Temp)) {
@@ -899,6 +928,9 @@ private:
 			if (removed_[i] || ins.operands.empty() || !ins.operands[0].is(OperandType::Temp)) {
 				continue;
 			}
+			if (ins.is(Op::Ld)) {
+				rows_[i] = ins.operands.size() == 3 ? symbol(ins.operands[1], 0) : std::nullopt;
+			}
 			const Operand &d = ins.operands[0];
 			for (uint8_t c = 0; c < 4; ++c) {
 				if (((d.write_mask() >> c) & 1u) == 0) {
@@ -916,6 +948,12 @@ private:
 					if (row && *row >= 0) {
 						value = row;
 					}
+				} else if (ins.opcode == kImad && ops.size() == 4 && ops[1].is(OperandType::Input) &&
+						ops[2].is(OperandType::Immediate32)) {
+					const std::optional<int64_t> row = symbol(ops[3], c);
+					if (row && *row >= 0) {
+						value = row;
+					}
 				} else if (ins.is(Op::Iadd) && ops.size() == 3) {
 					const std::optional<int64_t> row = symbol(ops[1], c);
 					if (row && *row >= 0 && ops[2].is(OperandType::Immediate32) && !ops[2].negate) {
@@ -929,11 +967,41 @@ private:
 					symbols_.erase(key);
 				}
 			}
-			if (ins.is(Op::Ld)) {
-				rows_[i] = ins.operands.size() == 3 ? symbol(ins.operands[1], 0) : std::nullopt;
+		}
+		find_world_base();
+		return core::Status::success();
+	}
+
+	void find_world_base() {
+		std::map<uint32_t, int64_t> loaded;
+		for (const auto &[at, row] : rows_) {
+			const Operand &d = vs_.code[at].operands[0];
+			if (row && d.is(OperandType::Temp) && d.write_mask() == 0xF) {
+				loaded[d.index[0]] = *row;
 			}
 		}
-		return core::Status::success();
+		std::map<uint64_t, std::set<int64_t>> by_other;
+		for (const Instruction &ins : vs_.code) {
+			if (dot_width(ins.opcode) != 4 || ins.operands.size() != 3) {
+				continue;
+			}
+			for (size_t s = 1; s < 3; ++s) {
+				const Operand &a = ins.operands[s];
+				const Operand &b = ins.operands[3 - s];
+				const auto row = a.is(OperandType::Temp) ? loaded.find(a.index[0]) : loaded.end();
+				if (row != loaded.end() && !(b.is(OperandType::Temp) && loaded.count(b.index[0]) != 0)) {
+					by_other[lane_key(b.type, b.index[0], 0)].insert(row->second);
+				}
+			}
+		}
+		for (const auto &[other, rows] : by_other) {
+			for (int64_t r : rows) {
+				if (rows.count(r + 1) != 0 && rows.count(r + 2) != 0) {
+					world_base_ = r;
+					return;
+				}
+			}
+		}
 	}
 
 	core::Status slice() {
@@ -981,7 +1049,7 @@ private:
 						? vs_.binding(dxbc::BindingType::Texture, ins.operands[2].index[0])
 						: nullptr;
 				if (b == nullptr || b->name != kInstanceVectors || row == rows_.end() || !row->second ||
-						*row->second >= int64_t(kWorldRows)) {
+						*row->second < world_base_ || *row->second >= world_base_ + int64_t(kWorldRows)) {
 					return refuse(
 							"vertex program loads what is not a world matrix row: " + dxbc::format_instruction(ins));
 				}
@@ -993,6 +1061,9 @@ private:
 			for (uint8_t c : written) {
 				for (const Read &r : reads_for(ins, c)) {
 					const Operand &op = ins.operands[r.operand];
+					if (op.is(OperandType::Temp) && op.index[0] >= source_temps_) {
+						continue;
+					}
 					if (op.is(OperandType::Temp)) {
 						live.insert(lane_key(op.type, op.index[0], r.lane));
 					} else if (op.is(OperandType::Input)) {
@@ -1025,8 +1096,8 @@ private:
 				mask += kLanes[c];
 			}
 		}
-		return "r" + std::to_string(d.index[0]) + "." + mask + " = (" + model_row(uint32_t(*rows_.at(p_index))) + "." +
-				swizzle + ")." + mask + ";";
+		return "r" + std::to_string(d.index[0]) + "." + mask + " = (" +
+				model_row(uint32_t(*rows_.at(p_index) - world_base_)) + "." + swizzle + ")." + mask + ";";
 	}
 
 	core::Result<std::string> input_local(uint32_t p_reg, uint8_t p_lanes) const {
@@ -1096,11 +1167,13 @@ private:
 				lanes[1] + ", " + lanes[2] + ", " + lanes[3] + ");\n";
 	}
 
-	const dxbc::Program &vs_;
+	dxbc::Program vs_;
+	uint32_t source_temps_ = 0;
 	std::span<const VertexInputLanes> lanes_;
 	std::set<uint64_t> wanted_;
 	std::map<uint64_t, int64_t> symbols_;
 	std::map<size_t, std::optional<int64_t>> rows_;
+	int64_t world_base_ = 0;
 	std::vector<bool> needed_;
 	std::vector<bool> removed_;
 	std::map<uint32_t, uint8_t> inputs_;

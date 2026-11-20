@@ -25,8 +25,8 @@ using namespace bf3;
 namespace {
 
 constexpr std::string_view kTexturePrefix = "texture_";
-constexpr size_t kGlossySlots = 24;
-constexpr size_t kBoundInputs = 225;
+constexpr size_t kGlossySlots = 43;
+constexpr size_t kBoundInputs = 248;
 constexpr size_t kShaderInputs = 252;
 constexpr size_t kConstantsGiven = 300;
 constexpr size_t kExternalConstants = 329;
