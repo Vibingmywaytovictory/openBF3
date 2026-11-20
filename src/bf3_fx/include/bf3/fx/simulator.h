@@ -95,6 +95,7 @@ struct FxStats {
 	uint64_t emitter_starts_dropped = 0;
 	uint64_t nonfinite_kills = 0;
 	uint64_t stolen_instances = 0;
+	uint64_t lit_instances_killed = 0;
 	uint64_t refused_starts = 0;
 	uint64_t events_dropped = 0;
 };

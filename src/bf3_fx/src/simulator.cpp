@@ -198,6 +198,7 @@ struct FxWorld::Impl {
 		bool active = false;
 		bool killed = false;
 		bool stopping = false;
+		bool lit_kill_counted = false;
 		std::shared_ptr<const EffectDef> def;
 		EffectStart start;
 		Transform base;
@@ -437,6 +438,12 @@ struct FxWorld::Impl {
 		for (const uint32_t id : emitter_list) {
 			EmitterInstance &e = emitters[id];
 			if (e.active && effects[e.effect].killed) {
+				EffectSlot &fx = effects[e.effect];
+				if (e.state_count > 0 && !fx.lit_kill_counted &&
+						(fx.def->emitters[e.emitter].tmpl.flags & kEmitterActAsPointLight) != 0) {
+					fx.lit_kill_counted = true;
+					++stats.lit_instances_killed;
+				}
 				retire_emitter(id);
 			}
 		}

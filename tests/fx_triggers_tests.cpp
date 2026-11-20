@@ -941,6 +941,7 @@ TEST_CASE("impacts: MaxInstanceCount limits each shooter's instances, so four sh
 	t.on_events(std::span<const hk::PresentEvent>(&again, 1), clock_at(0), kNear);
 	fx_step_frame(world, 1.0f / 60.0f);
 	CHECK(world.stats().stolen_instances == 1);
+	CHECK(world.stats().lit_instances_killed == 0);
 	CHECK(world.stats().live_effects == kShooters + 1);
 	CHECK(lit_outputs() == kShooters + 1);
 	MESSAGE("metal impacts from " << int(kShooters) << " shooters and one second hit: " << world.stats().live_effects

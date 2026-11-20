@@ -47,6 +47,7 @@ struct GameFxStats {
 	uint64_t light_frames_over = 0, lights_dropped = 0;
 	uint64_t impact_light_starts = 0, impact_light_frames = 0;
 	uint32_t impact_lights_max = 0;
+	uint64_t impact_light_mismatch_frames = 0, impact_lights_over_data = 0;
 	double load_seconds = 0;
 	fx::PlacedEffectStats placed;
 };
