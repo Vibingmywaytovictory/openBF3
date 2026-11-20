@@ -32,8 +32,9 @@ if(NOT out MATCHES "\\[game\\] vehicles built: [^\n]*; ([0-9]+) materials drawn 
     message(FATAL_ERROR "${ROW}: no vehicle material counts")
 endif()
 message("${ROW}: ${CMAKE_MATCH_1} vehicle materials through their shader's program, ${CMAKE_MATCH_2} through the resolved look")
-if(NOT CMAKE_MATCH_1 EQUAL 287 OR NOT CMAKE_MATCH_2 EQUAL 11)
-    message(FATAL_ERROR "${ROW}: MP_007 ConquestSmall0's vehicles draw 287 materials through their programs and 11 through looks")
+if(NOT CMAKE_MATCH_1 EQUAL PROGRAM_MATERIALS OR NOT CMAKE_MATCH_2 EQUAL LOOK_MATERIALS)
+    message(FATAL_ERROR "${ROW}: the level's vehicles draw ${PROGRAM_MATERIALS} materials through their programs and "
+        "${LOOK_MATERIALS} through looks")
 endif()
 if(ZOOM)
     godot_require_pass("VEHICLE DRIVE ROW tank_drive PASS")

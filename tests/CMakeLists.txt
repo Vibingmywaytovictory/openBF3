@@ -1362,10 +1362,14 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_godot_row(godot.crosshair_walk godot_crosshair_walk.cmake WINDOW TIMEOUT 120)
     openbf3_godot_row(godot.gadgets_draw godot_gadgets_draw.cmake WINDOW TIMEOUT 120)
     openbf3_godot_row(godot.vault_run godot_vault_run.cmake WINDOW TIMEOUT 180)
-    openbf3_godot_row(godot.vehicle_drive godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DZOOM=1)
-    openbf3_godot_row(godot.vehicle_drive.lag godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DNETSIM=lat=50)
-    openbf3_godot_row(godot.vehicle_drive.audio godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DAUDIO=1)
-    openbf3_godot_row(godot.vehicle_drive.ifv godot_vehicle_drive.cmake WINDOW TIMEOUT 240 ARGS -DIFV=1)
+    openbf3_godot_row(godot.vehicle_drive godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DZOOM=1
+        -DPROGRAM_MATERIALS=287 -DLOOK_MATERIALS=11)
+    openbf3_godot_row(godot.vehicle_drive.lag godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DNETSIM=lat=50
+        -DPROGRAM_MATERIALS=287 -DLOOK_MATERIALS=11)
+    openbf3_godot_row(godot.vehicle_drive.audio godot_vehicle_drive.cmake WINDOW TIMEOUT 180 ARGS -DAUDIO=1
+        -DPROGRAM_MATERIALS=287 -DLOOK_MATERIALS=11)
+    openbf3_godot_row(godot.vehicle_drive.ifv godot_vehicle_drive.cmake WINDOW TIMEOUT 240 ARGS -DIFV=1
+        -DPROGRAM_MATERIALS=476 -DLOOK_MATERIALS=27)
     set_tests_properties(godot.gadgets_draw godot.vault_run godot.vehicle_drive godot.vehicle_drive.lag godot.vehicle_drive.audio
         godot.vehicle_drive.ifv PROPERTIES RUN_SERIAL TRUE)
     openbf3_cost(godot.gadgets_draw 1 30)
