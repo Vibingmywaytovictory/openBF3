@@ -251,6 +251,7 @@ struct LevelGlossCensus {
 	size_t drawn = 0;
 	std::map<std::string, size_t> residue;
 	std::vector<std::pair<size_t, std::string>> residue_materials;
+	std::map<std::string, size_t> outside;
 };
 
 std::string gloss_residue(const LookMaterial &p_look);

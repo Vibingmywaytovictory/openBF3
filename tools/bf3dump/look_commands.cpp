@@ -427,6 +427,9 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 		for (const auto &[why, count] : census.residue) {
 			std::printf("gloss: %zu %s\n", count, why.c_str());
 		}
+		for (const auto &[why, count] : census.outside) {
+			std::printf("gloss outside: %zu %s\n", count, why.c_str());
+		}
 	}
 	if (!shader_dumps.empty()) {
 		std::unique_ptr<render::LookResolver> resolver = render::LookResolver::open(level.mount());

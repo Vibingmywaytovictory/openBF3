@@ -109,6 +109,7 @@ struct LookMaterial {
 	std::optional<std::array<float, 3>> flat_colour;
 	bool flat_unlit = false;
 	bool gbuffer_lanes = false;
+	bool shader_transparent = false;
 };
 
 struct LookStats {

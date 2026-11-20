@@ -1207,7 +1207,8 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 		attach_program(out, *shader, p_slot, false, p_programs);
 	}
 	if (shader != nullptr) {
-		out.gbuffer_lanes = !is_transparent(shader->surface_type) && writes_gbuffer(*shader);
+		out.shader_transparent = is_transparent(shader->surface_type);
+		out.gbuffer_lanes = !out.shader_transparent && writes_gbuffer(*shader);
 		if (!shader->solutions.empty()) {
 			out.solution_blend = shader->solutions.front().blend_mode;
 		}

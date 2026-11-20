@@ -1376,6 +1376,10 @@ LevelGlossCensus level_gloss_census(const LevelScenePlan &p_plan) {
 	for (const SceneMaterialPlan &m : p_plan.materials) {
 		++out.materials;
 		if (!m.look || !m.look->gbuffer_lanes) {
+			++out.outside[!m.look						  ? "no look"
+							: !m.look->shader_in_database ? "no shader in the database"
+							: m.look->shader_transparent  ? "transparent shader, lit forward"
+														  : "no solution writes the G-buffer"];
 			continue;
 		}
 		++out.gbuffer;

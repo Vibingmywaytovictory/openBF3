@@ -1211,6 +1211,7 @@ struct GlossExpectation {
 	size_t gbuffer;
 	size_t drawn;
 	std::vector<std::pair<std::string, size_t>> residue;
+	std::vector<std::pair<std::string, size_t>> outside;
 };
 
 std::string engine_texture_residue(uint32_t p_register, const char *p_name) {
@@ -1239,7 +1240,9 @@ TEST_SUITE("render-level-gloss") {
 							{ engine_texture_residue(4, "distanceFieldTexture"), 3 },
 							{ engine_texture_residue(5, "distanceFieldTexture"), 2 },
 							{ engine_texture_residue(8, "distanceFieldTexture"), 4 },
-							{ engine_texture_residue(9, "distanceFieldTexture"), 10 } } },
+							{ engine_texture_residue(9, "distanceFieldTexture"), 10 } },
+					{ { "no shader in the database", 2 }, { "no solution writes the G-buffer", 2 },
+							{ "transparent shader, lit forward", 13 } } },
 			{ "MP_Subway", "TeamDeathMatchC0", 666, 619, 593,
 					{ { "drawn as the character backdrop", 1 },
 							{ "lanes refused: vertex input v2.x reads usage 4 lane 0", 1 },
@@ -1248,7 +1251,9 @@ TEST_SUITE("render-level-gloss") {
 							{ engine_texture_residue(4, "distanceFieldTexture"), 10 },
 							{ engine_texture_residue(9, "distanceFieldTexture"), 3 },
 							{ "no program: vertex input v5.x reads usage 0 lane 0", 1 },
-							{ "one colour texture, no lanes", 2 } } },
+							{ "one colour texture, no lanes", 2 } },
+					{ { "no shader in the database", 9 }, { "no solution writes the G-buffer", 1 },
+							{ "transparent shader, lit forward", 37 } } },
 		};
 		for (const GlossExpectation &e : expected) {
 			Result<std::unique_ptr<level::LoadedLevel>> loaded = level::load_level(*install, e.level, e.mode);
@@ -1273,6 +1278,14 @@ TEST_SUITE("render-level-gloss") {
 				want[why] = count;
 			}
 			CHECK(gloss.residue == want);
+			std::map<std::string, size_t> want_outside;
+			for (const auto &[why, count] : e.outside) {
+				want_outside[why] = count;
+			}
+			for (const auto &[why, count] : gloss.outside) {
+				std::printf("render.level_gloss %s outside the G-buffer %zu: %s\n", e.level, count, why.c_str());
+			}
+			CHECK(gloss.outside == want_outside);
 		}
 		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
