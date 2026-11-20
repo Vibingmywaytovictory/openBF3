@@ -348,9 +348,7 @@ TEST_SUITE("host-logic-ghost") {
 		std::map<uint64_t, std::set<std::pair<uint32_t, int32_t>>> client_targets;
 		std::set<uint64_t> round_over_cues;
 		for (const core::gameplay::LogicEdge &e : client_graph.networked_edges()) {
-			if (e.target != core::gameplay::kNoLogicIndex &&
-					!(e.source == core::gameplay::kNoLogicIndex &&
-							client_graph.nodes()[e.target].type == core::gameplay::LogicTypeId::UIGraph)) {
+			if (e.target != core::gameplay::kNoLogicIndex) {
 				client_targets[e.connection].emplace(e.target, e.target_port);
 				if (e.source != core::gameplay::kNoLogicIndex &&
 						client_graph.nodes()[e.source].type == core::gameplay::LogicTypeId::RoundOver) {

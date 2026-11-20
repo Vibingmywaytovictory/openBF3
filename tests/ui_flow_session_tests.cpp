@@ -327,9 +327,9 @@ TEST_SUITE("ui-flow-session") {
 			"push hudmpscreen", "push hudtdmscreen" };
 		revive_expected.insert(revive_expected.end(), spawned_tail.begin(), spawned_tail.end());
 		CHECK(revive == revive_expected);
-		const Lines round_over_expected{ "native RoundOver.OnRoundOver 2", "close hudscreen", "close hudmpscreen",
-			"close hudtdmscreen", "native EndOfRound", "deploy UnSpawnCustomizationVehicle",
-			"deploy UnSpawnCustomization", "deploy OnFrontendCameraChanged", "push eorwinningteamscreen",
+		const Lines round_over_expected{ "native RoundOver.OnRoundOver 2", "native EndOfRound",
+			"deploy UnSpawnCustomizationVehicle", "deploy UnSpawnCustomization", "deploy OnFrontendCameraChanged",
+			"close hudscreen", "close hudmpscreen", "close hudtdmscreen", "push eorwinningteamscreen",
 			"deploy OnFrontendCameraChanged", "close eorwinningteamscreen", "push scoreboardtwoteamshud64screen",
 			"deploy OnFrontendCameraChanged", "close scoreboardtwoteamshud64screen", "push eordetailstabsscreen",
 			"push eordetailsscoreboardscreen", "push scoreboardtwoteamsscreen", "deploy OnFrontendCameraChanged",
@@ -510,6 +510,49 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(s.stats().networked_missed > 0);
 		CHECK(bools_lost(server.session.runtime().ghost(), s.runtime().ghost()) == 0);
 		CHECK(s.errors().empty());
+	}
+
+	TEST_CASE("ui flow session: the server's SetGameMode into tdmuidatagraph, received while the deploy screen is up, "
+			  "sets the game mode and leaves the spawn graphs in place, as its input reaches no state") {
+		Level *l = level_or_skip();
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE(made.ok());
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "TeamDeathMatch0");
+		std::vector<sim::logic::LogicNetworkedEvent> to_ui;
+		const core::gameplay::LogicGraph &g = s.runtime().graph();
+		for (const core::gameplay::LogicEdge &e : g.networked_edges()) {
+			if (e.source == core::gameplay::kNoLogicIndex && e.target < g.nodes().size() &&
+					g.nodes()[e.target].type == core::gameplay::LogicTypeId::UIGraph) {
+				sim::logic::LogicNetworkedEvent ev;
+				ev.connection = e.connection;
+				ev.source = e.source;
+				ev.source_port = e.source_port;
+				to_ui.push_back(ev);
+			}
+		}
+		REQUIRE(to_ui.size() == 1);
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::PreRound;
+		sc.state.joined = true;
+		sc.run_to(60);
+		REQUIRE(s.flow().find_screen(ui::kSpawnScreenPcPartition) != nullptr);
+		const uint64_t popped = s.stats().graphs_popped;
+		s.receive_networked(to_ui);
+		sc.run_to(63);
+		const Lines got = sc.phase("SetGameMode on the deploy screen");
+		std::printf("ui.flow.session SetGameMode: %llu deliveries, %llu graphs popped, game mode %s\n",
+				(unsigned long long)s.stats().networked_delivered,
+				(unsigned long long)(s.stats().graphs_popped - popped),
+				s.data("ui/uicomponents/uisettingscomp", 1733092213).value_or("-").c_str());
+		CHECK(s.stats().networked_delivered == 1);
+		CHECK(s.stats().graphs_popped == popped);
+		CHECK(s.data("ui/uicomponents/uisettingscomp", 1733092213) == "TDM");
+		CHECK(s.flow().find_screen(ui::kSpawnScreenPcPartition) != nullptr);
+		CHECK(std::find(got.begin(), got.end(), "close spawnscreenpc") == got.end());
 	}
 
 	TEST_CASE("ui flow session: networked edges are delivered only from received events, as the echo of them would be; "

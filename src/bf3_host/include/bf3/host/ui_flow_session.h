@@ -183,7 +183,7 @@ private:
 	void raise(uint32_t p_node, int32_t p_port);
 	void deliver(uint32_t p_node, int32_t p_port);
 	void ui_graph_input(uint32_t p_node, int32_t p_port);
-	void push_graph(uint32_t p_node);
+	void push_graph(uint32_t p_node, bool p_take_place);
 	void pre_round(UiPreRoundEvent p_event);
 	void note(std::string p_line);
 	void drain_flow_log();

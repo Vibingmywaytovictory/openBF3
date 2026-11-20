@@ -28,6 +28,28 @@ constexpr int32_t kEndOfRoundAnswer = -1342095349;
 constexpr size_t kMaxWatches = 1u << 14;
 constexpr size_t kMaxTimers = 4096;
 
+bool ui_input_settles(const ui::UiGraphAsset &p_graph, const ui::UiGraphNode &p_input) {
+	std::vector<size_t> open{ size_t(&p_input - p_graph.nodes.data()) };
+	std::set<size_t> seen;
+	while (!open.empty() && seen.size() < p_graph.nodes.size()) {
+		const size_t n = open.back();
+		open.pop_back();
+		if (n >= p_graph.nodes.size() || !seen.insert(n).second) {
+			continue;
+		}
+		const ui::UiGraphNodeKind kind = p_graph.nodes[n].kind;
+		if (kind == ui::UiGraphNodeKind::State || kind == ui::UiGraphNodeKind::Dialog) {
+			return true;
+		}
+		for (const ui::UiGraphConnection &c : p_graph.connections) {
+			if (c.source_node == n) {
+				open.push_back(c.target_node);
+			}
+		}
+	}
+	return false;
+}
+
 std::string leaf_key(std::string_view p_category, int32_t p_key) {
 	return ui::ui_data_category_leaf(p_category) + "#" + std::to_string(p_key);
 }
@@ -193,7 +215,7 @@ core::Status UiFlowSession::bind(const core::level::LoadedLevel &p_level, const 
 	}
 	watch_ports_.assign(ports.begin(), ports.end());
 	for (const gp::LogicEdge &e : graph_->networked_edges()) {
-		if (e.target == gp::kNoLogicIndex || (e.source == gp::kNoLogicIndex && ui_graph_of_.count(e.target) != 0)) {
+		if (e.target == gp::kNoLogicIndex) {
 			continue;
 		}
 		std::vector<std::pair<uint32_t, int32_t>> &targets = networked_targets_[e.connection];
@@ -516,7 +538,7 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 	} else if (p_port == gp::logic_port_id(kUiGraphEnterPort)) {
 		graph_owner_[graph] = p_node;
 		note("logic " + leaf + " " + std::string(kUiGraphEnterPort));
-		push_graph(p_node);
+		push_graph(p_node, true);
 		if (asset) {
 			for (const ui::UiGraphNode &n : asset->nodes) {
 				if (n.kind == ui::UiGraphNodeKind::InstanceInput && n.root) {
@@ -543,7 +565,7 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 			++stats_.inputs_fired;
 			graph_owner_[graph] = p_node;
 			note("logic " + leaf + "." + input->name);
-			push_graph(p_node);
+			push_graph(p_node, ui_input_settles(*asset, *input));
 			flow_->fire_input(graph, input->name);
 		}
 	}
@@ -553,7 +575,7 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 	flow_->clear_log();
 }
 
-void UiFlowSession::push_graph(uint32_t p_node) {
+void UiFlowSession::push_graph(uint32_t p_node, bool p_take_place) {
 	const auto entity = graph_entities_.find(p_node);
 	if (entity == graph_entities_.end()) {
 		return;
@@ -565,7 +587,7 @@ void UiFlowSession::push_graph(uint32_t p_node) {
 	if (top != entered_.rend() && top->graph == e.graph) {
 		return;
 	}
-	if (e.pop_previous) {
+	if (e.pop_previous && p_take_place) {
 		std::vector<std::string> previous;
 		for (auto g = entered_.rbegin(); g != entered_.rend(); ++g) {
 			if (g->priority == e.priority && g->graph != e.graph) {
