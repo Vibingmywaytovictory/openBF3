@@ -80,6 +80,8 @@ core::Result<TerrainSurfaceLanes> terrain_surface_lanes(const ShaderLookup &p_sh
 
 std::string terrain_lane_code(const TerrainLane &p_lane, std::string_view p_cover);
 
+core::Result<TerrainLane> terrain_output_lane(const dxbc::Program &p_program, uint32_t p_output, uint8_t p_lane);
+
 enum class TerrainImageFormat : uint8_t {
 	R8,
 	Rgba8,

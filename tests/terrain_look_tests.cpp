@@ -271,9 +271,20 @@ TEST_SUITE("render-terrain") {
 		CHECK(failures.empty());
 		CHECK(combos.size() >= 40);
 		std::printf("render.terrain combinations %zu, texture bindings %zu\n", combos.size(), textures.size());
+		size_t unlit = 0;
 		for (const SceneTerrainCombo &c : combos) {
 			CHECK_MESSAGE(c.program != nullptr, c.shader, " has no pixel program");
+			if (c.program == nullptr) {
+				continue;
+			}
+			const Result<dxbc::Program> program = dxbc::parse(*c.program);
+			REQUIRE(program.ok());
+			const Result<TerrainLane> specular = terrain_output_lane(*program, 1, 1);
+			CHECK_MESSAGE(specular.ok(), c.shader, ": ", (specular.ok() ? std::string() : specular.error().message));
+			unlit += specular && specular->literal == 0.0f ? 1u : 0u;
 		}
+		std::printf("render.terrain combinations writing specular o1.y as 0: %zu of %zu\n", unlit, combos.size());
+		CHECK(unlit == combos.size());
 
 		core::res::HeightGrid heights;
 		const core::res::ResError he = tree.height_grid(5, fetch, heights);

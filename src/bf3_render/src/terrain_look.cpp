@@ -306,6 +306,10 @@ core::Result<TerrainSurfaceLanes> terrain_surface_lanes(const ShaderLookup &p_sh
 	return *lanes;
 }
 
+core::Result<TerrainLane> terrain_output_lane(const dxbc::Program &p_program, uint32_t p_output, uint8_t p_lane) {
+	return trace_surface_lane(p_program, p_program.code.size(), uint8_t(dxbc::OperandType::Output), p_output, p_lane);
+}
+
 std::string terrain_lane_code(const TerrainLane &p_lane, std::string_view p_cover) {
 	if (p_lane.literal) {
 		return std::to_string(*p_lane.literal);
