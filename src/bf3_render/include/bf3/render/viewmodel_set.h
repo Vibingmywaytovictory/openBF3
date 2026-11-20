@@ -79,6 +79,8 @@ struct ViewmodelSetSpec {
 	bool clips_only = false;
 
 	bool knife_dog_tags = false;
+
+	bool vault = true;
 };
 
 struct ViewmodelClip {
@@ -193,6 +195,7 @@ struct ViewmodelItem {
 	uint32_t hidden_surfaces = 0;
 	std::shared_ptr<const ViewmodelLocomotionClips> locomotion;
 	std::shared_ptr<const ViewmodelVaultClips> vault;
+	std::optional<uint32_t> weapon_ant_ref;
 	anim::VmThrowFlow throw_flow;
 	std::string throw_flow_name;
 };

@@ -147,6 +147,7 @@ public:
 	bool muzzle_model(uint32_t p_i, Xform &r_model) const;
 
 	core::Result<uint8_t> add_weapon(uint32_t p_team, const CrowdWeapon &p_weapon);
+	core::Status set_weapon_vault(uint32_t p_team, uint8_t p_weapon, size_t p_kind, const CrowdVaultClip *p_clip);
 	uint8_t weapon_of(uint32_t p_i) const;
 	std::span<const Mat34> weapon_palette(uint32_t p_i) const;
 

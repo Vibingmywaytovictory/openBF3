@@ -58,16 +58,16 @@ CameraTravel camera_travel(const anim::Skeleton &p_rig, const ViewmodelItem &p_i
 
 }
 
-void load_viewmodel_vault(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
-		const anim::VaultControllers &p_controllers, uint32_t p_ant_ref, ViewmodelItem &r_item,
-		std::vector<std::string> &r_notes) {
-	const std::string where = r_item.unlock + " 1p vault";
+std::shared_ptr<const ViewmodelVaultClips> viewmodel_vault_clips(const core::ant::AntLibrary &p_library,
+		const anim::Skeleton &p_rig, const anim::VaultControllers &p_controllers, uint32_t p_ant_ref,
+		const ViewmodelItem &p_item, std::vector<std::string> &r_notes) {
+	const std::string where = p_item.unlock + " 1p vault";
 	core::Result<uint32_t> type = anim::weapon_type_index(p_library, p_ant_ref);
 	core::Result<uint32_t> specific = anim::weapon_choice_index(p_library, p_ant_ref);
 	if (!type || !specific) {
 		r_notes.push_back(
 				where + ": " + (!type ? type.error().message : specific.error().message) + " (no vault clip)");
-		return;
+		return nullptr;
 	}
 	anim::ChooserIndices idx;
 	idx.weapon_type = *type;
@@ -95,7 +95,7 @@ void load_viewmodel_vault(const core::ant::AntLibrary &p_library, const anim::Sk
 			r_notes.push_back(where + " " + c.name + ": " + clip.name + " is not an additive clip (no vault clip)");
 			continue;
 		}
-		const CameraTravel travel = camera_travel(p_rig, r_item, clip, *play);
+		const CameraTravel travel = camera_travel(p_rig, p_item, clip, *play);
 		r_notes.push_back(core::fmt("%s %s: %s -> %s, %u frames over %.3f s, CameraJoint up to %.3f m and %.1f deg off "
 									"the idle pose",
 				where.c_str(), c.name.c_str(), route->controller.c_str(), clip.name.c_str(), clip.tracks.end_frame,
@@ -105,9 +105,38 @@ void load_viewmodel_vault(const core::ant::AntLibrary &p_library, const anim::Sk
 		v->path[k] = c.name + " -> " + route->controller;
 		++loaded;
 	}
-	if (loaded > 0) {
+	return loaded > 0 ? std::shared_ptr<const ViewmodelVaultClips>(std::move(v)) : nullptr;
+}
+
+void load_viewmodel_vault(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
+		const anim::VaultControllers &p_controllers, uint32_t p_ant_ref, ViewmodelItem &r_item,
+		std::vector<std::string> &r_notes) {
+	if (std::shared_ptr<const ViewmodelVaultClips> v =
+					viewmodel_vault_clips(p_library, p_rig, p_controllers, p_ant_ref, r_item, r_notes)) {
 		r_item.vault = std::move(v);
 	}
+}
+
+std::vector<std::shared_ptr<const ViewmodelVaultClips>> load_viewmodel_set_vaults(
+		const ViewmodelSet &p_set, std::vector<std::string> &r_notes) {
+	std::vector<std::shared_ptr<const ViewmodelVaultClips>> out(p_set.items.size());
+	if (p_set.library == nullptr) {
+		r_notes.push_back("1p vault: the set has no ANT library (no vault clips)");
+		return out;
+	}
+	const core::Result<anim::VaultControllers> controllers = anim::find_vault_controllers(*p_set.library);
+	if (!controllers) {
+		r_notes.push_back("1p vault: " + controllers.error().message + " (no vault clips)");
+		return out;
+	}
+	for (size_t i = 0; i < p_set.items.size(); ++i) {
+		const ViewmodelItem &item = p_set.items[i];
+		if (item.weapon_ant_ref) {
+			out[i] =
+					viewmodel_vault_clips(*p_set.library, p_set.rig, *controllers, *item.weapon_ant_ref, item, r_notes);
+		}
+	}
+	return out;
 }
 
 anim::VmVault viewmodel_vault(const anim::Skeleton &p_rig, const ViewmodelItem &p_item) {

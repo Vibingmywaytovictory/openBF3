@@ -755,7 +755,8 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 	}
 	const core::EbxLibrary &lib = *p_sources.ebx;
 	const core::ant::AntLibrary &ant = *p_sources.library;
-	const core::Result<anim::VaultControllers> vault = anim::find_vault_controllers(ant);
+	const core::Result<anim::VaultControllers> vault =
+			p_spec.vault ? anim::find_vault_controllers(ant) : core::make_error("the set defers its vault clips");
 	auto set = std::make_unique<ViewmodelSet>();
 	set->library = p_sources.library;
 
@@ -949,6 +950,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		}
 		if (locomotion_ant_ref && *locomotion_ant_ref >= 0 && *locomotion_ant_ref <= int64_t(UINT32_MAX)) {
 			load_viewmodel_locomotion(ant, set->rig, uint32_t(*locomotion_ant_ref), item, set->notes);
+			item.weapon_ant_ref = uint32_t(*locomotion_ant_ref);
 			if (vault) {
 				load_viewmodel_vault(ant, set->rig, *vault, uint32_t(*locomotion_ant_ref), item, set->notes);
 			}

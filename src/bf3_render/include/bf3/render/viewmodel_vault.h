@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -16,9 +17,16 @@ struct ViewmodelVaultClips {
 	std::array<std::string, anim::kVaultAnimKinds> path;
 };
 
+std::shared_ptr<const ViewmodelVaultClips> viewmodel_vault_clips(const core::ant::AntLibrary &p_library,
+		const anim::Skeleton &p_rig, const anim::VaultControllers &p_controllers, uint32_t p_ant_ref,
+		const ViewmodelItem &p_item, std::vector<std::string> &r_notes);
+
 void load_viewmodel_vault(const core::ant::AntLibrary &p_library, const anim::Skeleton &p_rig,
 		const anim::VaultControllers &p_controllers, uint32_t p_ant_ref, ViewmodelItem &r_item,
 		std::vector<std::string> &r_notes);
+
+std::vector<std::shared_ptr<const ViewmodelVaultClips>> load_viewmodel_set_vaults(
+		const ViewmodelSet &p_set, std::vector<std::string> &r_notes);
 
 anim::VmVault viewmodel_vault(const anim::Skeleton &p_rig, const ViewmodelItem &p_item);
 

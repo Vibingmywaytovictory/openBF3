@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -55,6 +56,31 @@ TEST_SUITE("render-viewmodel-vault") {
 				}
 			}
 			REQUIRE(item.vault != nullptr);
+			render::ViewmodelSetSpec deferred_spec = spec;
+			deferred_spec.vault = false;
+			core::Result<std::unique_ptr<render::ViewmodelSet>> deferred =
+					render::load_viewmodel_set(**sources, deferred_spec, nullptr);
+			REQUIRE_MESSAGE(deferred.ok(), unlock, ": ", (deferred.ok() ? "" : deferred.error().message));
+			REQUIRE((*deferred)->items.size() == 1);
+			CHECK((*deferred)->items[0].vault == nullptr);
+			CHECK((*deferred)->items[0].weapon_ant_ref == item.weapon_ant_ref);
+			std::vector<std::string> deferred_notes;
+			const std::vector<std::shared_ptr<const render::ViewmodelVaultClips>> later =
+					render::load_viewmodel_set_vaults(**deferred, deferred_notes);
+			REQUIRE(later.size() == 1);
+			REQUIRE(later[0] != nullptr);
+			for (size_t k = 0; k < anim::kVaultAnimKinds; ++k) {
+				const render::ViewmodelClip &a = item.vault->clips[k], &b = later[0]->clips[k];
+				CHECK(a.source == b.source);
+				CHECK(a.name == b.name);
+				CHECK(a.tracks.end_frame == b.tracks.end_frame);
+				CHECK(a.seconds == b.seconds);
+				CHECK(item.vault->path[k] == later[0]->path[k]);
+				CHECK(item.vault->play[k].start_tick == later[0]->play[k].start_tick);
+				CHECK(item.vault->play[k].end_tick == later[0]->play[k].end_tick);
+				CHECK(item.vault->play[k].clip_ticks_per_tick == later[0]->play[k].clip_ticks_per_tick);
+				CHECK(item.vault->play[k].frames_per_tick == later[0]->play[k].frames_per_tick);
+			}
 			const anim::VmVault vault = render::viewmodel_vault((*set)->rig, item);
 			REQUIRE(vault.camera_joint >= 0);
 			for (size_t k = 0; k < anim::kVaultAnimKinds; ++k) {

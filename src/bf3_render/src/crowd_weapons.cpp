@@ -277,7 +277,7 @@ core::Result<MuzzleEntry> muzzle_entry(const core::EbxLibrary &p_library, const 
 }
 
 std::string load_vault_clips(const SoldierAssets &p_assets, const anim::VaultControllers &p_vault, uint32_t p_ant_ref,
-		CrowdWeaponPart &r_part) {
+		CrowdWeaponVaults &r_part) {
 	core::Result<uint32_t> type = anim::weapon_type_index(*p_assets.library, p_ant_ref);
 	if (!type) {
 		return "; no vault clips (" + type.error().message + ")";
@@ -391,10 +391,18 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 	}
 
 	std::string vault_line;
-	if (data && p_vault != nullptr) {
+	if (data) {
 		core::Result<uint32_t> ref = weapon_ant_ref(*data, spec.weapon_unlock);
-		vault_line = ref ? load_vault_clips(p_assets, *p_vault, *ref, r_part)
-						 : "; no vault clips (" + ref.error().message + ")";
+		if (ref) {
+			r_part.ant_ref = *ref;
+		}
+		if (p_vault != nullptr) {
+			CrowdWeaponVaults vaults;
+			vault_line = ref ? load_vault_clips(p_assets, *p_vault, *ref, vaults)
+							 : "; no vault clips (" + ref.error().message + ")";
+			r_part.have_vault = vaults.have_vault;
+			r_part.vault = std::move(vaults.vault);
+		}
 	}
 
 	std::optional<core::gameplay::WeaponDef> def;
@@ -480,8 +488,9 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 }
 }
 
-core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::InstallReader &p_install, const SoldierSpec &p_spec, const SoldierAssets &p_assets,
-		const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache) {
+core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::InstallReader &p_install,
+		const SoldierSpec &p_spec, const SoldierAssets &p_assets,
+		const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache, bool p_vault) {
 	const Clock::time_point start = Clock::now();
 	core::Result<std::shared_ptr<core::Install>> install = core::Install::open(p_install);
 	if (!install) {
@@ -491,7 +500,8 @@ core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::Ins
 	if (!ebx) {
 		return core::error_at(p_spec.superbundle, ebx.error());
 	}
-	core::Result<std::unique_ptr<CrowdWeaponSet>> set = load_crowd_weapons(**ebx, p_spec, p_assets, p_items, p_cache);
+	core::Result<std::unique_ptr<CrowdWeaponSet>> set =
+			load_crowd_weapons(**ebx, p_spec, p_assets, p_items, p_cache, p_vault);
 	if (set) {
 		(*set)->seconds = std::chrono::duration<double>(Clock::now() - start).count();
 	}
@@ -500,7 +510,7 @@ core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::Ins
 
 core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::EbxLibrary &p_library,
 		const SoldierSpec &p_spec, const SoldierAssets &p_assets,
-		const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache) {
+		const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache, bool p_vault) {
 	const Clock::time_point start = Clock::now();
 	if (p_assets.library == nullptr || p_assets.clips.rig.size() == 0) {
 		return core::make_error("crowd weapons: the soldier assets have no clip library or rig");
@@ -514,8 +524,9 @@ core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::Ebx
 	auto set = std::make_unique<CrowdWeaponSet>();
 	const core::EbxLibrary &lib = p_library;
 	const std::vector<std::string> databases = variation_database_names(lib);
-	const core::Result<anim::VaultControllers> vault = anim::find_vault_controllers(*p_assets.library);
-	if (!vault) {
+	const core::Result<anim::VaultControllers> vault =
+			p_vault ? anim::find_vault_controllers(*p_assets.library) : core::make_error("deferred");
+	if (p_vault && !vault) {
 		set->notes.push_back("no vault clips: " + vault.error().message);
 	}
 	for (size_t t = 0; t < p_items.size(); ++t) {
@@ -606,5 +617,31 @@ uint64_t release_soldier_textures(SoldierAssets &r_assets, const CrowdWeaponSet 
 		}
 	}
 	return freed;
+}
+
+std::array<std::vector<CrowdWeaponVaults>, 2> load_crowd_weapon_vaults(
+		const SoldierAssets &p_assets, const CrowdWeaponSet &p_set, std::vector<std::string> &r_notes) {
+	std::array<std::vector<CrowdWeaponVaults>, 2> out;
+	if (p_assets.library == nullptr) {
+		r_notes.push_back("no vault clips: the soldier assets have no clip library");
+		return out;
+	}
+	const core::Result<anim::VaultControllers> vault = anim::find_vault_controllers(*p_assets.library);
+	if (!vault) {
+		r_notes.push_back("no vault clips: " + vault.error().message);
+		return out;
+	}
+	for (size_t t = 0; t < p_set.teams.size(); ++t) {
+		out[t].resize(p_set.teams[t].size());
+		for (size_t i = 0; i < p_set.teams[t].size(); ++i) {
+			const CrowdWeaponPart &part = p_set.teams[t][i];
+			if (!part.ant_ref) {
+				continue;
+			}
+			const std::string line = load_vault_clips(p_assets, *vault, *part.ant_ref, out[t][i]);
+			r_notes.push_back("team " + std::to_string(t) + " item def " + std::to_string(part.spec.def) + line);
+		}
+	}
+	return out;
 }
 }

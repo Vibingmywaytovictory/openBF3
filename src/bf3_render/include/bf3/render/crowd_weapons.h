@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -38,6 +39,7 @@ struct CrowdWeaponPart {
 	anim::CrowdThrowClips throw_clips;
 	std::array<bool, anim::kVaultAnimKinds> have_vault{};
 	std::array<anim::CrowdVaultClip, anim::kVaultAnimKinds> vault;
+	std::optional<uint32_t> ant_ref;
 	int32_t muzzle_joint = -1;
 	anim::Xform muzzle_offset = anim::xform_identity();
 	uint64_t vertices = 0, triangles = 0;
@@ -61,11 +63,22 @@ struct CrowdWeaponSet {
 	}
 };
 
-core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::InstallReader &p_install, const SoldierSpec &p_spec,
-		const SoldierAssets &p_assets, const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache = nullptr);
+core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::InstallReader &p_install,
+		const SoldierSpec &p_spec, const SoldierAssets &p_assets,
+		const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache = nullptr,
+		bool p_vault = true);
 core::Result<std::unique_ptr<CrowdWeaponSet>> load_crowd_weapons(const core::EbxLibrary &p_library,
 		const SoldierSpec &p_spec, const SoldierAssets &p_assets,
-		const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache = nullptr);
+		const std::array<std::span<const CrowdWeaponSpec>, 2> &p_items, core::Cache *p_cache = nullptr,
+		bool p_vault = true);
+
+struct CrowdWeaponVaults {
+	std::array<bool, anim::kVaultAnimKinds> have_vault{};
+	std::array<anim::CrowdVaultClip, anim::kVaultAnimKinds> vault;
+};
+
+std::array<std::vector<CrowdWeaponVaults>, 2> load_crowd_weapon_vaults(
+		const SoldierAssets &p_assets, const CrowdWeaponSet &p_set, std::vector<std::string> &r_notes);
 
 inline uint32_t strip_team_weapon_parts(SoldierAssets &r_assets) {
 	uint32_t removed = 0;

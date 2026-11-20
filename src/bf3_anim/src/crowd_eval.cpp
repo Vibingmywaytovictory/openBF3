@@ -1283,6 +1283,25 @@ core::Result<uint8_t> CrowdEvaluator::add_weapon(uint32_t p_team, const CrowdWea
 	return uint8_t(team.weapons.size() - 1);
 }
 
+core::Status CrowdEvaluator::set_weapon_vault(
+		uint32_t p_team, uint8_t p_weapon, size_t p_kind, const CrowdVaultClip *p_clip) {
+	Impl &m = *impl_;
+	if (m.job) {
+		return core::make_error("crowd: set_weapon_vault while a pose job runs");
+	}
+	if (!m.combat || p_team >= m.combat->teams.size() || p_weapon >= m.combat->teams[p_team].weapons.size() ||
+			p_kind >= kVaultAnimKinds) {
+		return core::make_error("crowd: set_weapon_vault: no team " + std::to_string(p_team) + " weapon " +
+				std::to_string(p_weapon) + " kind " + std::to_string(p_kind));
+	}
+	if (p_clip != nullptr && (p_clip->clip.mask.size() != m.clips->rig.size() || !(p_clip->play.seconds() > 0.0f))) {
+		return core::make_error("crowd team " + std::to_string(p_team) + " weapon " + std::to_string(p_weapon) +
+				": vault clip " + std::to_string(p_kind) + " is not rig-sized or has no length");
+	}
+	m.combat->teams[p_team].weapons[p_weapon].vault[p_kind] = p_clip;
+	return core::Status::success();
+}
+
 uint8_t CrowdEvaluator::weapon_of(uint32_t p_i) const {
 	const Impl &m = *impl_;
 	if (!m.combat || !drawn(p_i)) {

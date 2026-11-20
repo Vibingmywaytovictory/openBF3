@@ -12,6 +12,7 @@
 #include "test_support.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -79,8 +80,37 @@ TEST_SUITE("render-crowd-weapons") {
 		const uint64_t released = render::release_soldier_textures(**assets, render::CrowdWeaponSet{});
 		core::Result<std::unique_ptr<render::CrowdWeaponSet>> later = render::load_crowd_weapons(reader, spec, **assets,
 				{ std::span<const render::CrowdWeaponSpec>(lists.teams[0]).first(1),
-						std::span<const render::CrowdWeaponSpec>(lists.teams[1]).first(1) });
+						std::span<const render::CrowdWeaponSpec>(lists.teams[1]).first(1) },
+				nullptr, false);
 		REQUIRE_MESSAGE(later.ok(), (later.ok() ? "" : later.error().message));
+		std::vector<std::string> vault_notes;
+		const std::array<std::vector<render::CrowdWeaponVaults>, 2> later_vaults =
+				render::load_crowd_weapon_vaults(**assets, **later, vault_notes);
+		uint32_t vault_clips = 0;
+		for (size_t t = 0; t < 2; ++t) {
+			REQUIRE((*later)->teams[t].size() == 1);
+			REQUIRE(later_vaults[t].size() == 1);
+			const render::CrowdWeaponPart &inline_part = (*set)->teams[t][0];
+			const render::CrowdWeaponPart &deferred_part = (*later)->teams[t][0];
+			CHECK(deferred_part.ant_ref == inline_part.ant_ref);
+			for (size_t k = 0; k < anim::kVaultAnimKinds; ++k) {
+				CHECK_FALSE(deferred_part.have_vault[k]);
+				const render::CrowdWeaponVaults &v = later_vaults[t][0];
+				CHECK(v.have_vault[k] == inline_part.have_vault[k]);
+				if (!v.have_vault[k] || !inline_part.have_vault[k]) {
+					continue;
+				}
+				++vault_clips;
+				CHECK(v.vault[k].controller == inline_part.vault[k].controller);
+				CHECK(v.vault[k].clip.tracks.end_frame == inline_part.vault[k].clip.tracks.end_frame);
+				CHECK(v.vault[k].play.start_tick == inline_part.vault[k].play.start_tick);
+				CHECK(v.vault[k].play.end_tick == inline_part.vault[k].play.end_tick);
+				CHECK(v.vault[k].play.clip_ticks_per_tick == inline_part.vault[k].play.clip_ticks_per_tick);
+				CHECK(v.vault[k].blend_in_seconds == inline_part.vault[k].blend_in_seconds);
+			}
+		}
+		std::printf("render.crowd_weapons deferred vault clips: %u, equal to the inline load's\n", vault_clips);
+		CHECK(vault_clips == 2 * anim::kVaultAnimKinds);
 		uint32_t named = 0, from_soldier = 0, missing = 0;
 		for (const std::vector<render::CrowdWeaponPart> &team : (*later)->teams) {
 			for (const render::CrowdWeaponPart &p : team) {
