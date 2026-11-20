@@ -48,6 +48,38 @@ std::vector<SceneTerrainCombo> plan_terrain_combos(const core::LevelMount &p_mou
 		std::string_view p_asset, const std::function<int32_t(const std::string &)> &p_texture,
 		std::vector<std::pair<std::string, std::string>> &r_failures);
 
+inline constexpr std::string_view kTerrainSurfaceShader = "/defaultterrainsurfaceshader";
+
+inline constexpr std::array<std::array<std::pair<uint8_t, uint8_t>, 4>, 2> kTerrainAtlasLanes{ {
+		{ { { 0, 1 }, { 0, 2 }, { 2, 0 }, { 0, 0 } } },
+		{ { { 1, 1 }, { 1, 2 }, { 2, 1 }, { 1, 0 } } },
+} };
+
+struct TerrainLane {
+	std::optional<float> literal;
+	uint8_t atlas = 0;
+	uint8_t lane = 0;
+	float scale = 1.0f;
+	float bias = 0.0f;
+
+	bool operator==(const TerrainLane &) const = default;
+};
+
+inline constexpr float kTerrainUntracedSmoothness = 0.5f;
+inline constexpr TerrainLane kTerrainUntracedSpecular{ std::nullopt, 1, 0 };
+
+struct TerrainSurfaceLanes {
+	TerrainLane smoothness;
+	TerrainLane specular;
+	std::string refusal;
+
+	bool operator==(const TerrainSurfaceLanes &) const = default;
+};
+
+core::Result<TerrainSurfaceLanes> terrain_surface_lanes(const ShaderLookup &p_shaders, std::string_view p_asset);
+
+std::string terrain_lane_code(const TerrainLane &p_lane, std::string_view p_cover);
+
 enum class TerrainImageFormat : uint8_t {
 	R8,
 	Rgba8,
@@ -83,6 +115,7 @@ struct TerrainMaterial {
 	std::vector<TerrainTextureBinding> textures;
 	std::vector<std::pair<std::string, std::array<float, 4>>> uniforms;
 	int32_t render_priority = 0;
+	TerrainSurfaceLanes surface;
 };
 
 enum class TerrainChoice : uint8_t {
@@ -128,6 +161,7 @@ struct TerrainLook {
 	std::array<float, 4> height_pixel{};
 	TerrainLookStats stats;
 	TerrainDetailLayout detail;
+	TerrainSurfaceLanes surface;
 
 	uint32_t material_at(float p_x, float p_z) const;
 };
@@ -138,6 +172,7 @@ struct TerrainLookInput {
 	std::array<float, 4> region{};
 	std::span<const SceneTerrainCombo> combos;
 	core::res::TerrainChunkFetch fetch;
+	std::optional<TerrainSurfaceLanes> surface;
 };
 
 inline constexpr uint32_t kTerrainMaxMaskSide = 1024;

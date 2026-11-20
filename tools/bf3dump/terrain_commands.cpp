@@ -110,6 +110,17 @@ int cmd_terrain(const std::shared_ptr<Install> &p_install, const std::vector<std
 			input.region = { -half, -half, half, half };
 			input.combos = combos;
 			input.fetch = fetch;
+			const Result<bf3::render::TerrainSurfaceLanes> surface =
+					bf3::render::terrain_surface_lanes(resolver->shaders(), name);
+			if (!surface) {
+				std::printf(", surface lanes: %s\n", surface.error().message.c_str());
+				++failures;
+				continue;
+			}
+			std::printf(", surface smoothness %s specular %s",
+					bf3::render::terrain_lane_code(surface->smoothness, {}).c_str(),
+					bf3::render::terrain_lane_code(surface->specular, {}).c_str());
+			input.surface = *surface;
 			Result<bf3::render::TerrainLook> look = bf3::render::build_terrain_look(input);
 			if (!look) {
 				std::printf(", look: %s\n", look.error().message.c_str());

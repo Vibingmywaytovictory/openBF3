@@ -4,6 +4,7 @@
 #include "bf3/render/dxbc.h"
 #include "bf3/render/light_pass.h"
 #include "bf3/render/program_database.h"
+#include "bf3/render/terrain_look.h"
 #include "test_support.h"
 
 #include <cstdint>
@@ -185,6 +186,15 @@ TEST_SUITE("render-light-pass") {
 		CHECK(normal_y->lane == 2);
 		CHECK(normal_z->resource == "g_source1");
 		CHECK(normal_z->lane == 0);
+		for (size_t atlas = 0; atlas < render::kTerrainAtlasLanes.size(); ++atlas) {
+			for (uint8_t lane = 0; lane < 4; ++lane) {
+				const std::optional<Source> from = written_from(atlas == 0 ? *page_a : *page_b, 0, lane);
+				REQUIRE(from.has_value());
+				const std::pair<uint8_t, uint8_t> table = render::kTerrainAtlasLanes[atlas][lane];
+				CHECK_MESSAGE(from->resource == "g_source" + std::to_string(table.first), atlas, " ", int(lane));
+				CHECK_MESSAGE(from->lane == table.second, atlas, " ", int(lane));
+			}
+		}
 		std::printf(
 				"render.light_pass: terrain atlas page 1 x (the surface shader's specular) is %s.%c, normal (%s.%c, "
 				"%s.%c, %s.%c)\n",

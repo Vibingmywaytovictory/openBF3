@@ -5,7 +5,9 @@
 #include "bf3/core/res/terrain_mask_field.h"
 #include "bf3/core/util/text.h"
 #include "bf3/render/level_scene.h"
+#include "bf3/render/light_pass.h"
 #include "bf3/render/roads.h"
+#include "bf3/render/terrain_page.h"
 #include "bf3/render/terrain_program.h"
 #include "dxbc_test_support.h"
 #include "terrain_test_support.h"
@@ -578,8 +580,15 @@ TEST_SUITE("terrain-decals-draw-unit") {
 		translation.inputs = { 1, 2, 3 };
 		translation.body = "o0 = v1 + v2 + v3;\n";
 		render::TerrainMaterial material;
+		material.surface.smoothness.atlas = 1;
+		material.surface.smoothness.lane = 2;
+		material.surface.specular.atlas = 1;
 		Result<std::string> code = render::terrain_decal_shader_code(translation, material);
 		REQUIRE(code.ok());
+		CHECK(render::uses_light_pass(*code));
+		CHECK(code->find("bf3_smoothness = clamp((abs(o2.y) / decal_cover), 0.0, 1.0);") != std::string::npos);
+		CHECK(code->find("bf3_specular = max(" + render::terrain_page_camera() +
+					  " ? 0.0 : (abs(o1.y) / decal_cover) * (abs(o1.y) / decal_cover), 0.0);") != std::string::npos);
 		CHECK(code->find("depth_draw_never") != std::string::npos);
 		CHECK(code->find("vec4 v1 = COLOR;") != std::string::npos);
 		CHECK(code->find("ALPHA = clamp(o0.w, 0.0, 1.0);") != std::string::npos);

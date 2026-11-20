@@ -8,6 +8,7 @@
 #include "bf3/render/look_materials.h"
 #include "bf3/render/shader_translate.h"
 #include "bf3/render/terrain_look.h"
+#include "bf3/render/terrain_page.h"
 #include "dxbc_test_support.h"
 #include "test_support.h"
 
@@ -283,8 +284,15 @@ TEST_SUITE("render-terrain") {
 		input.region = { -1024.0f, -1024.0f, 1024.0f, 1024.0f };
 		input.combos = combos;
 		input.fetch = fetch;
+		CHECK_FALSE(build_terrain_look(input).ok());
+		const Result<TerrainSurfaceLanes> surface = terrain_surface_lanes(resolver->shaders(), asset);
+		REQUIRE_MESSAGE(surface.ok(), (surface.ok() ? std::string() : surface.error().message));
+		CHECK(surface->smoothness.literal == 0.5f);
+		CHECK(surface->specular == TerrainLane{ std::nullopt, 1, 0 });
+		input.surface = *surface;
 		Result<TerrainLook> look = build_terrain_look(input);
 		REQUIRE_MESSAGE(look.ok(), (look.ok() ? std::string() : look.error().message));
+		CHECK(look->surface == *surface);
 		const TerrainLookStats &s = look->stats;
 		std::printf("render.terrain look: %u patches (%u exact, %u superset, %u opaque, %u misses), %zu materials, "
 					"%llu instructions, images %.1f MiB\n",
@@ -296,7 +304,10 @@ TEST_SUITE("render-terrain") {
 		for (const TerrainMaterial &mat : look->materials) {
 			CHECK(mat.code.find("ALBEDO") != std::string::npos);
 			CHECK(uses_light_pass(mat.code));
-			CHECK(mat.code.find("bf3_specular = max(o1.y * o1.y, 0.0);") != std::string::npos);
+			CHECK(mat.code.find("bf3_specular = max(" + terrain_page_camera() +
+						  " ? 0.0 : abs(o1.y) * abs(o1.y), 0.0);") != std::string::npos);
+			CHECK(mat.code.find("bf3_smoothness = clamp(" + std::to_string(0.5f) + ", 0.0, 1.0);") !=
+					std::string::npos);
 			CHECK(!mat.textures.empty());
 		}
 		const auto combo_at = [&](float p_x, float p_z) {

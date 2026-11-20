@@ -6,11 +6,13 @@
 #include "bf3/core/res/dx_texture.h"
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/util/text.h"
+#include "bf3/render/dxbc.h"
 #include "bf3/render/shader_database.h"
 #include "bf3/render/terrain_page.h"
 #include "bf3/render/terrain_program.h"
 
 #include <algorithm>
+#include <bit>
 #include <charconv>
 #include <cmath>
 #include <cstring>
@@ -180,6 +182,143 @@ std::vector<SceneTerrainCombo> plan_terrain_combos(const core::LevelMount &p_mou
 	return out;
 }
 
+namespace {
+
+core::Result<TerrainLane> trace_surface_lane(
+		const dxbc::Program &p_program, size_t p_end, uint8_t p_type, uint32_t p_reg, uint8_t p_lane) {
+	for (size_t i = p_end; i-- > 0;) {
+		const dxbc::Instruction &ins = p_program.code[i];
+		if (ins.operands.empty() || ins.operands[0].type != p_type || ins.operands[0].index[0] != p_reg ||
+				((ins.operands[0].write_mask() >> p_lane) & 1u) == 0) {
+			continue;
+		}
+		const auto source = [&](size_t p_operand) -> core::Result<TerrainLane> {
+			const dxbc::Operand &s = ins.operands[p_operand];
+			if (s.is(dxbc::OperandType::Immediate32)) {
+				TerrainLane out;
+				out.literal = std::bit_cast<float>(s.imm[s.components == 1 ? 0 : p_lane]);
+				return out;
+			}
+			if (!s.is(dxbc::OperandType::Temp)) {
+				return core::make_error("reads " + dxbc::format_instruction(ins));
+			}
+			return trace_surface_lane(p_program, i, uint8_t(dxbc::OperandType::Temp), s.index[0], s.lane(p_lane));
+		};
+		if (ins.is(dxbc::Op::Mov) && ins.operands.size() == 2 && !ins.operands[1].negate) {
+			return source(1);
+		}
+		if ((ins.is(dxbc::Op::Sample) || ins.is(dxbc::Op::SampleL) || ins.is(dxbc::Op::SampleD)) &&
+				ins.operands.size() > 2) {
+			const dxbc::Binding *b = p_program.binding(dxbc::BindingType::Texture, ins.operands[2].index[0]);
+			const int32_t atlas = b != nullptr ? terrain_page_atlas(b->name) : -1;
+			if (atlas < 0) {
+				return core::make_error("samples what is not a terrain atlas: " + dxbc::format_instruction(ins));
+			}
+			TerrainLane out;
+			out.atlas = uint8_t(atlas);
+			out.lane = ins.operands[2].lane(p_lane);
+			return out;
+		}
+		const bool affine = ins.is(dxbc::Op::Mad) && ins.operands.size() == 4 &&
+				ins.operands[2].is(dxbc::OperandType::Immediate32) &&
+				ins.operands[3].is(dxbc::OperandType::Immediate32) && !ins.operands[1].negate;
+		if (affine) {
+			core::Result<TerrainLane> a = source(1);
+			core::Result<TerrainLane> k = source(2);
+			core::Result<TerrainLane> b = source(3);
+			if (!a) {
+				return a.error();
+			}
+			if (a->literal) {
+				a->literal = *a->literal * *k->literal + *b->literal;
+			} else {
+				a->scale *= *k->literal;
+				a->bias = a->bias * *k->literal + *b->literal;
+			}
+			return *a;
+		}
+		const bool add =
+				ins.is(dxbc::Op::Add) && ins.operands.size() == 3 && ins.operands[1].negate != ins.operands[2].negate;
+		const bool lerp = ins.is(dxbc::Op::Mad) && ins.operands.size() == 4;
+		if (add || lerp) {
+			core::Result<TerrainLane> a = source(add ? 1 : 2);
+			core::Result<TerrainLane> b = source(add ? 2 : 3);
+			if (!a || !b) {
+				return a ? b.error() : a.error();
+			}
+			if (*a == *b) {
+				return *a;
+			}
+		}
+		return core::make_error("is not one atlas lane or literal: " + dxbc::format_instruction(ins));
+	}
+	return core::make_error("reads a value no instruction writes");
+}
+
+}
+
+core::Result<TerrainSurfaceLanes> terrain_surface_lanes(const ShaderLookup &p_shaders, std::string_view p_asset) {
+	const std::string name = to_lower_ascii(p_asset) + std::string(kTerrainSurfaceShader);
+	const SurfaceShader *shader = p_shaders.by_name(name);
+	if (shader == nullptr) {
+		return core::make_error(name + " is not in the shader database");
+	}
+	std::optional<TerrainSurfaceLanes> lanes;
+	for (const ShaderSolution &s : shader->solutions) {
+		if (!s.pixel_program) {
+			continue;
+		}
+		core::Result<dxbc::Program> program = dxbc::parse(*s.pixel_program);
+		if (!program) {
+			return core::error_at(name, program.error());
+		}
+		const bool gbuffer = std::any_of(program->outputs.begin(), program->outputs.end(),
+				[](const dxbc::SignatureElement &p_e) { return p_e.name == "SV_Target" && p_e.reg == 1; });
+		if (!gbuffer) {
+			continue;
+		}
+		const uint8_t output = uint8_t(dxbc::OperandType::Output);
+		const size_t end = program->code.size();
+		core::Result<TerrainLane> smoothness = trace_surface_lane(*program, end, output, 0, 3);
+		core::Result<TerrainLane> specular = trace_surface_lane(*program, end, output, 1, 3);
+		TerrainSurfaceLanes found;
+		if (smoothness && specular) {
+			found.smoothness = *smoothness;
+			found.specular = *specular;
+		} else {
+			found.smoothness.literal = kTerrainUntracedSmoothness;
+			found.specular = kTerrainUntracedSpecular;
+			found.refusal =
+					name + (smoothness ? ": o1.w " + specular.error().message : ": o0.w " + smoothness.error().message);
+		}
+		const bool same = lanes && lanes->specular == found.specular && lanes->smoothness == found.smoothness &&
+				lanes->refusal.empty() == found.refusal.empty();
+		if (lanes && !same) {
+			return core::make_error(name + "'s G-buffer solutions write o0.w or o1.w differently");
+		}
+		if (!lanes) {
+			lanes = found;
+		}
+	}
+	if (!lanes) {
+		return core::make_error(name + " has no G-buffer solution");
+	}
+	return *lanes;
+}
+
+std::string terrain_lane_code(const TerrainLane &p_lane, std::string_view p_cover) {
+	if (p_lane.literal) {
+		return std::to_string(*p_lane.literal);
+	}
+	const std::pair<uint8_t, uint8_t> source = kTerrainAtlasLanes[p_lane.atlas][p_lane.lane];
+	std::string code = "abs(o" + std::to_string(source.first) + "." + "xyzw"[source.second] + ")";
+	code = p_cover.empty() ? code : "(" + code + " / " + std::string(p_cover) + ")";
+	if (p_lane.scale == 1.0f && p_lane.bias == 0.0f) {
+		return code;
+	}
+	return "(" + code + " * " + std::to_string(p_lane.scale) + " + " + std::to_string(p_lane.bias) + ")";
+}
+
 TerrainChoiceResult choose_terrain_combo(std::span<const SceneTerrainCombo> p_combos,
 		const std::vector<uint8_t> &p_present, const std::vector<uint8_t> &p_opaque) {
 	bool exact = false;
@@ -264,7 +403,9 @@ core::Result<std::string> terrain_shader_code(
 	code += "vec3 terrain_colour = vec3(o0.y, o0.z, o2.x);\n"
 			"vec3 terrain_normal = normalize(vec3(o0.x, o1.z, o1.x) * 2.0 - 1.0);\n" +
 			terrain_page_output("terrain_colour", "terrain_normal");
-	code += light_pass_gloss(std::to_string(kTerrainSmoothness), terrain_page_camera() + " ? 0.0 : o1.y * o1.y") +
+	const std::string specular = terrain_lane_code(p_material.surface.specular, {});
+	code += light_pass_gloss(terrain_lane_code(p_material.surface.smoothness, {}),
+					terrain_page_camera() + " ? 0.0 : " + specular + " * " + specular) +
 			"}\n" + light_pass_code();
 	return code;
 }
@@ -275,6 +416,9 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 	}
 	if (p_input.combos.empty()) {
 		return core::make_error("terrain look needs its combinations");
+	}
+	if (!p_input.surface) {
+		return core::make_error("terrain look needs its surface shader's smoothness and specular lanes");
 	}
 	for (const SceneTerrainCombo &c : p_input.combos) {
 		if (c.program == nullptr) {
@@ -288,6 +432,7 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 		return core::make_error("terrain look region is empty");
 	}
 	TerrainLook look;
+	look.surface = *p_input.surface;
 	const float mask_rect = finest_mask_rect(mask);
 	look.stats.data_mask_texel = mask_rect / float(mask.samples_per_side - core::res::kTerrainMaskBorder);
 	const Region masks = region_for(rect, look.stats.data_mask_texel, kTerrainMaxMaskSide);
@@ -512,6 +657,7 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 		}
 		look.stats.instructions += translation->instructions;
 		TerrainMaterial material;
+		material.surface = look.surface;
 		material.combo = combo_index;
 		const auto terrain_value = [&](const std::string &p_name) -> core::Result<std::array<float, 4>> {
 			if (p_name == "external_worldToGlobalColorUvTransform") {

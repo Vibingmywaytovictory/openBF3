@@ -64,6 +64,7 @@ struct SceneTerrainPlan {
 	core::level::LevelTransform transform;
 	std::array<float, 3> color{ 0.36f, 0.33f, 0.27f };
 	std::vector<SceneTerrainCombo> combos;
+	std::optional<TerrainSurfaceLanes> surface;
 	SceneScatterPlan scatter;
 	std::vector<SceneDecalShader> decals;
 	std::vector<SceneWaterShader> water;

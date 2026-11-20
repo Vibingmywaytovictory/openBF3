@@ -13,7 +13,6 @@ inline constexpr float kSpecularPowerBias = 1.0f;
 inline constexpr float kSpecularNormAdd = 8.0f;
 inline constexpr float kSpecularNormScale = 0.125f;
 inline constexpr float kEnvmapMipScale = 10.0f;
-inline constexpr float kTerrainSmoothness = 0.5f;
 inline constexpr float kLookSpecular = 0.04f;
 inline constexpr std::string_view kSunSpecularScaleGlobal = "bf3_sun_specular_scale";
 inline constexpr std::string_view kOutdoorLightProgram =

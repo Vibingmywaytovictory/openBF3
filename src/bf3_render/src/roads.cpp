@@ -282,8 +282,9 @@ core::Result<std::string> terrain_decal_shader_code(
 			"vec3 decal_colour = vec3(o0.y, o0.z, o2.x) / decal_cover;\n"
 			"vec3 decal_normal = normalize(vec3(o0.x, o1.z, o1.x) / decal_cover * 2.0 - 1.0);\n" +
 			terrain_page_output("decal_colour", "decal_normal") + "ALPHA = clamp(o0.w, 0.0, 1.0);\n";
-	code += light_pass_gloss(std::to_string(kTerrainSmoothness),
-					terrain_page_camera() + " ? 0.0 : (o1.y / decal_cover) * (o1.y / decal_cover)") +
+	const std::string specular = terrain_lane_code(p_material.surface.specular, "decal_cover");
+	code += light_pass_gloss(terrain_lane_code(p_material.surface.smoothness, "decal_cover"),
+					terrain_page_camera() + " ? 0.0 : " + specular + " * " + specular) +
 			"}\n" + light_pass_code();
 	return code;
 }
@@ -304,6 +305,7 @@ core::Result<TerrainMaterial> terrain_decal_material(
 	}
 	TerrainMaterial material;
 	material.render_priority = p_priority;
+	material.surface = p_look.surface;
 	const core::Status bound = bind_terrain_program(
 			where, *program, *translation, p_shader.textures, p_look.height_uv, p_look.height_pixel, {}, material);
 	if (!bound) {

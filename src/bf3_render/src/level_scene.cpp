@@ -1014,6 +1014,15 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 						*p_options.mount, resolver->shaders(), terrain.asset,
 						[&](const std::string &p_name) { return int32_t(builder.texture(p_name, TextureRole::Data)); },
 						plan.failures);
+				core::Result<TerrainSurfaceLanes> surface = terrain_surface_lanes(resolver->shaders(), terrain.asset);
+				if (surface && !surface->refusal.empty()) {
+					plan.failures.emplace_back("terrain surface lanes", surface->refusal);
+				}
+				if (surface) {
+					terrain.surface = *surface;
+				} else {
+					plan.failures.emplace_back("terrain surface shader of " + terrain.asset, surface.error().message);
+				}
 				const std::vector<std::string> databases = variation_database_names(*p_options.mount);
 				terrain.scatter = plan_terrain_scatter(
 						*p_options.mount, resolver->shaders(), terrain.asset,
@@ -1239,6 +1248,7 @@ core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mo
 	input.region = region;
 	input.combos = plan.combos;
 	input.fetch = fetch;
+	input.surface = plan.surface;
 	core::Result<TerrainLook> look = build_terrain_look(input);
 	if (!look) {
 		out.look_error = look.error().message;

@@ -8,6 +8,7 @@
 #include "bf3/core/thread_pool.h"
 #include "bf3/core/util/text.h"
 #include "bf3/render/look_materials.h"
+#include "bf3/render/terrain_look.h"
 #include "bf3/render/terrain_scatter.h"
 #include "dxbc_test_support.h"
 #include "terrain_test_support.h"
@@ -23,6 +24,7 @@
 #include <map>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace bf3;
@@ -166,10 +168,14 @@ constexpr LevelTypes kLevels[] = {
 	{ "XP5_004", "levels/xp5_004/xp5_004_terrain/xp5_004_terrain", 13 },
 };
 
+constexpr size_t kSmoothnessLiterals = 21;
+constexpr std::array<std::string_view, 2> kUntracedSurfaces{ "XP3_Alborz", "XP3_Desert" };
+
 using LoadedTree = test::LoadedTerrainTree;
 
 struct BuiltScatter {
 	SceneScatterPlan plan;
+	Result<TerrainSurfaceLanes> surface = core::make_error("not read");
 	std::vector<std::string> meshes;
 	std::vector<std::pair<std::string, std::string>> failures;
 	Result<std::shared_ptr<const TerrainScatter>> scatter = core::make_error("not built");
@@ -182,6 +188,7 @@ void build_scatter(
 		r_out.failures.emplace_back(p_asset, "no look resolver");
 		return;
 	}
+	r_out.surface = terrain_surface_lanes(resolver->shaders(), p_asset);
 	r_out.plan = plan_terrain_scatter(
 			p_mount, resolver->shaders(), p_asset,
 			[&](const std::string &p_mesh) {
@@ -357,8 +364,9 @@ TEST_SUITE("render-scatter-unit") {
 }
 
 TEST_SUITE("render-scatter") {
-	TEST_CASE("scatter: every MP terrain's scattering types read as the data has them, 352 on 24 terrains, and all "
-			  "their mask programs build") {
+	TEST_CASE("scatter: every MP terrain's scattering types read as the data has them, 352 on 24 terrains, all "
+			  "their mask programs build, and each terrain surface shader's smoothness and specular trace to one "
+			  "literal or atlas lane but on XP3_Alborz and XP3_Desert") {
 		test::Mounted m;
 		if (!test::open_or_skip(m)) {
 			return;
@@ -411,7 +419,7 @@ TEST_SUITE("render-scatter") {
 			build_scatter(*mount, level.asset, tree, out.built);
 			return out;
 		});
-		size_t total = 0;
+		size_t total = 0, smoothness_literals = 0, specular_o1y = 0;
 		for (size_t i = 0; i < reads.size(); ++i) {
 			const LevelTypes &level = kLevels[i];
 			const LevelRead &read = reads[i];
@@ -432,7 +440,24 @@ TEST_SUITE("render-scatter") {
 			CHECK((*read.built.scatter)->types().size() == level.types);
 			CHECK((*read.built.scatter)->programs() == read.built.plan.combos.size());
 			CHECK_FALSE((*read.built.scatter)->levels().empty());
+			REQUIRE_MESSAGE(read.built.surface.ok(),
+					(read.built.surface.ok() ? std::string() : read.built.surface.error().message));
+			const TerrainSurfaceLanes &lanes = *read.built.surface;
+			const bool untraced = std::find(kUntracedSurfaces.begin(), kUntracedSurfaces.end(),
+										  std::string_view(level.level)) != kUntracedSurfaces.end();
+			CHECK_MESSAGE(lanes.refusal.empty() != untraced, lanes.refusal);
+			if (untraced) {
+				std::printf("render.terrain_scatter: %s surface lanes not traced: %s\n", level.level,
+						lanes.refusal.c_str());
+				continue;
+			}
+			std::printf("render.terrain_scatter: %s surface smoothness %s, specular %s\n", level.level,
+					terrain_lane_code(lanes.smoothness, {}).c_str(), terrain_lane_code(lanes.specular, {}).c_str());
+			smoothness_literals += lanes.smoothness.literal ? 1u : 0u;
+			specular_o1y += terrain_lane_code(lanes.specular, {}) == "abs(o1.y)" ? 1u : 0u;
 		}
+		CHECK(smoothness_literals == kSmoothnessLiterals);
+		CHECK(specular_o1y == std::size(kLevels) - kUntracedSurfaces.size());
 		CHECK(total == 352);
 		const SnapshotDiff diff = diff_snapshots(m.before, m.reader.snapshot());
 		std::printf("install.unchanged %s\n", diff.clean() ? "PASS" : diff.summary().c_str());
