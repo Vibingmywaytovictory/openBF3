@@ -618,11 +618,11 @@ void Bf3GameFx::step(const GameFrame &p_frame) {
 		const std::span<const fx::FxLight> shown = renderer->prep().lights();
 		uint32_t lit = 0, lit_emitters = 0, shown_impact = 0;
 		for (const fx::EmitterOutput &o : m.world->outputs()) {
-			if (o.light_count == 0 ||
-					std::find(m.impact_lit.begin(), m.impact_lit.end(), o.effect) == m.impact_lit.end()) {
+			if (o.light_count == 0) {
 				continue;
 			}
-			++lit;
+			const bool impact = std::find(m.impact_lit.begin(), m.impact_lit.end(), o.effect) != m.impact_lit.end();
+			lit += impact ? 1u : 0u;
 			float sum = 0;
 			for (uint32_t k = 0; k < o.light_count; ++k) {
 				sum += std::max(0.0f, plights[o.first_light + k].intensity);
@@ -630,15 +630,15 @@ void Bf3GameFx::step(const GameFrame &p_frame) {
 			if (sum <= 0) {
 				continue;
 			}
-			++lit_emitters;
+			lit_emitters += impact ? 1u : 0u;
 			const fx::PointLightDef &d = o.def->emitters[o.emitter].tmpl.light;
 			const float bound = std::max(d.color.x, std::max(d.color.y, d.color.z)) * d.intensity.max_clamp *
 					d.intensity.scale * std::max(d.random_min, d.random_max);
 			for (const fx::FxLight &f : shown) {
 				if (f.effect == o.effect && f.emitter == o.emitter) {
-					++shown_impact;
+					shown_impact += impact ? 1u : 0u;
 					const float energy = f.intensity * std::max(f.color.x, std::max(f.color.y, f.color.z));
-					m.stats.impact_lights_over_data += energy > bound * 1.001f ? 1u : 0u;
+					m.stats.lights_over_data += energy > bound * 1.001f ? 1u : 0u;
 				}
 			}
 		}
@@ -798,7 +798,7 @@ void Bf3GameFx::shutdown() {
 											 "reset by MaxInstanceCount, %llu refused, %llu particle spawns dropped; "
 											 "impacts %llu started, %llu culled, %llu with a light, at most %u impact "
 											 "lights in %llu frames, %llu lit effects cut short, %llu frames where the "
-											 "shown impact lights differ from the lit impact emitters, %llu impact "
+											 "shown impact lights differ from the lit impact emitters, %llu effect "
 											 "lights brighter than their data",
 				(unsigned long long)st.frames, st.light_particles_max, st.light_candidates_max, st.lights_max,
 				(unsigned long long)st.light_frames_over, (unsigned long long)st.lights_dropped,
@@ -809,7 +809,7 @@ void Bf3GameFx::shutdown() {
 				(unsigned long long)st.triggers.impacts_culled, (unsigned long long)st.impact_light_starts,
 				st.impact_lights_max, (unsigned long long)st.impact_light_frames,
 				(unsigned long long)m.world->stats().lit_instances_killed,
-				(unsigned long long)st.impact_light_mismatch_frames, (unsigned long long)st.impact_lights_over_data)));
+				(unsigned long long)st.impact_light_mismatch_frames, (unsigned long long)st.lights_over_data)));
 	}
 	m.placed.forget();
 	m.decals.clear();

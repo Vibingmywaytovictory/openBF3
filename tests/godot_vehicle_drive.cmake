@@ -36,6 +36,7 @@ if(NOT CMAKE_MATCH_1 EQUAL PROGRAM_MATERIALS OR NOT CMAKE_MATCH_2 EQUAL LOOK_MAT
     message(FATAL_ERROR "${ROW}: the level's vehicles draw ${PROGRAM_MATERIALS} materials through their programs and "
         "${LOOK_MATERIALS} through looks")
 endif()
+godot_require_pass("\\[game\\] effect lights: [0-9]+ frames, at most [1-9][0-9]* light particles[^\n]*, 0 effect lights brighter than their data")
 if(ZOOM)
     godot_require_pass("VEHICLE DRIVE ROW tank_drive PASS")
     godot_require_pass("VEHICLE DRIVE ROW tank_turn PASS")
