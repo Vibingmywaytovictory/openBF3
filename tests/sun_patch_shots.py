@@ -42,7 +42,7 @@ def main(argv):
             print('sun patch shots: the window of %s is off the shot' % name)
             return 1
     others = [means[name] for name in VIEWS[1:]]
-    limit = max(others) + (max(others) - min(others))
+    limit = max(others)
     print('sun patch shots: %s window %dx%d luma toward %.2f, away %.2f, sides %.2f %.2f; limit %.2f' %
           (argv[2], 2 * half, 2 * half, means['toward'], means['away'], means['side_a'], means['side_b'], limit))
     return 0 if means['toward'] <= limit else 1

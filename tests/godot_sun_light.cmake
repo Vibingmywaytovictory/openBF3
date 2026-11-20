@@ -39,8 +39,8 @@ if(DEFINED PATCH_POINT)
         RESULT_VARIABLE patch_rc OUTPUT_VARIABLE patch_out ERROR_VARIABLE patch_err)
     message("${ROW}: ${patch_out}${patch_err}")
     if(NOT patch_rc STREQUAL "0")
-        message(FATAL_ERROR "${ROW}: the grass-covered terrain patch is brighter toward the sun than its view-independent "
-            "spread, while the terrain combinations and the moorland grass write their specular lanes as 0")
+        message(FATAL_ERROR "${ROW}: the grass-covered terrain patch is brighter toward the sun than from any other side, "
+            "while the terrain combinations and the moorland grass write their specular lanes as 0")
     endif()
 endif()
 if(NOT out MATCHES "\\[level\\] light pass: ([0-9]+) of ([0-9]+) level materials \\(([0-9]+) with their program's smoothness and specular, of ([0-9]+) whose shader writes the G-buffer\\), ([0-9]+) of ([0-9]+) terrain materials")
