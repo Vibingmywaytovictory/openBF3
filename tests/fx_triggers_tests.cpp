@@ -43,6 +43,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -898,8 +899,9 @@ TEST_CASE("impacts: cell choice by seed, spread cone, mirror, decal and sound cu
 	CHECK(t.stats().double_starts == 0);
 }
 
-TEST_CASE("impacts: MaxInstanceCount limits each shooter's instances, so four shooters keep four lights, a shooter's "
-		  "next hit leaves its last one's light to live out its life, and none is stuck") {
+TEST_CASE(
+		"impacts: MaxInstanceCount limits each shooter's lit instances, so four shooters keep four lights; a shooter's "
+		"next hit ends its last one's light while its particles live out their life, and none is stuck") {
 	std::unique_ptr<Syn> s = make_syn();
 	DocBuilder light = simple_doc(77, 8, 240, 1, 0.2f);
 	fxt::set(light.tmpl(), "ActAsPointLight", flag(true));
@@ -926,6 +928,15 @@ TEST_CASE("impacts: MaxInstanceCount limits each shooter's instances, so four sh
 		}
 		return effects.size();
 	};
+	const auto drawn_effects = [&world] {
+		std::set<uint32_t> effects;
+		for (const EmitterOutput &o : world.outputs()) {
+			if (o.particle_count > 0) {
+				effects.insert(o.effect.slot);
+			}
+		}
+		return effects.size();
+	};
 	constexpr uint8_t kShooters = 4;
 	for (uint8_t k = 0; k < kShooters; ++k) {
 		const hk::PresentEvent e = impact(uint8_t(2 + k), 700, kMetal, { float(k), 1, 8 }, { 0, 0, -1 });
@@ -943,11 +954,14 @@ TEST_CASE("impacts: MaxInstanceCount limits each shooter's instances, so four sh
 	fx_step_frame(world, 1.0f / 60.0f);
 	CHECK(world.stats().stolen_instances == 1);
 	CHECK(world.stats().lit_instances_killed == 0);
+	CHECK(world.stats().reset_lit_instances == 1);
 	CHECK(world.stats().live_effects == kShooters + 1);
-	CHECK(lit_outputs() == kShooters + 1);
-	MESSAGE("metal impacts from " << int(kShooters) << " shooters and one second hit: " << world.stats().live_effects
-								  << " live, " << lit_outputs() << " lit, " << world.stats().stolen_instances
-								  << " reset by the same shooter's next hit, its light living out its life");
+	CHECK(drawn_effects() == kShooters + 1);
+	CHECK(lit_outputs() == kShooters);
+	MESSAGE("metal impacts from "
+			<< int(kShooters) << " shooters and one second hit: " << world.stats().live_effects << " live, "
+			<< lit_outputs() << " lit, " << world.stats().stolen_instances
+			<< " reset by the same shooter's next hit, its particles living out their life without its light");
 
 	for (int i = 0; i < 240; ++i) {
 		fx_step_frame(world, 1.0f / 60.0f);
@@ -2259,9 +2273,9 @@ TEST_SUITE("fx-install-vehicles") {
 		}
 	}
 
-	TEST_CASE(
-			"lights: the M1A2's and the BMP-2's gun shots light the scene as their lit emitters' data says, one light "
-			"per emitter at its particles' mean intensity, never brighter than one particle") {
+	TEST_CASE("lights: the M1A2's and the BMP-2's gun shots and the levels' impacts light the scene as their lit "
+			  "emitters' data says, one light "
+			  "per emitter at its particles' mean intensity, never brighter than one particle") {
 		Retail r;
 		if (!open_retail(r)) {
 			return;
@@ -2271,7 +2285,7 @@ TEST_SUITE("fx-install-vehicles") {
 			const char *mode;
 			const char *vehicle;
 		};
-		size_t lit_shots = 0;
+		size_t lit_shots = 0, lit_impacts = 0;
 		for (const Gun g : { Gun{ "MP_007", "ConquestLarge0", "vehicles/m1a2/m1abrams" },
 					 Gun{ "MP_003", "ConquestSmall0", "vehicles/bmp2/bmp2" } }) {
 			CAPTURE(g.vehicle);
@@ -2303,6 +2317,15 @@ TEST_SUITE("fx-install-vehicles") {
 			core::Result<EmitterAtlas> atlas =
 					EmitterAtlas::load(lib, lib.mount(0), EmitterAtlas::emitter_system_of(g.level), budget);
 			REQUIRE_MESSAGE(atlas.ok(), (atlas.ok() ? std::string() : atlas.error().message));
+			size_t impact_effects = 0;
+			for (const core::EbxLibrary::Entry &e : lib.entries()) {
+				if (e.partition != nullptr && e.partition->primary().type_name() == "EffectBlueprint" &&
+						std::string_view(e.name).starts_with("fx/impacts/")) {
+					shots.insert(std::string(e.name));
+					++impact_effects;
+				}
+			}
+			REQUIRE(impact_effects > 0);
 			for (const std::string &name : shots) {
 				CAPTURE(name);
 				core::Result<std::shared_ptr<const EffectDef>> def = fx->library->get(name);
@@ -2325,54 +2348,43 @@ TEST_SUITE("fx-install-vehicles") {
 				++lit_shots;
 				FxWorld world;
 				EffectStart start;
-				start.seed = 1;
+				std::function<bool(uint32_t, int)> lights_below = [&](uint32_t p_emitter, int p_depth) {
+					const EmitterDef &e = (*def)->emitters[p_emitter];
+					if ((e.tmpl.flags & kEmitterActAsPointLight) != 0) {
+						return true;
+					}
+					return p_depth < 8 &&
+							std::any_of(
+									e.children.begin(), e.children.end(),
+									[&](uint32_t p_child) { return lights_below(p_child, p_depth + 1); });
+				};
+				const auto lit_selected = [&](uint64_t p_seed) {
+					for (uint32_t c = 0; c < (*def)->components.size(); ++c) {
+						const EffectComponentDef &comp = (*def)->components[c];
+						if (comp.kind == ComponentKind::Emitter && lights_below(comp.emitter, 0) &&
+								fx_component_selected(**def, c, p_seed, start.tier)) {
+							return true;
+						}
+					}
+					return false;
+				};
+				for (start.seed = 1; start.seed < 4096 && !lit_selected(start.seed); ++start.seed) {
+				}
+				REQUIRE(lit_selected(start.seed));
 				REQUIRE(world.start(*def, start).ok());
 				FxView view;
 				view.camera_position = Vec3{ 0, 2, -20 };
 				RenderPrep prep;
 				float peak_energy = 0, last_lit = -1;
-				size_t particle_lights = 0, off_curve = 0, off_mean = 0, unmatched = 0, extra = 0;
+				FxLightAudit audit;
 				constexpr float kDt = 1.0f / 30.0f;
 				for (int f = 1; f <= 30 * 12; ++f) {
 					fx_step_frame(world, kDt);
 					prep.prepare(world, view, *atlas);
-					const std::span<const ParticleLight> plights = world.lights();
-					const std::span<const ParticleVertex> particles = world.particles();
-					size_t lit_outputs = 0;
 					for (const EmitterOutput &o : world.outputs()) {
-						if (o.light_count == 0) {
-							continue;
-						}
-						REQUIRE(o.light_count == o.particle_count);
-						const EmitterDef &e = o.def->emitters[o.emitter];
-						const float rmin = std::min(e.tmpl.light.random_min, e.tmpl.light.random_max);
-						const float rmax = std::max(e.tmpl.light.random_min, e.tmpl.light.random_max);
-						double sum = 0;
-						for (uint32_t k = 0; k < o.light_count; ++k) {
-							const ParticleLight &pl = plights[o.first_light + k];
-							const float curve =
-									evaluate_polynomial(e.tmpl.light.intensity, particles[o.first_particle + k].age);
-							++particle_lights;
-							const bool on_curve = curve > 0
-									? pl.intensity >= curve * rmin * 0.999f && pl.intensity <= curve * rmax * 1.001f
-									: pl.intensity == 0;
-							off_curve += on_curve ? 0 : 1;
-							sum += std::max(0.0f, pl.intensity);
-						}
-						if (sum <= 0) {
-							continue;
-						}
-						++lit_outputs;
-						const float mean = float(sum / double(o.light_count));
-						const auto shown = std::find_if(prep.lights().begin(), prep.lights().end(),
-								[&](const FxLight &p_l) { return p_l.effect == o.effect && p_l.emitter == o.emitter; });
-						if (shown == prep.lights().end()) {
-							++unmatched;
-							continue;
-						}
-						off_mean += std::fabs(shown->intensity - mean) <= 1e-4f * std::max(1.0f, mean) ? 0 : 1;
+						REQUIRE((o.light_count == 0 || o.light_count == o.particle_count));
 					}
-					extra += prep.lights().size() > lit_outputs ? prep.lights().size() - lit_outputs : 0;
+					audit_fx_lights(world, prep.lights(), audit);
 					for (const FxLight &l : prep.lights()) {
 						peak_energy = std::max(
 								peak_energy, l.intensity * std::max(l.color.x, std::max(l.color.y, l.color.z)));
@@ -2380,15 +2392,19 @@ TEST_SUITE("fx-install-vehicles") {
 					if (!prep.lights().empty()) {
 						last_lit = float(f) * kDt;
 					}
+					if (world.stats().live_effects == 0) {
+						break;
+					}
 				}
-				MESSAGE(g.vehicle << " " << name << ": " << lit << " lit emitters, " << particle_lights
-								  << " particle lights, peak energy " << peak_energy << " of the data's " << bound
-								  << ", last lit at " << last_lit << " s");
-				CHECK(particle_lights > 0);
-				CHECK(off_curve == 0);
-				CHECK(off_mean == 0);
-				CHECK(unmatched == 0);
-				CHECK(extra == 0);
+				lit_impacts += name.starts_with("fx/impacts/") ? 1u : 0u;
+				MESSAGE(g.vehicle << " " << name << ": " << lit << " lit emitters, " << audit.particle_lights
+								  << " particle lights, " << audit.lit_emitters << " emitter lights, peak energy "
+								  << peak_energy << " of the data's " << bound << ", last lit at " << last_lit << " s");
+				CHECK(audit.particle_lights > 0);
+				CHECK(audit.off_curve == 0);
+				CHECK(audit.off_mean == 0);
+				CHECK(audit.unshown == 0);
+				CHECK(audit.extra == 0);
 				CHECK(peak_energy > 0);
 				CHECK(peak_energy <= bound * 1.001f);
 				CHECK(last_lit > 0);
@@ -2396,6 +2412,7 @@ TEST_SUITE("fx-install-vehicles") {
 			}
 		}
 		CHECK(lit_shots >= 2);
+		CHECK(lit_impacts > 0);
 	}
 
 	TEST_CASE("install unchanged") {

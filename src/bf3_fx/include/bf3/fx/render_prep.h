@@ -95,8 +95,20 @@ struct FxLight {
 	bool first_person = false;
 	EffectHandle effect;
 	uint32_t emitter = 0;
+	uint32_t output = 0;
 };
 static_assert(std::is_trivially_copyable_v<FxLight>);
+
+struct FxLightAudit {
+	uint64_t particle_lights = 0;
+	uint64_t off_curve = 0;
+	uint64_t lit_emitters = 0;
+	uint64_t off_mean = 0;
+	uint64_t unshown = 0;
+	uint64_t extra = 0;
+};
+
+void audit_fx_lights(const FxWorld &p_world, std::span<const FxLight> p_shown, FxLightAudit &r_audit);
 
 struct FxExclusionVolume {
 	Transform transform;

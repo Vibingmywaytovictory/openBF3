@@ -570,8 +570,8 @@ TEST_CASE("sim: children start per parent particle, follow it and stop with it")
 	CHECK_FALSE(w.alive(*h));
 }
 
-TEST_CASE("sim: pools steal with reset and refuse without; a reset instance stops spawning and its particles live "
-		  "out their life unless KillParticlesWithEmitter") {
+TEST_CASE("sim: pools steal with reset and refuse without; a reset instance stops spawning, its lights end and its "
+		  "particles live out their life unless KillParticlesWithEmitter") {
 	FxWorld w;
 	const auto particles_of = [](const FxWorld &p_w, EffectHandle p_h) {
 		uint32_t n = 0;
@@ -622,6 +622,33 @@ TEST_CASE("sim: pools steal with reset and refuse without; a reset instance stop
 	run_frames(wk, 0.1f, 1);
 	CHECK_FALSE(wk.alive(*k0));
 	CHECK(wk.stats().live_particles == particles_of(wk, *k1));
+
+	const auto lights_of = [](const FxWorld &p_w, EffectHandle p_h) {
+		uint32_t n = 0;
+		for (const EmitterOutput &o : p_w.outputs()) {
+			n += o.effect == p_h ? o.light_count : 0;
+		}
+		return n;
+	};
+	EmitterDef lit = fxt::emitter_def("l", 4, 10, 10);
+	lit.tmpl.flags |= kEmitterActAsPointLight;
+	lit.tmpl.light.radius = 3;
+	lit.tmpl.light.color = Vec3{ 20, 6, 2 };
+	const auto lamp = fxt::effect_def("lamp", { lit }, { 0 }, 1, true);
+	FxWorld wl;
+	const auto l0 = wl.start(lamp, start_with(1));
+	REQUIRE(l0.ok());
+	run_frames(wl, 0.1f, 1);
+	REQUIRE(lights_of(wl, *l0) > 0);
+	const auto l1 = wl.start(lamp, start_with(2));
+	REQUIRE(l1.ok());
+	run_frames(wl, 0.1f, 1);
+	CHECK(wl.alive(*l0));
+	CHECK(particles_of(wl, *l0) > 0);
+	CHECK(lights_of(wl, *l0) == 0);
+	CHECK(lights_of(wl, *l1) > 0);
+	CHECK(wl.stats().reset_lit_instances == 1);
+	CHECK(wl.stats().lit_instances_killed == 0);
 	const auto refuse = fxt::effect_def("refuse", { fxt::emitter_def("e", 4, 10, 10) }, { 0 }, 1, false);
 	REQUIRE(w.start(refuse, start_with(4)).ok());
 	CHECK_FALSE(w.start(refuse, start_with(5)).ok());

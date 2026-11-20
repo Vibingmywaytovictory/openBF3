@@ -4,6 +4,7 @@
 
 #include "bf3/core/result.h"
 #include "bf3/fx/placed_effects.h"
+#include "bf3/fx/render_prep.h"
 #include "bf3/fx/simulator.h"
 #include "bf3/fx/triggers.h"
 #include "bf3/host/logic_effect_feed.h"
@@ -47,7 +48,9 @@ struct GameFxStats {
 	uint64_t light_frames_over = 0, lights_dropped = 0;
 	uint64_t impact_light_starts = 0, impact_light_frames = 0;
 	uint32_t impact_lights_max = 0;
-	uint64_t impact_light_mismatch_frames = 0, lights_over_data = 0;
+	uint64_t impact_light_mismatch_frames = 0;
+	uint64_t impact_lights_cut = 0, impact_lights_ended_by_next_hit = 0, impact_over_max_frames = 0;
+	fx::FxLightAudit light_audit;
 	double load_seconds = 0;
 	fx::PlacedEffectStats placed;
 };

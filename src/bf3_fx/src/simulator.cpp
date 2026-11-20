@@ -198,6 +198,7 @@ struct FxWorld::Impl {
 		bool active = false;
 		bool killed = false;
 		bool stopping = false;
+		bool reset = false;
 		bool lit_kill_counted = false;
 		std::shared_ptr<const EffectDef> def;
 		EffectStart start;
@@ -638,7 +639,7 @@ struct FxWorld::Impl {
 		it.first = r_offset;
 		it.capacity = inst.state_count + n;
 		r_offset += it.capacity;
-		if ((t.flags & kEmitterActAsPointLight) != 0) {
+		if ((t.flags & kEmitterActAsPointLight) != 0 && !fx.reset) {
 			it.light_first = r_light_offset;
 			r_light_offset += it.capacity;
 		} else {
@@ -1233,6 +1234,7 @@ struct FxWorld::Impl {
 			const EffectSlot &fx = effects[inst.effect];
 			o.effect = EffectHandle{ inst.effect, fx.generation };
 			o.def = fx.def.get();
+			o.owner = fx.start.owner;
 			o.emitter = inst.emitter;
 			o.component = inst.component;
 			o.first_person = fx.start.first_person;
@@ -1296,8 +1298,18 @@ core::Result<EffectHandle> FxWorld::start(std::shared_ptr<const EffectDef> p_def
 			++w.stats.refused_starts;
 			return core::make_error("start: " + p_def->name + ": instance pool full");
 		}
-		w.effects[oldest].stopping = true;
+		Impl::EffectSlot &old = w.effects[oldest];
+		old.stopping = true;
+		old.reset = true;
 		++w.stats.stolen_instances;
+		for (const uint32_t id : w.emitter_list) {
+			const Impl::EmitterInstance &e = w.emitters[id];
+			if (e.active && e.effect == oldest && e.state_count > 0 &&
+					(old.def->emitters[e.emitter].tmpl.flags & kEmitterActAsPointLight) != 0) {
+				++w.stats.reset_lit_instances;
+				break;
+			}
+		}
 	}
 	if (w.free_effects.empty()) {
 		++w.stats.refused_starts;

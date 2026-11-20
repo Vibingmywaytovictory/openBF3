@@ -355,6 +355,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 				l.first_person = o.first_person;
 				l.effect = o.effect;
 				l.emitter = o.emitter;
+				l.output = uint32_t(i);
 				if (std::isfinite(l.priority) && std::isfinite(l.color.x + l.color.y + l.color.z)) {
 					m.candidates.push_back(l);
 				}
@@ -522,4 +523,47 @@ const RenderPrepStats &RenderPrep::stats() const {
 	return impl_->stats;
 }
 
+void audit_fx_lights(const FxWorld &p_world, std::span<const FxLight> p_shown, FxLightAudit &r_audit) {
+	const std::span<const ParticleLight> plights = p_world.lights();
+	const std::span<const ParticleVertex> particles = p_world.particles();
+	size_t lit_outputs = 0;
+	const std::span<const EmitterOutput> outputs = p_world.outputs();
+	for (size_t i = 0; i < outputs.size(); ++i) {
+		const EmitterOutput &o = outputs[i];
+		if (o.light_count == 0 || o.def == nullptr || o.emitter >= o.def->emitters.size() ||
+				size_t(o.first_light) + o.light_count > plights.size() ||
+				size_t(o.first_particle) + o.light_count > particles.size()) {
+			continue;
+		}
+		const PointLightDef &l = o.def->emitters[o.emitter].tmpl.light;
+		const float rmin = std::min(l.random_min, l.random_max);
+		const float rmax = std::max(l.random_min, l.random_max);
+		double sum = 0;
+		for (uint32_t k = 0; k < o.light_count; ++k) {
+			const ParticleLight &pl = plights[o.first_light + k];
+			const float curve = evaluate_polynomial(l.intensity, particles[o.first_particle + k].age);
+			const bool on_curve = curve > 0
+					? pl.intensity >= curve * rmin * 0.999f && pl.intensity <= curve * rmax * 1.001f
+					: pl.intensity == 0;
+			++r_audit.particle_lights;
+			r_audit.off_curve += on_curve ? 0u : 1u;
+			sum += std::max(0.0f, pl.intensity);
+		}
+		if (!(sum > 0) || !(l.radius > 0)) {
+			continue;
+		}
+		++lit_outputs;
+		++r_audit.lit_emitters;
+		const float mean = float(sum / double(o.light_count));
+		const auto shown = std::find_if(p_shown.begin(), p_shown.end(), [&](const FxLight &p_l) {
+			return p_l.output == i && p_l.effect == o.effect && p_l.emitter == o.emitter;
+		});
+		if (shown == p_shown.end()) {
+			++r_audit.unshown;
+			continue;
+		}
+		r_audit.off_mean += std::fabs(shown->intensity - mean) <= 1e-4f * std::max(1.0f, mean) ? 0u : 1u;
+	}
+	r_audit.extra += p_shown.size() > lit_outputs ? p_shown.size() - lit_outputs : 0u;
+}
 }
