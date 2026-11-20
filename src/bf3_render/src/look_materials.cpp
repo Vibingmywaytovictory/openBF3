@@ -1196,7 +1196,8 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	}
 	out.double_sided = shader_info != nullptr ? shader_info->double_sided : foliage;
 
-	out.glass = has_word(shader_name, kGlassWords) && (!color || (out.blend == LookBlend::Blend && !color_alpha));
+	out.glass = has_word(shader_name, kGlassWords) && (shader == nullptr || is_transparent(shader->surface_type)) &&
+			(!color || (out.blend == LookBlend::Blend && !color_alpha));
 	if (out.glass) {
 		out.blend = LookBlend::Blend;
 	}
