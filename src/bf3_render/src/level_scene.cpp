@@ -416,7 +416,7 @@ struct PlanBuilder {
 	std::unordered_set<std::string> undrawn_keys;
 
 	uint32_t look_material(const MaterialSlot &p_slot, std::string_view p_mesh) {
-		LookMaterial look = resolver->resolve(p_slot, p_mesh);
+		LookMaterial look = resolver->resolve(p_slot, p_mesh, LookPrograms::Deferred);
 		if (!look.drawn) {
 			if (undrawn_keys.insert(material_key(p_slot)).second) {
 				plan.undrawn.push_back(SceneUndrawnMaterial{ p_slot, look.graph_refusal });

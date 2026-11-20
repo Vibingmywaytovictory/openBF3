@@ -64,6 +64,7 @@ struct UploadStats {
 	uint64_t program_instances = 0;
 	uint64_t lit_materials = 0;
 	uint64_t gloss_materials = 0;
+	uint64_t sliced_materials = 0;
 	uint64_t level_materials = 0;
 	uint64_t terrain_lit = 0;
 	uint64_t terrain_materials = 0;

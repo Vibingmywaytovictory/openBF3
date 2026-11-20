@@ -716,6 +716,8 @@ void LevelUpload::create_materials(double p_deadline_us) {
 					std::lock_guard lock(stats_mutex_);
 					stats_.program_materials += program ? 1 : 0;
 					stats_.gloss_materials += program && plan.programs[size_t(mp.program)]->translated.gloss ? 1 : 0;
+					stats_.sliced_materials +=
+							mp.program >= 0 && plan.programs[size_t(mp.program)]->translated.gloss ? 1 : 0;
 					stats_.lit_materials += render::uses_light_pass(code) ? 1 : 0;
 					stats_.level_materials += render::unshaded(code) ? 0 : 1;
 				}
@@ -1113,6 +1115,8 @@ void LevelUpload::update_pages() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	for (size_t i : users) {
 		rs->material_set_shader(materials_[i], generic_shader(plan_->materials[i]));
+		std::lock_guard lock(stats_mutex_);
+		stats_.gloss_materials -= plan_->programs[size_t(plan_->materials[i].program)]->translated.gloss ? 1 : 0;
 	}
 	if (!users.empty()) {
 		UtilityFunctions::print(to_godot("[pages] no terrain pages: " + std::to_string(users.size()) +

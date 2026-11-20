@@ -935,8 +935,9 @@ void LookResolver::attach_program(LookMaterial &r_out, const SurfaceShader &p_sh
 		mask_colour = mask_colour || (r_out.color && r_out.color->name == name);
 	}
 	const bool pages = !info.variants.empty() && info.variants.begin()->second->translated.terrain_pages;
-	if (info.target == ProgramTarget::Deferred && !mask_colour && !pages && textures.size() == 1 && r_out.color &&
-			textures.front() == r_out.color->name) {
+	const bool lanes = deferred && (r_out.blend != LookBlend::AlphaTest || info.alpha_cut);
+	if (info.target == ProgramTarget::Deferred && !mask_colour && !pages && !lanes && textures.size() == 1 &&
+			r_out.color && textures.front() == r_out.color->name) {
 		r_out.graph_plain = true;
 		return;
 	}
