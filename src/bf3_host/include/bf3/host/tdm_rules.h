@@ -190,6 +190,8 @@ public:
 
 	core::Status step(uint32_t p_tick, const ServerView &p_view, const Gunplay &p_gunplay, std::span<sim::SoldierState> r_states,
 			std::vector<RulesOrder> &r_orders);
+	void vehicle_hits(const sim::weapons::ProjectileStepOutput &p_out);
+	const sim::logic::UnderFireStats *under_fire_stats() const;
 
 	size_t choose_spawn(uint8_t p_slot, std::span<const sim::SpawnPoint> p_points, const ServerView &p_view, uint32_t p_tick) const;
 	bool spawn_point_open(uint8_t p_slot, const sim::SpawnPoint &p_point) const;

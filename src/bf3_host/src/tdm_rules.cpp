@@ -42,6 +42,15 @@ bool state_alive(const sim::SoldierState &p_state) {
 	return (p_state.flags & sim::soldier_flags::kAlive) != 0 && p_state.mode != sim::MoveMode::Dead;
 }
 
+void append_hit_points(const sim::weapons::ProjectileStepOutput &p_out, std::vector<core::Vec3> &r_points) {
+	for (const sim::weapons::ImpactEvent &e : p_out.impacts) {
+		r_points.push_back(e.position);
+	}
+	for (const sim::weapons::DetonationEvent &e : p_out.detonations) {
+		r_points.push_back(e.position);
+	}
+}
+
 using bf3::core::finite;
 
 bool segment_hits_sphere(const sim::Vec3 &p_origin, const sim::Vec3 &p_dir, float p_length, const sim::Vec3 &p_centre, float p_radius, float &r_t) {
@@ -322,6 +331,7 @@ struct TdmRules::Impl {
 	std::optional<lg::LogicRuntime> runtime;
 	std::optional<lg::RoundNatives> natives;
 	std::optional<lg::UnderFireNatives> under_fire;
+	std::vector<core::Vec3> hit_points;
 	std::vector<lg::LogicNetworkedEvent> networked;
 	uint32_t base = 0;
 	bool based = false;
@@ -1126,6 +1136,17 @@ SpawnRefusal TdmRules::request_spawn(uint8_t p_slot, uint8_t p_kit, uint8_t p_sp
 	return SpawnRefusal::None;
 }
 
+void TdmRules::vehicle_hits(const sim::weapons::ProjectileStepOutput &p_out) {
+	Impl &m = *impl_;
+	if (m.under_fire && !m.faulted) {
+		append_hit_points(p_out, m.hit_points);
+	}
+}
+
+const sim::logic::UnderFireStats *TdmRules::under_fire_stats() const {
+	return impl_->under_fire ? &impl_->under_fire->stats() : nullptr;
+}
+
 core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gunplay &p_gunplay, std::span<sim::SoldierState> r_states,
 		std::vector<RulesOrder> &r_orders) {
 	Impl &m = *impl_;
@@ -1169,15 +1190,10 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		}
 		if (st.ok() && m.under_fire) {
 			m.under_fire->apply(next, m.runtime->effects());
-			std::vector<core::Vec3> points;
-			for (const sim::weapons::ImpactEvent &e : p_gunplay.step_output().impacts) {
-				points.push_back(e.position);
-			}
-			for (const sim::weapons::DetonationEvent &e : p_gunplay.step_output().detonations) {
-				points.push_back(e.position);
-			}
-			st = m.under_fire->impacts(next, points, *m.runtime);
+			append_hit_points(p_gunplay.step_output(), m.hit_points);
+			st = m.under_fire->impacts(next, m.hit_points, *m.runtime);
 		}
+		m.hit_points.clear();
 		if (st.ok() && m.natives->conquest() != nullptr) {
 			std::vector<lg::ConquestPlayerSample> players;
 			for (size_t i = 0; i < m.slots.size() && i < r_states.size() && i < lg::kConquestSlots; ++i) {

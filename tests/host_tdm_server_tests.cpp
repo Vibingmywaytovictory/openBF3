@@ -4046,6 +4046,149 @@ TEST_SUITE("host-tdm-conquest") {
 		CHECK(m->rules().stats().runtime_faults == 0u);
 	}
 
+	TEST_CASE(
+			"conquest: MP_007 on the GameServer: a soldier's bullets landing within an UnderFireTrigger's Radius fire "
+			"it in TdmRules, which sends its networked output to the client; bullets landing outside fire none") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::SharedLevel &shared = *level->shared;
+		REQUIRE(shared.logic_natives != nullptr);
+		REQUIRE(shared.logic_natives->under_fire != nullptr);
+		const std::vector<sim::logic::UnderFireTriggerData> &triggers = shared.logic_natives->under_fire->triggers;
+		REQUIRE_FALSE(triggers.empty());
+		std::unique_ptr<Match> m = start_match(*level, false, 53u, 0, 2);
+		Script *shooter = m->bot();
+		tdm::ScriptedPeer &p = m->join("watcher");
+		p.ready();
+		REQUIRE(wait_in_round(*m));
+		REQUIRE(m->until([&] { return is_alive(m->state(shooter->slot)) && is_alive(m->state(p.slot())); }, 600));
+		const auto reach = [&](const sim::Vec3 &p_point) {
+			float best = 1e9f;
+			for (const sim::logic::UnderFireTriggerData &t : triggers) {
+				best = std::min(best, t.distance(p_point) - t.radius);
+			}
+			return best;
+		};
+		const auto floor_under = [&](float p_x, float p_z, float p_y) -> std::optional<sim::Vec3> {
+			sim::StaticHit ground;
+			if (!m->world->ground_below({ p_x, p_y + 30.0f, p_z }, 80.0f, sim::query_mask::kMovement, &ground) ||
+					ground.normal[1] < 0.8f) {
+				return std::nullopt;
+			}
+			return ground.position;
+		};
+		const auto lands = [&](const sim::Vec3 &p_floor, const sim::Vec3 &p_target) -> std::optional<sim::Vec3> {
+			const sim::Vec3 eye = add(p_floor, 0.0f, 1.6f, 0.0f);
+			const sim::Vec3 to{ (p_target[0] - eye[0]) * 1.5f, (p_target[1] - eye[1]) * 1.5f,
+				(p_target[2] - eye[2]) * 1.5f };
+			sim::StaticHit hit;
+			if (!m->motor.fits_standing(add(p_floor, 0.0f, 0.05f, 0.0f)) ||
+					!m->world->ray(eye, to, sim::query_mask::kProjectile, &hit) ||
+					distance(hit.position, p_target) > 1.0f) {
+				return std::nullopt;
+			}
+			return hit.position;
+		};
+		struct Shot {
+			sim::Vec3 stand{}, aim{};
+		};
+		size_t target_index = triggers.size();
+		std::optional<Shot> in_shot, out_shot;
+		for (size_t t = 0; t < triggers.size() && !in_shot; ++t) {
+			const sim::Vec3 c = triggers[t].position;
+			for (int k = 0; k < 16 && !in_shot; ++k) {
+				const float dx = std::cos(float(k) * 0.3926991f), dz = std::sin(float(k) * 0.3926991f);
+				const std::optional<sim::Vec3> stand = floor_under(c[0] + 8.0f * dx, c[2] + 8.0f * dz, c[1]);
+				const std::optional<sim::Vec3> target = floor_under(c[0] + 3.0f * dx, c[2] + 3.0f * dz, c[1]);
+				const std::optional<sim::Vec3> hit = stand && target ? lands(*stand, *target) : std::nullopt;
+				if (hit && triggers[t].distance(*hit) <= 0.0f) {
+					in_shot = Shot{ add(*stand, 0.0f, 0.05f, 0.0f), *hit };
+					target_index = t;
+				}
+			}
+		}
+		for (const sim::SpawnPoint &sp : shared.spawns) {
+			const std::optional<sim::Vec3> stand = floor_under(sp.position[0], sp.position[2], sp.position[1]);
+			const std::optional<sim::Vec3> target = floor_under(sp.position[0] + 5.0f, sp.position[2], sp.position[1]);
+			const std::optional<sim::Vec3> hit = stand && target ? lands(*stand, *target) : std::nullopt;
+			if (hit && reach(*stand) > 10.0f && reach(*hit) > 10.0f) {
+				out_shot = Shot{ add(*stand, 0.0f, 0.05f, 0.0f), *hit };
+				break;
+			}
+		}
+		REQUIRE(in_shot.has_value());
+		REQUIRE(out_shot.has_value());
+		const sim::logic::UnderFireTriggerData &target = triggers[target_index];
+		m->place(shooter->slot, out_shot->stand);
+		sim::Vec3 aim = out_shot->aim;
+		bool firing = false;
+		shooter->fn = [&](sim::Tick p_tick, const sim::SoldierState &p_state) {
+			return aim_command(
+					*m, p_tick, p_state, aim, sim::Pose::Stand, select_and_fire(0, firing && p_tick % 8u < 4u));
+		};
+		size_t from_trigger = 0, from_any_trigger = 0;
+		const auto run = [&](uint32_t p_ticks) {
+			for (uint32_t i = 0; i < p_ticks; ++i) {
+				m->tick();
+				for (const host::OutDatagram &d : m->out) {
+					if (d.peer != p.peer() || net::peek_type(d.bytes) != std::optional(net::MessageType::LogicEvents)) {
+						continue;
+					}
+					core::Result<net::LogicEvents> e = net::decode_logic_events(d.bytes);
+					REQUIRE(e.ok());
+					for (const sim::logic::LogicNetworkedEvent &ev : e->events) {
+						if (ev.source_port != sim::logic::kUnderFireOut) {
+							continue;
+						}
+						++from_any_trigger;
+						from_trigger += ev.source == target.node ? 1u : 0u;
+					}
+				}
+			}
+		};
+		run(30);
+		const sim::logic::UnderFireStats *stats = m->rules().under_fire_stats();
+		REQUIRE(stats != nullptr);
+		const sim::logic::UnderFireStats idle = *stats;
+		firing = true;
+		run(60);
+		const sim::logic::UnderFireStats outside = *stats;
+		firing = false;
+		run(20);
+		const size_t outside_events = from_any_trigger;
+		m->place(shooter->slot, in_shot->stand);
+		aim = in_shot->aim;
+		firing = true;
+		run(60);
+		firing = false;
+		run(20);
+		const sim::logic::UnderFireStats inside = *stats;
+		std::printf(
+				"under fire: %zu UnderFireTriggers on MP_007 ConquestSmall0; trigger node %u, a box of %.0f x %.0f x "
+				"%.0f m, %.1f m from its centre, radius %.1f; "
+				"bullets landing outside: %llu impacts, %llu inside, %llu fired, %zu networked; landing inside: %llu "
+				"impacts, %llu inside, %llu fired, %zu networked from the trigger\n",
+				triggers.size(), unsigned(target.node), target.volume ? 2.0 * double(target.volume->half[0]) : 0.0,
+				target.volume ? 2.0 * double(target.volume->half[1]) : 0.0,
+				target.volume ? 2.0 * double(target.volume->half[2]) : 0.0,
+				double(distance(in_shot->stand, target.position)), double(target.radius),
+				(unsigned long long)(outside.impacts - idle.impacts),
+				(unsigned long long)(outside.inside - idle.inside), (unsigned long long)(outside.fired - idle.fired),
+				outside_events, (unsigned long long)(inside.impacts - outside.impacts),
+				(unsigned long long)(inside.inside - outside.inside),
+				(unsigned long long)(inside.fired - outside.fired), from_trigger);
+		CHECK(outside.impacts > idle.impacts);
+		CHECK(outside.inside == idle.inside);
+		CHECK(outside.fired == idle.fired);
+		CHECK(outside_events == 0u);
+		CHECK(inside.inside > outside.inside);
+		CHECK(inside.fired > outside.fired);
+		CHECK(from_trigger == inside.fired - outside.fired);
+		CHECK(m->rules().stats().runtime_faults == 0u);
+	}
+
 	TEST_CASE("conquest: the dedicated server's Conquest settings reach the rules: GameModeCounterModifier, "
 			  "IsDesertingAllowed, DisableTicketBleed, SuperFastBleed") {
 		host::ServerRules rules;

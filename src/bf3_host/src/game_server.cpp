@@ -1064,6 +1064,9 @@ void GameServer::Impl::step_rules(sim::Tick p_tick) {
 				[&](const sim::weapons::HitTargetProvider &p_targets,
 						std::vector<sim::weapons::DamageEvent> &r_damage) {
 					vehicles.resolve_weapons(p_tick, *world, p_targets, r_damage);
+					if (TdmRules *rules = match.rules()) {
+						rules->vehicle_hits(vehicles.gunnery().step_output());
+					}
 					for (const sim::weapons::DetonationEvent &d : vehicles.gunnery().step_output().detonations) {
 						if (d.shot_index < kWreckShotIndexBase && d.player_slot < slots.size()) {
 							combat_log.detonation(vehicle_detonation_wire(d));
