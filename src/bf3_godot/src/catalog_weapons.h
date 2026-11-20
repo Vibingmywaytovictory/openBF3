@@ -2,6 +2,7 @@
 
 #include "bf3/core/cache/disk_cache.h"
 #include "bf3/render/viewmodel_set.h"
+#include "bf3/render/viewmodel_vault.h"
 
 #include <array>
 #include <cstdint>
@@ -21,6 +22,13 @@ struct CatalogViewmodel {
 	CatalogPicks picks{};
 	std::unique_ptr<render::ViewmodelSet> set;
 	std::string error;
+	double seconds = 0.0;
+};
+
+struct CatalogVaults {
+	uint8_t team = 1;
+	std::vector<std::shared_ptr<const render::ViewmodelVaultClips>> clips;
+	std::vector<std::string> notes;
 	double seconds = 0.0;
 };
 
@@ -45,6 +53,8 @@ public:
 			const render::WeaponAccessories &p_accessories = {}, const CatalogPicks &p_picks = {});
 	bool viewmodel_requested(uint8_t p_team, uint16_t p_def, const CatalogPicks &p_picks = {}) const;
 	std::vector<CatalogViewmodel> take_viewmodels();
+	bool request_vaults(uint8_t p_team, const render::ViewmodelSet &p_set);
+	std::vector<CatalogVaults> take_vaults();
 	CatalogWeaponsStats stats() const;
 
 private:

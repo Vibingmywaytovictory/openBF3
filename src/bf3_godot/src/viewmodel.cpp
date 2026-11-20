@@ -511,6 +511,12 @@ void Bf3Viewmodel::select_item(int p_index) {
 	set_viewmodel_fov(ads_params_.render_fov);
 }
 
+void Bf3Viewmodel::refresh_vault() {
+	if (set_ && animator_ && item_ >= 0 && size_t(item_) < items_.size()) {
+		animator_->set_vault(bf3::render::viewmodel_vault(set_->rig, *items_[size_t(item_)].item));
+	}
+}
+
 void Bf3Viewmodel::set_tuning(const bf3::anim::ViewmodelTuning &p_tuning) {
 	tuning_ = p_tuning;
 	select_item(item_);

@@ -93,6 +93,7 @@ public:
 	size_t item_count() const;
 
 	void select_item(int p_index);
+	void refresh_vault();
 	int item() const { return item_; }
 
 	void set_tuning(const bf3::anim::ViewmodelTuning &p_tuning);

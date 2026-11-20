@@ -18,6 +18,7 @@ struct CatalogWeapons::Impl {
 	mutable std::mutex mutex;
 	std::set<std::tuple<uint8_t, uint16_t, CatalogPicks>> viewmodels_requested;
 	std::vector<CatalogViewmodel> viewmodels_done;
+	std::vector<CatalogVaults> vaults_done;
 	CatalogWeaponsStats stats;
 	core::JobQueue jobs{ "catalog weapons" };
 
@@ -84,6 +85,24 @@ bool CatalogWeapons::viewmodel_requested(uint8_t p_team, uint16_t p_def, const C
 std::vector<CatalogViewmodel> CatalogWeapons::take_viewmodels() {
 	std::lock_guard lock(impl_->mutex);
 	return std::exchange(impl_->viewmodels_done, {});
+}
+
+bool CatalogWeapons::request_vaults(uint8_t p_team, const render::ViewmodelSet &p_set) {
+	Impl &m = *impl_;
+	return m.jobs.post([&m, p_team, &p_set] {
+		const auto t0 = std::chrono::steady_clock::now();
+		CatalogVaults out;
+		out.team = p_team;
+		out.clips = render::load_viewmodel_set_vaults(p_set, out.notes);
+		out.seconds = core::seconds_since(t0);
+		std::lock_guard lock(m.mutex);
+		m.vaults_done.push_back(std::move(out));
+	});
+}
+
+std::vector<CatalogVaults> CatalogWeapons::take_vaults() {
+	std::lock_guard lock(impl_->mutex);
+	return std::exchange(impl_->vaults_done, {});
 }
 
 CatalogWeaponsStats CatalogWeapons::stats() const {

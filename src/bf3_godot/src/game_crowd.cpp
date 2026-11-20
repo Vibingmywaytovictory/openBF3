@@ -209,6 +209,9 @@ struct Bf3GameCrowd::Impl {
 	std::map<std::string, Ref<Texture2D>> textures;
 	uint32_t catalog_added = 0, catalog_failed = 0;
 	std::unique_ptr<core::JobQueue> catalog_jobs;
+	std::optional<std::array<std::vector<render::CrowdWeaponVaults>, 2>> vaults_done;
+	std::vector<std::string> vault_notes;
+	double vault_seconds = 0.0;
 
 	int32_t index_of(uint8_t p_team, uint16_t p_def);
 	int32_t gear_index_of(uint8_t p_team, const net::SoldierGear &p_gear);
@@ -216,6 +219,8 @@ struct Bf3GameCrowd::Impl {
 	void want_gear(uint8_t p_team, const net::SoldierGear &p_gear);
 	void load_catalog(uint8_t p_team, const render::CrowdWeaponSpec &p_spec, const GearPicks &p_picks = {});
 	void adopt_catalog();
+	void load_vaults();
+	void adopt_vaults();
 	Ref<Texture2D> find_texture(const std::string &p_name);
 	WeaponMesh make_weapon_mesh(const render::CrowdWeaponPart &p_part);
 };
@@ -309,6 +314,62 @@ void Bf3GameCrowd::Impl::load_catalog(uint8_t p_team, const render::CrowdWeaponS
 	out.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 	std::lock_guard lock(catalog_mutex);
 	catalog_done.push_back(std::move(out));
+}
+
+void Bf3GameCrowd::Impl::load_vaults() {
+	const auto t0 = std::chrono::steady_clock::now();
+	std::vector<std::string> notes;
+	std::array<std::vector<render::CrowdWeaponVaults>, 2> loaded =
+			render::load_crowd_weapon_vaults(*assets, *weapons, notes);
+	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+	std::lock_guard lock(catalog_mutex);
+	vaults_done = std::move(loaded);
+	vault_notes = std::move(notes);
+	vault_seconds = seconds;
+}
+
+void Bf3GameCrowd::Impl::adopt_vaults() {
+	std::optional<std::array<std::vector<render::CrowdWeaponVaults>, 2>> done;
+	std::vector<std::string> notes;
+	double seconds = 0.0;
+	{
+		std::lock_guard lock(catalog_mutex);
+		done.swap(vaults_done);
+		notes.swap(vault_notes);
+		seconds = vault_seconds;
+	}
+	if (!done || eval == nullptr) {
+		return;
+	}
+	uint32_t clips = 0, failures = 0;
+	for (uint32_t t = 0; t < 2; ++t) {
+		for (size_t i = 0; i < (*done)[t].size() && i < weapons->teams[t].size() && i < views[t].size(); ++i) {
+			render::CrowdWeaponPart &part = weapons->teams[t][i];
+			part.have_vault = (*done)[t][i].have_vault;
+			part.vault = std::move((*done)[t][i].vault);
+			for (size_t k = 0; k < anim::kVaultAnimKinds; ++k) {
+				const anim::CrowdVaultClip *clip = part.have_vault[k] ? &part.vault[k] : nullptr;
+				views[t][i].vault[k] = clip;
+				if (clip == nullptr) {
+					continue;
+				}
+				if (const core::Status st = eval->set_weapon_vault(t, uint8_t(i), k, clip); !st.ok()) {
+					++failures;
+					log("vault: " + st.error().message);
+					continue;
+				}
+				++clips;
+			}
+		}
+	}
+	for (const std::string &n : notes) {
+		log("vault: " + n);
+	}
+	char line[160];
+	std::snprintf(line, sizeof(line),
+			"vault clips: %u for %zu + %zu weapons in %.2f s on the catalog queue, %u refused", clips,
+			(*done)[0].size(), (*done)[1].size(), seconds, failures);
+	log(line);
 }
 
 void Bf3GameCrowd::Impl::adopt_catalog() {
@@ -810,9 +871,10 @@ core::Status Bf3GameCrowd::load(const GameLoadInputs &p_in) {
 	render::SoldierSpec spec;
 	const host::GunplayLevel *gunplay = p_in.shared ? p_in.shared->gunplay.get() : nullptr;
 	const CrowdItemLists lists = crowd_item_specs(gunplay, spec);
-	core::Result<std::unique_ptr<render::CrowdWeaponSet>> weapons =
-			render::load_crowd_weapons(reader, spec, *m.body, { std::span<const render::CrowdWeaponSpec>(lists.teams[0]), std::span<const render::CrowdWeaponSpec>(lists.teams[1]) },
-					p_in.cache);
+	core::Result<std::unique_ptr<render::CrowdWeaponSet>> weapons = render::load_crowd_weapons(reader, spec, *m.body,
+			{ std::span<const render::CrowdWeaponSpec>(lists.teams[0]),
+					std::span<const render::CrowdWeaponSpec>(lists.teams[1]) },
+			p_in.cache, false);
 	if (!weapons) {
 		return core::error_at("crowd weapons", weapons.error());
 	}
@@ -959,6 +1021,7 @@ void Bf3GameCrowd::step(const GameFrame &p_frame) {
 	m.eval->wait_and_publish(*m.lanes);
 	m.collect_plants();
 	m.adopt_catalog();
+	m.adopt_vaults();
 	if (m.uploader) {
 		m.uploader->upload(*m.eval, m.roots, m.upload_stats);
 	}
@@ -1014,6 +1077,7 @@ void Bf3GameCrowd::enable_catalog(std::function<std::shared_ptr<core::Cache>()> 
 	}
 	m.catalog_cache = std::move(p_cache);
 	m.catalog_jobs = std::make_unique<core::JobQueue>("crowd catalog");
+	m.catalog_jobs->post([&m] { m.load_vaults(); });
 }
 
 void Bf3GameCrowd::want_weapon(uint8_t p_wire_team, uint16_t p_def) {

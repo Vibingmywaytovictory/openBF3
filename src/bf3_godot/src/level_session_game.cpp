@@ -501,6 +501,7 @@ void Bf3LevelSession::game_load_options(host::SharedLoadOptions &r_options) {
 			}
 			render::ViewmodelSetSpec spec = render::team_viewmodel_set(g->vm_kits, team);
 			spec.superbundle = superbundle;
+			spec.vault = false;
 			bf3::core::Result<std::unique_ptr<render::ViewmodelSet>> set = render::load_viewmodel_set(**sources, spec, &g->vm_progress, cache.get());
 			if (!set) {
 				fail(std::string(team == 1 ? "US" : "RU") + " viewmodel set: " + set.error().message);
@@ -991,6 +992,22 @@ void step_viewmodel_catalog(GameState &r_game, const host::PresentationFrame &p_
 	if (r_game.catalog == nullptr) {
 		return;
 	}
+	for (CatalogVaults &v : r_game.catalog->take_vaults()) {
+		render::ViewmodelSet &set = *r_game.vm_sets[size_t(v.team - 1)];
+		size_t loaded = 0;
+		for (size_t i = 0; i < v.clips.size() && i < set.items.size(); ++i) {
+			loaded += v.clips[i] != nullptr ? 1u : 0u;
+			set.items[i].vault = std::move(v.clips[i]);
+		}
+		if (Bf3Viewmodel *vm = r_game.vm[size_t(v.team - 1)]) {
+			vm->refresh_vault();
+		}
+		char line[160];
+		std::snprintf(line, sizeof(line),
+				"[game] viewmodel vault clips (team %u): %zu of %zu items in %.2f s on the catalog queue",
+				unsigned(v.team), loaded, set.items.size(), v.seconds);
+		UtilityFunctions::print(line);
+	}
 	for (CatalogViewmodel &c : r_game.catalog->take_viewmodels()) {
 		Bf3Viewmodel *vm = r_game.vm[size_t(c.team - 1)];
 		const int index = c.set != nullptr && vm != nullptr ? vm->add_items(*c.set) : -1;
@@ -1331,6 +1348,9 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			}
 			for (const std::unique_ptr<render::ViewmodelSet> &set : g.vm_sets) {
 				render::release_texture_data(set->textures);
+			}
+			for (uint8_t team = 1; team <= 2 && g.catalog != nullptr; ++team) {
+				g.catalog->request_vaults(team, *g.vm_sets[size_t(team - 1)]);
 			}
 			char line[256];
 			std::snprintf(line, sizeof(line), "[game] viewmodel sets in %.2f s: US %zu items, RU %zu items; %zu + %zu defs mapped to items (tuning %s)", g.vm_seconds,
