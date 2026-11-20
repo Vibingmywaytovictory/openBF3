@@ -959,6 +959,14 @@ void capture_end(Impl &r_m) {
 		UtilityFunctions::print(String::utf8(("[audio] weapon foley: " + std::to_string(rs.reloads) + " reloads, " + std::to_string(rs.foley) + " foley one-shots, " +
 				std::to_string(rs.foley_releases) + " releases, " + std::to_string(rs.foley_out_of_reach) + " out of reach, " + std::to_string(rs.one_shots) + " pool one-shots").c_str()));
 	}
+	if (r_m.impacts) {
+		const ba::ImpactAudioStats &is = r_m.impacts->stats();
+		UtilityFunctions::print(String::utf8(("[audio] impact and effect sounds: " + std::to_string(is.impacts) +
+				" impacts, " + std::to_string(is.effect_sounds) + " effect sounds started, " +
+				std::to_string(is.effect_stops) + " stopped, " + std::to_string(is.unknown_patches) +
+				" unknown patches, " + std::to_string(is.refused) + " refused")
+						.c_str()));
+	}
 	if (r_m.flybys) {
 		const ba::FlyByAudioStats &fs = r_m.flybys->stats();
 		UtilityFunctions::print(String::utf8(("[audio] fly-bys: " + std::to_string(fs.bullets) + " bullets, " +
