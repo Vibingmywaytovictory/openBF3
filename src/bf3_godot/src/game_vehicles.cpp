@@ -237,6 +237,13 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 		}
 	}
 	damage_fx_.emplace(std::move(visuals));
+	set_->textures.clear();
+	set_->textures.shrink_to_fit();
+	for (render::VehicleMeshKind &kind : set_->kinds) {
+		for (render::VehicleMeshPart &part : kind.parts) {
+			part.prepared = render::PreparedMesh{};
+		}
+	}
 	stats_.program_materials = vehicle_looks.program_materials();
 	stats_.look_materials = vehicle_looks.look_materials();
 	root_ = memnew(Node3D);
