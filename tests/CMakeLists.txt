@@ -252,6 +252,7 @@ add_test(NAME sim.motor COMMAND test_sim_motor --test-suite=sim-motor)
 set_tests_properties(sim.motor PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME sim.vault.levels COMMAND test_sim_motor --test-suite=sim-vault-levels)
 set_tests_properties(sim.vault.levels PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME sim.swim.unit COMMAND test_sim_motor --test-suite=sim-swim-unit)
 set_tests_properties(sim.motor.unit PROPERTIES TIMEOUT 300)
 set_tests_properties(sim.motor PROPERTIES TIMEOUT 600)
 

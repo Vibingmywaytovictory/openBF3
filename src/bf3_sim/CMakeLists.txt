@@ -39,6 +39,8 @@ target_sources(bf3_sim PRIVATE
     src/vault.cpp
     src/spawn.cpp
     src/prediction.cpp
+    include/bf3/sim/water.h
+    src/water.cpp
 )
 
 target_sources(bf3_sim PRIVATE

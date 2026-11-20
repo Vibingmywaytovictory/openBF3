@@ -18,6 +18,7 @@
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
+#include "bf3/sim/water.h"
 #include "bf3/sim_harness/vault_spots.h"
 #include "test_scratch.h"
 #include "test_support.h"
@@ -281,7 +282,12 @@ gameplay::SoldierDef synthetic_soldier() {
 	for (SoldierPose p : { SoldierPose::Stand, SoldierPose::Crouch, SoldierPose::Prone }) {
 		falling.poses.push_back(speed(p, 15, 1, 1, 1, 0.05f, 0, 0, 1));
 	}
-	d.states = { ground, jump, air, falling };
+	gameplay::MovementStateDef swimming;
+	swimming.type = "SwimmingStateData";
+	swimming.poses = { speed(SoldierPose::Stand, 3, 1, 0.34f, 0.34f, 0.05f, 0.8f, 0, 0) };
+	swimming.scalars = { { "BodyUnderWater", 1.4 } };
+	d.water_depth_limit = 1.4f;
+	d.states = { ground, jump, air, falling, swimming };
 	d.fall_damage_vertical = { { 0, 0 }, { 13.9f, 0 }, { 14, 20 }, { 22, 40 }, { 30, 100 } };
 	d.fall_damage_horizontal = d.fall_damage_vertical;
 	d.special_moves = synthetic_special_moves();
@@ -2851,5 +2857,32 @@ TEST_SUITE("sim-vault-levels") {
 			  "with jump pressed "
 			  "1.0 m (walk) and 1.5 m (sprint) from the face") {
 		vault_level_case("MP_007", "ConquestLarge0", 10, 1, { true, true, true });
+	}
+}
+
+TEST_SUITE("sim-swim-unit") {
+	TEST_CASE(
+			"sim.swim: the water surface is the height of the triangle under a point, the highest of several, and none "
+			"outside them") {
+		WaterBodyMesh a;
+		a.triangles.push_back({ Vec3{ 0.0f, 10.0f, 0.0f }, Vec3{ 0.0f, 10.0f, 40.0f }, Vec3{ 40.0f, 14.0f, 0.0f } });
+		WaterBodyMesh b;
+		b.triangles.push_back({ Vec3{ 0.0f, 11.0f, 0.0f }, Vec3{ 0.0f, 11.0f, 10.0f }, Vec3{ 10.0f, 11.0f, 0.0f } });
+		const std::array<WaterBodyMesh, 2> bodies{ a, b };
+		core::Result<std::shared_ptr<const WaterSurface>> w = WaterSurface::build(bodies);
+		REQUIRE(w.ok());
+		CHECK((*w)->body_count() == 2);
+		CHECK((*w)->triangle_count() == 2);
+		CHECK((*w)->height(20.0f, 10.0f).value_or(-1.0f) == doctest::Approx(12.0f));
+		CHECK((*w)->height(2.0f, 2.0f).value_or(-1.0f) == doctest::Approx(11.0f));
+		CHECK_FALSE((*w)->height(39.0f, 39.0f).has_value());
+		CHECK_FALSE((*w)->height(-1.0f, 5.0f).has_value());
+		CHECK_FALSE((*w)->height(NAN, 5.0f).has_value());
+		core::Result<std::shared_ptr<const WaterSurface>> again = WaterSurface::build(bodies);
+		REQUIRE(again.ok());
+		CHECK((*again)->digest() == (*w)->digest());
+		WaterBodyMesh bad;
+		bad.triangles.push_back({ Vec3{ 0.0f, INFINITY, 0.0f }, Vec3{ 1.0f, 0.0f, 0.0f }, Vec3{ 0.0f, 0.0f, 1.0f } });
+		CHECK_FALSE(WaterSurface::build(std::span<const WaterBodyMesh>(&bad, 1)).ok());
 	}
 }

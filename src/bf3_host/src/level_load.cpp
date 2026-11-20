@@ -7,6 +7,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/source_digest.h"
 #include "bf3/core/level/spawn_points.h"
+#include "bf3/core/level/water_mesh.h"
 #include "bf3/core/level/world.h"
 #include "bf3/sim/static_world.h"
 
@@ -319,6 +320,22 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 	}
 	shared->static_world = std::move(*shapes);
 	shared->collision_digest = static_world_digest(*shared->static_world);
+	core::Result<std::vector<core::level::WaterMesh>> water = core::level::read_water_meshes(level, world);
+	if (!water) {
+		return core::error_at("load_shared_level: water", water.error());
+	}
+	if (!water->empty()) {
+		std::vector<sim::WaterBodyMesh> bodies;
+		for (core::level::WaterMesh &mesh : *water) {
+			bodies.push_back(sim::WaterBodyMesh{ std::move(mesh.triangles) });
+		}
+		core::Result<std::shared_ptr<const sim::WaterSurface>> surface = sim::WaterSurface::build(bodies);
+		if (!surface) {
+			return core::error_at("load_shared_level: water", surface.error());
+		}
+		shared->water = std::move(*surface);
+		core::fnv1a_value(shared->collision_digest, shared->water->digest());
+	}
 	shared->seconds_shapes = seconds_since(clock);
 	if (p_progress != nullptr) {
 		const sim::StaticWorldStats &s = shared->static_world->stats();

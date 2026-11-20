@@ -9,6 +9,7 @@
 #include "bf3/sim/spawn.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/vehicle_model.h"
+#include "bf3/sim/water.h"
 
 #include <array>
 #include <atomic>
@@ -104,6 +105,7 @@ struct SharedLevel {
 	std::optional<core::Sha256Digest> source_digest;
 	std::shared_ptr<const sim::StaticWorldShapes> static_world;
 	uint64_t collision_digest = 0;
+	std::shared_ptr<const sim::WaterSurface> water;
 	std::vector<sim::SpawnPoint> spawns;
 	std::vector<uint32_t> spawn_spawners;
 	std::vector<core::level::CharacterSpawnerDef> spawners;

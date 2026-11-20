@@ -244,6 +244,8 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/level/placed_effects.h
     src/level/placed_effects.cpp
     src/level/mode_areas.cpp
+    include/bf3/core/level/water_mesh.h
+    src/level/water_mesh.cpp
 )
 
 target_sources(bf3_core PRIVATE

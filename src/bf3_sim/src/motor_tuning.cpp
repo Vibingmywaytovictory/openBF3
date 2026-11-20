@@ -419,6 +419,7 @@ core::Result<MotorParams> make_motor_params(const core::gameplay::SoldierDef &p_
 	const core::gameplay::MovementStateDef *in_air = p_def.state("InAirStateData");
 	const core::gameplay::MovementStateDef *falling = p_def.state("FallingStateData");
 	const core::gameplay::MovementStateDef *jumping = p_def.state("JumpStateData");
+	const core::gameplay::MovementStateDef *swimming = p_def.state("SwimmingStateData");
 	for (size_t i = 0; i < kPoseCount; ++i) {
 		const SoldierPose pose = SoldierPose(i);
 		const core::gameplay::PoseDef *def = p_def.pose(pose);
@@ -479,7 +480,8 @@ core::Result<MotorParams> make_motor_params(const core::gameplay::SoldierDef &p_
 		pp.in_air = state_speed(in_air);
 		pp.falling = state_speed(falling);
 		pp.jumping = state_speed(jumping);
-		for (const StateSpeed *s : { &pp.on_ground, &pp.in_air, &pp.falling, &pp.jumping }) {
+		pp.swimming = state_speed(swimming);
+		for (const StateSpeed *s : { &pp.on_ground, &pp.in_air, &pp.falling, &pp.jumping, &pp.swimming }) {
 			if (!speed_finite(*s)) {
 				return core::make_error(std::string("motor params: a speed of pose ") + core::gameplay::soldier_pose_name(pose) + " is not finite");
 			}
@@ -488,6 +490,15 @@ core::Result<MotorParams> make_motor_params(const core::gameplay::SoldierDef &p_
 		set_factors(pp.in_air, p.tuning, p.tuning.air_control_scale);
 		set_factors(pp.falling, p.tuning, p.tuning.air_control_scale);
 		set_factors(pp.jumping, p.tuning, p.tuning.air_control_scale);
+		set_factors(pp.swimming, p.tuning, 1.0f);
+	}
+	const std::optional<float> under = scalar_of(p_def, "SwimmingStateData", "BodyUnderWater");
+	if (swimming != nullptr && under && *under >= 0.0f && *under <= 10.0f && std::isfinite(p_def.water_depth_limit) &&
+			p_def.water_depth_limit > 0.0f && p_def.water_depth_limit <= 10.0f) {
+		p.swim.present = true;
+		p.swim.depth_limit = p_def.water_depth_limit;
+		p.swim.body_under_water = *under;
+		p.swim.pose_change_during_transition = p_def.allow_pose_change_during_transition;
 	}
 	if (p.poses[size_t(Pose::Stand)].height < 2.0f * p.radius || p.poses[size_t(Pose::Crouch)].height < 2.0f * p.radius) {
 		return core::make_error("motor params: the stand or crouch height is below the capsule diameter");
@@ -545,6 +556,14 @@ uint64_t motor_params_hash(const MotorParams &p_params) {
 	}
 	if (p_params.vault.present) {
 		hash_vault(h, p_params.vault);
+	}
+	if (p_params.swim.present) {
+		hash_value(h, p_params.swim.depth_limit);
+		hash_value(h, p_params.swim.body_under_water);
+		hash_value(h, uint8_t(p_params.swim.pose_change_during_transition ? 1 : 0));
+		for (const PoseParams &pp : p_params.poses) {
+			hash_speed(h, pp.swimming);
+		}
 	}
 	return h;
 }

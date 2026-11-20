@@ -100,6 +100,14 @@ struct PoseParams {
 	StateSpeed in_air;
 	StateSpeed falling;
 	StateSpeed jumping;
+	StateSpeed swimming;
+};
+
+struct SwimParams {
+	bool present = false;
+	float depth_limit = 0;
+	float body_under_water = 0;
+	bool pose_change_during_transition = false;
 };
 
 struct MotorParams {
@@ -120,6 +128,7 @@ struct MotorParams {
 	std::array<PoseParams, kPoseCount> poses{};
 	MotorTuning tuning;
 	VaultParams vault;
+	SwimParams swim;
 
 	uint32_t protect_abort_buttons = 0;
 	bool protect_abort_move = false;
