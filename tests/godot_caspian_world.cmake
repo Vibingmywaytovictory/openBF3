@@ -40,7 +40,7 @@ if(NOT out MATCHES "\\[audio\\] impact and effect sounds: [0-9]+ impacts, ([0-9]
 elseif(CMAKE_MATCH_1 EQUAL 0 OR NOT CMAKE_MATCH_2 EQUAL 0)
     string(APPEND failures " effect-sounds-${CMAKE_MATCH_1}-started-${CMAKE_MATCH_2}-unknown")
 endif()
-if(NOT out MATCHES "\\[game\\] effect particles by type: [^\r\n]*; ([0-9]+) particles not drawn, ([0-9]+) of a type without a drawer; mesh particles ([0-9]+) drawn of ([0-9]+) instances")
+if(NOT out MATCHES "\\[game\\] effect particles by type: [^\r\n]*; ([0-9]+) particles not drawn, ([0-9]+) of a type without a drawer, [0-9]+ in the opaque pass; mesh particles ([0-9]+) drawn of ([0-9]+) instances")
     string(APPEND failures " no-particles-by-type")
 else()
     message("${ROW}: ${CMAKE_MATCH_1} particles not drawn, ${CMAKE_MATCH_2} of a type without a drawer, mesh particles ${CMAKE_MATCH_3} drawn of ${CMAKE_MATCH_4}")

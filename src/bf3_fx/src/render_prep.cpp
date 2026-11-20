@@ -95,7 +95,9 @@ FxBatchKey fx_batch_key(const EmitterDef &p_emitter, bool p_first_person) {
 			k.shader = FxShaderClass::Saq;
 			break;
 	}
-	k.blend = (p_emitter.tmpl.flags & kEmitterEmissive) != 0 ? FxBlend::Additive : FxBlend::Alpha;
+	k.blend = (p_emitter.tmpl.flags & kEmitterEmissive) != 0 ? FxBlend::Additive
+			: (p_emitter.tmpl.flags & kEmitterOpaque) != 0	 ? FxBlend::Opaque
+															 : FxBlend::Alpha;
 	k.pass = p_first_person ? FxPass::FirstPerson : FxPass::World;
 	return k;
 }
@@ -200,7 +202,8 @@ FxBatchKey fx_batch_key_at(size_t p_index) {
 }
 
 namespace {
-constexpr std::array<FxBlend, kFxBlendCount> kBlendDrawOrder{ FxBlend::Alpha, FxBlend::Premultiplied, FxBlend::Additive };
+constexpr std::array<FxBlend, kFxBlendCount> kBlendDrawOrder{ FxBlend::Opaque, FxBlend::Alpha, FxBlend::Premultiplied,
+	FxBlend::Additive };
 }
 
 struct RenderPrep::Impl {
@@ -488,6 +491,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 				if (key.pass == FxPass::FirstPerson) {
 					first_person += batch.instance_count;
 				}
+				m.stats.opaque_instances += key.blend == FxBlend::Opaque ? batch.instance_count : 0u;
 				m.batches.push_back(batch);
 			}
 		}

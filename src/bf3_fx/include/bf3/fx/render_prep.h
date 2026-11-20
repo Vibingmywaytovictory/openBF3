@@ -15,7 +15,7 @@
 
 namespace bf3::fx {
 
-inline constexpr size_t kMaxFxBatches = 24;
+inline constexpr size_t kMaxFxBatches = 32;
 inline constexpr size_t kMaxFxLights = 64;
 
 inline constexpr float kFxLightMinDistance2 = 0.01f;
@@ -23,7 +23,7 @@ inline constexpr float kFxLightMinDistance2 = 0.01f;
 inline constexpr const char *kFxDefaultTexture = "systems/emitter/defaulttexture";
 
 enum class FxShaderClass : uint8_t { Saq = 0, Daq = 1, Waq = 2, Mesh = 3, Count };
-enum class FxBlend : uint8_t { Alpha = 0, Additive = 1, Premultiplied = 2, Count };
+enum class FxBlend : uint8_t { Alpha = 0, Additive = 1, Premultiplied = 2, Opaque = 3, Count };
 enum class FxPass : uint8_t { World = 0, FirstPerson = 1, Count };
 inline constexpr size_t kFxShaderClassCount = size_t(FxShaderClass::Count);
 inline constexpr size_t kFxBlendCount = size_t(FxBlend::Count);
@@ -133,6 +133,7 @@ struct RenderPrepStats {
 	std::array<uint64_t, kEmittableTypeCount> particles_by_type{};
 	std::array<uint64_t, kEmittableTypeCount> instances_by_type{};
 	std::array<uint64_t, kEmittableTypeCount> excluded_by_type{};
+	uint64_t opaque_instances = 0;
 	uint64_t frames = 0;
 	double prepare_ms = 0;
 };

@@ -9,7 +9,9 @@ uniform int debug_view = 0;
 uniform sampler2D base_atlas : source_color, filter_linear_mipmap, repeat_disable;
 uniform sampler2D normal_atlas : hint_normal, filter_linear_mipmap, repeat_disable;
 uniform sampler2D fx_params : filter_nearest, repeat_disable;
+#ifndef FX_OPAQUE
 uniform sampler2D fx_depth : hint_depth_texture, filter_nearest, repeat_disable;
+#endif
 
 const int kFxParamsRowsPerLine = 64;
 
@@ -104,12 +106,14 @@ void fragment() {
 	float span = v_alpha.y - v_alpha.x;
 	float a1 = span > 0.0005 ? clamp((tex.a - v_alpha.x) / span, 0.0, 1.0) : step(v_alpha.x + 0.0005, tex.a);
 	float a = clamp((a1 - 1.0 + v_alpha.z) * max(v_alpha.w, 1.0), 0.0, 1.0) * clamp(COLOR.a, 0.0, 1.0);
+#ifndef FX_OPAQUE
 	if (soft_enabled && v_light.w > 0.0) {
 		float depth = texture(fx_depth, SCREEN_UV).r;
 		vec4 view = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, depth, 1.0);
 		float scene_z = view.z / view.w;
 		a *= clamp((VERTEX.z - scene_z) / v_light.w, 0.0, 1.0);
 	}
+#endif
 	if (a < 0.002) {
 		discard;
 	}
@@ -136,6 +140,9 @@ void fragment() {
 #endif
 #else
 	ALBEDO = rgb * emissive_scale;
+#endif
+#ifdef FX_OPAQUE
+	ALPHA_SCISSOR_THRESHOLD = 0.5;
 #endif
 	ALPHA = a;
 }

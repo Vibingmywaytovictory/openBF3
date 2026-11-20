@@ -133,6 +133,11 @@ TEST_CASE("batch keys: index round trip, classes, blends, passes") {
 	e.tmpl.emittable = EmittableType::DirectionAlignedQuad;
 	e.tmpl.flags = kEmitterEmissive;
 	CHECK(fx_batch_key(e, true) == FxBatchKey{ FxShaderClass::Daq, FxBlend::Additive, FxPass::FirstPerson });
+	e.tmpl.flags = kEmitterEmissive | kEmitterOpaque;
+	CHECK(fx_batch_key(e, false).blend == FxBlend::Additive);
+	e.tmpl.flags = kEmitterOpaque;
+	CHECK(fx_batch_key(e, false) == FxBatchKey{ FxShaderClass::Daq, FxBlend::Opaque, FxPass::World });
+	e.tmpl.flags = kEmitterEmissive;
 	e.tmpl.emittable = EmittableType::WorldAlignedQuad;
 	CHECK(fx_batch_key(e, false).shader == FxShaderClass::Waq);
 	e.tmpl.emittable = EmittableType::Quad;

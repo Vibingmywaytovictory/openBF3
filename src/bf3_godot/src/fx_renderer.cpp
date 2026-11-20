@@ -41,8 +41,11 @@ int draw_position(const fx::FxBatchKey &p_key) {
 			blend = 1;
 			break;
 		case fx::FxBlend::Additive:
-		default:
 			blend = 2;
+			break;
+		case fx::FxBlend::Opaque:
+		default:
+			blend = 3;
 			break;
 	}
 	return (int(p_key.pass) * int(fx::kFxBlendCount) + blend) * int(fx::kFxShaderClassCount) + int(p_key.shader);
@@ -54,6 +57,8 @@ const char *shader_path(fx::FxBlend p_blend) {
 			return "res://shaders/fx_additive.gdshader";
 		case fx::FxBlend::Premultiplied:
 			return "res://shaders/fx_premultiplied.gdshader";
+		case fx::FxBlend::Opaque:
+			return "res://shaders/fx_opaque.gdshader";
 		case fx::FxBlend::Alpha:
 		default:
 			return "res://shaders/fx_alpha.gdshader";

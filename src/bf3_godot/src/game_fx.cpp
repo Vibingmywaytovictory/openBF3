@@ -875,9 +875,10 @@ void Bf3GameFx::shutdown() {
 			}
 			UtilityFunctions::print(
 					to_godot(fmt("[game] effect particles by type: %s; %llu particles not drawn, %llu of "
-								 "a type without a drawer; mesh particles %llu drawn of %llu instances",
+								 "a type without a drawer, %llu in the opaque pass; mesh particles %llu drawn of %llu "
+								 "instances",
 							by_type.c_str(), (unsigned long long)undrawn, (unsigned long long)no_drawer,
-							(unsigned long long)m.meshes.stats().drawn_total,
+							(unsigned long long)ps.opaque_instances, (unsigned long long)m.meshes.stats().drawn_total,
 							(unsigned long long)ps.instances_by_type[size_t(fx::EmittableType::ParticleMesh)])));
 		}
 	}

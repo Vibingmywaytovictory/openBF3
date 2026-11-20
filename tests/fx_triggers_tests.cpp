@@ -1600,7 +1600,8 @@ TEST_SUITE("fx-install-cells") {
 			std::unique_ptr<LevelFx> fx = level_fx(r.install, level, true);
 			core::EbxLibrary &lib = *fx->sources->level;
 			std::set<std::string> meshes;
-			size_t emitters = 0, tinted = 0, compiled = 0, failed = 0;
+			size_t emitters = 0, tinted = 0, compiled = 0, failed = 0, opaque_quads = 0, opaque_batched = 0,
+				   opaque_emissive = 0;
 			std::array<size_t, kEmittableTypeCount> by_type{};
 			for (const core::EbxLibrary::Entry &e : lib.entries()) {
 				if (e.partition == nullptr || e.partition->primary().type_name() != "EffectBlueprint") {
@@ -1614,6 +1615,11 @@ TEST_SUITE("fx-install-cells") {
 				++compiled;
 				for (const EmitterDef &m : (*def)->emitters) {
 					++by_type[size_t(m.tmpl.emittable)];
+					if (m.tmpl.emittable != EmittableType::ParticleMesh && (m.tmpl.flags & kEmitterOpaque) != 0) {
+						++opaque_quads;
+						opaque_batched += fx_batch_key(m, false).blend == FxBlend::Opaque ? 1 : 0;
+						opaque_emissive += (m.tmpl.flags & kEmitterEmissive) != 0 ? 1 : 0;
+					}
 					if (m.tmpl.emittable != EmittableType::ParticleMesh) {
 						continue;
 					}
@@ -1675,7 +1681,10 @@ TEST_SUITE("fx-install-cells") {
 				without_drawer += fx_emittable_drawn(EmittableType(t)) ? 0 : by_type[t];
 			}
 			MESSAGE(std::string(level) << ": emitters by type:" << types << "; " << without_drawer
-									   << " of a type without a drawer, " << failed << " effects that do not compile");
+									   << " of a type without a drawer, " << failed << " effects that do not compile; "
+									   << opaque_quads << " Opaque quad emitters, " << opaque_batched
+									   << " drawn in the opaque pass, " << opaque_emissive << " Emissive as well");
+			CHECK(opaque_batched + opaque_emissive == opaque_quads);
 			CHECK(without_drawer == 0);
 			CHECK(failed == 0);
 			CHECK(emitters > 0);
