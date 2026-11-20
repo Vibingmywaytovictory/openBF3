@@ -328,13 +328,15 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 			}
 			if (sum > 0.0 && radius > 0.0f) {
 				l.position = Vec3{ float(px / sum), float(py / sum), float(pz / sum) };
-				l.intensity = float(sum);
+				l.intensity = float(sum / double(o.light_count));
 
 				l.color = Vec3{ float(cr / sum), float(cg / sum), float(cb / sum) };
 				l.radius = radius;
 				const Vec3 d = sub(l.position, cam);
 				l.priority = l.intensity / std::max(dot(d, d), kFxLightMinDistance2);
 				l.first_person = o.first_person;
+				l.effect = o.effect;
+				l.emitter = o.emitter;
 				if (std::isfinite(l.priority) && std::isfinite(l.color.x + l.color.y + l.color.z)) {
 					m.candidates.push_back(l);
 				}

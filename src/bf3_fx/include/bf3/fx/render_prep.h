@@ -92,6 +92,8 @@ struct FxLight {
 	float intensity = 0;
 	float priority = 0;
 	bool first_person = false;
+	EffectHandle effect;
+	uint32_t emitter = 0;
 };
 static_assert(std::is_trivially_copyable_v<FxLight>);
 

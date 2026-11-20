@@ -19,14 +19,18 @@
 #include "bf3/core/util/text.h"
 #include "bf3/fx/effect_compiler.h"
 #include "bf3/fx/effect_library.h"
+#include "bf3/fx/emitter_atlas.h"
 #include "bf3/fx/fx_harness.h"
 #include "bf3/fx/impact_table.h"
+#include "bf3/fx/render_prep.h"
 #include "bf3/fx/simulator.h"
 #include "bf3/fx/triggers.h"
 #include "bf3/host/client_projectiles.h"
 #include "bf3/host/client_session.h"
 #include "bf3/host/client_wiring.h"
 #include "bf3/host/gunplay.h"
+#include "bf3/host/level_load.h"
+#include "bf3/host/level_vehicles.h"
 #include "bf3/host/presentation_events.h"
 #include "bf3/render/texture_prep.h"
 #include "bf3/sim/collision_world.h"
@@ -2165,6 +2169,145 @@ TEST_SUITE("fx-install-vehicles") {
 					[](const core::gameplay::VehicleWreckEffectDef &p_e) { return p_e.gate < 0; }));
 			CHECK(always == 2);
 		}
+	}
+
+	TEST_CASE(
+			"lights: the M1A2's and the BMP-2's gun shots light the scene as their lit emitters' data says, one light "
+			"per emitter at its particles' mean intensity, never brighter than one particle") {
+		Retail r;
+		if (!open_retail(r)) {
+			return;
+		}
+		struct Gun {
+			const char *level;
+			const char *mode;
+			const char *vehicle;
+		};
+		size_t lit_shots = 0;
+		for (const Gun g : { Gun{ "MP_007", "ConquestLarge0", "vehicles/m1a2/m1abrams" },
+					 Gun{ "MP_003", "ConquestSmall0", "vehicles/bmp2/bmp2" } }) {
+			CAPTURE(g.vehicle);
+			std::unique_ptr<LevelFx> fx = level_fx(r.install, g.level, true);
+			core::EbxLibrary &lib = *fx->sources->level;
+			core::Result<hk::LevelDatabase> db = hk::open_level_database(r.install, g.level, g.mode, 0, nullptr);
+			REQUIRE_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
+			core::Result<std::shared_ptr<const hk::LevelVehicles>> vehicles =
+					hk::load_level_vehicles(*db, sim::VehicleTuning{});
+			REQUIRE_MESSAGE(vehicles.ok(), (vehicles.ok() ? std::string() : vehicles.error().message));
+			const auto kind = std::find_if((*vehicles)->kinds.begin(), (*vehicles)->kinds.end(),
+					[&](const hk::LevelVehicleKind &p_k) { return p_k.blueprint == g.vehicle; });
+			REQUIRE(kind != (*vehicles)->kinds.end());
+			std::vector<core::gameplay::WeaponDef> defs;
+			for (const uint16_t w : kind->weapon_defs) {
+				REQUIRE(w < (*vehicles)->weapons.size());
+				defs.push_back((*vehicles)->weapons[w]);
+			}
+			REQUIRE_FALSE(defs.empty());
+			core::Result<FireEffectTable> table = load_fire_effects(lib, defs);
+			REQUIRE_MESSAGE(table.ok(), (table.ok() ? std::string() : table.error().message));
+			std::set<std::string> shots;
+			for (const WeaponFireEffects &w : table->defs) {
+				for (const FireEffect &e : w.third_person) {
+					shots.insert(e.blueprint);
+				}
+			}
+			core::gameplay::WorkBudget budget{ kDefaultCompileWorkLimit };
+			core::Result<EmitterAtlas> atlas =
+					EmitterAtlas::load(lib, lib.mount(0), EmitterAtlas::emitter_system_of(g.level), budget);
+			REQUIRE_MESSAGE(atlas.ok(), (atlas.ok() ? std::string() : atlas.error().message));
+			for (const std::string &name : shots) {
+				CAPTURE(name);
+				core::Result<std::shared_ptr<const EffectDef>> def = fx->library->get(name);
+				REQUIRE_MESSAGE(def.ok(), (def.ok() ? std::string() : def.error().message));
+				float bound = 0;
+				size_t lit = 0;
+				for (const EmitterDef &e : (*def)->emitters) {
+					if ((e.tmpl.flags & kEmitterActAsPointLight) == 0) {
+						continue;
+					}
+					++lit;
+					const PointLightDef &l = e.tmpl.light;
+					const float peak = std::max(l.color.x, std::max(l.color.y, l.color.z));
+					bound = std::max(bound,
+							peak * l.intensity.max_clamp * l.intensity.scale * std::max(l.random_min, l.random_max));
+				}
+				if (lit == 0) {
+					continue;
+				}
+				++lit_shots;
+				FxWorld world;
+				EffectStart start;
+				start.seed = 1;
+				REQUIRE(world.start(*def, start).ok());
+				FxView view;
+				view.camera_position = Vec3{ 0, 2, -20 };
+				RenderPrep prep;
+				float peak_energy = 0, last_lit = -1;
+				size_t particle_lights = 0, off_curve = 0, off_mean = 0, unmatched = 0, extra = 0;
+				constexpr float kDt = 1.0f / 30.0f;
+				for (int f = 1; f <= 30 * 12; ++f) {
+					fx_step_frame(world, kDt);
+					prep.prepare(world, view, *atlas);
+					const std::span<const ParticleLight> plights = world.lights();
+					const std::span<const ParticleVertex> particles = world.particles();
+					size_t lit_outputs = 0;
+					for (const EmitterOutput &o : world.outputs()) {
+						if (o.light_count == 0) {
+							continue;
+						}
+						REQUIRE(o.light_count == o.particle_count);
+						const EmitterDef &e = o.def->emitters[o.emitter];
+						const float rmin = std::min(e.tmpl.light.random_min, e.tmpl.light.random_max);
+						const float rmax = std::max(e.tmpl.light.random_min, e.tmpl.light.random_max);
+						double sum = 0;
+						for (uint32_t k = 0; k < o.light_count; ++k) {
+							const ParticleLight &pl = plights[o.first_light + k];
+							const float curve =
+									evaluate_polynomial(e.tmpl.light.intensity, particles[o.first_particle + k].age);
+							++particle_lights;
+							const bool on_curve = curve > 0
+									? pl.intensity >= curve * rmin * 0.999f && pl.intensity <= curve * rmax * 1.001f
+									: pl.intensity == 0;
+							off_curve += on_curve ? 0 : 1;
+							sum += std::max(0.0f, pl.intensity);
+						}
+						if (sum <= 0) {
+							continue;
+						}
+						++lit_outputs;
+						const float mean = float(sum / double(o.light_count));
+						const auto shown = std::find_if(prep.lights().begin(), prep.lights().end(),
+								[&](const FxLight &p_l) { return p_l.effect == o.effect && p_l.emitter == o.emitter; });
+						if (shown == prep.lights().end()) {
+							++unmatched;
+							continue;
+						}
+						off_mean += std::fabs(shown->intensity - mean) <= 1e-4f * std::max(1.0f, mean) ? 0 : 1;
+					}
+					extra += prep.lights().size() > lit_outputs ? prep.lights().size() - lit_outputs : 0;
+					for (const FxLight &l : prep.lights()) {
+						peak_energy = std::max(
+								peak_energy, l.intensity * std::max(l.color.x, std::max(l.color.y, l.color.z)));
+					}
+					if (!prep.lights().empty()) {
+						last_lit = float(f) * kDt;
+					}
+				}
+				MESSAGE(g.vehicle << " " << name << ": " << lit << " lit emitters, " << particle_lights
+								  << " particle lights, peak energy " << peak_energy << " of the data's " << bound
+								  << ", last lit at " << last_lit << " s");
+				CHECK(particle_lights > 0);
+				CHECK(off_curve == 0);
+				CHECK(off_mean == 0);
+				CHECK(unmatched == 0);
+				CHECK(extra == 0);
+				CHECK(peak_energy > 0);
+				CHECK(peak_energy <= bound * 1.001f);
+				CHECK(last_lit > 0);
+				CHECK(last_lit < 12.0f);
+			}
+		}
+		CHECK(lit_shots >= 2);
 	}
 
 	TEST_CASE("install unchanged") {

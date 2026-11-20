@@ -339,7 +339,8 @@ TEST_CASE("prepare: Waq and mesh particle transforms, each mesh particle scaled 
 	}
 }
 
-TEST_CASE("lights: merged per output, intensity-weighted, priority, the 64 pool") {
+TEST_CASE(
+		"lights: one per output, its intensity the mean of its particles', intensity-weighted, priority, the 64 pool") {
 	const EmitterAtlas atlas = make_atlas();
 	FxWorldConfig cfg;
 	FxWorld w(cfg);
@@ -364,7 +365,7 @@ TEST_CASE("lights: merged per output, intensity-weighted, priority, the 64 pool"
 		CHECK(l.priority <= last);
 		last = l.priority;
 		CHECK(l.radius == 5.0f);
-		CHECK(l.intensity == doctest::Approx(4.0f));
+		CHECK(l.intensity == doctest::Approx(1.0f));
 		CHECK(l.color.x == doctest::Approx(1.0f));
 		CHECK(l.color.y == doctest::Approx(0.5f));
 		CHECK(l.color.z == doctest::Approx(0.25f));
@@ -379,7 +380,7 @@ TEST_CASE("lights: merged per output, intensity-weighted, priority, the 64 pool"
 	prep.prepare(w2, view_along_z(), atlas);
 	REQUIRE(prep.lights().size() == 1);
 	CHECK(std::isfinite(prep.lights()[0].priority));
-	CHECK(prep.lights()[0].priority == doctest::Approx(4.0f / kFxLightMinDistance2));
+	CHECK(prep.lights()[0].priority == doctest::Approx(1.0f / kFxLightMinDistance2));
 	CHECK(prep.lights()[0].first_person);
 }
 
