@@ -19,6 +19,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -244,4 +245,14 @@ private:
 	std::unique_ptr<Impl> impl_;
 };
 
+struct LevelGlossCensus {
+	size_t materials = 0;
+	size_t gbuffer = 0;
+	size_t drawn = 0;
+	std::map<std::string, size_t> residue;
+	std::vector<std::pair<size_t, std::string>> residue_materials;
+};
+
+std::string gloss_residue(const LookMaterial &p_look);
+LevelGlossCensus level_gloss_census(const LevelScenePlan &p_plan);
 }

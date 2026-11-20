@@ -108,6 +108,7 @@ struct LookMaterial {
 	bool graph_mask_colour = false;
 	std::optional<std::array<float, 3>> flat_colour;
 	bool flat_unlit = false;
+	bool gbuffer_lanes = false;
 };
 
 struct LookStats {
@@ -157,6 +158,7 @@ private:
 	const GraphInfo &graph_info(const SurfaceShader &p_shader);
 	const FolderIndex &folder_index(const std::string &p_folder);
 	ProgramInfo &program_info(const SurfaceShader &p_shader);
+	bool writes_gbuffer(const SurfaceShader &p_shader);
 	core::Result<TranslatedProgram> translate(
 			const ProgramInfo &p_info, uint64_t p_srgb, ProgramAnalysis *r_analysis = nullptr);
 	void attach_program(LookMaterial &r_out, const SurfaceShader &p_shader, const MaterialSlot &p_slot,
@@ -171,6 +173,7 @@ private:
 	std::map<const SurfaceShader *, std::unique_ptr<GraphInfo>> graphs_;
 	std::map<std::string, std::unique_ptr<FolderIndex>> folder_indices_;
 	std::map<const SurfaceShader *, std::unique_ptr<ProgramInfo>> programs_;
+	std::map<const SurfaceShader *, bool> gbuffer_writers_;
 	std::vector<std::pair<std::string, std::string>> failures_;
 	LookStats stats_;
 };

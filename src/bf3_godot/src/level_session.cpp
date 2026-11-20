@@ -1024,9 +1024,9 @@ void Bf3LevelSession::try_done() {
 		UtilityFunctions::print(line);
 		std::snprintf(line, sizeof(line),
 				"[level] light pass: %llu of %llu level materials (%llu with their program's smoothness and specular, "
-				"of %llu whose program's lanes slice), %llu of %llu terrain materials",
+				"of %llu whose shader writes the G-buffer), %llu of %llu terrain materials",
 				(unsigned long long)upload.lit_materials, (unsigned long long)upload.level_materials,
-				(unsigned long long)upload.gloss_materials, (unsigned long long)upload.sliced_materials,
+				(unsigned long long)upload.gloss_materials, (unsigned long long)upload.gbuffer_materials,
 				(unsigned long long)upload.terrain_lit, (unsigned long long)upload.terrain_materials);
 		UtilityFunctions::print(line);
 	}

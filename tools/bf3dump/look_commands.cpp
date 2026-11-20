@@ -365,26 +365,11 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 	}
 	if (std::find(p_args.begin(), p_args.end(), "--gloss") != p_args.end()) {
 		std::unique_ptr<render::LookResolver> resolver = render::LookResolver::open(level.mount());
-		std::map<std::string, size_t> reasons;
-		size_t gloss = 0;
-		for (const render::SceneMaterialPlan &m : l1->materials) {
-			const render::LookMaterial look =
-					resolver->resolve(m.slot, std::string_view(), render::LookPrograms::Deferred);
-			std::string why;
-			if (look.graph && look.graph->translated.gloss) {
-				++gloss;
-			} else if (look.graph) {
-				why = "lanes refused: " + look.graph->translated.gloss_refusal;
-			} else {
-				why = look.graph_plain ? std::string("one colour texture, no lanes")
-									   : "no program: " + look.graph_refusal;
-			}
-			if (!why.empty()) {
-				++reasons[why];
-				std::printf("gloss material %s: %s\n",
-						(m.slot.variation_shader.empty() ? m.slot.shader : m.slot.variation_shader).c_str(),
-						why.c_str());
-			}
+		const render::LevelGlossCensus census = render::level_gloss_census(*l1);
+		for (const auto &[index, why] : census.residue_materials) {
+			const render::MaterialSlot &slot = l1->materials[index].slot;
+			std::printf("gloss material %s: %s\n",
+					(slot.variation_shader.empty() ? slot.shader : slot.variation_shader).c_str(), why.c_str());
 		}
 		for (const render::SceneMaterialPlan &m : l1->materials) {
 			const std::string name = m.slot.variation_shader.empty() ? m.slot.shader : m.slot.variation_shader;
@@ -436,8 +421,10 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 		std::printf("gloss: %zu of %zu plan textures are read only by the looks of materials drawn through programs\n",
 				look_only, l1->textures.size());
 		std::printf(
-				"gloss: %zu of %zu level materials resolved with their program's lanes\n", gloss, l1->materials.size());
-		for (const auto &[why, count] : reasons) {
+				"gloss: %zu of %zu level materials whose shader writes the G-buffer draw their program's lanes, of %zu "
+				"level materials\n",
+				census.drawn, census.gbuffer, census.materials);
+		for (const auto &[why, count] : census.residue) {
 			std::printf("gloss: %zu %s\n", count, why.c_str());
 		}
 	}

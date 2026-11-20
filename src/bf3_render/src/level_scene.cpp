@@ -1351,4 +1351,42 @@ uint64_t estimate_scene_bytes(const LevelScenePlan &p_plan, const core::LevelMou
 	return bytes;
 }
 
+std::string gloss_residue(const LookMaterial &p_look) {
+	if (p_look.graph) {
+		return "program not drawn by the level plan";
+	}
+	if (p_look.graph_plain) {
+		return "one colour texture, no lanes";
+	}
+	if (p_look.blend == LookBlend::Blend) {
+		return "drawn blended";
+	}
+	if (p_look.program == LookProgram::CharacterBackdrop) {
+		return "drawn as the character backdrop";
+	}
+	return "no program: " + p_look.graph_refusal;
+}
+
+LevelGlossCensus level_gloss_census(const LevelScenePlan &p_plan) {
+	LevelGlossCensus out;
+	for (const SceneMaterialPlan &m : p_plan.materials) {
+		++out.materials;
+		if (!m.look || !m.look->gbuffer_lanes) {
+			continue;
+		}
+		++out.gbuffer;
+		const bool drawn = m.program >= 0 && size_t(m.program) < p_plan.programs.size() &&
+				p_plan.programs[size_t(m.program)]->translated.gloss;
+		if (drawn) {
+			++out.drawn;
+		} else {
+			const std::string why = m.program >= 0
+					? "lanes refused: " + p_plan.programs[size_t(m.program)]->translated.gloss_refusal
+					: gloss_residue(*m.look);
+			++out.residue[why];
+			out.residue_materials.emplace_back(out.materials - 1, why);
+		}
+	}
+	return out;
+}
 }

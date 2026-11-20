@@ -396,8 +396,9 @@ openbf3_test(test_look test_main.cpp look_tests.cpp test_support.h)
 target_link_libraries(test_look PRIVATE bf3_render)
 add_test(NAME render.look.unit COMMAND test_look --test-suite=render-look-unit)
 add_test(NAME render.look COMMAND test_look --test-suite=render-look)
-set_tests_properties(render.look PROPERTIES SKIP_RETURN_CODE 77)
-set_tests_properties(render.look.unit render.look PROPERTIES TIMEOUT 300)
+add_test(NAME render.level_gloss COMMAND test_look --test-suite=render-level-gloss)
+set_tests_properties(render.look render.level_gloss PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(render.look.unit render.look render.level_gloss PROPERTIES TIMEOUT 300)
 openbf3_test(test_material_programs test_main.cpp material_programs_tests.cpp dxbc_test_support.h test_support.h)
 target_link_libraries(test_material_programs PRIVATE bf3_render)
 add_test(NAME render.programs.unit COMMAND test_material_programs --test-suite=render-programs-unit)
@@ -440,12 +441,12 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
         ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DMAX_HIDDEN=0.05)
     set_tests_properties(godot.surface_decals PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.sun_light godot_sun_light.cmake WINDOW TIMEOUT 400
-        ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DLEVEL=MP_007 -DMODE=TeamDeathMatchC0 -DGLOSS=250
+        ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DLEVEL=MP_007 -DMODE=TeamDeathMatchC0 -DGLOSS=250 -DGBUFFER=306
         "-DVIEWS=patch_toward@-126.35,145.0,786.35,135,-24|patch_away@-113.65,145.0,773.65,-45,-24|patch_side_a@-126.35,145.0,773.65,45,-24|patch_side_b@-113.65,145.0,786.35,-135,-24"
         -DPATCH_POINT=-120,141.0,780 -DPATCH_EXPOSURE=0.5 -DPATCH_HALF=32)
     set_tests_properties(godot.sun_light PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.sun_light.metro godot_sun_light.cmake WINDOW TIMEOUT 400
-        ARGS -DLEVEL=MP_Subway -DMODE=TeamDeathMatchC0 -DGLOSS=458
+        ARGS -DLEVEL=MP_Subway -DMODE=TeamDeathMatchC0 -DGLOSS=458 -DGBUFFER=619
         "-DVIEWS=toward_street@-154.3,66.1,-493.9,200,0|away_street@-154.3,66.1,-493.9,20,5")
     set_tests_properties(godot.sun_light.metro PROPERTIES RUN_SERIAL TRUE)
 endif()

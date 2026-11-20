@@ -25,6 +25,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 constexpr uint8_t kColor = 0, kNormal = 1, kSpecular = 2, kEmissive = 3;
+constexpr uint32_t kGbufferSpecularTarget = 1;
 
 constexpr std::string_view kColorParameters[] = { "diffuse", "maindiffuse", "color", "difusealpha", "paintingdiffuse", "topdiffuse", "bottomdiffuse",
 	"maintexture", "mat1_d", "mat2_d", "diffuseleaves", "diffuseatlas", "frame_d", "awningtexture", "tilediffuse", "detaildiffuse", "background",
@@ -978,6 +979,26 @@ void LookResolver::attach_program(LookMaterial &r_out, const SurfaceShader &p_sh
 	r_out.graph_constants = std::move(constants);
 }
 
+bool LookResolver::writes_gbuffer(const SurfaceShader &p_shader) {
+	const auto known = gbuffer_writers_.find(&p_shader);
+	if (known != gbuffer_writers_.end()) {
+		return known->second;
+	}
+	bool writes = false;
+	for (const ShaderSolution &s : p_shader.solutions) {
+		if (!s.pixel_program) {
+			continue;
+		}
+		const core::Result<dxbc::Program> pixel = dxbc::parse(*s.pixel_program);
+		if (pixel && writes_target(*pixel, kGbufferSpecularTarget)) {
+			writes = true;
+			break;
+		}
+	}
+	gbuffer_writers_[&p_shader] = writes;
+	return writes;
+}
+
 LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view p_mesh, LookPrograms p_programs) {
 	const Clock::time_point start = Clock::now();
 	LookMaterial out;
@@ -1179,6 +1200,7 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 		attach_program(out, *shader, p_slot, false, p_programs);
 	}
 	if (shader != nullptr) {
+		out.gbuffer_lanes = !is_transparent(shader->surface_type) && writes_gbuffer(*shader);
 		if (!shader->solutions.empty()) {
 			out.solution_blend = shader->solutions.front().blend_mode;
 		}
