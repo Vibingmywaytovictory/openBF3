@@ -1230,7 +1230,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			AudioIngamePhase phase = AudioIngamePhase::Mix;
 			if (!parse_audio_ingame_phase(user_arg_value("audio-ingame-phase"), phase)) {
 				UtilityFunctions::print(to_godot("[audio-ingame] bad --audio-ingame-phase=" +
-						user_arg_value("audio-ingame-phase") + ": mix, pool, steps or flyby"));
+						user_arg_value("audio-ingame-phase") + ": mix, pool, steps, flyby or breath"));
 				m.finished = true;
 				finish(2);
 				return true;
@@ -1239,7 +1239,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 					new AudioIngameCheck(user_arg_value("audio-ingame-check"),
 							std::atof(user_arg_value("audio-ingame-seconds").c_str()), phase),
 					&delete_part<AudioIngameCheck>);
-			if (phase == AudioIngamePhase::Steps) {
+			if (phase == AudioIngamePhase::Steps || phase == AudioIngamePhase::Breath) {
 				mapper_.set_scripted(true);
 			}
 		}
@@ -1342,7 +1342,14 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			return audio_ingame_fight_spot(std::span<const host::PresentedSoldier>(others.data(), n), r_game.slot_team,
 					m.own_team, frame_->own_curr.position);
 		};
+		io.jump = [this] { mapper_.script_press(InputAction::Jump); };
+		io.suicide = [this] {
+			if (host::ClientSession *c = client()) {
+				c->send_suicide_request();
+			}
+		};
 		io.feet = frame_->own_curr.position;
+		io.own_mode = frame_->own_curr.mode;
 		io.own_slot = m.own_slot;
 		if (m.audio_ingame->frame(now_s, *r_game.audio, io)) {
 			m.finished = true;

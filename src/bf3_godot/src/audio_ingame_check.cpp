@@ -151,6 +151,10 @@ bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase
 		r_phase = AudioIngamePhase::Flyby;
 		return true;
 	}
+	if (p_text == "breath") {
+		r_phase = AudioIngamePhase::Breath;
+		return true;
+	}
 	return false;
 }
 
@@ -400,19 +404,27 @@ void AudioIngameCheck::script_steps(double p_now_s, const AudioIngameIo &p_io) {
 		leg_ = AudioIngameLeg::Stand;
 		leg_index_ = 0;
 	}
-	if (p_now_s - leg_s_ >= kAudioIngameLegSeconds[size_t(leg_)]) {
+	const bool breath = kind_ == AudioIngamePhase::Breath;
+	if (p_now_s - leg_s_ >= (breath ? kAudioIngameBreathLegSeconds : kAudioIngameLegSeconds)[size_t(leg_)]) {
 		if (record_s_ >= 0.0 && leg_s_ >= record_s_) {
 			++legs_[size_t(leg_)].legs;
 			stands_after_moving_ += leg_ == AudioIngameLeg::Stand && leg_index_ != 0 ? 1u : 0u;
 		}
 		++leg_index_;
 		leg_ = leg_index_ % 2 == 0 ? AudioIngameLeg::Stand
-								   : (leg_index_ % 4 == 1 ? AudioIngameLeg::Walk : AudioIngameLeg::Sprint);
+								   : (leg_index_ % 4 == 1 && !breath ? AudioIngameLeg::Walk : AudioIngameLeg::Sprint);
 		leg_s_ = p_now_s;
 		last_step_s_ = -1.0;
+		breath_jump_ = 0;
 		if (leg_ != AudioIngameLeg::Stand) {
 			pick_run_yaw(p_io);
 		}
+	}
+	if (breath && leg_ == AudioIngameLeg::Sprint && breath_jump_ < kAudioIngameBreathJumpSeconds.size() &&
+			p_now_s - leg_s_ >= kAudioIngameBreathJumpSeconds[breath_jump_] && p_io.jump) {
+		p_io.jump();
+		base_yaw_ += (breath_jump_ % 2 == 0 ? 1.0f : -1.0f) * kAudioIngameBreathTurnDeg * core::kDegToRadF;
+		++breath_jump_;
 	}
 	p_io.view(base_yaw_, 0.0f);
 	p_io.move(leg_ != AudioIngameLeg::Stand, leg_ == AudioIngameLeg::Sprint);
@@ -527,7 +539,7 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 		last_s_ = p_now_s;
 		return;
 	}
-	if (kind_ == AudioIngamePhase::Steps) {
+	if (kind_ == AudioIngamePhase::Steps || kind_ == AudioIngamePhase::Breath) {
 		script_steps(p_now_s, p_io);
 		return;
 	}
@@ -607,6 +619,26 @@ bool AudioIngameCheck::frame(double p_now_s, Bf3GameAudio &r_audio, const AudioI
 	if (first_s_ < 0.0) {
 		first_s_ = p_now_s;
 	}
+	if (kind_ == AudioIngamePhase::Breath) {
+		if (!breath_armed_) {
+			breath_armed_ = true;
+			ba::MovementFoley *foley = r_audio.movement_foley();
+			const std::shared_ptr<const core::audio::SoundProgram> program = r_audio.movement_program();
+			breath_loop_ = program ? ba::speed_triggered_loop(*program) : std::nullopt;
+			if (foley == nullptr || !breath_loop_ || foley->stats().starts != 0) {
+				row("breathing traced", false,
+						core::fmt("movement foley %s, a looping sampler triggered by a Speed condition %s, %llu "
+								  "movement starts before the check",
+								foley != nullptr ? "built" : "missing", breath_loop_ ? "found" : "not found",
+								(unsigned long long)(foley != nullptr ? foley->stats().starts : 0)));
+				done_ = true;
+				return true;
+			}
+			breath_trace_.entries.resize(kAudioIngameBreathTraceEntries);
+			foley->trace_next(&breath_trace_);
+		}
+		tally_breath(p_now_s, r_audio, p_io);
+	}
 	switch (phase_) {
 		case Phase::WaitSpawn:
 			script(p_now_s, p_io);
@@ -645,18 +677,116 @@ bool AudioIngameCheck::frame(double p_now_s, Bf3GameAudio &r_audio, const AudioI
 			if (p_io.move) {
 				p_io.move(false, false);
 			}
-			end(r_audio);
-			r_audio.drain_events();
-			take(r_audio);
-			r_audio.forward_cuts(false);
-			analyse(r_audio);
-			phase_ = Phase::Done;
-			done_ = true;
+			if (kind_ == AudioIngamePhase::Breath && p_io.suicide) {
+				p_io.suicide();
+				drain_s_ = p_now_s;
+				phase_ = Phase::Drain;
+				return false;
+			}
+			finish(r_audio);
 			return true;
+		case Phase::Drain: {
+			pull();
+			take(r_audio);
+			const ba::MovementFoley *foley = r_audio.movement_foley();
+			if ((foley != nullptr && foley->trace_closed()) || p_now_s - drain_s_ > kAudioIngameBreathDrainSeconds) {
+				finish(r_audio);
+				return true;
+			}
+			return false;
+		}
 		case Phase::Done:
 			return true;
 	}
 	return true;
+}
+
+void AudioIngameCheck::finish(Bf3GameAudio &r_audio) {
+	end(r_audio);
+	r_audio.drain_events();
+	take(r_audio);
+	r_audio.forward_cuts(false);
+	analyse(r_audio);
+	phase_ = Phase::Done;
+	done_ = true;
+}
+
+void AudioIngameCheck::tally_breath(double p_now_s, Bf3GameAudio &r_audio, const AudioIngameIo &p_io) {
+	const ba::MovementFoley *foley = r_audio.movement_foley();
+	if (foley == nullptr || !breath_loop_) {
+		return;
+	}
+	const ba::MovementFoleyStats &st = foley->stats();
+	if (st.starts != breath_lives_) {
+		breath_lives_ = st.starts;
+		breath_on_ = false;
+	}
+	if (breath_lives_ != 1 || foley->trace_closed()) {
+		return;
+	}
+	const bool on = ba::speed_loop_on(*breath_loop_, foley->speed());
+	breath_edges_ += on && !breath_on_ ? 1u : 0u;
+	breath_on_ = on;
+	const bool jumped = p_io.alive && p_io.own_mode == sim::MoveMode::Jumping && breath_mode_ != sim::MoveMode::Jumping;
+	breath_sim_jumps_ += jumped ? 1u : 0u;
+	breath_mode_ = p_io.own_mode;
+	breath_foley_jumps_ = st.jumps;
+	breath_log_ += core::fmt("%.3f\t%.3f\t%d\t%d\t%d\n", p_now_s - first_s_, double(foley->speed()), int(p_io.own_mode),
+			on ? 1 : 0, jumped ? 1 : 0);
+}
+
+void AudioIngameCheck::analyse_breath(Bf3GameAudio &r_audio) {
+	const ba::MovementFoley *foley = r_audio.movement_foley();
+	const bool closed = foley != nullptr && foley->trace_closed();
+	const ba::LoopVoices v =
+			breath_loop_ && closed ? ba::loop_voices(breath_trace_, breath_loop_->node, 0) : ba::LoopVoices{};
+	const ba::AudioTuning tuning;
+	const uint64_t fade_frames = uint64_t(std::ceil(tuning.release_fade_ms * 0.001f * float(ba::kMixRate)));
+	const double ms = 1000.0 / double(ba::kMixRate);
+	row("one breathing loop at a time",
+			closed && breath_trace_.dropped == 0 && v.starts >= 1 && breath_loop_ &&
+					v.max_busy <= breath_loop_->slots && v.longest_stack_frames <= fade_frames,
+			core::fmt("trace %s, %u entries, %llu dropped; %llu breathing starts, at most %u of the sampler's %u "
+					  "slots busy, %.1f ms with two loops sounding, the longest %.1f ms (a release fade is %.1f ms)",
+					closed ? "closed" : "still open", breath_trace_.count, (unsigned long long)breath_trace_.dropped,
+					(unsigned long long)v.starts, v.max_busy, breath_loop_ ? breath_loop_->slots : 0u,
+					double(v.stacked_frames) * ms, double(v.longest_stack_frames) * ms, double(fade_frames) * ms));
+	row("breathing follows the data's Speed condition", breath_loop_ && v.starts >= 1 && v.starts <= breath_edges_,
+			core::fmt("the loop's Trigger is Speed op %d %.2f; the Speed fed rose through it %llu times, the sampler "
+					  "started %llu times",
+					breath_loop_ ? int(breath_loop_->op) : -1, breath_loop_ ? double(breath_loop_->threshold) : 0.0,
+					(unsigned long long)breath_edges_, (unsigned long long)v.starts));
+	row("every jump posts the patch's Jump once",
+			breath_sim_jumps_ >= kAudioIngameMinBreathLegs && breath_foley_jumps_ == breath_sim_jumps_,
+			core::fmt("%llu jumps seen in the own soldier's state, %llu Jump events posted",
+					(unsigned long long)breath_sim_jumps_, (unsigned long long)breath_foley_jumps_));
+	if (out_dir_.empty() || !closed) {
+		return;
+	}
+	std::string voices = "frame\tms\tslot\tkind\tsegment\n";
+	for (uint32_t i = 0; i < std::min<size_t>(breath_trace_.count, breath_trace_.entries.size()); ++i) {
+		const ba::SamplerTraceEntry &e = breath_trace_.entries[i];
+		if (e.node == breath_loop_->node) {
+			voices += core::fmt("%llu\t%.1f\t%u\t%d\t%u\n", (unsigned long long)e.frame, double(e.frame) * ms,
+					unsigned(e.slot), int(e.kind), unsigned(e.segment));
+		}
+	}
+	const core::PathGuard &guard = r_audio.write_guard();
+	const std::filesystem::path dir = utf8_path(out_dir_);
+	bool ok = true;
+	for (const auto &[name, text] : { std::pair<const char *, const std::string *>{ "breath_voices.tsv", &voices },
+				 std::pair<const char *, const std::string *>{ "breath_speed.tsv", &breath_log_ } }) {
+		std::error_code ec;
+		std::filesystem::create_directories(dir, ec);
+		if (!guard.allows_write(dir / name)) {
+			ok = false;
+			continue;
+		}
+		std::ofstream f(dir / name, std::ios::binary | std::ios::trunc);
+		f << *text;
+		ok = ok && f.good();
+	}
+	row("breath files", ok, "breath_voices.tsv and breath_speed.tsv in " + out_dir_);
 }
 
 void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
@@ -889,6 +1019,9 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 			legs_[size_t(AudioIngameLeg::Sprint)].legs >= kAudioIngameMinLegs;
 	const bool fired = kind_ == AudioIngamePhase::Pool || bursts_ >= 6;
 	const bool ran = kind_ == AudioIngamePhase::Steps ? moved
+			: kind_ == AudioIngamePhase::Breath
+			? legs_[size_t(AudioIngameLeg::Sprint)].legs >= kAudioIngameMinBreathLegs && bursts_ == 0 &&
+					breath_edges_ > legs_[size_t(AudioIngameLeg::Sprint)].legs + 1
 			: kind_ == AudioIngamePhase::Flyby
 			? bursts_ == 0 && bots.requested >= kAudioIngameMinBotShots && surface.requested >= 20
 			: fired && own.requested >= 1 && bots.requested >= 10 && surface.requested >= 20;
@@ -906,6 +1039,9 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 	}
 	if (kind_ == AudioIngamePhase::Flyby) {
 		analyse_flyby(r_audio);
+	}
+	if (kind_ == AudioIngamePhase::Breath) {
+		analyse_breath(r_audio);
 	}
 
 	if (!out_dir_.empty()) {

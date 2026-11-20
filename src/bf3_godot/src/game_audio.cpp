@@ -600,6 +600,14 @@ std::vector<ba::FlyBySound> Bf3GameAudio::flyby_sounds() const {
 	return impl_->flyby_sounds;
 }
 
+ba::MovementFoley *Bf3GameAudio::movement_foley() {
+	return impl_->movement.get();
+}
+
+std::shared_ptr<const core::audio::SoundProgram> Bf3GameAudio::movement_program() const {
+	return impl_->soldier ? impl_->soldier->movement : nullptr;
+}
+
 core::Result<std::vector<std::string>> Bf3GameAudio::observe_area_waves(
 		std::string_view p_patch, float p_area_type) const {
 	const Impl &m = *impl_;

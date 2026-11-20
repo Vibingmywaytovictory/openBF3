@@ -28,6 +28,10 @@ namespace godot {
 class Node;
 }
 
+namespace bf3::audio {
+class MovementFoley;
+}
+
 namespace bf3::godot_side {
 
 struct GameAudioStats {
@@ -104,6 +108,8 @@ public:
 	std::string footstep_program() const;
 	std::optional<audio::FootstepParams> footstep_params() const;
 	std::vector<audio::FlyBySound> flyby_sounds() const;
+	audio::MovementFoley *movement_foley();
+	std::shared_ptr<const core::audio::SoundProgram> movement_program() const;
 #endif
 	void shutdown();
 

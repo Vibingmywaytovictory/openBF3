@@ -3,6 +3,7 @@
 #include "bf3/anim/viewmodel_anim.h"
 #include "bf3/audio/footstep_driver.h"
 #include "bf3/audio/mixer_core.h"
+#include "bf3/audio/movement_foley.h"
 #include "bf3/audio/wav_io.h"
 #include "bf3/client_audio/sound_fate_ledger.h"
 #include "bf3/present/presented.h"
@@ -49,13 +50,19 @@ struct AudioIngameAim {
 inline constexpr std::array<AudioIngameAim, 10> kAudioIngameAims{ { { 0, -70 }, { 0, -35 }, { 0, -5 }, { 90, -5 },
 		{ 180, -5 }, { 270, -5 }, { 45, -20 }, { 135, -50 }, { 225, 15 }, { 315, -10 } } };
 
-enum class AudioIngamePhase : uint8_t { Mix, Pool, Steps, Flyby };
+enum class AudioIngamePhase : uint8_t { Mix, Pool, Steps, Flyby, Breath };
 
 enum class AudioIngameLeg : uint8_t { Stand, Walk, Sprint };
 inline constexpr size_t kAudioIngameLegs = 3;
 inline constexpr std::array<std::string_view, kAudioIngameLegs> kAudioIngameLegNames{ "standing", "walking",
 	"sprinting" };
 inline constexpr std::array<double, kAudioIngameLegs> kAudioIngameLegSeconds{ 1.5, 3.0, 3.0 };
+inline constexpr std::array<double, kAudioIngameLegs> kAudioIngameBreathLegSeconds{ 1.5, 0.0, 4.0 };
+inline constexpr std::array<double, 2> kAudioIngameBreathJumpSeconds{ 1.5, 2.7 };
+inline constexpr float kAudioIngameBreathTurnDeg = 60.0f;
+inline constexpr uint32_t kAudioIngameMinBreathLegs = 3;
+inline constexpr size_t kAudioIngameBreathTraceEntries = size_t(1) << 15;
+inline constexpr double kAudioIngameBreathDrainSeconds = 10.0;
 inline constexpr double kAudioIngameLegSettleSeconds = 0.6;
 inline constexpr uint32_t kAudioIngameMinLegs = 2;
 inline constexpr uint32_t kAudioIngameMinLegSteps = 3;
@@ -116,7 +123,10 @@ struct AudioIngameIo {
 	std::function<void(const AudioIngameSpot &)> teleport;
 	std::function<void()> revive;
 	std::function<std::optional<AudioIngameSpot>()> fight_spot;
+	std::function<void()> jump;
+	std::function<void()> suicide;
 	sim::Vec3 feet{};
+	sim::MoveMode own_mode = sim::MoveMode::OnGround;
 	uint8_t own_slot = 0xFF;
 };
 
@@ -178,7 +188,7 @@ public:
 	int exit_code() const { return done_ && failures_ == 0 ? 0 : 1; }
 
 private:
-	enum class Phase : uint8_t { WaitSpawn, Settle, Record, Done };
+	enum class Phase : uint8_t { WaitSpawn, Settle, Record, Drain, Done };
 	void begin(double p_now_s, Bf3GameAudio &r_audio);
 	void end(Bf3GameAudio &r_audio);
 	void pull();
@@ -193,6 +203,9 @@ private:
 	void pick_run_yaw(const AudioIngameIo &p_io);
 	void script_steps(double p_now_s, const AudioIngameIo &p_io);
 	void tally_steps(double p_now_s, Bf3GameAudio &r_audio, const AudioIngameIo &p_io);
+	void tally_breath(double p_now_s, Bf3GameAudio &r_audio, const AudioIngameIo &p_io);
+	void analyse_breath(Bf3GameAudio &r_audio);
+	void finish(Bf3GameAudio &r_audio);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 	void mix_row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 
@@ -266,6 +279,16 @@ private:
 	uint32_t fights_ = 0, revives_ = 0;
 	float spot_clear_m_ = 0.0f;
 	GameAudioStats stats_at_start_;
+
+	std::optional<audio::SpeedLoop> breath_loop_;
+	audio::SamplerTrace breath_trace_;
+	bool breath_armed_ = false;
+	uint64_t breath_lives_ = 0, breath_edges_ = 0, breath_sim_jumps_ = 0, breath_foley_jumps_ = 0;
+	bool breath_on_ = false;
+	sim::MoveMode breath_mode_ = sim::MoveMode::OnGround;
+	uint32_t breath_jump_ = 0;
+	double drain_s_ = -1.0;
+	std::string breath_log_;
 
 	bool done_ = false;
 	uint32_t rows_ = 0, failures_ = 0;
