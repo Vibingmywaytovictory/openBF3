@@ -570,18 +570,58 @@ TEST_CASE("sim: children start per parent particle, follow it and stop with it")
 	CHECK_FALSE(w.alive(*h));
 }
 
-TEST_CASE("sim: pools steal with reset and refuse without") {
+TEST_CASE("sim: pools steal with reset and refuse without; a reset instance stops spawning and its particles live "
+		  "out their life unless KillParticlesWithEmitter") {
 	FxWorld w;
+	const auto particles_of = [](const FxWorld &p_w, EffectHandle p_h) {
+		uint32_t n = 0;
+		for (const EmitterOutput &o : p_w.outputs()) {
+			n += o.effect == p_h ? o.particle_count : 0;
+		}
+		return n;
+	};
 	const auto steal = fxt::effect_def("steal", { fxt::emitter_def("e", 4, 10, 10) }, { 0 }, 2, true);
 	const auto h0 = w.start(steal, start_with(1));
 	const auto h1 = w.start(steal, start_with(2));
 	REQUIRE(h0.ok());
 	REQUIRE(h1.ok());
+	run_frames(w, 0.1f, 1);
+	const uint32_t h0_spawned = particles_of(w, *h0);
+	REQUIRE(h0_spawned > 0);
+	REQUIRE(h0_spawned < 4);
 	const auto h2 = w.start(steal, start_with(3));
 	REQUIRE(h2.ok());
 	CHECK(w.stats().stolen_instances == 1);
-	CHECK_FALSE(w.alive(*h0));
+	CHECK(w.alive(*h0));
 	CHECK(w.alive(*h1));
+	run_frames(w, 0.1f, 4);
+	CHECK(particles_of(w, *h0) == h0_spawned);
+	CHECK(particles_of(w, *h1) == 4);
+	CHECK(particles_of(w, *h2) > 0);
+	const auto h3 = w.start(steal, start_with(4));
+	REQUIRE(h3.ok());
+	CHECK(w.stats().stolen_instances == 2);
+	CHECK(w.alive(*h0));
+	CHECK(w.alive(*h1));
+	run_frames(w, 0.5f, 22);
+	CHECK_FALSE(w.alive(*h0));
+	CHECK_FALSE(w.alive(*h1));
+	CHECK(w.alive(*h2));
+	CHECK(w.alive(*h3));
+
+	EmitterDef killed = fxt::emitter_def("k", 4, 10, 10);
+	killed.tmpl.flags |= kEmitterKillParticlesWithEmitter;
+	const auto kill = fxt::effect_def("kill", { killed }, { 0 }, 1, true);
+	FxWorld wk;
+	const auto k0 = wk.start(kill, start_with(1));
+	REQUIRE(k0.ok());
+	run_frames(wk, 0.1f, 1);
+	REQUIRE(particles_of(wk, *k0) > 0);
+	const auto k1 = wk.start(kill, start_with(2));
+	REQUIRE(k1.ok());
+	run_frames(wk, 0.1f, 1);
+	CHECK_FALSE(wk.alive(*k0));
+	CHECK(wk.stats().live_particles == particles_of(wk, *k1));
 	const auto refuse = fxt::effect_def("refuse", { fxt::emitter_def("e", 4, 10, 10) }, { 0 }, 1, false);
 	REQUIRE(w.start(refuse, start_with(4)).ok());
 	CHECK_FALSE(w.start(refuse, start_with(5)).ok());

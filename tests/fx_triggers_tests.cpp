@@ -897,8 +897,8 @@ TEST_CASE("impacts: cell choice by seed, spread cone, mirror, decal and sound cu
 	CHECK(t.stats().double_starts == 0);
 }
 
-TEST_CASE("impacts: MaxInstanceCount limits each shooter's instances, so four shooters keep four lights and none is "
-		  "stuck") {
+TEST_CASE("impacts: MaxInstanceCount limits each shooter's instances, so four shooters keep four lights, a shooter's "
+		  "next hit leaves its last one's light to live out its life, and none is stuck") {
 	std::unique_ptr<Syn> s = make_syn();
 	DocBuilder light = simple_doc(77, 8, 240, 1, 0.2f);
 	fxt::set(light.tmpl(), "ActAsPointLight", flag(true));
@@ -941,11 +941,11 @@ TEST_CASE("impacts: MaxInstanceCount limits each shooter's instances, so four sh
 	t.on_events(std::span<const hk::PresentEvent>(&again, 1), clock_at(0), kNear);
 	fx_step_frame(world, 1.0f / 60.0f);
 	CHECK(world.stats().stolen_instances == 1);
-	CHECK(world.stats().live_effects == kShooters);
-	CHECK(lit_outputs() == kShooters);
-	MESSAGE("metal impacts from " << int(kShooters) << " shooters: " << world.stats().live_effects << " live, "
-								  << lit_outputs() << " lit, " << world.stats().stolen_instances
-								  << " reset by the same shooter's next hit");
+	CHECK(world.stats().live_effects == kShooters + 1);
+	CHECK(lit_outputs() == kShooters + 1);
+	MESSAGE("metal impacts from " << int(kShooters) << " shooters and one second hit: " << world.stats().live_effects
+								  << " live, " << lit_outputs() << " lit, " << world.stats().stolen_instances
+								  << " reset by the same shooter's next hit, its light living out its life");
 
 	for (int i = 0; i < 240; ++i) {
 		fx_step_frame(world, 1.0f / 60.0f);

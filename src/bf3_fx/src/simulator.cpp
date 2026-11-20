@@ -1277,7 +1277,7 @@ core::Result<EffectHandle> FxWorld::start(std::shared_ptr<const EffectDef> p_def
 	uint32_t oldest = kNone;
 	for (const uint32_t slot : w.effect_list) {
 		const Impl::EffectSlot &s = w.effects[slot];
-		if (s.active && !s.killed && s.def == p_def && s.start.owner == p_start.owner) {
+		if (s.active && !s.killed && !s.stopping && s.def == p_def && s.start.owner == p_start.owner) {
 			++live;
 			if (oldest == kNone || s.sequence < w.effects[oldest].sequence) {
 				oldest = slot;
@@ -1289,7 +1289,7 @@ core::Result<EffectHandle> FxWorld::start(std::shared_ptr<const EffectDef> p_def
 			++w.stats.refused_starts;
 			return core::make_error("start: " + p_def->name + ": instance pool full");
 		}
-		w.effects[oldest].killed = true;
+		w.effects[oldest].stopping = true;
 		++w.stats.stolen_instances;
 	}
 	if (w.free_effects.empty()) {
