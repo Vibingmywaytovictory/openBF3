@@ -442,8 +442,8 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     set_tests_properties(godot.surface_decals PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.sun_light godot_sun_light.cmake WINDOW TIMEOUT 400
         ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DLEVEL=MP_007 -DMODE=TeamDeathMatchC0 -DGLOSS=264 -DGBUFFER=306
-        "-DVIEWS=patch_toward@-126.35,145.0,786.35,135,-24|patch_away@-113.65,145.0,773.65,-45,-24|patch_side_a@-126.35,145.0,773.65,45,-24|patch_side_b@-113.65,145.0,786.35,-135,-24"
-        -DPATCH_POINT=-120,141.0,780 -DPATCH_EXPOSURE=0.5 -DPATCH_HALF=32)
+        "-DVIEWS=patch_toward@-126.35,145.0,786.35,135,-24|patch_away@-113.65,145.0,773.65,-45,-24|patch_side_a@-126.35,145.0,773.65,45,-24|patch_side_b@-113.65,145.0,786.35,-135,-24|first_toward@-66.35,148.0,706.35,135,-24|first_away@-53.65,148.0,693.65,-45,-24"
+        -DPATCH_POINT=-120,141.0,780 -DTURN_POINT=-60,144,700 -DPATCH_EXPOSURE=0.5 -DPATCH_HALF=32)
     set_tests_properties(godot.sun_light PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.sun_light.metro godot_sun_light.cmake WINDOW TIMEOUT 400
         ARGS -DLEVEL=MP_Subway -DMODE=TeamDeathMatchC0 -DGLOSS=593 -DGBUFFER=619
@@ -887,7 +887,7 @@ openbf3_cost(godot.look.exposure 1 40)
 openbf3_cost(godot.look_programs 1 27)
 openbf3_cost(godot.look_programs.mp018 1 35)
 openbf3_cost(godot.look_programs.palace 1 30)
-openbf3_cost(godot.sun_light 1 23)
+openbf3_cost(godot.sun_light 1 73)
 openbf3_cost(godot.sun_light.metro 1 21)
 openbf3_cost(godot.metro_light 1 27)
 openbf3_cost(render.programs 6 6)

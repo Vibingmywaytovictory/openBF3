@@ -21,6 +21,7 @@
 #include <godot_cpp/classes/world_environment.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -240,6 +241,14 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 
 	if (first || moved3(s.sun_direction, p_f.sun_direction) || moved3(s.sun_color, p_f.sun_color) || moved(s.sun_energy, p_f.sun_energy)) {
 		Vector3 d(p_f.sun_direction[0], p_f.sun_direction[1], p_f.sun_direction[2]);
+		static const bool turned = has_user_arg("look-sun-turned");
+		if (turned) {
+			d.x = -d.x;
+			d.z = -d.z;
+			if (first) {
+				UtilityFunctions::print("[look] sun azimuth turned 180 degrees");
+			}
+		}
 		d = d.length_squared() > 1e-8f ? d.normalized() : Vector3(0, -1, 0);
 		const Vector3 up = std::fabs(d.y) > 0.99f ? Vector3(0, 0, 1) : Vector3(0, 1, 0);
 		sun_->set_transform(Transform3D(Basis::looking_at(d, up), Vector3()));

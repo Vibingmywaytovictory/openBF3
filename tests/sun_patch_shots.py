@@ -21,7 +21,45 @@ def window_luma(path, centre, half):
     return total / (count * 1000.0) if count else None
 
 
+def centres_of(items):
+    centres = {}
+    for item in items:
+        name, _, xy = item.partition('=')
+        x, _, y = xy.partition(',')
+        centres[name] = (int(round(float(x))), int(round(float(y))))
+    return centres
+
+
+def turned(argv):
+    if len(argv) != 8:
+        print('usage: sun_patch_shots.py --turned <shots-dir> <turned-dir> <prefix> <half-window> toward=<x>,<y> '
+              'away=<x>,<y>')
+        return 2
+    half = int(argv[5])
+    centres = centres_of(argv[6:])
+    lumas = {}
+    for key, folder in (('real', argv[2]), ('turned', argv[3])):
+        for name in ('toward', 'away'):
+            if name not in centres:
+                print('sun patch shots: no centre for ' + name)
+                return 1
+            lumas[key, name] = window_luma('%s/%s%s.png' % (folder, argv[4], name), centres[name], half)
+            if lumas[key, name] is None or lumas[key, name] <= 0:
+                print('sun patch shots: the window of %s is off the shot or black' % name)
+                return 1
+    facing = lumas['real', 'toward'] * lumas['turned', 'away']
+    behind = lumas['real', 'away'] * lumas['turned', 'toward']
+    ratio = facing / behind
+    print('sun patch shots: %s same cameras, sun ahead against behind: toward camera %.2f against %.2f, away camera '
+          '%.2f against %.2f; ratio %.4f (at most 1)' %
+          (argv[4], lumas['real', 'toward'], lumas['turned', 'toward'], lumas['turned', 'away'], lumas['real', 'away'],
+           ratio))
+    return 0 if ratio <= 1.0 else 1
+
+
 def main(argv):
+    if len(argv) > 1 and argv[1] == '--turned':
+        return turned(argv)
     if len(argv) != 4 + len(VIEWS):
         print('usage: sun_patch_shots.py <shots-dir> <prefix> <half-window> ' +
               ' '.join(v + '=<x>,<y>' for v in VIEWS))

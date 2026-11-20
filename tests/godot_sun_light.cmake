@@ -13,14 +13,27 @@ foreach(view IN LISTS view_list)
 endforeach()
 list(LENGTH views view_count)
 string(REPLACE ";" "\\;" views_arg "${views}")
-set(patch_args "")
 if(DEFINED PATCH_POINT)
-    set(patch_args "--look-exposure=${PATCH_EXPOSURE}" "--shot-points=${PATCH_POINT}")
+    set(points "${PATCH_POINT};${TURN_POINT}")
+    string(REPLACE ";" "\\;" points_arg "${points}")
+    file(MAKE_DIRECTORY "${shots}/turned")
+    string(REPLACE "${shots}/" "${shots}/turned/" turned_views_arg "${views_arg}")
+    godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 300 REMOVE_ON_SKIP "${cache}"
+        ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- --level=${LEVEL} --mode=${MODE}
+            --bots=0 --deploy-screen=0 --preround=0 --min-players=1 --no-hud --shot-settle=4 "--shots=${turned_views_arg}"
+            "--look-exposure=${PATCH_EXPOSURE}" "--shot-points=${points_arg}" --look-sun-turned --quit-after=1
+            "--bf3-cache=${cache}")
+    set(turned_out "${out}")
+    godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 300 REMOVE_ON_SKIP "${cache}"
+        ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- --level=${LEVEL} --mode=${MODE}
+            --bots=0 --deploy-screen=0 --preround=0 --min-players=1 --no-hud --shot-settle=4 "--shots=${views_arg}"
+            "--look-exposure=${PATCH_EXPOSURE}" "--shot-points=${points_arg}" --quit-after=1 "--bf3-cache=${cache}")
+else()
+    godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 300 REMOVE_ON_SKIP "${cache}"
+        ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- --level=${LEVEL} --mode=${MODE}
+            --bots=0 --deploy-screen=0 --preround=0 --min-players=1 --no-hud --shot-settle=4 "--shots=${views_arg}"
+            --quit-after=1 "--bf3-cache=${cache}")
 endif()
-godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 300 REMOVE_ON_SKIP "${cache}"
-    ARGS --path "${PROJECT_DIR}" --resolution 1280x720 res://scenes/metro_tdm.tscn -- --level=${LEVEL} --mode=${MODE}
-        --bots=0 --deploy-screen=0 --preround=0 --min-players=1 --no-hud --shot-settle=4 "--shots=${views_arg}"
-        ${patch_args} --quit-after=1 "--bf3-cache=${cache}")
 file(REMOVE_RECURSE "${cache}")
 if(out MATCHES "SHADER ERROR" OR err MATCHES "SHADER ERROR")
     message(FATAL_ERROR "${ROW}: a material shader did not compile")
@@ -42,6 +55,31 @@ if(DEFINED PATCH_POINT)
         message(FATAL_ERROR "${ROW}: the grass-covered terrain patch is brighter toward the sun than from any other side, "
             "while the terrain combinations and the moorland grass write their specular lanes as 0")
     endif()
+    if(NOT turned_out MATCHES "\\[look\\] sun azimuth turned 180 degrees")
+        message(FATAL_ERROR "${ROW}: the run with --look-sun-turned did not turn the sun")
+    endif()
+    foreach(patch patch first)
+        set(turn_centres "")
+        foreach(view toward away)
+            if(patch STREQUAL "patch")
+                set(point_at "([0-9.]+),([0-9.]+) [^\n]*")
+            else()
+                set(point_at "[^ \n]+ ([0-9.]+),([0-9.]+)")
+            endif()
+            if(NOT out MATCHES "\\[m1\\] shot points [^\n]*/${patch}_${view}\\.png: ${point_at}")
+                message(FATAL_ERROR "${ROW}: its terrain patch is not in the ${patch}_${view} shot")
+            endif()
+            list(APPEND turn_centres "${view}=${CMAKE_MATCH_1},${CMAKE_MATCH_2}")
+        endforeach()
+        execute_process(COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/sun_patch_shots.py" --turned "${shots}"
+                "${shots}/turned" ${patch}_ ${PATCH_HALF} ${turn_centres}
+            RESULT_VARIABLE turn_rc OUTPUT_VARIABLE turn_out ERROR_VARIABLE turn_err)
+        message("${ROW}: ${turn_out}${turn_err}")
+        if(NOT turn_rc STREQUAL "0")
+            message(FATAL_ERROR "${ROW}: the ${patch}_ patch's sun-facing views are brighter than the same cameras with the "
+                "sun behind them, while its terrain and grass write their specular lanes as 0")
+        endif()
+    endforeach()
 endif()
 if(NOT out MATCHES "\\[level\\] light pass: ([0-9]+) of ([0-9]+) level materials \\(([0-9]+) with their program's smoothness and specular, of ([0-9]+) whose shader writes the G-buffer\\), ([0-9]+) of ([0-9]+) terrain materials")
     message(FATAL_ERROR "${ROW}: no light pass line")
