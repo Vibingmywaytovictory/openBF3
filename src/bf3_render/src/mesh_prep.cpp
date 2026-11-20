@@ -68,6 +68,12 @@ core::Result<PreparedMesh> prepare_mesh(const core::res::LoadedMeshSet &p_mesh, 
 				s.uv1.insert(s.uv1.end(), v.begin(), v.end());
 			}
 		}
+		if (d.uv2 && d.uv2->size() == n) {
+			s.uv2.reserve(n * 2);
+			for (const core::res::Vec2 &v : *d.uv2) {
+				s.uv2.insert(s.uv2.end(), v.begin(), v.end());
+			}
+		}
 		if (d.colors && d.colors->size() == n) {
 			s.colors.reserve(n * 4);
 			for (const std::array<uint8_t, 4> &c : *d.colors) {

@@ -24,7 +24,8 @@ enum ArrayBit : uint32_t {
 	kBones = 1u << 5,
 	kWeights = 1u << 6,
 	kParts = 1u << 7,
-	kKnownBits = (1u << 8) - 1,
+	kUv2 = 1u << 8,
+	kKnownBits = (1u << 9) - 1,
 };
 
 template <class T>
@@ -95,6 +96,7 @@ std::vector<uint8_t> encode_mesh_blob(const PreparedMeshSet &p_mesh) {
 			mask |= s.bones.empty() ? 0 : kBones;
 			mask |= s.weights.empty() ? 0 : kWeights;
 			mask |= s.parts.empty() ? 0 : kParts;
+			mask |= s.uv2.empty() ? 0 : kUv2;
 			w.u32(mask);
 			for (float v : s.aabb_min) {
 				w.f32(v);
@@ -111,6 +113,7 @@ std::vector<uint8_t> encode_mesh_blob(const PreparedMeshSet &p_mesh) {
 			write_array(w, s.bones);
 			write_array(w, s.weights);
 			write_array(w, s.parts);
+			write_array(w, s.uv2);
 			write_array(w, s.indices, true);
 		}
 	}
@@ -179,6 +182,7 @@ core::Result<PreparedMeshSet> decode_mesh_blob(std::span<const uint8_t> p_blob) 
 			read_array(r, mask, kBones, 4, n, s.bones);
 			read_array(r, mask, kWeights, 4, n, s.weights);
 			read_array(r, mask, kParts, 1, n, s.parts);
+			read_array(r, mask, kUv2, 2, n, s.uv2);
 			r.align(4);
 			r.array<int32_t>(index_count, s.indices);
 			if (!r.ok()) {
@@ -408,8 +412,8 @@ bool same_prepared(const PreparedMesh &p_a, const PreparedMesh &p_b) {
 				a.category != b.category || std::memcmp(&a.aabb_min, &b.aabb_min, 12) != 0 ||
 				std::memcmp(&a.aabb_max, &b.aabb_max, 12) != 0 || !same_bytes(a.positions, b.positions) ||
 				!same_bytes(a.normals, b.normals) || !same_bytes(a.tangents, b.tangents) || !same_bytes(a.uv0, b.uv0) ||
-				!same_bytes(a.uv1, b.uv1) || !same_bytes(a.colors, b.colors) || !same_bytes(a.bones, b.bones) ||
-				!same_bytes(a.weights, b.weights) || !same_bytes(a.parts, b.parts) ||
+				!same_bytes(a.uv1, b.uv1) || !same_bytes(a.uv2, b.uv2) || !same_bytes(a.colors, b.colors) ||
+				!same_bytes(a.bones, b.bones) || !same_bytes(a.weights, b.weights) || !same_bytes(a.parts, b.parts) ||
 				!same_bytes(a.indices, b.indices)) {
 			return false;
 		}

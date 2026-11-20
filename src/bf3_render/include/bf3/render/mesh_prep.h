@@ -23,6 +23,7 @@ struct PreparedSurface {
 	std::vector<float> tangents;
 	std::vector<float> uv0;
 	std::vector<float> uv1;
+	std::vector<float> uv2;
 	std::vector<uint8_t> colors;
 	std::vector<int32_t> bones;
 	std::vector<float> weights;

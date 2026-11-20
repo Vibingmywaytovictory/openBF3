@@ -1232,15 +1232,14 @@ TEST_SUITE("render-level-gloss") {
 		Result<std::shared_ptr<Install>> install = Install::open(reader);
 		REQUIRE(install.ok());
 		const std::vector<GlossExpectation> expected = {
-			{ "MP_007", "TeamDeathMatchC0", 323, 306, 259,
+			{ "MP_007", "TeamDeathMatchC0", 323, 306, 264,
 					{ { "drawn as the character backdrop", 1 }, { engine_texture_residue(1, "Texture"), 4 },
 							{ engine_texture_residue(1, "diffuseAtlas"), 13 },
 							{ engine_texture_residue(10, "distanceFieldTexture"), 5 },
 							{ engine_texture_residue(4, "distanceFieldTexture"), 3 },
 							{ engine_texture_residue(5, "distanceFieldTexture"), 2 },
 							{ engine_texture_residue(8, "distanceFieldTexture"), 4 },
-							{ engine_texture_residue(9, "distanceFieldTexture"), 10 },
-							{ "no program: vertex input v4.x reads usage 35 lane 0", 5 } } },
+							{ engine_texture_residue(9, "distanceFieldTexture"), 10 } } },
 			{ "MP_Subway", "TeamDeathMatchC0", 666, 619, 593,
 					{ { "drawn as the character backdrop", 1 },
 							{ "lanes refused: vertex input v2.x reads usage 4 lane 0", 1 },

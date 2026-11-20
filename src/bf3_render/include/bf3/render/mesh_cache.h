@@ -18,7 +18,7 @@ namespace bf3::render {
 
 inline constexpr uint32_t kMeshBlobFormatVersion = 1;
 
-inline constexpr uint32_t kMeshConverterVersion = 1;
+inline constexpr uint32_t kMeshConverterVersion = 2;
 inline constexpr const char *kMeshCacheKind = "mesh";
 
 struct PreparedMeshSet {

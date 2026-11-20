@@ -132,8 +132,9 @@ core::Status check_surface(const PreparedSurface &p_s, const std::string &p_mesh
 		return bad("positions are not xyz triples");
 	}
 	const auto sized = [&](size_t p_size, size_t p_width) { return p_size == 0 || p_size == n * p_width; };
-	if (!sized(p_s.normals.size(), 3) || !sized(p_s.tangents.size(), 4) || !sized(p_s.uv0.size(), 2) || !sized(p_s.uv1.size(), 2) ||
-			!sized(p_s.colors.size(), 4) || !sized(p_s.bones.size(), 4) || !sized(p_s.weights.size(), 4) || !sized(p_s.parts.size(), 1)) {
+	if (!sized(p_s.normals.size(), 3) || !sized(p_s.tangents.size(), 4) || !sized(p_s.uv0.size(), 2) ||
+			!sized(p_s.uv1.size(), 2) || !sized(p_s.uv2.size(), 2) || !sized(p_s.colors.size(), 4) ||
+			!sized(p_s.bones.size(), 4) || !sized(p_s.weights.size(), 4) || !sized(p_s.parts.size(), 1)) {
 		return bad("vertex arrays of different lengths");
 	}
 	if (p_s.indices.size() % 3 != 0) {
@@ -178,6 +179,7 @@ void compact_vertices(PreparedSurface &r_s, const std::vector<uint8_t> &p_keep) 
 	squeeze(r_s.tangents, 4);
 	squeeze(r_s.uv0, 2);
 	squeeze(r_s.uv1, 2);
+	squeeze(r_s.uv2, 2);
 	squeeze(r_s.colors, 4);
 	squeeze(r_s.bones, 4);
 	squeeze(r_s.weights, 4);
@@ -617,7 +619,9 @@ bool has_triangles(const PreparedMesh &p_mesh) {
 uint64_t prepared_bytes(const PreparedMesh &p_mesh) {
 	uint64_t bytes = 0;
 	for (const PreparedSurface &s : p_mesh.surfaces) {
-		bytes += (s.positions.size() + s.normals.size() + s.tangents.size() + s.uv0.size() + s.uv1.size() + s.weights.size()) * sizeof(float);
+		bytes += (s.positions.size() + s.normals.size() + s.tangents.size() + s.uv0.size() + s.uv1.size() +
+						 s.uv2.size() + s.weights.size()) *
+				sizeof(float);
 		bytes += s.colors.size() + s.parts.size() * sizeof(uint16_t) + (s.bones.size() + s.indices.size()) * sizeof(int32_t);
 	}
 	return bytes;

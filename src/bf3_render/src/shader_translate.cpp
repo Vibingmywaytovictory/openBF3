@@ -736,7 +736,8 @@ std::optional<std::string> attribute_lane(VertexInputLane p_lane) {
 	static constexpr Attribute kAttributes[] = { { VertexUsage::Position, "VERTEX", 3 },
 		{ VertexUsage::Normal, "NORMAL", 3 }, { VertexUsage::Tangent, "TANGENT", 3 },
 		{ VertexUsage::Binormal, "BINORMAL", 3 }, { VertexUsage::Color0, "COLOR", 4 },
-		{ VertexUsage::TexCoord0, "UV", 2 }, { VertexUsage(uint8_t(VertexUsage::TexCoord0) + 1), "UV2", 2 } };
+		{ VertexUsage::TexCoord0, "UV", 2 }, { VertexUsage(uint8_t(VertexUsage::TexCoord0) + 1), "UV2", 2 },
+		{ VertexUsage(uint8_t(VertexUsage::TexCoord0) + 2), "CUSTOM0", 2 } };
 	if (p_lane.usage == uint8_t(VertexUsage::BinormalSign) && p_lane.lane == 0) {
 		return std::string("(dot(BINORMAL, cross(NORMAL, TANGENT)) < 0.0 ? -1.0 : 1.0)");
 	}

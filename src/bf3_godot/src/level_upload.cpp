@@ -272,6 +272,7 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 	const bool tangents = normals && p_surface.tangents.size() == size_t(vc) * 4;
 	const bool uv0 = p_surface.uv0.size() == size_t(vc) * 2 && vc > 0;
 	const bool uv1 = uv0 && p_surface.uv1.size() == size_t(vc) * 2;
+	const bool uv2 = p_surface.uv2.size() == size_t(vc) * 2 && vc > 0;
 	const bool colors = p_surface.colors.size() == size_t(vc) * 4 && vc > 0;
 	uint64_t format = RenderingServer::ARRAY_FORMAT_VERTEX | RenderingServer::ARRAY_FORMAT_INDEX | RenderingServer::ARRAY_FLAG_FORMAT_CURRENT_VERSION;
 	if (normals) {
@@ -286,6 +287,10 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 	if (colors) {
 		format |= RenderingServer::ARRAY_FORMAT_COLOR;
 	}
+	if (uv2) {
+		format |= RenderingServer::ARRAY_FORMAT_CUSTOM0 |
+				(uint64_t(RenderingServer::ARRAY_CUSTOM_RG_FLOAT) << RenderingServer::ARRAY_FORMAT_CUSTOM0_SHIFT);
+	}
 	const BitField<RenderingServer::ArrayFormat> f = int64_t(format);
 	const int64_t vstride = rs->mesh_surface_get_format_vertex_stride(f, vc32);
 	const int64_t nstride = rs->mesh_surface_get_format_normal_tangent_stride(f, vc32);
@@ -296,6 +301,7 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 	const int64_t off_uv0 = uv0 ? rs->mesh_surface_get_format_offset(f, vc32, RenderingServer::ARRAY_TEX_UV) : 0;
 	const int64_t off_uv1 = uv1 ? rs->mesh_surface_get_format_offset(f, vc32, RenderingServer::ARRAY_TEX_UV2) : 0;
 	const int64_t off_color = colors ? rs->mesh_surface_get_format_offset(f, vc32, RenderingServer::ARRAY_COLOR) : 0;
+	const int64_t off_uv2 = uv2 ? rs->mesh_surface_get_format_offset(f, vc32, RenderingServer::ARRAY_CUSTOM0) : 0;
 
 	PackedByteArray vertex;
 	vertex.resize(vc * (vstride + (normals ? nstride : 0)));
@@ -346,6 +352,9 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 			}
 			if (colors) {
 				std::memcpy(aw + off_color + i * astride, &p_surface.colors[size_t(i) * 4], 4);
+			}
+			if (uv2) {
+				std::memcpy(aw + off_uv2 + i * astride, &p_surface.uv2[size_t(i) * 2], 8);
 			}
 		}
 	}
