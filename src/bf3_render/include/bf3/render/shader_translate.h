@@ -106,6 +106,8 @@ struct TranslatedProgram {
 	std::vector<ProgramConstant> constants;
 	size_t instructions = 0;
 	bool terrain_pages = false;
+	bool gloss = false;
+	std::string gloss_refusal;
 };
 
 inline constexpr uint32_t kDxgiR32G32B32A32Float = 2;

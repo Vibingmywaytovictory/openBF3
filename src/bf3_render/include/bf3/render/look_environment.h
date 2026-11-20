@@ -119,6 +119,7 @@ struct LookFrame {
 	LookVec3 sun_direction{ 0.0f, -1.0f, 0.0f };
 	LookVec3 sun_color{ 1.0f, 1.0f, 1.0f };
 	float sun_energy = 1.0f;
+	float sun_specular_scale = 1.0f;
 	LookVec3 ambient_up{}, ambient_horizon{}, ambient_down{};
 	LookSkyLobe sun_lobe, back_lobe;
 	float sky_brightness = 1.0f, sky_rotation = 0.0f, uv_min_y = 0.0f, uv_max_y = 1.0f;

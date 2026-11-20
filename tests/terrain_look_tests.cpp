@@ -4,6 +4,7 @@
 #include "bf3/core/res/terrain.h"
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/render/dxbc.h"
+#include "bf3/render/light_pass.h"
 #include "bf3/render/look_materials.h"
 #include "bf3/render/shader_translate.h"
 #include "bf3/render/terrain_look.h"
@@ -294,6 +295,8 @@ TEST_SUITE("render-terrain") {
 		CHECK(look->patch == doctest::Approx(16.0f));
 		for (const TerrainMaterial &mat : look->materials) {
 			CHECK(mat.code.find("ALBEDO") != std::string::npos);
+			CHECK(uses_light_pass(mat.code));
+			CHECK(mat.code.find("bf3_specular = max(o1.y * o1.y, 0.0);") != std::string::npos);
 			CHECK(!mat.textures.empty());
 		}
 		const auto combo_at = [&](float p_x, float p_z) {

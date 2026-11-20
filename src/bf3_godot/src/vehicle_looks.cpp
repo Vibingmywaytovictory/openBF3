@@ -16,7 +16,9 @@ using namespace godot;
 
 namespace bf3::godot_side {
 
-VehicleLooks::VehicleLooks(FindTexture p_find) : find_(std::move(p_find)) {}
+VehicleLooks::VehicleLooks(FindTexture p_find) : find_(std::move(p_find)) {
+	register_light_pass_globals();
+}
 
 Ref<Shader> VehicleLooks::look_shader(int p_alpha_mode, bool p_double_sided) {
 	const int key = p_alpha_mode * 2 + (p_double_sided ? 1 : 0);

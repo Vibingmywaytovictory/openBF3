@@ -1,6 +1,7 @@
 #include "bf3/render/shader_translate.h"
 
 #include "bf3/core/res/mesh_set.h"
+#include "bf3/render/light_pass.h"
 #include "bf3/render/shader_database.h"
 #include "bf3/render/terrain_page.h"
 
@@ -25,6 +26,7 @@ constexpr char kLanes[] = "xyzw";
 constexpr uint32_t kSystemPosition = 1;
 constexpr uint32_t kGbufferAlbedo = 1;
 constexpr uint32_t kGbufferNormal = 0;
+constexpr uint8_t kGlossLane = 3;
 constexpr const char *kViewConstants = "viewConstants";
 constexpr const char *kExternalPrefix = "external_";
 constexpr const char *kDepthTexture = "texture_depthBufferTexture";
@@ -1116,7 +1118,8 @@ bool colour_channel(uint32_t p_format) {
 
 class Translator {
 public:
-	explicit Translator(const ProgramRequest &p_request) : request_(p_request), ps_(*p_request.pixel) {
+	Translator(const ProgramRequest &p_request, bool p_gloss) :
+			request_(p_request), ps_(*p_request.pixel), gloss_(p_gloss && p_request.target == ProgramTarget::Deferred) {
 		for (const dxbc::Binding &b : ps_.bindings) {
 			if (b.type == uint32_t(dxbc::BindingType::Texture) && b.dimension == dxbc::kDimensionTextureCube) {
 				emitter_.cubes.insert(b.bind_point);
@@ -1193,7 +1196,9 @@ public:
 			return vertex.error();
 		}
 		out_.code = header() + head + common_uniforms() + *vertex + "void fragment() {\n" +
-				(request_.page_hidden ? terrain_page_hidden() : std::string()) + locals + body + tail() + "}\n";
+				(request_.page_hidden ? terrain_page_hidden() : std::string()) + locals + body + tail() + "}\n" +
+				(request_.target == ProgramTarget::Deferred ? light_pass_code() : std::string());
+		out_.gloss = gloss_;
 		return out_;
 	}
 
@@ -1235,6 +1240,13 @@ private:
 					}
 					outputs_used_.insert(kGbufferNormal);
 				}
+			}
+			if (gloss_) {
+				live.insert(lane_key(uint8_t(OperandType::Output), kGbufferAlbedo, kGlossLane));
+			}
+			if (gloss_ && normal) {
+				live.insert(lane_key(uint8_t(OperandType::Output), kGbufferNormal, kGlossLane));
+				outputs_used_.insert(kGbufferNormal);
 			}
 		} else {
 			for (uint8_t c = 0; c < 4; ++c) {
@@ -1672,7 +1684,8 @@ private:
 		if (request_.target != ProgramTarget::Deferred) {
 			return std::string();
 		}
-		return R"(uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
+		return light_pass_head() +
+				R"(uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool has_normal = false;
 uniform int normal_uv = 0;
 uniform float normal_scale = 1.0;
@@ -1717,11 +1730,10 @@ uniform float roughness_value = 0.6;
 )";
 		}
 		if (request_.target == ProgramTarget::Deferred) {
-			return R"(	ALBEDO = o1.xyz * o1.xyz;
-	ROUGHNESS = roughness_value;
-	METALLIC = 0.0;
-	SPECULAR = 0.5;
-	if (has_normal) {
+			return "\tALBEDO = o1.xyz * o1.xyz;\n" +
+					(gloss_ ? light_pass_gloss("o0.w", "o1.w * o1.w")
+							: light_pass_gloss("1.0 - roughness_value", std::to_string(kLookSpecular))) +
+					R"(	if (has_normal) {
 		NORMAL_MAP = vec3(texture(normal_tex, (normal_uv == 1 ? UV2 : UV) * normal_scale).rg, 1.0);
 	}
 )";
@@ -1749,6 +1761,7 @@ uniform float roughness_value = 0.6;
 	std::map<uint64_t, std::set<uint32_t>> input_usage_;
 	std::map<uint64_t, uint8_t> constants_;
 	std::set<uint32_t> outputs_used_;
+	bool gloss_ = false;
 	std::vector<uint32_t> textures_;
 	Emitter emitter_{ ConstantNames::Locals };
 	bool depth_ = false;
@@ -1842,8 +1855,20 @@ core::Result<TranslatedProgram> translate_program(const ProgramRequest &p_reques
 	if (p_request.pixel == nullptr || p_request.pixel->kind != dxbc::kPixelProgram) {
 		return refuse("no pixel program");
 	}
-	Translator t(p_request);
-	return t.run();
+	Translator albedo(p_request, false);
+	core::Result<TranslatedProgram> base = albedo.run();
+	if (!base || p_request.target != ProgramTarget::Deferred) {
+		return base;
+	}
+	ProgramRequest gloss_request = p_request;
+	gloss_request.analysis = nullptr;
+	Translator gloss(gloss_request, true);
+	core::Result<TranslatedProgram> glossy = gloss.run();
+	if (glossy) {
+		return glossy;
+	}
+	base->gloss_refusal = glossy.error().message;
+	return base;
 }
 
 }

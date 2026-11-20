@@ -361,6 +361,28 @@ int cmd_looks(const std::shared_ptr<Install> &p_install, const std::vector<std::
 					l1->programs[i]->translated.code.c_str());
 		}
 	}
+	if (std::find(p_args.begin(), p_args.end(), "--gloss") != p_args.end()) {
+		std::unique_ptr<render::LookResolver> resolver = render::LookResolver::open(level.mount());
+		std::map<std::string, size_t> reasons;
+		size_t gloss = 0;
+		for (const render::SceneMaterialPlan &m : l1->materials) {
+			const render::LookMaterial look =
+					resolver->resolve(m.slot, std::string_view(), render::LookPrograms::Deferred);
+			if (look.graph && look.graph->translated.gloss) {
+				++gloss;
+			} else if (look.graph) {
+				++reasons["lanes refused: " + look.graph->translated.gloss_refusal];
+			} else {
+				++reasons[look.graph_plain ? std::string("one colour texture, no lanes")
+										   : "no program: " + look.graph_refusal];
+			}
+		}
+		std::printf(
+				"gloss: %zu of %zu level materials resolved with their program's lanes\n", gloss, l1->materials.size());
+		for (const auto &[why, count] : reasons) {
+			std::printf("gloss: %zu %s\n", count, why.c_str());
+		}
+	}
 	if (!shader_dumps.empty()) {
 		std::unique_ptr<render::LookResolver> resolver = render::LookResolver::open(level.mount());
 		for (const std::string &name : shader_dumps) {

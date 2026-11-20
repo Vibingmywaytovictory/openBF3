@@ -384,7 +384,13 @@ TEST_SUITE("render-programs-unit") {
 		CHECK(code.find("o1.z = (vec4(dot((r0.xyzw), (cb0_2.xyzw)))).z;") != std::string::npos);
 		CHECK(code.find("\tvso1 = o1;\n}\n") != std::string::npos);
 		CHECK(code.find("vec4 v1 = vec4(vso1.x, 0.0, vso1.z, 0.0);") != std::string::npos);
-		CHECK(code.find("o0.") == std::string::npos);
+		const size_t vertex_at = code.find("void vertex() {"), fragment_at = code.find("void fragment() {");
+		REQUIRE((vertex_at != std::string::npos && fragment_at > vertex_at));
+		CHECK(code.substr(vertex_at, fragment_at - vertex_at).find("o0.") == std::string::npos);
+		CHECK(code.find("bf3_smoothness = clamp(o0.w, 0.0, 1.0);") != std::string::npos);
+		CHECK(code.find("bf3_specular = max(o1.w * o1.w, 0.0);") != std::string::npos);
+		CHECK(code.find("void light() {") != std::string::npos);
+		CHECK(t->gloss);
 		const std::vector<uint8_t> forward_blob = world_pixel_program(0, 0xF);
 		bf3::core::Result<dxbc::Program> forward_ps = dxbc::parse(forward_blob);
 		REQUIRE(forward_ps.ok());

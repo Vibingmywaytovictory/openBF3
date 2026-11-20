@@ -855,6 +855,7 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 		f.sun_color = { 1.0f, 1.0f, 1.0f };
 		f.sun_energy = 0.0f;
 	}
+	f.sun_specular_scale = p_s.sun_specular_scale;
 	const LookVec3 sky = p_s.enlighten && max3(p_s.sky_color) > 1e-6f ? p_s.sky_color : p_s.outdoor_sky;
 	const LookVec3 ground = p_s.enlighten && max3(p_s.ground_color) > 1e-6f ? p_s.ground_color : p_s.outdoor_ground;
 	f.ambient_up = sky;

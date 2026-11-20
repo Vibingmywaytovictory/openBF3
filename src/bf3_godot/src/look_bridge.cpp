@@ -5,6 +5,7 @@
 #include "level_upload.h"
 
 #include "bf3/core/util/format.h"
+#include "bf3/render/light_pass.h"
 
 #include <godot_cpp/classes/camera_attributes_practical.hpp>
 #include <godot_cpp/classes/compositor.hpp>
@@ -124,6 +125,7 @@ LookBridge::~LookBridge() {
 }
 
 void LookBridge::build(Node *p_parent, std::shared_ptr<const render::LevelScenePlan> p_plan) {
+	register_light_pass_globals();
 	plan_ = std::move(p_plan);
 	sun_ = memnew(DirectionalLight3D);
 	sun_->set_name("Sun");
@@ -247,6 +249,12 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 		s.sun_direction = p_f.sun_direction;
 		s.sun_color = p_f.sun_color;
 		s.sun_energy = p_f.sun_energy;
+	}
+
+	if (first || moved(s.sun_specular_scale, p_f.sun_specular_scale)) {
+		RenderingServer::get_singleton()->global_shader_parameter_set(
+				to_godot(std::string(render::kSunSpecularScaleGlobal)), p_f.sun_specular_scale);
+		s.sun_specular_scale = p_f.sun_specular_scale;
 	}
 
 	if (first || s.sun_shadow_distance != p_f.sun_shadow_distance) {

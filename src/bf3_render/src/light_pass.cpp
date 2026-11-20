@@ -1,6 +1,7 @@
 #include "bf3/render/light_pass.h"
 
 #include <bit>
+#include <cstdio>
 #include <optional>
 #include <vector>
 
@@ -198,4 +199,43 @@ core::Result<LightPassLobe> measure_light_pass(const dxbc::Program &p_program) {
 	return lobe;
 }
 
+std::string light_pass_head() {
+	return "varying float bf3_smoothness;\nvarying float bf3_specular;\nglobal uniform float " +
+			std::string(kSunSpecularScaleGlobal) + ";\n";
+}
+
+std::string light_pass_gloss(std::string_view p_smoothness, std::string_view p_specular) {
+	return "\tbf3_smoothness = clamp(" + std::string(p_smoothness) + ", 0.0, 1.0);\n\tbf3_specular = max(" +
+			std::string(p_specular) +
+			", 0.0);\n\tROUGHNESS = 1.0 - bf3_smoothness;\n\tMETALLIC = 0.0;\n\tSPECULAR = min(sqrt(bf3_specular) / "
+			"0.4, 1.0);\n";
+}
+
+std::string light_pass_code() {
+	char lobe[256];
+	std::snprintf(lobe, sizeof(lobe),
+			"\tfloat power = exp2(%#.9g * bf3_smoothness + %#.9g);\n\tfloat norm = (power + %#.9g) * %#.9g;\n",
+			double(kSpecularPowerScale), double(kSpecularPowerBias), double(kSpecularNormAdd),
+			double(kSpecularNormScale));
+	return "void light() {\n"
+		   "\tfloat n_dot_l = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);\n"
+		   "\tDIFFUSE_LIGHT += LIGHT_COLOR * ATTENUATION * (n_dot_l / PI);\n" +
+			std::string(lobe) +
+			"\tfloat n_dot_h = clamp(dot(NORMAL, normalize(LIGHT + VIEW)), 0.0, 1.0);\n"
+			"\tfloat scale = LIGHT_IS_DIRECTIONAL ? " +
+			std::string(kSunSpecularScaleGlobal) +
+			" : SPECULAR_AMOUNT * 0.5;\n"
+			"\tSPECULAR_LIGHT += LIGHT_COLOR * ATTENUATION * (n_dot_l * pow(n_dot_h, power) * norm * bf3_specular * "
+			"scale / PI);\n"
+			"}\n";
+}
+bool unshaded(std::string_view p_code) {
+	const size_t mode = p_code.find("render_mode ");
+	return mode != std::string_view::npos &&
+			p_code.substr(mode, p_code.find(';', mode) - mode).find("unshaded") != std::string_view::npos;
+}
+
+bool uses_light_pass(std::string_view p_code) {
+	return p_code.find("void light() {") != std::string_view::npos;
+}
 }

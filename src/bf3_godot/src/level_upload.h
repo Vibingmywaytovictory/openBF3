@@ -32,6 +32,8 @@ std::string look_shader_code(int p_alpha_mode, bool p_double_sided);
 
 int64_t look_uv(uint8_t p_channel);
 
+void register_light_pass_globals();
+
 void set_look_params(const godot::RID &p_material, const bf3::render::MaterialSlot &p_slot, bool p_has_albedo,
 		bool p_glass, const std::optional<std::array<float, 3>> &p_flat, bool p_flat_unlit);
 
@@ -60,6 +62,11 @@ struct UploadStats {
 	uint64_t double_sided_casters = 0;
 	uint64_t program_materials = 0;
 	uint64_t program_instances = 0;
+	uint64_t lit_materials = 0;
+	uint64_t gloss_materials = 0;
+	uint64_t level_materials = 0;
+	uint64_t terrain_lit = 0;
+	uint64_t terrain_materials = 0;
 
 	uint64_t failures = 0;
 	uint64_t queued_peak = 0;
@@ -149,6 +156,7 @@ private:
 	void update_scatter();
 	void update_detail();
 	void update_pages();
+	size_t generic_index(const bf3::render::SceneMaterialPlan &p_material) const;
 	godot::RID generic_shader(const bf3::render::SceneMaterialPlan &p_material) const;
 	void add_world_bounds(const std::optional<godot::AABB> &p_bounds, const godot::Transform3D &p_transform);
 

@@ -14,6 +14,7 @@ inline constexpr float kSpecularNormAdd = 8.0f;
 inline constexpr float kSpecularNormScale = 0.125f;
 inline constexpr float kEnvmapMipScale = 10.0f;
 inline constexpr float kTerrainSmoothness = 0.5f;
+inline constexpr float kLookSpecular = 0.04f;
 inline constexpr std::string_view kSunSpecularScaleGlobal = "bf3_sun_specular_scale";
 inline constexpr std::string_view kOutdoorLightProgram =
 		"Dx11/DeferredOutdoorLight_shadow=0,trans=0,shadowQuality=0,transShadow=0,cloud=0,skyVis=0,msaa=1,gbLayout=0";
@@ -28,4 +29,13 @@ struct LightPassLobe {
 
 core::Result<LightPassLobe> measure_light_pass(const dxbc::Program &p_program);
 
+std::string light_pass_head();
+
+std::string light_pass_gloss(std::string_view p_smoothness, std::string_view p_specular);
+
+std::string light_pass_code();
+
+bool uses_light_pass(std::string_view p_code);
+
+bool unshaded(std::string_view p_code);
 }

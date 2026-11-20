@@ -1,5 +1,7 @@
 #include "bf3/render/terrain_look.h"
 
+#include "bf3/render/light_pass.h"
+
 #include "bf3/core/ebx.h"
 #include "bf3/core/res/dx_texture.h"
 #include "bf3/core/superbundle_mount.h"
@@ -254,14 +256,16 @@ core::Result<std::string> terrain_shader_code(
 	if (!detail) {
 		return detail.error();
 	}
-	std::string code = std::move(*head);
+	std::string code = std::move(*head) + light_pass_head();
 	code += detail->functions;
 	code += "void fragment() {\nvec4 v1 = vec4(UV.x, UV.y, 0.0, 0.0);\n";
 	code += terrain_shader_locals(p_translation, p_material);
 	code += detail->body;
 	code += "vec3 terrain_colour = vec3(o0.y, o0.z, o2.x);\n"
 			"vec3 terrain_normal = normalize(vec3(o0.x, o1.z, o1.x) * 2.0 - 1.0);\n" +
-			terrain_page_output("terrain_colour", "terrain_normal") + "}\n";
+			terrain_page_output("terrain_colour", "terrain_normal");
+	code += light_pass_gloss(std::to_string(kTerrainSmoothness), terrain_page_camera() + " ? 0.0 : o1.y * o1.y") +
+			"}\n" + light_pass_code();
 	return code;
 }
 

@@ -3,6 +3,8 @@
 #include "godot_util.h"
 #include "texture_ledger.h"
 
+#include "bf3/render/light_pass.h"
+
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -161,11 +163,13 @@ uniform int normal_uv = 0;
 uniform float normal_scale = 1.0;
 uniform vec3 albedo_tint : source_color = vec3(0.55);
 uniform float roughness_value = 0.6;
-uniform float specular_value = 0.5;
+uniform float specular_value = )" +
+			std::to_string(render::kLookSpecular) + R"(;
 uniform vec3 emission_value = vec3(0.0);
 uniform float glass_opacity = 0.0;
 uniform float alpha_cut = 0.5;
-varying vec3 world_pos;
+)" + render::light_pass_head() +
+			R"(varying vec3 world_pos;
 varying vec3 world_nrm;
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -185,10 +189,8 @@ vec2 look_uv(int p_set, float p_scale, vec2 p_uv0, vec2 p_uv1) {
 void fragment() {
 	vec4 c = has_albedo ? texture(albedo_tex, look_uv(albedo_uv, albedo_scale, UV, UV2)) : vec4(1.0);
 	ALBEDO = c.rgb * albedo_tint;
-	ROUGHNESS = roughness_value;
-	METALLIC = 0.0;
-	SPECULAR = specular_value;
-	EMISSION = emission_value;
+)" + render::light_pass_gloss("1.0 - roughness_value", "specular_value") +
+			R"(	EMISSION = emission_value;
 	if (has_normal) {
 		NORMAL_MAP = vec3(texture(normal_tex, look_uv(normal_uv, normal_scale, UV, UV2)).rg, 1.0);
 	}
@@ -198,7 +200,7 @@ void fragment() {
 	} else if (p_alpha_mode == 2) {
 		code += "\tALPHA = glass_opacity > 0.0 ? glass_opacity : c.a;\n";
 	}
-	code += "}\n";
+	code += "}\n" + render::light_pass_code();
 	return code;
 }
 }
@@ -209,6 +211,15 @@ std::string look_shader_code(int p_alpha_mode, bool p_double_sided) {
 
 int64_t look_uv(uint8_t p_channel) {
 	return int64_t(p_channel == render::kLookUvOverlay ? render::kLookUv0 : p_channel);
+}
+
+void register_light_pass_globals() {
+	static std::atomic<bool> registered{ false };
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs != nullptr && !registered.exchange(true)) {
+		rs->global_shader_parameter_add(
+				to_godot(std::string(render::kSunSpecularScaleGlobal)), RenderingServer::GLOBAL_VAR_TYPE_FLOAT, 1.0f);
+	}
 }
 
 void set_look_params(const RID &p_material, const render::MaterialSlot &p_slot, bool p_has_albedo, bool p_glass,
@@ -427,6 +438,7 @@ void LevelUpload::begin(std::shared_ptr<const render::LevelScenePlan> p_plan, co
 		}
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
+	register_light_pass_globals();
 	if (plan.look == render::SceneLook::L1) {
 		for (int v = 0; v < 6; ++v) {
 			const RID shader = rs->shader_create();
@@ -695,11 +707,17 @@ void LevelUpload::create_materials(double p_deadline_us) {
 			if (plan.look == render::SceneLook::L1) {
 
 				const bool program = mp.program >= 0 && !graph_programs_off();
+				const size_t generic = generic_index(mp);
 				rs->material_set_shader(
-						m, program ? shaders_[program_shaders_ + size_t(mp.program)] : generic_shader(mp));
-				if (program) {
+						m, program ? shaders_[program_shaders_ + size_t(mp.program)] : shaders_[generic]);
+				{
+					const std::string code = program ? plan.programs[size_t(mp.program)]->translated.code
+													 : shader_code_l1(int(generic / 2), (generic & 1) != 0);
 					std::lock_guard lock(stats_mutex_);
-					++stats_.program_materials;
+					stats_.program_materials += program ? 1 : 0;
+					stats_.gloss_materials += program && plan.programs[size_t(mp.program)]->translated.gloss ? 1 : 0;
+					stats_.lit_materials += render::uses_light_pass(code) ? 1 : 0;
+					stats_.level_materials += render::unshaded(code) ? 0 : 1;
 				}
 				if (program && mp.look) {
 					const std::vector<render::ProgramConstant> &constants =
@@ -836,6 +854,11 @@ void LevelUpload::create_terrain_look(const Done &p_done) {
 			}
 		}
 		rs->shader_set_code(shader, to_godot(code));
+		{
+			std::lock_guard lock(stats_mutex_);
+			stats_.terrain_materials += render::unshaded(code) ? 0 : 1;
+			stats_.terrain_lit += render::uses_light_pass(code) ? 1 : 0;
+		}
 		const RID material = rs->material_create();
 		rs->material_set_shader(material, shader);
 		rs->material_set_render_priority(material, m.render_priority);
@@ -1097,10 +1120,14 @@ void LevelUpload::update_pages() {
 	}
 }
 
-RID LevelUpload::generic_shader(const render::SceneMaterialPlan &p_material) const {
+size_t LevelUpload::generic_index(const render::SceneMaterialPlan &p_material) const {
 	static const bool blend_off = ("," + user_arg_value("look-off") + ",").find(",blend,") != std::string::npos;
 	const int mode = p_material.blend && !blend_off ? 2 : (p_material.alpha_test ? 1 : 0);
-	return shaders_[size_t(2 * mode + (p_material.double_sided ? 1 : 0))];
+	return size_t(2 * mode + (p_material.double_sided ? 1 : 0));
+}
+
+RID LevelUpload::generic_shader(const render::SceneMaterialPlan &p_material) const {
+	return shaders_[generic_index(p_material)];
 }
 
 ScatterDrawStats LevelUpload::scatter_stats() const {

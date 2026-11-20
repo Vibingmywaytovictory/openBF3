@@ -3,6 +3,7 @@
 #include "bf3/core/superbundle_mount.h"
 #include "bf3/core/util/text.h"
 #include "bf3/render/dxbc.h"
+#include "bf3/render/light_pass.h"
 #include "bf3/render/shader_database.h"
 #include "bf3/render/terrain_page.h"
 #include "bf3/render/terrain_program.h"
@@ -267,7 +268,7 @@ core::Result<std::string> terrain_decal_shader_code(
 	if (!head) {
 		return head.error();
 	}
-	std::string code = std::move(*head);
+	std::string code = std::move(*head) + light_pass_head();
 	code += "void vertex() {\nVERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz * (" + terrain_page_camera() +
 			" ? 1.0 : " + std::to_string(1.0f - kTerrainDecalViewPull) +
 			");\nNORMAL = normalize((MODELVIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);\n"
@@ -280,7 +281,10 @@ core::Result<std::string> terrain_decal_shader_code(
 	code += "float decal_cover = max(o0.w, 0.0001);\n"
 			"vec3 decal_colour = vec3(o0.y, o0.z, o2.x) / decal_cover;\n"
 			"vec3 decal_normal = normalize(vec3(o0.x, o1.z, o1.x) / decal_cover * 2.0 - 1.0);\n" +
-			terrain_page_output("decal_colour", "decal_normal") + "ALPHA = clamp(o0.w, 0.0, 1.0);\n}\n";
+			terrain_page_output("decal_colour", "decal_normal") + "ALPHA = clamp(o0.w, 0.0, 1.0);\n";
+	code += light_pass_gloss(std::to_string(kTerrainSmoothness),
+					terrain_page_camera() + " ? 0.0 : (o1.y / decal_cover) * (o1.y / decal_cover)") +
+			"}\n" + light_pass_code();
 	return code;
 }
 
