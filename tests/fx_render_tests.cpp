@@ -384,6 +384,32 @@ TEST_CASE(
 	CHECK(prep.lights()[0].first_person);
 }
 
+TEST_CASE("exclusion volumes: an ExclusionVolumeCullEnable emitter's particles inside a volume are not drawn, other "
+		  "emitters' are") {
+	const EmitterAtlas atlas = make_atlas();
+	FxWorld w;
+	const auto culled = fxt::effect_def(
+			"culled", { burst("c", 4, EmittableType::ScreenAlignedQuad, kEmitterExclusionVolumeCull) }, { 0 }, 2);
+	const auto kept = fxt::effect_def("kept", { burst("k", 3) });
+	REQUIRE(w.start(culled, at(0, 0, 10, 1)).ok());
+	REQUIRE(w.start(kept, at(0, 0, 10, 2)).ok());
+	REQUIRE(w.start(culled, at(0, 0, 20, 3)).ok());
+	fx_step_frame(w, 1.0f / 60.0f);
+	RenderPrep prep;
+	prep.prepare(w, view_along_z(), atlas);
+	CHECK(prep.instances().size() == 11);
+	CHECK(prep.stats().excluded_particles == 0);
+	FxExclusionVolume v;
+	v.transform.trans = Vec3{ 0, 0, 10 };
+	v.half_extents = Vec3{ 2, 2, 2 };
+	prep.set_exclusion_volumes({ v });
+	prep.prepare(w, view_along_z(), atlas);
+	CHECK(prep.instances().size() == 7);
+	CHECK(prep.stats().excluded_particles == 4);
+	CHECK(fx_inside_exclusion_volume(v, Vec3{ 1.9f, -1.9f, 11.9f }));
+	CHECK_FALSE(fx_inside_exclusion_volume(v, Vec3{ 0, 2.1f, 10 }));
+}
+
 TEST_CASE("atlas pixels: NormalDXT5RGA -> BC5 on synthetic blocks") {
 
 	std::vector<uint8_t> block(16, 0);

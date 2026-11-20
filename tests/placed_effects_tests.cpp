@@ -3,6 +3,7 @@
 #include "bf3/core/level/world.h"
 #include "bf3/fx/effect_compiler.h"
 #include "bf3/fx/placed_effects.h"
+#include "bf3/fx/render_prep.h"
 #include "bf3/fx/simulator.h"
 #include "fx_test_support.h"
 #include "test_support.h"
@@ -226,5 +227,44 @@ TEST_SUITE("placed-effects") {
 
 	TEST_CASE("placed effects: MP_018 ConquestLarge0 starts what the level places") {
 		check_placed_effects("MP_018", "ConquestLarge0", PlacedCounts{ 271, 204, 39 });
+	}
+
+	TEST_CASE("emitter exclusion volumes: MP_001's 34 rain occluders are read as boxes their centres are inside and a "
+			  "point past each face is outside; Caspian and Metro place none") {
+		test::Mounted *m = test::shared_mount_or_skip();
+		if (m == nullptr) {
+			return;
+		}
+		for (const auto &[name, expected] : { std::pair{ "MP_001", size_t(34) }, std::pair{ "MP_007", size_t(0) },
+					 std::pair{ "MP_Subway", size_t(0) } }) {
+			CAPTURE(name);
+			Result<std::unique_ptr<level::LoadedLevel>> loaded = level::load_level(m->install, name, "ConquestLarge0");
+			REQUIRE(loaded.ok());
+			Result<std::unique_ptr<level::World>> world = level::World::traverse(**loaded);
+			REQUIRE(world.ok());
+			Result<std::vector<level::EmitterExclusionVolume>> volumes = level::read_emitter_exclusion_volumes(**world);
+			REQUIRE_MESSAGE(volumes.ok(), (volumes.ok() ? std::string() : volumes.error().message));
+			size_t inside = 0, outside = 0;
+			for (const level::EmitterExclusionVolume &v : *volumes) {
+				CHECK(v.half_extents.x > 0.0f);
+				CHECK(v.half_extents.y > 0.0f);
+				CHECK(v.half_extents.z > 0.0f);
+				fx::FxExclusionVolume f;
+				f.transform.right = v.transform.right;
+				f.transform.up = v.transform.up;
+				f.transform.forward = v.transform.forward;
+				f.transform.trans = v.transform.trans;
+				f.half_extents = v.half_extents;
+				inside += fx::fx_inside_exclusion_volume(f, f.transform.trans) ? 1 : 0;
+				const float k = 1.01f * v.half_extents.y;
+				const fx::Vec3 above{ f.transform.trans.x + f.transform.up.x * k,
+					f.transform.trans.y + f.transform.up.y * k, f.transform.trans.z + f.transform.up.z * k };
+				outside += fx::fx_inside_exclusion_volume(f, above) ? 0 : 1;
+			}
+			std::printf("%s: %zu emitter exclusion volumes\n", name, volumes->size());
+			CHECK(volumes->size() == expected);
+			CHECK(inside == volumes->size());
+			CHECK(outside == volumes->size());
+		}
 	}
 }

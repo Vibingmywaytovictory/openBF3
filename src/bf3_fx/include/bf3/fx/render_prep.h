@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 namespace bf3::fx {
 
@@ -97,6 +98,13 @@ struct FxLight {
 };
 static_assert(std::is_trivially_copyable_v<FxLight>);
 
+struct FxExclusionVolume {
+	Transform transform;
+	Vec3 half_extents;
+};
+
+bool fx_inside_exclusion_volume(const FxExclusionVolume &p_volume, const Vec3 &p_point);
+
 struct RenderPrepStats {
 	uint32_t instances = 0;
 	uint32_t batches = 0;
@@ -107,6 +115,7 @@ struct RenderPrepStats {
 	uint32_t unresolved_this_frame = 0;
 	uint32_t mesh_instances = 0;
 	uint32_t first_person_instances = 0;
+	uint32_t excluded_particles = 0;
 	uint64_t frames = 0;
 	double prepare_ms = 0;
 };
@@ -119,6 +128,7 @@ public:
 	RenderPrep &operator=(const RenderPrep &) = delete;
 
 	void prepare(const FxWorld &p_world, const FxView &p_view, const EmitterAtlas &p_atlas);
+	void set_exclusion_volumes(std::vector<FxExclusionVolume> p_volumes);
 	std::span<const FxInstance> instances() const;
 	std::span<const FxBatch> batches() const;
 	std::span<const FxLight> lights() const;

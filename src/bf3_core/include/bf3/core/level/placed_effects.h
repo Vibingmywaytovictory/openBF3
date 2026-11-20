@@ -21,4 +21,12 @@ struct PlacedEffect {
 
 Result<std::vector<PlacedEffect>> read_placed_effects(const World &p_world);
 
+struct EmitterExclusionVolume {
+	uint32_t object = 0;
+	LevelTransform transform;
+	Vec3 half_extents{};
+};
+
+Result<std::vector<EmitterExclusionVolume>> read_emitter_exclusion_volumes(const World &p_world);
+
 }

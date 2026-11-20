@@ -69,6 +69,9 @@ public:
 
 	const FxRendererStats &stats() const { return stats_; }
 	const bf3::fx::RenderPrep &prep() const { return prep_; }
+	void set_exclusion_volumes(std::vector<bf3::fx::FxExclusionVolume> p_volumes) {
+		prep_.set_exclusion_volumes(std::move(p_volumes));
+	}
 
 protected:
 	static void _bind_methods();

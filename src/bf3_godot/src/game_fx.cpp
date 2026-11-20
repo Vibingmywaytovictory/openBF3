@@ -87,6 +87,7 @@ struct Bf3GameFx::Impl {
 	std::vector<fx::MuzzleSample> muzzles;
 	std::vector<fx::EffectSoundCue> effect_cues;
 	std::vector<fx::EffectHandle> impact_lit;
+	std::vector<fx::FxExclusionVolume> exclusion;
 	std::vector<std::string> notes;
 	GameFxStats stats;
 	bool loaded = false;
@@ -363,6 +364,25 @@ core::Status Bf3GameFx::load(const GameLoadInputs &p_in) {
 		for (const core::level::PlacedEffect &e : placed) {
 			names.push_back(e.blueprint);
 		}
+		m.exclusion.clear();
+		if (p_in.db->world != nullptr) {
+			core::Result<std::vector<core::level::EmitterExclusionVolume>> volumes =
+					core::level::read_emitter_exclusion_volumes(*p_in.db->world);
+			if (!volumes) {
+				m.notes.push_back("emitter exclusion volumes: " + volumes.error().message);
+			} else {
+				for (const core::level::EmitterExclusionVolume &v : *volumes) {
+					fx::FxExclusionVolume f;
+					f.transform.right = v.transform.right;
+					f.transform.up = v.transform.up;
+					f.transform.forward = v.transform.forward;
+					f.transform.trans = v.transform.trans;
+					f.half_extents = v.half_extents;
+					m.exclusion.push_back(f);
+				}
+				m.notes.push_back(fmt("emitter exclusion volumes: %zu", m.exclusion.size()));
+			}
+		}
 		std::sort(names.begin(), names.end());
 		names.erase(std::unique(names.begin(), names.end()), names.end());
 		const size_t failed = m.library->preload(names, p_in.threads);
@@ -522,6 +542,7 @@ bool Bf3GameFx::build(Node3D *p_parent, std::string *r_error) {
 		return fail("Bf3GameFx::build: " + (err.empty() ? std::string("effect meshes: no world") : err));
 	}
 	m.renderer->set_meshes(&m.meshes);
+	m.renderer->set_exclusion_volumes(m.exclusion);
 	m.stats.decal_textures = m.decals.stats().textures;
 	m.built = true;
 	return true;

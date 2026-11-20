@@ -199,6 +199,7 @@ struct RenderPrep::Impl {
 	std::unordered_map<const EmitterDef *, Resolved> resolved;
 	const EmitterAtlas *atlas = nullptr;
 	const AtlasEntry *default_entry = nullptr;
+	std::vector<FxExclusionVolume> exclusion;
 	RenderPrepStats stats;
 
 	const Resolved &resolve(const EmitterDef &p_e, const EmitterAtlas &p_atlas) {
@@ -238,6 +239,23 @@ RenderPrep::RenderPrep() :
 }
 
 RenderPrep::~RenderPrep() = default;
+
+bool fx_inside_exclusion_volume(const FxExclusionVolume &p_volume, const Vec3 &p_point) {
+	const Vec3 d = sub(p_point, p_volume.transform.trans);
+	const Vec3 axes[3] = { p_volume.transform.right, p_volume.transform.up, p_volume.transform.forward };
+	const float half[3] = { p_volume.half_extents.x, p_volume.half_extents.y, p_volume.half_extents.z };
+	for (int i = 0; i < 3; ++i) {
+		const float len2 = dot(axes[i], axes[i]);
+		if (!(len2 > 0.0f) || std::fabs(dot(d, axes[i])) > half[i] * len2) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void RenderPrep::set_exclusion_volumes(std::vector<FxExclusionVolume> p_volumes) {
+	impl_->exclusion = std::move(p_volumes);
+}
 
 void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const EmitterAtlas &p_atlas) {
 	const auto t0 = std::chrono::steady_clock::now();
@@ -346,7 +364,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 
 	m.batches.clear();
 	m.instances.resize(particles.size());
-	uint32_t written = 0, mesh_instances = 0, first_person = 0;
+	uint32_t written = 0, mesh_instances = 0, first_person = 0, excluded = 0;
 	for (size_t pass = 0; pass < kFxPassCount; ++pass) {
 		for (const FxBlend blend : kBlendDrawOrder) {
 			for (size_t sc = 0; sc < kFxShaderClassCount; ++sc) {
@@ -373,11 +391,20 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 					const Vec3 ey = normalized(et.up, Vec3{ 0, 1, 0 });
 					const Vec3 ez = normalized(et.forward, Vec3{ 0, 0, 1 });
 					const EmitterDef &drawn = o.def->emitters[o.emitter];
+					const bool culled_by_volumes = (drawn.tmpl.flags & kEmitterExclusionVolumeCull) != 0 &&
+							!o.first_person && !m.exclusion.empty();
 					++batch.emitters;
 					for (uint32_t k = 0; k < o.particle_count; ++k) {
 						ParticleVertex p = particles[o.first_particle + k];
 						if (written >= m.instances.size()) {
 							break;
+						}
+						if (culled_by_volumes &&
+								std::any_of(m.exclusion.begin(), m.exclusion.end(), [&p](const FxExclusionVolume &v) {
+									return fx_inside_exclusion_volume(v, p.position);
+								})) {
+							++excluded;
+							continue;
 						}
 						if (!o.first_person) {
 							const float s = fx_distance_scale(drawn.tmpl, length(sub(p.position, cam)));
@@ -466,6 +493,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 	st.unresolved_this_frame = unresolved;
 	st.mesh_instances = mesh_instances;
 	st.first_person_instances = first_person;
+	st.excluded_particles = excluded;
 	++st.frames;
 	st.prepare_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 }
