@@ -13,6 +13,7 @@
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -36,9 +37,8 @@ constexpr float kAtSurface = 0.1f;
 constexpr float kAboveBed = 0.5f;
 constexpr float kBankReach = 3.0f;
 constexpr std::array<float, 3> kShotAlong{ 0.4f, 0.7f, 1.0f };
-constexpr float kCameraBack = 4.0f;
-constexpr float kCameraUp = 3.0f;
-
+constexpr float kCameraShort = 7.0f;
+constexpr float kCameraUp = 2.5f;
 }
 
 WaterRunCheck::WaterRunCheck(std::string p_shots) :
@@ -104,11 +104,11 @@ void WaterRunCheck::drive_other(bool p_forward) {
 
 void WaterRunCheck::aim_free_camera(Bf3LevelSession &r_session) {
 	const float sy = std::sin(yaw_), cy = std::cos(yaw_);
-	const float pitch = -std::atan2(spot_->bank[1] + kCameraUp - spot_->surface, spot_->run + kCameraBack);
+	const float along = std::max(0.0f, spot_->run - kCameraShort);
+	const float pitch = -std::atan2(kCameraUp, spot_->run - along);
 	r_session.mapper().script_view(yaw_, pitch);
 	r_session.cameras().place_free(
-			Vector3(spot_->bank[0] - sy * kCameraBack, spot_->bank[1] + kCameraUp, spot_->bank[2] - cy * kCameraBack),
-			yaw_, pitch);
+			Vector3(spot_->bank[0] + sy * along, spot_->surface + kCameraUp, spot_->bank[2] + cy * along), yaw_, pitch);
 }
 
 bool WaterRunCheck::step(Bf3LevelSession &r_session, const WaterRunInputs &p_in, double p_delta) {
