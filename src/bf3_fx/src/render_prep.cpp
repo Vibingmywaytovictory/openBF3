@@ -100,6 +100,21 @@ FxBatchKey fx_batch_key(const EmitterDef &p_emitter, bool p_first_person) {
 	return k;
 }
 
+bool fx_emittable_drawn(EmittableType p_type) {
+	switch (p_type) {
+		case EmittableType::ScreenAlignedQuad:
+		case EmittableType::DirectionAlignedQuad:
+		case EmittableType::WorldAlignedQuad:
+		case EmittableType::Quad:
+		case EmittableType::ParticleMesh:
+			return true;
+		case EmittableType::Trail:
+		case EmittableType::Point:
+			return false;
+	}
+	return false;
+}
+
 float fx_distance_scale(const EmitterTemplateDef &p_template, float p_distance) {
 	const float near_scale = p_template.distance_scale_near, far_scale = p_template.distance_scale_far;
 	if (!std::isfinite(near_scale) || !std::isfinite(far_scale) || !std::isfinite(p_distance)) {
@@ -325,6 +340,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 
 		const float depth = dot(sub(o.emitter_transform.trans, cam), fwd);
 		if (o.particle_count > 0 && size_t(o.first_particle) + o.particle_count <= particles.size()) {
+			m.stats.particles_by_type[size_t(e.tmpl.emittable)] += o.particle_count;
 			m.per_batch[fx_batch_index(fx_batch_key(e, o.first_person))].push_back(OutputRef{ uint32_t(i), std::isfinite(depth) ? depth : 0.0f });
 		}
 
@@ -405,6 +421,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 									return fx_inside_exclusion_volume(v, p.position);
 								})) {
 							++excluded;
+							++m.stats.excluded_by_type[size_t(drawn.tmpl.emittable)];
 							continue;
 						}
 						if (!o.first_person) {
@@ -414,6 +431,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 						p.position = fx_pivoted_position(
 								key.shader, world_aligned, drawn.params.size_pivot, p, ex, ey, view_right, view_up);
 						FxInstance &in = m.instances[written++];
+						++m.stats.instances_by_type[size_t(drawn.tmpl.emittable)];
 						const float c = std::cos(p.rotation), s = std::sin(p.rotation);
 						switch (key.shader) {
 							case FxShaderClass::Saq:

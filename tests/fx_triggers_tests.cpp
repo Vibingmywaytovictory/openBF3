@@ -40,6 +40,7 @@
 #include "bf3/sim_harness/shooting_range.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -1587,10 +1588,9 @@ std::unique_ptr<LevelFx> level_fx(const std::shared_ptr<core::Install> &p_instal
 }
 
 TEST_SUITE("fx-install-cells") {
-	TEST_CASE("mesh particles: every ParticleMesh emitter of Metro's and Caspian's effects is white and opaque in the "
-			  "data "
-			  "(no colour, transparency or alpha processor, Color 1 1 1), and its mesh loads with every texture its "
-			  "materials name") {
+	TEST_CASE("mesh particles: every emitter of Metro's and Caspian's effects is of a type with a drawer; every "
+			  "ParticleMesh emitter is white and opaque in the data (no colour, transparency or alpha processor, Color "
+			  "1 1 1), and its mesh loads with every texture its materials name") {
 		Retail r;
 		if (!open_retail(r)) {
 			return;
@@ -1600,17 +1600,20 @@ TEST_SUITE("fx-install-cells") {
 			std::unique_ptr<LevelFx> fx = level_fx(r.install, level, true);
 			core::EbxLibrary &lib = *fx->sources->level;
 			std::set<std::string> meshes;
-			size_t emitters = 0, tinted = 0, compiled = 0;
+			size_t emitters = 0, tinted = 0, compiled = 0, failed = 0;
+			std::array<size_t, kEmittableTypeCount> by_type{};
 			for (const core::EbxLibrary::Entry &e : lib.entries()) {
 				if (e.partition == nullptr || e.partition->primary().type_name() != "EffectBlueprint") {
 					continue;
 				}
 				core::Result<std::shared_ptr<const EffectDef>> def = fx->library->get(e.name);
 				if (!def) {
+					++failed;
 					continue;
 				}
 				++compiled;
 				for (const EmitterDef &m : (*def)->emitters) {
+					++by_type[size_t(m.tmpl.emittable)];
 					if (m.tmpl.emittable != EmittableType::ParticleMesh) {
 						continue;
 					}
@@ -1665,6 +1668,16 @@ TEST_SUITE("fx-install-cells") {
 									   << " without a Diffuse texture, " << set->shader_textures
 									   << " textures from the shader database, " << loaded << " of " << wanted.size()
 									   << " Diffuse textures loaded");
+			std::string types;
+			size_t without_drawer = 0;
+			for (size_t t = 0; t < kEmittableTypeCount; ++t) {
+				types += " " + std::string(emittable_type_name(EmittableType(t))) + " " + std::to_string(by_type[t]);
+				without_drawer += fx_emittable_drawn(EmittableType(t)) ? 0 : by_type[t];
+			}
+			MESSAGE(std::string(level) << ": emitters by type:" << types << "; " << without_drawer
+									   << " of a type without a drawer, " << failed << " effects that do not compile");
+			CHECK(without_drawer == 0);
+			CHECK(failed == 0);
 			CHECK(emitters > 0);
 			CHECK(tinted == 0);
 			CHECK(set->failed == 0);

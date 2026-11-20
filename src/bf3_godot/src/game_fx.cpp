@@ -857,6 +857,30 @@ void Bf3GameFx::shutdown() {
 				(unsigned long long)st.light_audit.particle_lights, (unsigned long long)st.light_audit.off_mean,
 				(unsigned long long)st.light_audit.lit_emitters)));
 	}
+	if (m.built) {
+		if (Bf3FxRenderer *r = m.live_renderer()) {
+			const fx::RenderPrepStats &ps = r->prep().stats();
+			std::string by_type;
+			uint64_t undrawn = 0, no_drawer = 0;
+			for (size_t t = 0; t < fx::kEmittableTypeCount; ++t) {
+				const uint64_t shown = ps.instances_by_type[t] + ps.excluded_by_type[t];
+				undrawn += ps.particles_by_type[t] > shown ? ps.particles_by_type[t] - shown : 0u;
+				no_drawer += fx::fx_emittable_drawn(fx::EmittableType(t)) ? 0u : ps.particles_by_type[t];
+				if (ps.particles_by_type[t] > 0) {
+					by_type += fmt("%s%s %llu drawn and %llu excluded of %llu", by_type.empty() ? "" : ", ",
+							std::string(fx::emittable_type_name(fx::EmittableType(t))).c_str(),
+							(unsigned long long)ps.instances_by_type[t], (unsigned long long)ps.excluded_by_type[t],
+							(unsigned long long)ps.particles_by_type[t]);
+				}
+			}
+			UtilityFunctions::print(
+					to_godot(fmt("[game] effect particles by type: %s; %llu particles not drawn, %llu of "
+								 "a type without a drawer; mesh particles %llu drawn of %llu instances",
+							by_type.c_str(), (unsigned long long)undrawn, (unsigned long long)no_drawer,
+							(unsigned long long)m.meshes.stats().drawn_total,
+							(unsigned long long)ps.instances_by_type[size_t(fx::EmittableType::ParticleMesh)])));
+		}
+	}
 	m.placed.forget();
 	m.decals.clear();
 	if (Bf3FxRenderer *r = m.live_renderer()) {

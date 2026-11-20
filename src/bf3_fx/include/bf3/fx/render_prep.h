@@ -4,6 +4,7 @@
 #include "bf3/fx/fx_types.h"
 #include "bf3/fx/simulator.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -62,6 +63,7 @@ struct FxBatchKey {
 };
 
 FxBatchKey fx_batch_key(const EmitterDef &p_emitter, bool p_first_person);
+bool fx_emittable_drawn(EmittableType p_type);
 
 float fx_distance_scale(const EmitterTemplateDef &p_template, float p_distance);
 
@@ -128,6 +130,9 @@ struct RenderPrepStats {
 	uint32_t mesh_instances = 0;
 	uint32_t first_person_instances = 0;
 	uint32_t excluded_particles = 0;
+	std::array<uint64_t, kEmittableTypeCount> particles_by_type{};
+	std::array<uint64_t, kEmittableTypeCount> instances_by_type{};
+	std::array<uint64_t, kEmittableTypeCount> excluded_by_type{};
 	uint64_t frames = 0;
 	double prepare_ms = 0;
 };
