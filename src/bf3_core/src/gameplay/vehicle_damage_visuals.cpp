@@ -26,6 +26,10 @@ constexpr int32_t kHealthNormalized = logic_port_id("CurrentHealthNormalized");
 constexpr int32_t kOnEnabled = logic_port_id("OnEnabled");
 constexpr int32_t kOnSuccess = logic_port_id("OnSuccess");
 constexpr int32_t kOnFail = logic_port_id("OnFail");
+constexpr int32_t kOnStart = logic_port_id("OnStart");
+constexpr int32_t kOnStop = logic_port_id("OnStop");
+constexpr int32_t kOnBoostStart = logic_port_id("OnBoostStart");
+constexpr int32_t kOnBoostStop = logic_port_id("OnBoostStop");
 
 struct Framed {
 	EbxInstance component;
@@ -260,6 +264,43 @@ Status read_damage(const EbxResolver &p_db, const LogicConnections &p_vehicle, c
 	return r_budget.status();
 }
 
+Status read_engine(const EbxResolver &p_db, const LogicConnections &p_vehicle, const std::vector<Framed> &p_frames,
+		WorkBudget &r_budget, VehicleDamageVisualsDef &r_out) {
+	struct Port {
+		int32_t start;
+		int32_t stop;
+		VehicleEngineEvent on;
+	};
+	static constexpr Port kPorts[] = { { kOnStart, kOnStop, VehicleEngineEvent::Running },
+		{ kOnBoostStart, kOnBoostStop, VehicleEngineEvent::Boost } };
+	for (const LogicConnection &e : p_vehicle.event) {
+		if (!e.source.is_a("EngineComponentData") || !e.target.is_a("EffectComponentData") ||
+				e.target_field != kStart) {
+			continue;
+		}
+		const Port *port = nullptr;
+		for (const Port &p : kPorts) {
+			port = e.source_field == p.start ? &p : port;
+		}
+		const Framed *where = framed(p_frames, e.target);
+		const std::optional<EbxInstance> effect = p_db.follow(e.target.data(), "Effect");
+		if (port == nullptr || where == nullptr || !effect) {
+			++r_out.unresolved;
+			continue;
+		}
+		VehicleEngineEffectDef d;
+		d.effect = partition_name(r_budget, p_db, *effect);
+		d.transform = model_transform(where->frame);
+		d.on = port->on;
+		d.stops = std::any_of(p_vehicle.event.begin(), p_vehicle.event.end(), [&](const LogicConnection &s) {
+			return s.source == e.source && s.source_field == port->stop && s.target == e.target &&
+					s.target_field == kStop;
+		});
+		r_out.engine.push_back(std::move(d));
+	}
+	return r_budget.status();
+}
+
 std::optional<EbxInstance> wreck_state(
 		WorkBudget &r_budget, const EbxResolver &p_db, const std::vector<Framed> &p_frames, const Framed **r_at) {
 	for (const Framed &f : p_frames) {
@@ -373,6 +414,7 @@ Result<VehicleDamageVisualsDef> read_vehicle_damage_visuals(
 		return vehicle.error();
 	}
 	BF3_TRY(read_damage(p_db, *vehicle, all, r_budget, out));
+	BF3_TRY(read_engine(p_db, *vehicle, all, r_budget, out));
 	BF3_TRY(read_wreck(p_db, all, r_budget, out));
 	return out;
 }

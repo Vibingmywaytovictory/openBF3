@@ -46,6 +46,9 @@ struct GameVehiclesStats {
 	uint64_t damage_starts = 0;
 	uint64_t damage_stops = 0;
 	uint32_t damage_live = 0;
+	uint64_t engine_starts = 0;
+	uint64_t engine_stops = 0;
+	uint32_t engine_live = 0;
 	uint64_t husks = 0;
 	uint64_t husk_effects = 0;
 	uint32_t husks_live = 0;
@@ -104,6 +107,7 @@ public:
 	const host::LevelVehicles *level() const { return level_.get(); }
 	const GameVehiclesStats &stats() const { return stats_; }
 	std::optional<GameVehicleView> view(uint16_t p_spawner) const;
+	uint32_t engine_effects(uint16_t p_spawner) const;
 	VehicleSeatView seat_view(const OwnVehicleSeat &p_seat, uint32_t p_camera, float p_yaw, float p_pitch,
 			float p_fov_deg, bool p_zoom, double p_dt, const sim::CollisionWorld *p_world);
 
@@ -146,6 +150,7 @@ private:
 	std::map<std::string, std::vector<Part>> wrecks_;
 	std::optional<present::VehicleDamageFx> damage_fx_;
 	std::map<std::pair<uint16_t, uint16_t>, DamageEffect> damage_effects_;
+	std::map<std::pair<uint16_t, uint16_t>, DamageEffect> engine_effects_;
 	std::vector<Husk> husks_;
 	host::VehicleWrecks wrecked_;
 	std::optional<OwnVehicleSeat> own_;

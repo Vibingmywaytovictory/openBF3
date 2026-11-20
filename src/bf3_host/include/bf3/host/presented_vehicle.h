@@ -75,6 +75,10 @@ void present_window(
 
 PresentedVehiclePose vehicle_pose_at(const PresentedVehicle &p_vehicle, double p_ticks);
 
+inline bool vehicle_engine_running(const PresentedVehicle &p_vehicle) {
+	return p_vehicle.seat_count > 0 && p_vehicle.occupants[0] != net::kNoVehicleOccupant;
+}
+
 struct PresentedSeat {
 	uint16_t spawner = 0;
 	uint8_t seat = 0;

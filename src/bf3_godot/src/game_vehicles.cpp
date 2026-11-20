@@ -277,8 +277,8 @@ void GameVehicles::step(
 		const host::PresentedVehiclePose pose = host::vehicle_pose_at(v, own_seat ? own_ticks : render_ticks);
 		const Transform3D body = vehicle_body_transform(model, pose);
 		const host::VehicleWreckSight wreck = wrecked_.see(v);
-		sights.push_back(
-				present::VehicleFxSight{ v.spawner, v.generation, kind, v.health, wreck.hidden, wreck.explosion });
+		sights.push_back(present::VehicleFxSight{ v.spawner, v.generation, kind, v.health, wreck.hidden,
+				wreck.explosion, host::vehicle_engine_running(v), false });
 		placed[v.spawner] = { body, to_vector(v.linear_velocity) };
 		if (wreck.explosion) {
 			++stats_.wrecks;
@@ -393,6 +393,20 @@ void GameVehicles::present_damage(std::span<const present::VehicleFxSight> p_sig
 					++stats_.damage_stops;
 				}
 				break;
+			case present::VehicleFxOp::StartEngine:
+				if (const Transform3D local = godot_transform(def.engine[c.effect].transform);
+						const std::optional<fx::EffectHandle> h = start(def.engine[c.effect].effect, body * local)) {
+					engine_effects_[key] = DamageEffect{ *h, local };
+					++stats_.engine_starts;
+				}
+				break;
+			case present::VehicleFxOp::StopEngine:
+				if (const auto it = engine_effects_.find(key); it != engine_effects_.end()) {
+					r_fx.stop_effect(it->second.handle);
+					engine_effects_.erase(it);
+					++stats_.engine_stops;
+				}
+				break;
 			case present::VehicleFxOp::StartWreck: {
 				Husk husk{ c.spawner, c.generation, 0, body * godot_transform(def.wreck->transform), {} };
 				Node3D *node = memnew(Node3D);
@@ -436,16 +450,26 @@ void GameVehicles::present_damage(std::span<const present::VehicleFxSight> p_sig
 				break;
 		}
 	}
-	for (const auto &[key, effect] : damage_effects_) {
-		const auto at = p_placed.find(key.first);
-		if (at == p_placed.end()) {
-			continue;
+	for (const std::map<std::pair<uint16_t, uint16_t>, DamageEffect> *effects :
+			{ &damage_effects_, &engine_effects_ }) {
+		for (const auto &[key, effect] : *effects) {
+			const auto at = p_placed.find(key.first);
+			if (at == p_placed.end()) {
+				continue;
+			}
+			const Vector3 v = at->second.second;
+			r_fx.move_effect(
+					effect.handle, to_fx_transform(at->second.first * effect.local), fx::Vec3{ v.x, v.y, v.z });
 		}
-		const Vector3 v = at->second.second;
-		r_fx.move_effect(effect.handle, to_fx_transform(at->second.first * effect.local), fx::Vec3{ v.x, v.y, v.z });
 	}
 	stats_.damage_live = uint32_t(damage_effects_.size());
+	stats_.engine_live = uint32_t(engine_effects_.size());
 	stats_.husks_live = uint32_t(husks_.size());
+}
+
+uint32_t GameVehicles::engine_effects(uint16_t p_spawner) const {
+	return uint32_t(std::count_if(engine_effects_.begin(), engine_effects_.end(),
+			[p_spawner](const auto &p_e) { return p_e.first.first == p_spawner; }));
 }
 
 std::optional<GameVehicleView> GameVehicles::view(uint16_t p_spawner) const {

@@ -2171,9 +2171,8 @@ TEST_CASE("install unchanged") {
 }
 
 TEST_SUITE("fx-install-vehicles") {
-	TEST_CASE(
-			"vehicles: every vehicle's damage-state, wreck and explosion effects compile; the M1A2's health thresholds "
-			"and its wreck") {
+	TEST_CASE("vehicles: every vehicle's damage-state, engine, wreck and explosion effects compile; the M1A2's health "
+			  "thresholds, its engine effects and its wreck") {
 		Retail r;
 		if (!open_retail(r)) {
 			return;
@@ -2189,7 +2188,7 @@ TEST_SUITE("fx-install-vehicles") {
 			}
 			std::sort(blueprints.begin(), blueprints.end());
 			REQUIRE_FALSE(blueprints.empty());
-			size_t with_damage = 0, with_wreck = 0, compiled = 0;
+			size_t with_damage = 0, with_wreck = 0, with_engine = 0, compiled = 0;
 			for (const std::string &b : blueprints) {
 				core::Result<core::gameplay::VehicleDef> def = core::gameplay::read_vehicle_def(lib, b);
 				REQUIRE_MESSAGE(def.ok(), (def.ok() ? std::string() : def.error().message));
@@ -2200,6 +2199,12 @@ TEST_SUITE("fx-install-vehicles") {
 					names.push_back(d.effect);
 					row += " " + leaf(d.effect) + "@" + std::to_string(d.threshold).substr(0, 4);
 				}
+				for (const core::gameplay::VehicleEngineEffectDef &e : v.engine) {
+					names.push_back(e.effect);
+					row += " " + leaf(e.effect) +
+							(e.on == core::gameplay::VehicleEngineEvent::Boost ? "@boost" : "@engine");
+				}
+				with_engine += v.engine.empty() ? 0 : 1;
 				if (v.wreck) {
 					for (const core::gameplay::VehicleWreckEffectDef &w : v.wreck->effects) {
 						names.push_back(w.effect);
@@ -2222,9 +2227,11 @@ TEST_SUITE("fx-install-vehicles") {
 				MESSAGE(level << " " << b << ":" << row << " (" << v.unresolved << " unresolved)");
 			}
 			MESSAGE(level << ": " << blueprints.size() << " vehicles, " << with_damage << " with damage effects, "
-						  << with_wreck << " with a wreck, " << compiled << " effects compiled");
+						  << with_engine << " with engine effects, " << with_wreck << " with a wreck, " << compiled
+						  << " effects compiled");
 			CHECK(with_damage > 0);
 			CHECK(with_wreck > 0);
+			CHECK(with_engine > 0);
 			if (level != "MP_007") {
 				continue;
 			}
@@ -2246,6 +2253,17 @@ TEST_SUITE("fx-install-vehicles") {
 			CHECK(damage[2].first == "fx_healthhigh_tank");
 			CHECK(damage[2].second == doctest::Approx(0.85));
 			CHECK(v.unresolved == 0);
+			std::vector<std::tuple<std::string, core::gameplay::VehicleEngineEvent, bool>> engine;
+			for (const core::gameplay::VehicleEngineEffectDef &e : v.engine) {
+				engine.emplace_back(leaf(e.effect), e.on, e.stops);
+			}
+			std::sort(engine.begin(), engine.end());
+			using core::gameplay::VehicleEngineEvent;
+			CHECK(engine ==
+					std::vector<std::tuple<std::string, VehicleEngineEvent, bool>>{
+							{ "fx_exhaust_cloud", VehicleEngineEvent::Running, true },
+							{ "fx_tankboost_01", VehicleEngineEvent::Boost, true },
+							{ "fx_tankexhaust_01", VehicleEngineEvent::Running, true } });
 			core::Result<core::gameplay::VehicleDef> bmp = core::gameplay::read_vehicle_def(lib, "vehicles/bmp2/bmp2");
 			REQUIRE(bmp.ok());
 			bool own_threshold = false;

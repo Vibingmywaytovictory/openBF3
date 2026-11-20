@@ -25,6 +25,15 @@ struct VehicleDamageEffectDef {
 	float threshold = 0;
 };
 
+enum class VehicleEngineEvent : uint8_t { Running, Boost };
+
+struct VehicleEngineEffectDef {
+	std::string effect;
+	core::Transform transform;
+	VehicleEngineEvent on = VehicleEngineEvent::Running;
+	bool stops = false;
+};
+
 struct VehicleWreckGateDef {
 	float probability = 0;
 	int parent = -1;
@@ -49,6 +58,7 @@ struct VehicleWreckDef {
 
 struct VehicleDamageVisualsDef {
 	std::vector<VehicleDamageEffectDef> damage;
+	std::vector<VehicleEngineEffectDef> engine;
 	std::optional<VehicleWreckDef> wreck;
 	size_t unresolved = 0;
 };

@@ -38,6 +38,7 @@ if(NOT CMAKE_MATCH_1 EQUAL PROGRAM_MATERIALS OR NOT CMAKE_MATCH_2 EQUAL LOOK_MAT
 endif()
 godot_require_pass("\\[game\\] effect lights: [0-9]+ frames, at most [1-9][0-9]* light particles[^\n]*, 0 of [1-9][0-9]* particle lights off their curve, 0 of [1-9][0-9]* effect lights not at their particles' mean")
 if(ZOOM)
+    godot_require_pass("VEHICLE DRIVE ROW tank_engine_fx PASS")
     godot_require_pass("VEHICLE DRIVE ROW tank_drive PASS")
     godot_require_pass("VEHICLE DRIVE ROW tank_turn PASS")
     godot_require_pass("VEHICLE DRIVE ROW tank_main_gun PASS")

@@ -124,6 +124,35 @@ TEST_SUITE("present-vehicle-fx-unit") {
 		CHECK(core::gameplay::roll_wreck_effects(w, 5) == core::gameplay::roll_wreck_effects(w, 5));
 	}
 
+	TEST_CASE("vehicle fx: engine effects run while the engine runs, boost ones while it boosts; one without a Stop "
+			  "link is left to end; all stop when the vehicle goes") {
+		core::gameplay::VehicleDamageVisualsDef d;
+		using core::gameplay::VehicleEngineEvent;
+		d.engine.push_back({ "fx/exhaust", core::Transform::identity(), VehicleEngineEvent::Running, true });
+		d.engine.push_back({ "fx/boost", core::Transform::identity(), VehicleEngineEvent::Boost, true });
+		d.engine.push_back({ "fx/cloud", core::Transform::identity(), VehicleEngineEvent::Running, false });
+		present::VehicleDamageFx fx({ d });
+		VehicleFxSight s = seen(1.0f);
+		CHECK(step(fx, { s }, 0.0).empty());
+		s.engine = true;
+		CHECK(step(fx, { s }, 0.1) ==
+				std::vector{ cmd(VehicleFxOp::StartEngine, 0), cmd(VehicleFxOp::StartEngine, 2) });
+		CHECK(fx.engine_running() == 2);
+		CHECK(step(fx, { s }, 0.2).empty());
+		s.boost = true;
+		CHECK(step(fx, { s }, 0.3) == std::vector{ cmd(VehicleFxOp::StartEngine, 1) });
+		s.boost = false;
+		CHECK(step(fx, { s }, 0.4) == std::vector{ cmd(VehicleFxOp::StopEngine, 1) });
+		s.engine = false;
+		CHECK(step(fx, { s }, 0.5) == std::vector{ cmd(VehicleFxOp::StopEngine, 0) });
+		CHECK(fx.engine_running() == 0);
+		s.engine = true;
+		CHECK(step(fx, { s }, 0.6) ==
+				std::vector{ cmd(VehicleFxOp::StartEngine, 0), cmd(VehicleFxOp::StartEngine, 2) });
+		CHECK(step(fx, {}, 0.7) == std::vector{ cmd(VehicleFxOp::StopEngine, 0), cmd(VehicleFxOp::StopEngine, 2) });
+		CHECK(fx.engine_running() == 0);
+	}
+
 	TEST_CASE("vehicle fx: the health comparisons") {
 		using core::gameplay::health_compare;
 		CHECK(health_compare(HealthCompare::LessOrEqual, 0.5f, 0.5f));

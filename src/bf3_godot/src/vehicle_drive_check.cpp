@@ -856,6 +856,23 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 						"FieldOfView %.2f deg",
 							unsigned(seat->seat), unsigned(seat->spawner), unsigned(p_in.camera_counter),
 							double(regular_fov_), double(first_person_fov(lv.kinds[lv.spawners[spawner_].kind], 0))));
+			{
+				const std::vector<core::gameplay::VehicleEngineEffectDef> &engine =
+						lv.kinds[lv.spawners[spawner_].kind].damage_visuals.engine;
+				std::string names;
+				size_t running = 0;
+				for (const core::gameplay::VehicleEngineEffectDef &e : engine) {
+					if (e.on == core::gameplay::VehicleEngineEvent::Running) {
+						++running;
+						names += (names.empty() ? "" : ", ") + e.effect;
+					}
+				}
+				const uint32_t live = p_in.vehicles != nullptr ? p_in.vehicles->engine_effects(spawner_) : 0u;
+				row("tank_engine_fx", running > 0 && live == running,
+						fmt("%u engine effects running on the M1A2 with its driver seated; its EngineComponentData's "
+							"OnStart starts %zu (%s)",
+								unsigned(live), running, names.c_str()));
+			}
 			shoot(p_in, "tank_1p");
 			mapper.script_hold(InputMapper::WeaponAction::Ads, true);
 			shown_black_ = 0.0f;

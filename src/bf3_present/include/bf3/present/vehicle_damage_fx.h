@@ -17,9 +17,19 @@ struct VehicleFxSight {
 	float health = 1.0f;
 	bool hidden = false;
 	bool explosion = false;
+	bool engine = false;
+	bool boost = false;
 };
 
-enum class VehicleFxOp : uint8_t { StartDamage, StopDamage, StartWreck, StartWreckEffect, EndWreck };
+enum class VehicleFxOp : uint8_t {
+	StartDamage,
+	StopDamage,
+	StartWreck,
+	StartWreckEffect,
+	EndWreck,
+	StartEngine,
+	StopEngine
+};
 
 struct VehicleFxCommand {
 	VehicleFxOp op = VehicleFxOp::StartDamage;
@@ -37,6 +47,7 @@ public:
 	void step(std::span<const VehicleFxSight> p_seen, double p_now_s, uint64_t p_seed,
 			std::vector<VehicleFxCommand> &r_out);
 	size_t running() const;
+	size_t engine_running() const;
 	size_t wrecks() const { return wrecks_.size(); }
 
 private:
@@ -44,6 +55,7 @@ private:
 		uint8_t generation = 0;
 		uint16_t kind = 0;
 		std::vector<bool> on;
+		std::vector<bool> engine;
 	};
 	struct Wreck {
 		uint16_t spawner = 0;

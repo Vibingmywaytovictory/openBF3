@@ -19,12 +19,27 @@ size_t VehicleDamageFx::running() const {
 	return n;
 }
 
+size_t VehicleDamageFx::engine_running() const {
+	size_t n = 0;
+	for (const auto &[spawner, shown] : shown_) {
+		n += size_t(std::count(shown.engine.begin(), shown.engine.end(), true));
+	}
+	return n;
+}
+
 void VehicleDamageFx::stop_all(uint16_t p_spawner, Shown &r_shown, std::vector<VehicleFxCommand> &r_out) {
 	for (size_t i = 0; i < r_shown.on.size(); ++i) {
 		if (r_shown.on[i]) {
 			r_out.push_back(
 					{ VehicleFxOp::StopDamage, p_spawner, r_shown.generation, r_shown.kind, static_cast<uint16_t>(i) });
 			r_shown.on[i] = false;
+		}
+	}
+	for (size_t i = 0; i < r_shown.engine.size(); ++i) {
+		if (r_shown.engine[i]) {
+			r_out.push_back(
+					{ VehicleFxOp::StopEngine, p_spawner, r_shown.generation, r_shown.kind, static_cast<uint16_t>(i) });
+			r_shown.engine[i] = false;
 		}
 	}
 }
@@ -46,6 +61,7 @@ void VehicleDamageFx::step(
 			shown.generation = s.generation;
 			shown.kind = s.kind;
 			shown.on.assign(def.damage.size(), false);
+			shown.engine.assign(def.engine.size(), false);
 		}
 		if (s.explosion && def.wreck) {
 			stop_all(s.spawner, shown, r_out);
@@ -73,6 +89,18 @@ void VehicleDamageFx::step(
 						s.kind, static_cast<uint16_t>(i) });
 				shown.on[i] = want;
 			}
+		}
+		for (size_t i = 0; i < def.engine.size(); ++i) {
+			const core::gameplay::VehicleEngineEffectDef &d = def.engine[i];
+			const bool want = d.on == core::gameplay::VehicleEngineEvent::Boost ? s.boost : s.engine;
+			if (want == shown.engine[i]) {
+				continue;
+			}
+			if (want || d.stops) {
+				r_out.push_back({ want ? VehicleFxOp::StartEngine : VehicleFxOp::StopEngine, s.spawner, s.generation,
+						s.kind, static_cast<uint16_t>(i) });
+			}
+			shown.engine[i] = want;
 		}
 	}
 	for (auto it = shown_.begin(); it != shown_.end();) {

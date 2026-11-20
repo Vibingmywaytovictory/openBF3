@@ -128,7 +128,7 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 		VehicleSoundSource s;
 		s.key = vehicle_sound_key(v.spawner, v.generation, kVehicleEngineSound);
 		s.program = p_assets.engine_program[kind];
-		s.running = v.seat_count > 0 && v.occupants[0] != net::kNoVehicleOccupant;
+		s.running = host::vehicle_engine_running(v);
 		s.emitter.position = engine ? hull.transform_point(p_assets.defs[kind].engines.front().position) : hull.trans;
 		s.emitter.velocity = v.linear_velocity;
 		s.emitter.forward = hull.forward;
