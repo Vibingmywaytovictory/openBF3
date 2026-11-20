@@ -320,6 +320,9 @@ TEST_SUITE("host-logic-ghost") {
 		host::UiGameState st;
 		st.joined = true;
 		st.phase = net::MatchPhase::InRound;
+		REQUIRE(peers[0].peer != nullptr);
+		st.own_player = peers[0].peer->slot();
+		REQUIRE(st.own_player >= 0);
 		REQUIRE(flow.update(st).ok());
 		REQUIRE(flow.apply_ghost(*peers[0].join_sync).ok());
 		std::vector<lg::LogicNetworkedEvent> received;
@@ -346,8 +349,8 @@ TEST_SUITE("host-logic-ghost") {
 		std::set<uint64_t> round_over_cues;
 		for (const core::gameplay::LogicEdge &e : client_graph.networked_edges()) {
 			if (e.target != core::gameplay::kNoLogicIndex &&
-					(e.source != core::gameplay::kNoLogicIndex ||
-							host::logic_starts_effects_only(client_graph, e.target))) {
+					!(e.source == core::gameplay::kNoLogicIndex &&
+							client_graph.nodes()[e.target].type == core::gameplay::LogicTypeId::UIGraph)) {
 				client_targets[e.connection].emplace(e.target, e.target_port);
 				if (e.source != core::gameplay::kNoLogicIndex &&
 						client_graph.nodes()[e.source].type == core::gameplay::LogicTypeId::RoundOver) {
@@ -355,8 +358,13 @@ TEST_SUITE("host-logic-ghost") {
 				}
 			}
 		}
-		size_t matched = 0, deliveries = 0, cues = 0;
+		size_t matched = 0, deliveries = 0, cues = 0, others = 0, own = 0;
 		for (const lg::LogicNetworkedEvent &e : received) {
+			if (e.context.player >= 0 && e.context.player != st.own_player) {
+				++others;
+				continue;
+			}
+			own += e.context.player == st.own_player ? 1u : 0u;
 			if (const auto at = client_targets.find(e.connection); at != client_targets.end()) {
 				++matched;
 				deliveries += at->second.size();
@@ -364,10 +372,13 @@ TEST_SUITE("host-logic-ghost") {
 			cues += round_over_cues.count(e.connection);
 		}
 		std::printf("host.logic.ghost: the client graph has a networked edge for %zu of the %zu events (%zu round-over "
-					"cues)\n",
-				matched, received.size(), cues);
+					"cues); %zu are addressed to other players, %zu to the joiner (slot %d)\n",
+				matched, received.size(), cues, others, own, st.own_player);
+		CHECK(others > 0);
+		CHECK(own > 0);
 		CHECK(fs.networked_received == received.size());
-		CHECK(fs.networked_unmatched == received.size() - matched);
+		CHECK(fs.networked_other_player == others);
+		CHECK(fs.networked_unmatched == received.size() - others - matched);
 		CHECK(fs.networked_delivered == deliveries);
 		CHECK(cues == 1);
 		CHECK(fs.networked_echoed == 0);

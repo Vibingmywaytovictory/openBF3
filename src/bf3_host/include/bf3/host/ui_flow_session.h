@@ -47,8 +47,6 @@ struct ClientLogicWorld {
 };
 core::Result<ClientLogicWorld> build_client_logic(const core::level::LoadedLevel &p_level);
 
-bool logic_starts_effects_only(const core::gameplay::LogicGraph &p_graph, uint32_t p_node);
-
 struct UiGameState {
 	bool joined = false;
 	net::MatchPhase phase = net::MatchPhase::Loading;
@@ -59,6 +57,7 @@ struct UiGameState {
 	bool end_of_round = false;
 	bool round_over_before_join = false;
 	bool end_of_round_before_join = false;
+	int32_t own_player = -1;
 };
 
 struct UiFlowSessionOptions {
@@ -98,6 +97,7 @@ struct UiFlowSessionStats {
 	uint64_t networked_delivered = 0;
 	uint64_t networked_received = 0;
 	uint64_t networked_unmatched = 0;
+	uint64_t networked_other_player = 0;
 	uint64_t networked_dropped = 0;
 	uint64_t networked_local = 0;
 	uint64_t networked_echoed = 0;

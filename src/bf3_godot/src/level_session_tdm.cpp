@@ -276,6 +276,7 @@ void tick_native_flow(GameState &r_game, TdmState &r_m, const host::Presentation
 	};
 	st.round_over_before_join = st.phase == net::MatchPhase::RoundOver && before_join(p_f.match.round_end_tick);
 	st.end_of_round_before_join = st.end_of_round && before_join(p_f.match.unspawn_tick);
+	st.own_player = st.joined ? int32_t(p_f.stats.slot) : -1;
 	if (r_m.native_following) {
 		if (const std::optional<uint8_t> kit = r_m.deploy_screens.feed(
 					*flow.session(), r_game.hud_model, r_m.scoreboard_held, r_m.spawn_kit)) {
