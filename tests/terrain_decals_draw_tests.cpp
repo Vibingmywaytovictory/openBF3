@@ -464,6 +464,16 @@ void check_terrain_decals(const char *p_level, const char *p_mode, const DecalCo
 	for (const auto &[shader, why] : ss.undrawn) {
 		std::printf("  surface decal not drawn: %s: %s\n", shader.c_str(), why.c_str());
 	}
+	size_t surface_codes = 0, surface_lit = 0;
+	for (const render::TerrainMaterial &m : terrain->look->materials) {
+		if (m.code.find("vec3 decal_colour = o1.xyz / decal_cover;") == std::string::npos) {
+			continue;
+		}
+		++surface_codes;
+		surface_lit +=
+				render::uses_light_pass(m.code) && m.code.find("bf3_specular = max(0.0, 0.0);") != std::string::npos;
+	}
+	CHECK(surface_lit == surface_codes);
 	CHECK(surface_shapes == p_data.surface_shapes);
 	CHECK(surface_shapes_drawn == surface_shapes);
 	CHECK(ss.records == p_data.surface_records);

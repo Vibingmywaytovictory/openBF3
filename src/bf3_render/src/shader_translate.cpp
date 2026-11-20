@@ -1270,7 +1270,7 @@ public:
 		}
 		out_.code = header() + head + common_uniforms() + *vertex + "void fragment() {\n" +
 				(request_.page_hidden ? terrain_page_hidden() : std::string()) + locals + body + tail() + "}\n" +
-				(request_.target == ProgramTarget::Deferred ? light_pass_code() : std::string());
+				(lit() ? light_pass_code() : std::string());
 		out_.gloss = gloss_;
 		return out_;
 	}
@@ -1753,7 +1753,14 @@ private:
 		return code;
 	}
 
+	bool lit() const {
+		return request_.target == ProgramTarget::Deferred || request_.target == ProgramTarget::DeferredDecal;
+	}
+
 	std::string common_uniforms() const {
+		if (request_.target == ProgramTarget::DeferredDecal) {
+			return light_pass_head();
+		}
 		if (request_.target != ProgramTarget::Deferred) {
 			return std::string();
 		}
@@ -1794,27 +1801,23 @@ uniform float roughness_value = 0.6;
 	}
 
 	std::string tail() const {
+		const std::string gloss = gloss_ ? light_pass_gloss("o0.w", "o1.w * o1.w")
+										 : light_pass_gloss("1.0 - roughness_value", std::to_string(kLookSpecular));
 		if (request_.target == ProgramTarget::Deferred && page_normal_) {
-			return R"(	ALBEDO = o1.xyz * o1.xyz;
-	ROUGHNESS = roughness_value;
-	METALLIC = 0.0;
-	SPECULAR = 0.5;
-	NORMAL = normalize((VIEW_MATRIX * vec4(o0.xyz * 2.0 - 1.0, 0.0)).xyz);
-)";
+			return "\tALBEDO = o1.xyz * o1.xyz;\n" + gloss +
+					"\tNORMAL = normalize((VIEW_MATRIX * vec4(o0.xyz * 2.0 - 1.0, 0.0)).xyz);\n";
 		}
 		if (request_.target == ProgramTarget::Deferred) {
-			return "\tALBEDO = o1.xyz * o1.xyz;\n" +
-					(gloss_ ? light_pass_gloss("o0.w", "o1.w * o1.w")
-							: light_pass_gloss("1.0 - roughness_value", std::to_string(kLookSpecular))) +
+			return "\tALBEDO = o1.xyz * o1.xyz;\n" + gloss +
 					R"(	if (has_normal) {
 		NORMAL_MAP = vec3(texture(normal_tex, (normal_uv == 1 ? UV2 : UV) * normal_scale).rg, 1.0);
 	}
 )";
 		}
 		if (request_.target == ProgramTarget::DeferredDecal) {
-			std::string code =
-					"\tfloat decal_cover = max(o1.w, 0.0001);\n\tvec3 decal_colour = o1.xyz / decal_cover;\n"
-					"\tALBEDO = decal_colour * decal_colour;\n\tALPHA = clamp(o1.w, 0.0, 1.0);\n\tROUGHNESS = 1.0;\n";
+			std::string code = "\tfloat decal_cover = max(o1.w, 0.0001);\n\tvec3 decal_colour = o1.xyz / decal_cover;\n"
+							   "\tALBEDO = decal_colour * decal_colour;\n\tALPHA = clamp(o1.w, 0.0, 1.0);\n" +
+					light_pass_gloss("0.0", "0.0");
 			if (outputs_used_.count(kGbufferNormal) != 0) {
 				code += "\tNORMAL = normalize((VIEW_MATRIX * vec4(o0.xyz / max(o0.w, 0.0001) * 2.0 - 1.0, "
 						"0.0)).xyz);\n";

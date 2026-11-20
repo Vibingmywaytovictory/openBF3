@@ -4,6 +4,7 @@
 #include "bf3/core/res/terrain_mask_field.h"
 #include "bf3/core/util/text.h"
 #include "bf3/render/level_scene.h"
+#include "bf3/render/light_pass.h"
 #include "bf3/render/mesh_cache.h"
 #include "bf3/render/terrain_detail.h"
 #include "bf3/render/terrain_page.h"
@@ -395,6 +396,9 @@ TEST_SUITE("render-scatter-pages") {
 					CHECK(code.find(std::string(render::kTerrainPageUvUniform) + ".") != std::string::npos);
 					CHECK(code.find("NORMAL = ") != std::string::npos);
 					CHECK(code.find("discard") != std::string::npos);
+					CHECK(render::uses_light_pass(code));
+					CHECK(code.find("SPECULAR = 0.5;") == std::string::npos);
+					CHECK(code.find("bf3_smoothness = clamp(") != std::string::npos);
 				}
 			}
 		}
