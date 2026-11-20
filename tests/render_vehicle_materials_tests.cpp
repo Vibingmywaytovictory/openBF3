@@ -25,6 +25,20 @@ using namespace bf3;
 namespace {
 
 constexpr std::string_view kTexturePrefix = "texture_";
+constexpr size_t kGlossySlots = 24;
+constexpr size_t kBoundInputs = 225;
+constexpr size_t kShaderInputs = 252;
+constexpr size_t kConstantsGiven = 300;
+constexpr size_t kExternalConstants = 329;
+
+bool zero_bound(const render::LookMaterial &p_look, std::string_view p_parameter) {
+	for (size_t i = 0; i < p_look.graph_parameters.size() && i < p_look.graph_textures.size(); ++i) {
+		if (p_look.graph_textures[i].empty() && core::iequals_ascii(p_look.graph_parameters[i], p_parameter)) {
+			return true;
+		}
+	}
+	return false;
+}
 
 const render::ShaderSolution *gbuffer_solution(const render::SurfaceShader &p_shader, render::dxbc::Program &r_pixel) {
 	for (const render::ShaderSolution &s : p_shader.solutions) {
@@ -130,7 +144,7 @@ TEST_SUITE("render-vehicle-materials") {
 		REQUIRE(resolver != nullptr);
 		const auto loaded = [&](const std::string &p_name) { return (*set)->texture(p_name) != nullptr; };
 		size_t slots = 0, gbuffer = 0, drawn_by_program = 0, unloaded = 0, inputs = 0, bound = 0, constants = 0;
-		size_t constants_bound = 0, alpha_tested = 0, alpha_cut = 0;
+		size_t constants_bound = 0, alpha_tested = 0, alpha_cut = 0, glossy = 0;
 		std::set<std::string> zero_parameters;
 		for (const render::VehicleMeshKind &k : (*set)->kinds) {
 			std::vector<std::set<uint32_t>> used(k.materials.size());
@@ -175,11 +189,13 @@ TEST_SUITE("render-vehicle-materials") {
 					}
 					const bool through_program = look.graph != nullptr || look.graph_plain;
 					drawn_by_program += through_program ? 1u : 0u;
+					glossy += look.graph != nullptr && look.graph->translated.gloss ? 1u : 0u;
 					std::string missing, zero;
 					size_t slot_bound = 0;
 					for (const std::string &t : in.textures) {
 						const bool unset = t.rfind("(unset ", 0) == 0;
-						const bool here = unset ? look.graph != nullptr : drawn.count(t) != 0 && loaded(t);
+						const bool here =
+								unset ? zero_bound(look, t.substr(7, t.size() - 8)) : drawn.count(t) != 0 && loaded(t);
 						slot_bound += here ? 1u : 0u;
 						if (!here) {
 							missing += " " + t;
@@ -217,6 +233,11 @@ TEST_SUITE("render-vehicle-materials") {
 													   : "NOT its program",
 							slot_bound, in.textures.size(), zero.empty() ? "" : ", zero for the unset", zero.c_str(),
 							missing.empty() ? "" : ", not bound:", missing.c_str());
+					if (look.graph && !look.graph->translated.gloss) {
+						std::printf("vehicle materials: %s slot %u %s: no smoothness and specular: %s\n",
+								k.blueprint.c_str(), s, shader_name.c_str(),
+								look.graph->translated.gloss_refusal.c_str());
+					}
 					CHECK_MESSAGE(through_program, k.blueprint, " slot ", s, " ", shader_name);
 				}
 			}
@@ -225,10 +246,12 @@ TEST_SUITE("render-vehicle-materials") {
 			std::printf("vehicle materials: %s: %zu of %zu shader texture inputs bound\n", k.blueprint.c_str(),
 					kind_bound, kind_inputs);
 		}
-		std::printf("vehicle materials: %zu drawn slots, %zu with a G-buffer program, %zu drawn through it or its one "
-					"colour texture; %zu of %zu shader texture inputs bound; %zu program constants given of the "
-					"programs' %zu external constants; %zu bound textures not loaded\n",
-				slots, gbuffer, drawn_by_program, bound, inputs, constants_bound, constants, unloaded);
+		std::printf(
+				"vehicle materials: %zu drawn slots, %zu with a G-buffer program, %zu drawn through it or its one "
+				"colour texture, %zu with its program's smoothness and specular; %zu of %zu shader texture inputs "
+				"bound; %zu program constants given of the programs' %zu external constants; %zu bound textures not "
+				"loaded\n",
+				slots, gbuffer, drawn_by_program, glossy, bound, inputs, constants_bound, constants, unloaded);
 		std::string zeros;
 		for (const std::string &z : zero_parameters) {
 			zeros += " " + z;
@@ -239,6 +262,11 @@ TEST_SUITE("render-vehicle-materials") {
 				alpha_cut, alpha_tested, zeros.c_str());
 		CHECK(gbuffer > 0);
 		CHECK(drawn_by_program == gbuffer);
+		CHECK(glossy == kGlossySlots);
+		CHECK(bound == kBoundInputs);
+		CHECK(inputs == kShaderInputs);
+		CHECK(constants_bound == kConstantsGiven);
+		CHECK(constants == kExternalConstants);
 		CHECK(unloaded == 0);
 		CHECK(zero_parameters == std::set<std::string>{ "HeatMap" });
 		const core::SnapshotDiff diff = core::diff_snapshots(before, reader.snapshot());
