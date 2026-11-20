@@ -74,6 +74,10 @@ bool FxMeshes::build(RID p_scenario, std::string *r_error) {
 				w = make_standard_material(
 						m.materials.slots[s.material_index], !s.tangents.empty(), find_texture, MaterialOptions{});
 				f = make_standard_material(m.materials.slots[s.material_index], !s.tangents.empty(), find_texture, fp);
+				if (s.material_index < m.looks.size()) {
+					apply_look_blend(w, m.looks[s.material_index]);
+					apply_look_blend(f, m.looks[s.material_index]);
+				}
 			}
 			world.push_back(w);
 			d.first_person.push_back(f);

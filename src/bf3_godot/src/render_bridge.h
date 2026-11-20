@@ -3,6 +3,7 @@
 #include "bf3/anim/pose_math.h"
 #include "bf3/anim/skeleton.h"
 #include "bf3/anim/skinning.h"
+#include "bf3/render/look_materials.h"
 #include "bf3/render/material_lookup.h"
 #include "bf3/render/mesh_prep.h"
 #include "bf3/render/texture_prep.h"
@@ -48,4 +49,5 @@ struct MaterialOptions {
 godot::Ref<godot::StandardMaterial3D> make_standard_material(const bf3::render::MaterialSlot &p_slot, bool p_has_tangents,
 		const std::function<godot::Ref<godot::Texture2D>(const std::string &)> &p_find_texture, const MaterialOptions &p_options);
 
+void apply_look_blend(const godot::Ref<godot::StandardMaterial3D> &p_m, const bf3::render::LookMaterial &p_look);
 }

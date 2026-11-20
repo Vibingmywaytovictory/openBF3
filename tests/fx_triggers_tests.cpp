@@ -32,6 +32,7 @@
 #include "bf3/host/level_load.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/host/presentation_events.h"
+#include "bf3/render/effect_meshes.h"
 #include "bf3/render/texture_prep.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
@@ -1572,6 +1573,92 @@ std::unique_ptr<LevelFx> level_fx(const std::shared_ptr<core::Install> &p_instal
 }
 
 TEST_SUITE("fx-install-cells") {
+	TEST_CASE("mesh particles: every ParticleMesh emitter of Metro's and Caspian's effects is white and opaque in the "
+			  "data "
+			  "(no colour, transparency or alpha processor, Color 1 1 1), and its mesh loads with every texture its "
+			  "materials name") {
+		Retail r;
+		if (!open_retail(r)) {
+			return;
+		}
+		for (const char *level : { "MP_Subway", "MP_007" }) {
+			CAPTURE(level);
+			std::unique_ptr<LevelFx> fx = level_fx(r.install, level, true);
+			core::EbxLibrary &lib = *fx->sources->level;
+			std::set<std::string> meshes;
+			size_t emitters = 0, tinted = 0, compiled = 0;
+			for (const core::EbxLibrary::Entry &e : lib.entries()) {
+				if (e.partition == nullptr || e.partition->primary().type_name() != "EffectBlueprint") {
+					continue;
+				}
+				core::Result<std::shared_ptr<const EffectDef>> def = fx->library->get(e.name);
+				if (!def) {
+					continue;
+				}
+				++compiled;
+				for (const EmitterDef &m : (*def)->emitters) {
+					if (m.tmpl.emittable != EmittableType::ParticleMesh) {
+						continue;
+					}
+					++emitters;
+					const bool coloured = m.has(ProcessorType::UpdateColor) ||
+							m.has(ProcessorType::UpdateTransparency) || m.has(ProcessorType::UpdateAlphaLevelMin) ||
+							m.has(ProcessorType::UpdateAlphaLevelMax) || m.has(ProcessorType::UpdateAlphaLevelScale) ||
+							m.params.color.x != 1.0f || m.params.color.y != 1.0f || m.params.color.z != 1.0f;
+					tinted += coloured ? 1 : 0;
+					if (!m.tmpl.mesh.empty()) {
+						meshes.insert(m.tmpl.mesh);
+					}
+				}
+			}
+			const std::vector<std::string> names(meshes.begin(), meshes.end());
+			std::unique_ptr<render::EffectMeshSet> set = render::load_effect_meshes(lib, lib.mount(0), names);
+			REQUIRE(set != nullptr);
+			size_t surfaces = 0, no_diffuse = 0;
+			std::set<std::string> wanted;
+			std::map<std::string, size_t> shaders_without;
+			for (const render::EffectMesh &m : set->meshes) {
+				for (const render::PreparedSurface &s : m.prepared.surfaces) {
+					++surfaces;
+					REQUIRE(s.material_index < m.materials.slots.size());
+					const render::MaterialSlot &slot = m.materials.slots[s.material_index];
+					const std::string diffuse = slot.texture("Diffuse");
+					if (diffuse.empty()) {
+						++no_diffuse;
+						std::string params;
+						for (const auto &[param, texture] : slot.textures) {
+							params += " " + param;
+						}
+						++shaders_without[slot.shader + ":" + params];
+					} else {
+						wanted.insert(diffuse);
+					}
+				}
+			}
+			size_t loaded = 0;
+			for (const std::string &w : wanted) {
+				loaded += set->texture(w) != nullptr ? 1 : 0;
+			}
+			for (const auto &[shader, n] : shaders_without) {
+				MESSAGE(std::string(level) << ": " << n << " surfaces without a Diffuse texture: " << shader);
+			}
+			for (const std::string &n : set->notes) {
+				MESSAGE(std::string(level) << ": " << n);
+			}
+			MESSAGE(std::string(level) << ": " << compiled << " effects, " << emitters << " ParticleMesh emitters, "
+									   << tinted << " with a colour or alpha, " << names.size() << " meshes, "
+									   << set->meshes.size() << " loaded, " << surfaces << " surfaces, " << no_diffuse
+									   << " without a Diffuse texture, " << set->shader_textures
+									   << " textures from the shader database, " << loaded << " of " << wanted.size()
+									   << " Diffuse textures loaded");
+			CHECK(emitters > 0);
+			CHECK(tinted == 0);
+			CHECK(set->failed == 0);
+			CHECK(set->meshes.size() == names.size());
+			CHECK(no_diffuse == 0);
+			CHECK(loaded == wanted.size());
+		}
+	}
 
 TEST_CASE("cells: Metro's fire effects, preload, the 1p flash fraction, in-game cells, cues; Caspian water; an M67 on "
 		  "Caspian gravel picks fx_grenade_frag_01, fx_impact_gravel_m and decal_scorchmark_m_01") {

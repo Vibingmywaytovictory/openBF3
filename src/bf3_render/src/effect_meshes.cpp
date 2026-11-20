@@ -32,6 +32,10 @@ std::unique_ptr<EffectMeshSet> load_effect_meshes(const core::EbxResolver &p_db,
 	const auto start = std::chrono::steady_clock::now();
 	auto set = std::make_unique<EffectMeshSet>();
 	const std::vector<std::string> databases = variation_database_names(p_mount);
+	std::unique_ptr<LookResolver> look = LookResolver::open(p_mount);
+	if (!look) {
+		set->notes.push_back("no level shader database: effect mesh slots keep only their own textures");
+	}
 	for (const std::string &name : p_names) {
 		core::Result<MeshMaterials> materials = mesh_materials(p_db, name, 0, databases);
 		if (!materials) {
@@ -51,6 +55,18 @@ std::unique_ptr<EffectMeshSet> load_effect_meshes(const core::EbxResolver &p_db,
 		EffectMesh m;
 		m.name = name;
 		m.materials = std::move(*materials);
+		m.looks.resize(m.materials.slots.size());
+		for (size_t i = 0; look && i < m.looks.size(); ++i) {
+			m.looks[i] = look->resolve(m.materials.slots[i], name);
+			MaterialSlot &slot = m.materials.slots[i];
+			for (const auto &[parameter, texture] :
+					{ std::pair{ "Diffuse", &m.looks[i].color }, std::pair{ "Normal", &m.looks[i].normal } }) {
+				if (slot.texture(parameter).empty() && texture->has_value()) {
+					slot.textures.emplace_back(parameter, (*texture)->name);
+					++set->shader_textures;
+				}
+			}
+		}
 		m.prepared = std::move(mesh->mesh.meshes[0]);
 		m.cache = mesh->item;
 		set->meshes.push_back(std::move(m));

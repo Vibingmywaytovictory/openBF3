@@ -3,6 +3,8 @@
 #include "godot_util.h"
 #include "texture_ledger.h"
 
+#include "bf3/render/viewmodel_set.h"
+
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
@@ -234,4 +236,32 @@ Ref<StandardMaterial3D> make_standard_material(const bf3::render::MaterialSlot &
 	return m;
 }
 
+void apply_look_blend(const Ref<StandardMaterial3D> &p_m, const render::LookMaterial &p_look) {
+	if (p_look.double_sided) {
+		p_m->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
+	}
+	if (p_look.blend == render::LookBlend::AlphaTest) {
+		p_m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+		return;
+	}
+	if (p_look.blend != render::LookBlend::Blend) {
+		return;
+	}
+	p_m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
+	if (p_look.glass) {
+		if (!p_look.color) {
+			p_m->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, Ref<Texture2D>());
+			p_m->set_albedo(Color(
+					render::kLookGlassTint, render::kLookGlassTint, render::kLookGlassTint, render::kLookGlassOpacity));
+		} else {
+			p_m->set_albedo(Color(1.0f, 1.0f, 1.0f, render::kLookGlassOpacity));
+		}
+		p_m->set_roughness(0.1f);
+		return;
+	}
+	const render::ViewmodelBlend mode = render::viewmodel_blend_of(p_look.solution_blend.value_or(0));
+	p_m->set_blend_mode(mode == render::ViewmodelBlend::Add	   ? BaseMaterial3D::BLEND_MODE_ADD
+					: mode == render::ViewmodelBlend::Multiply ? BaseMaterial3D::BLEND_MODE_MUL
+															   : BaseMaterial3D::BLEND_MODE_MIX);
+}
 }
