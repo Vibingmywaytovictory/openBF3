@@ -72,6 +72,7 @@ struct ProgramConstant {
 struct VertexInputLane {
 	uint8_t usage = 0;
 	uint8_t lane = 0;
+	bool instance = false;
 };
 
 using VertexInputLanes = std::array<VertexInputLane, 4>;

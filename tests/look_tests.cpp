@@ -1232,18 +1232,8 @@ TEST_SUITE("render-level-gloss") {
 		Result<std::shared_ptr<Install>> install = Install::open(reader);
 		REQUIRE(install.ok());
 		const std::vector<GlossExpectation> expected = {
-			{ "MP_007", "TeamDeathMatchC0", 323, 306, 250,
+			{ "MP_007", "TeamDeathMatchC0", 323, 306, 258,
 					{ { "drawn as the character backdrop", 1 },
-							{ "lanes refused: vertex input v4.x reads usage 0 lane 0", 4 },
-							{ "lanes refused: vertex program loads what is not a world matrix row: ld r0.xyzw, "
-							  "r0.yyyy, t0.xyzw",
-									2 },
-							{ "lanes refused: vertex program loads what is not a world matrix row: ld r3.xyzw, "
-							  "r1.zzzz, t0.xyzw",
-									1 },
-							{ "lanes refused: vertex program loads what is not a world matrix row: ld r5.xyzw, "
-							  "r1.zzzz, t0.xyzw",
-									1 },
 							{ "no program: no solution draws its target with a texture", 1 },
 							{ engine_texture_residue(1, "Texture"), 4 },
 							{ engine_texture_residue(1, "diffuseAtlas"), 13 },
@@ -1252,22 +1242,10 @@ TEST_SUITE("render-level-gloss") {
 							{ engine_texture_residue(5, "distanceFieldTexture"), 2 },
 							{ engine_texture_residue(8, "distanceFieldTexture"), 4 },
 							{ engine_texture_residue(9, "distanceFieldTexture"), 10 },
-							{ "no program: vertex input v4.x reads usage 35 lane 0", 4 },
-							{ "no program: vertex program branches on if_nz r0.y", 1 } } },
-			{ "MP_Subway", "TeamDeathMatchC0", 666, 619, 458,
+							{ "no program: vertex input v4.x reads usage 35 lane 0", 5 } } },
+			{ "MP_Subway", "TeamDeathMatchC0", 666, 619, 574,
 					{ { "drawn as the character backdrop", 1 }, { "drawn blended", 2 },
 							{ "lanes refused: vertex input v2.x reads usage 4 lane 0", 1 },
-							{ "lanes refused: vertex input v4.x reads usage 0 lane 0", 101 },
-							{ "lanes refused: vertex program branches on if_nz r0.y", 1 },
-							{ "lanes refused: vertex program loads what is not a world matrix row: ld r0.xyzw, "
-							  "r0.yyyy, t0.xyzw",
-									3 },
-							{ "lanes refused: vertex program loads what is not a world matrix row: ld r4.xyzw, "
-							  "r1.zzzz, t0.xyzw",
-									3 },
-							{ "lanes refused: vertex program loads what is not a world matrix row: ld r5.xyzw, "
-							  "r1.zzzz, t0.xyzw",
-									8 },
 							{ "no program: instruction op43 r1.yzw, r1.yyzw", 1 },
 							{ "no program: instruction op77 ?13_, r0.y, r0.y", 12 },
 							{ "no program: instruction op77 ?13_, r1.x, r1.x", 1 },

@@ -441,12 +441,12 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
         ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DMAX_HIDDEN=0.05)
     set_tests_properties(godot.surface_decals PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.sun_light godot_sun_light.cmake WINDOW TIMEOUT 400
-        ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DLEVEL=MP_007 -DMODE=TeamDeathMatchC0 -DGLOSS=250 -DGBUFFER=306
+        ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DLEVEL=MP_007 -DMODE=TeamDeathMatchC0 -DGLOSS=258 -DGBUFFER=306
         "-DVIEWS=patch_toward@-126.35,145.0,786.35,135,-24|patch_away@-113.65,145.0,773.65,-45,-24|patch_side_a@-126.35,145.0,773.65,45,-24|patch_side_b@-113.65,145.0,786.35,-135,-24"
         -DPATCH_POINT=-120,141.0,780 -DPATCH_EXPOSURE=0.5 -DPATCH_HALF=32)
     set_tests_properties(godot.sun_light PROPERTIES RUN_SERIAL TRUE)
     openbf3_godot_row(godot.sun_light.metro godot_sun_light.cmake WINDOW TIMEOUT 400
-        ARGS -DLEVEL=MP_Subway -DMODE=TeamDeathMatchC0 -DGLOSS=458 -DGBUFFER=619
+        ARGS -DLEVEL=MP_Subway -DMODE=TeamDeathMatchC0 -DGLOSS=574 -DGBUFFER=619
         "-DVIEWS=toward_street@-154.3,66.1,-493.9,200,0|away_street@-154.3,66.1,-493.9,20,5")
     set_tests_properties(godot.sun_light.metro PROPERTIES RUN_SERIAL TRUE)
 endif()

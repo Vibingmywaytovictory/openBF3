@@ -164,6 +164,9 @@ std::optional<std::vector<VertexInputLanes>> lanes_in(
 	std::vector<VertexInputLanes> out(p_inputs.size());
 	for (size_t i = 0; i < p_inputs.size(); ++i) {
 		if (p_inputs[i].per_instance) {
+			for (uint8_t c = 0; c < 4; ++c) {
+				out[i][c] = VertexInputLane{ 0, c, true };
+			}
 			continue;
 		}
 		const LaneLayout in = dxgi_layout(p_inputs[i].format);
@@ -209,7 +212,7 @@ std::vector<VertexInputLanes> resolve_lanes(
 		for (size_t i = 0; i < out->size(); ++i) {
 			for (size_t c = 0; c < 4; ++c) {
 				const VertexInputLane a = (*out)[i][c], b = (*lanes)[i][c];
-				if (a.usage != b.usage || a.lane != b.lane) {
+				if (a.usage != b.usage || a.lane != b.lane || a.instance != b.instance) {
 					(*out)[i][c] = VertexInputLane{};
 				}
 			}

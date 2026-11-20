@@ -736,7 +736,11 @@ public:
 				continue;
 			}
 			const Instruction &ins = vs_.code[i];
-			core::Result<std::string> line = ins.is(Op::Ld) ? load_row(i) : emitter.statement(ins);
+			const auto instance_row = instance_rows_.find(i);
+			core::Result<std::string> line = instance_row != instance_rows_.end()
+					? instance_row_line(ins.operands[0], instance_row->second)
+					: ins.is(Op::Ld) ? load_row(i)
+									 : emitter.statement(ins);
 			if (!line) {
 				return refuse("vertex program: " + line.error().message);
 			}
@@ -814,6 +818,15 @@ private:
 				return false;
 			}
 			const Operand &vector = ins.operands[2];
+			if (vector.is(OperandType::Temp) && !vector.negate && !vector.absolute) {
+				const std::optional<size_t> w = writer_before(j, vector.index[0], uint8_t(1u << vector.lane(lane)));
+				const Instruction *load = w ? &vs_.code[*w] : nullptr;
+				const dxbc::Binding *b = load != nullptr && load->is(Op::Ld) && load->operands.size() == 3 &&
+								load->operands[2].is(OperandType::Resource)
+						? vs_.binding(dxbc::BindingType::Texture, load->operands[2].index[0])
+						: nullptr;
+				return b != nullptr && b->name == kInstanceVectors;
+			}
 			uint32_t component = 0;
 			const dxbc::ConstantBuffer *cb = vector.is(OperandType::ConstantBuffer) && vector.dims == 2 &&
 							vector.relative && !vector.negate && !vector.absolute
@@ -932,11 +945,12 @@ private:
 				rows_[i] = ins.operands.size() == 3 ? symbol(ins.operands[1], 0) : std::nullopt;
 			}
 			const Operand &d = ins.operands[0];
+			std::array<std::optional<int64_t>, 4> values;
 			for (uint8_t c = 0; c < 4; ++c) {
 				if (((d.write_mask() >> c) & 1u) == 0) {
 					continue;
 				}
-				std::optional<int64_t> value;
+				std::optional<int64_t> &value = values[c];
 				const std::vector<Operand> &ops = ins.operands;
 				if (ins.is(Op::Utof) && ops.size() == 2 && instance_id(ops[1], c)) {
 					value = kInstanceIndex;
@@ -960,9 +974,14 @@ private:
 						value = *row + int64_t(int32_t(ops[2].imm[ops[2].lane(c)]));
 					}
 				}
+			}
+			for (uint8_t c = 0; c < 4; ++c) {
+				if (((d.write_mask() >> c) & 1u) == 0) {
+					continue;
+				}
 				const uint64_t key = lane_key(d.type, d.index[0], c);
-				if (value) {
-					symbols_[key] = *value;
+				if (values[c]) {
+					symbols_[key] = *values[c];
 				} else {
 					symbols_.erase(key);
 				}
@@ -974,24 +993,31 @@ private:
 
 	void find_world_base() {
 		std::map<uint32_t, int64_t> loaded;
-		for (const auto &[at, row] : rows_) {
-			const Operand &d = vs_.code[at].operands[0];
-			if (row && d.is(OperandType::Temp) && d.write_mask() == 0xF) {
-				loaded[d.index[0]] = *row;
-			}
-		}
 		std::map<uint64_t, std::set<int64_t>> by_other;
-		for (const Instruction &ins : vs_.code) {
-			if (dot_width(ins.opcode) != 4 || ins.operands.size() != 3) {
+		for (size_t i = 0; i < vs_.code.size(); ++i) {
+			const Instruction &ins = vs_.code[i];
+			if (removed_[i] || ins.operands.empty()) {
 				continue;
 			}
-			for (size_t s = 1; s < 3; ++s) {
-				const Operand &a = ins.operands[s];
-				const Operand &b = ins.operands[3 - s];
-				const auto row = a.is(OperandType::Temp) ? loaded.find(a.index[0]) : loaded.end();
-				if (row != loaded.end() && !(b.is(OperandType::Temp) && loaded.count(b.index[0]) != 0)) {
-					by_other[lane_key(b.type, b.index[0], 0)].insert(row->second);
+			if (dot_width(ins.opcode) == 4 && ins.operands.size() == 3) {
+				for (size_t s = 1; s < 3; ++s) {
+					const Operand &a = ins.operands[s];
+					const Operand &b = ins.operands[3 - s];
+					const auto row = a.is(OperandType::Temp) ? loaded.find(a.index[0]) : loaded.end();
+					if (row != loaded.end() && !(b.is(OperandType::Temp) && loaded.count(b.index[0]) != 0)) {
+						by_other[lane_key(b.type, b.index[0], 0)].insert(row->second);
+					}
 				}
+			}
+			const Operand &d = ins.operands[0];
+			if (!d.is(OperandType::Temp)) {
+				continue;
+			}
+			const auto row = rows_.find(i);
+			if (row != rows_.end() && row->second && d.write_mask() == 0xF) {
+				loaded[d.index[0]] = *row->second;
+			} else {
+				loaded.erase(d.index[0]);
 			}
 		}
 		for (const auto &[other, rows] : by_other) {
@@ -1001,6 +1027,101 @@ private:
 					return;
 				}
 			}
+		}
+		find_instance_input_rows();
+	}
+
+	bool instance_input(const Operand &p_op) const {
+		if (!p_op.is(OperandType::Input)) {
+			return false;
+		}
+		for (const dxbc::SignatureElement &e : vs_.inputs) {
+			if (e.reg == p_op.index[0] && e.system_value == 0 && e.name == "TEXCOORD" &&
+					e.semantic_index < lanes_.size()) {
+				return lanes_[e.semantic_index][0].instance;
+			}
+		}
+		return false;
+	}
+
+	std::optional<size_t> writer_before(size_t p_at, uint32_t p_reg, uint8_t p_lanes = 0xF) const {
+		for (size_t j = p_at; j-- > 0;) {
+			const Instruction &ins = vs_.code[j];
+			if (!removed_[j] && !ins.operands.empty() && ins.operands[0].is(OperandType::Temp) &&
+					ins.operands[0].index[0] == p_reg && (ins.operands[0].write_mask() & p_lanes) != 0) {
+				return j;
+			}
+		}
+		return std::nullopt;
+	}
+
+	bool reads_instance_input(size_t p_at, int p_depth) const {
+		const Instruction &ins = vs_.code[p_at];
+		for (size_t s = 1; s < ins.operands.size(); ++s) {
+			const Operand &op = ins.operands[s];
+			if (instance_input(op)) {
+				return true;
+			}
+			if (p_depth > 0 && op.is(OperandType::Temp)) {
+				const std::optional<size_t> w = writer_before(p_at, op.index[0]);
+				if (w && reads_instance_input(*w, p_depth - 1)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	void find_instance_input_rows() {
+		std::map<std::pair<uint64_t, uint64_t>, std::map<uint8_t, std::set<size_t>>> groups;
+		for (size_t i = 0; i < vs_.code.size(); ++i) {
+			const Instruction &ins = vs_.code[i];
+			if (removed_[i] || dot_width(ins.opcode) != 4 || ins.operands.size() != 3 ||
+					!ins.operands[0].is(OperandType::Temp)) {
+				continue;
+			}
+			const Operand &d = ins.operands[0];
+			uint8_t lane = 4;
+			for (uint8_t c = 0; c < 4; ++c) {
+				if (d.write_mask() == (1u << c)) {
+					lane = c;
+				}
+			}
+			if (lane >= kWorldRows) {
+				continue;
+			}
+			for (size_t s = 1; s < 3; ++s) {
+				const Operand &a = ins.operands[s];
+				const Operand &b = ins.operands[3 - s];
+				if (!a.is(OperandType::Temp) || a.negate || a.absolute) {
+					continue;
+				}
+				std::set<size_t> defs;
+				bool instance = false;
+				bool whole = true;
+				for (uint8_t c = 0; c < 4 && whole; ++c) {
+					const std::optional<size_t> def = writer_before(i, a.index[0], uint8_t(1u << c));
+					whole = def && !vs_.code[*def].is(Op::Ld);
+					if (whole) {
+						defs.insert(*def);
+						instance = instance || reads_instance_input(*def, 4);
+					}
+				}
+				if (whole && instance) {
+					groups[{ lane_key(d.type, d.index[0], 0), lane_key(b.type, b.index[0], 0) }][lane] = defs;
+				}
+			}
+		}
+		for (const auto &[key, rows] : groups) {
+			if (rows.size() != kWorldRows) {
+				continue;
+			}
+			for (const auto &[row, defs] : rows) {
+				for (size_t def : defs) {
+					instance_rows_[def] = row;
+				}
+			}
+			return;
 		}
 	}
 
@@ -1043,6 +1164,9 @@ private:
 				continue;
 			}
 			needed_[i] = true;
+			if (instance_rows_.count(i) != 0) {
+				continue;
+			}
 			if (ins.is(Op::Ld)) {
 				const auto row = rows_.find(i);
 				const dxbc::Binding *b = ins.operands.size() == 3 && ins.operands[2].is(OperandType::Resource)
@@ -1080,6 +1204,16 @@ private:
 			return refuse("vertex program reads or outputs a value no instruction writes");
 		}
 		return core::Status::success();
+	}
+
+	static core::Result<std::string> instance_row_line(const Operand &p_dest, uint32_t p_row) {
+		std::string mask;
+		for (uint8_t c = 0; c < 4; ++c) {
+			if ((p_dest.write_mask() >> c) & 1u) {
+				mask += kLanes[c];
+			}
+		}
+		return "r" + std::to_string(p_dest.index[0]) + "." + mask + " = " + model_row(p_row) + "." + mask + ";";
 	}
 
 	core::Result<std::string> load_row(size_t p_index) const {
@@ -1122,8 +1256,10 @@ private:
 				const VertexInputLane in = lanes_[index][c];
 				const std::optional<std::string> a = attribute_lane(in);
 				if (!a) {
-					return refuse(where + "." + kLanes[c] + " reads usage " + std::to_string(in.usage) + " lane " +
-							std::to_string(in.lane));
+					return refuse(where + "." + kLanes[c] +
+							(in.instance ? std::string(" reads per-instance data")
+										 : " reads usage " + std::to_string(in.usage) + " lane " +
+													std::to_string(in.lane)));
 				}
 				lane = *a;
 			}
@@ -1173,6 +1309,7 @@ private:
 	std::set<uint64_t> wanted_;
 	std::map<uint64_t, int64_t> symbols_;
 	std::map<size_t, std::optional<int64_t>> rows_;
+	std::map<size_t, uint32_t> instance_rows_;
 	int64_t world_base_ = 0;
 	std::vector<bool> needed_;
 	std::vector<bool> removed_;
