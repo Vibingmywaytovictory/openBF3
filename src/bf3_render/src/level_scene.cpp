@@ -1027,6 +1027,12 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 						*p_options.mount, resolver->shaders(), terrain.asset,
 						[&](const std::string &p_name) { return int32_t(builder.texture(p_name, TextureRole::Data)); },
 						plan.failures);
+				const SurfaceDecalShapes shapes = surface_decal_shapes(p_resolver, terrain.asset);
+				terrain.surface_decals = plan_terrain_record_shaders(
+						*p_options.mount, resolver->shaders(), terrain.asset, TerrainDecalGroup::Surface,
+						[&](const std::string &p_name) { return shapes.standalone.count(p_name) != 0; },
+						[&](const std::string &p_name) { return int32_t(builder.texture(p_name, TextureRole::Data)); },
+						plan.failures);
 			}
 			plan.terrains.push_back(std::move(terrain));
 		}
@@ -1263,7 +1269,7 @@ core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mo
 			out.scatter_failures.emplace_back(where, built.error().message);
 		}
 	}
-	if (!plan.decals.empty() || !plan.water.empty()) {
+	if (!plan.decals.empty() || !plan.water.empty() || !plan.surface_decals.empty()) {
 		const std::string decals_name = terrain_decals_name(plan.asset);
 		auto decals_res = p_mount.read_res(decals_name);
 		if (!decals_res) {
@@ -1277,6 +1283,8 @@ core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mo
 		out.decals = add_terrain_decals(decals, grid, t, crop, plan.decals, *out.look, out.mesh);
 		out.water = add_terrain_water(
 				decals, plan.water, p_plan.look_environment.base, plan.water_envmap, *out.look, out.mesh);
+		out.surface_decals = add_terrain_surface_decals(
+				decals, plan.surface_decals, p_plan.look_environment.base, *out.look, out.mesh);
 	}
 	if (!terrain_detail_gains(out.look->detail)) {
 		return out;

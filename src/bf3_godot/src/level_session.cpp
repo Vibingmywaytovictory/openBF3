@@ -360,6 +360,12 @@ void Bf3LevelSession::_ready() {
 		}
 		shots_ = std::make_unique<ShotRunner>(*this, std::move(free_shots), std::move(spawn_shots), user_arg_value("shot-dir"));
 		shots_->set_teleports(std::move(teleport_shots));
+		std::vector<std::array<float, 3>> shot_points;
+		if (!ShotRunner::parse_points(user_arg_value("shot-points"), shot_points, error)) {
+			UtilityFunctions::push_error(to_godot("[level] " + error));
+			failed_ = true;
+		}
+		shots_->set_points(std::move(shot_points));
 		shots_->set_luma(has_user_arg("shot-luma"));
 		shots_->set_detail(has_user_arg("shot-detail"));
 
@@ -368,7 +374,8 @@ void Bf3LevelSession::_ready() {
 		shots_->set_timing(settle, uint32_t(measure));
 	}
 #else
-	for (const char *shot_arg : { "shots", "shot-spawns", "shot-teleports", "shot-luma", "shot-detail" }) {
+	for (const char *shot_arg :
+			{ "shots", "shot-spawns", "shot-teleports", "shot-points", "shot-luma", "shot-detail" }) {
 		has_check_arg(shot_arg);
 	}
 #endif

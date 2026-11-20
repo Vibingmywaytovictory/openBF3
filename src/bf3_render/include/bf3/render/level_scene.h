@@ -11,6 +11,7 @@
 #include "bf3/render/material_lookup.h"
 #include "bf3/render/mesh_cache.h"
 #include "bf3/render/roads.h"
+#include "bf3/render/surface_decals.h"
 #include "bf3/render/terrain_look.h"
 #include "bf3/render/terrain_scatter.h"
 #include "bf3/render/texture_prep.h"
@@ -67,6 +68,7 @@ struct SceneTerrainPlan {
 	std::vector<SceneDecalShader> decals;
 	std::vector<SceneWaterShader> water;
 	SceneTerrainTexture water_envmap;
+	std::vector<SceneWaterShader> surface_decals;
 };
 struct SceneTerrainOptions {
 	float spacing = 4.0f;
@@ -186,6 +188,7 @@ struct PreparedTerrain {
 	std::shared_ptr<const TerrainDetailSource> detail;
 	TerrainDecalStats decals;
 	TerrainWaterStats water;
+	TerrainSurfaceDecalStats surface_decals;
 };
 
 core::Result<PreparedTerrain> prepare_scene_terrain(const core::LevelMount &p_mount, const LevelScenePlan &p_plan,

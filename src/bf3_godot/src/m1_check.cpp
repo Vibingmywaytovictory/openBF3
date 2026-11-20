@@ -533,14 +533,15 @@ bool ShotRunner::parse(const std::string &p_shots, const std::string &p_spawns, 
 ShotRunner::ShotRunner(Bf3LevelSession &p_session, std::vector<FreeShot> p_free, std::vector<SpawnShot> p_spawn, std::string p_dir) :
 		session_(p_session), free_(std::move(p_free)), spawn_(std::move(p_spawn)), dir_(std::move(p_dir)) {}
 
-bool ShotRunner::parse_teleports(const std::string &p_teleports, std::vector<TeleportShot> &r_teleports, std::string &r_error) {
-	std::stringstream ss(p_teleports);
+template <size_t N>
+bool parse_tuples(const std::string &p_list, std::vector<std::array<float, N>> &r_tuples, std::string &r_bad) {
+	std::stringstream ss(p_list);
 	std::string item;
 	while (std::getline(ss, item, ';')) {
 		if (item.empty()) {
 			continue;
 		}
-		TeleportShot shot;
+		std::array<float, N> tuple{};
 		std::stringstream vs(item);
 		std::string v;
 		size_t n = 0;
@@ -548,16 +549,40 @@ bool ShotRunner::parse_teleports(const std::string &p_teleports, std::vector<Tel
 		while (ok && std::getline(vs, v, ',')) {
 			char *end = nullptr;
 			const float f = std::strtof(v.c_str(), &end);
-			ok = n < 4 && end != v.c_str() && std::isfinite(f) && std::fabs(f) < 1e6f;
+			ok = n < N && end != v.c_str() && std::isfinite(f) && std::fabs(f) < 1e6f;
 			if (ok) {
-				shot.at[n++] = f;
+				tuple[n++] = f;
 			}
 		}
-		if (!ok || n != 4 || r_teleports.size() >= 64) {
-			r_error = "--shot-teleports entry is not x,y,z,yaw (at most 64): " + item;
+		if (!ok || n != N || r_tuples.size() >= 64) {
+			r_bad = item;
 			return false;
 		}
-		r_teleports.push_back(shot);
+		r_tuples.push_back(tuple);
+	}
+	return true;
+}
+
+bool ShotRunner::parse_teleports(
+		const std::string &p_teleports, std::vector<TeleportShot> &r_teleports, std::string &r_error) {
+	std::vector<std::array<float, 4>> tuples;
+	std::string bad;
+	if (!parse_tuples(p_teleports, tuples, bad)) {
+		r_error = "--shot-teleports entry is not x,y,z,yaw (at most 64): " + bad;
+		return false;
+	}
+	for (const std::array<float, 4> &t : tuples) {
+		r_teleports.push_back(TeleportShot{ t });
+	}
+	return true;
+}
+
+bool ShotRunner::parse_points(
+		const std::string &p_points, std::vector<std::array<float, 3>> &r_points, std::string &r_error) {
+	std::string bad;
+	if (!parse_tuples(p_points, r_points, bad)) {
+		r_error = "--shot-points entry is not x,y,z (at most 64): " + bad;
+		return false;
 	}
 	return true;
 }
@@ -806,6 +831,20 @@ bool ShotRunner::frame(uint64_t p_now_ns) {
 	}
 	UtilityFunctions::print(to_godot("[m1] shot " + lines_.back()));
 	UtilityFunctions::print(to_godot("[m1] shot " + session_.look_summary()));
+	if (!points_.empty()) {
+		const Camera3D *camera = session_.cameras().free_camera();
+		std::string line = "[m1] shot points " + shot.path + ":";
+		for (const std::array<float, 3> &p : points_) {
+			const Vector3 at(p[0], p[1], p[2]);
+			if (camera == nullptr || camera->is_position_behind(at)) {
+				line += " behind";
+				continue;
+			}
+			const Vector2 px = camera->unproject_position(at);
+			line += fmt(" %.1f,%.1f", px.x, px.y);
+		}
+		UtilityFunctions::print(to_godot(line));
+	}
 	if (detail_) {
 		int32_t width = 0, height = 0;
 		const PackedByteArray rgba = viewport_rgba(session_, width, height);

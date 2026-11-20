@@ -66,6 +66,9 @@ public:
 	};
 	static bool parse_teleports(const std::string &p_teleports, std::vector<TeleportShot> &r_teleports, std::string &r_error);
 	void set_teleports(std::vector<TeleportShot> p_teleports) { teleport_ = std::move(p_teleports); }
+	static bool parse_points(
+			const std::string &p_points, std::vector<std::array<float, 3>> &r_points, std::string &r_error);
+	void set_points(std::vector<std::array<float, 3>> p_points) { points_ = std::move(p_points); }
 
 	static bool parse(const std::string &p_shots, const std::string &p_spawns, std::vector<FreeShot> &r_free, std::vector<SpawnShot> &r_spawn,
 			std::string &r_error);
@@ -93,6 +96,7 @@ private:
 	std::vector<FreeShot> free_;
 	std::vector<SpawnShot> spawn_;
 	std::vector<TeleportShot> teleport_;
+	std::vector<std::array<float, 3>> points_;
 	std::string dir_;
 	size_t next_ = 0;
 	int state_ = 0;

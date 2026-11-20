@@ -45,6 +45,7 @@ core::Result<PixelTranslation> translate_pixel_program(
 enum class ProgramTarget : uint8_t {
 	Deferred,
 	Forward,
+	DeferredDecal,
 };
 
 enum class ProgramBlend : uint8_t {
@@ -90,6 +91,7 @@ struct ProgramRequest {
 	ProgramTarget target = ProgramTarget::Deferred;
 	ProgramBlend blend = ProgramBlend::Mix;
 	bool double_sided = false;
+	float view_pull = 0.0f;
 	std::function<bool(uint32_t)> srgb;
 	std::function<uint32_t(uint32_t)> texture_usage;
 	ProgramAnalysis *analysis = nullptr;

@@ -4,6 +4,7 @@
 #include "bf3/render/look_environment.h"
 #include "bf3/render/mesh_prep.h"
 #include "bf3/render/shader_database.h"
+#include "bf3/render/shader_translate.h"
 #include "bf3/render/terrain_look.h"
 
 #include <array>
@@ -34,6 +35,27 @@ struct SceneWaterShader {
 std::vector<SceneWaterShader> plan_terrain_water(const core::LevelMount &p_mount, const ShaderLookup &p_shaders,
 		std::string_view p_asset, const std::function<int32_t(const std::string &)> &p_texture,
 		std::vector<std::pair<std::string, std::string>> &r_failures);
+
+enum class TerrainDecalGroup : uint8_t { Surface, Water };
+
+std::vector<SceneWaterShader> plan_terrain_record_shaders(const core::LevelMount &p_mount,
+		const ShaderLookup &p_shaders, std::string_view p_asset, TerrainDecalGroup p_group,
+		const std::function<bool(const std::string &)> &p_keep,
+		const std::function<int32_t(const std::string &)> &p_texture,
+		std::vector<std::pair<std::string, std::string>> &r_failures);
+
+struct SolutionBinding {
+	SceneTerrainTexture envmap;
+	std::array<float, 4> height_uv{};
+	std::array<float, 4> height_pixel{};
+	ProgramBlend blend = ProgramBlend::Premultiplied;
+	ProgramTarget target = ProgramTarget::Forward;
+	int32_t render_priority = 0;
+	float view_pull = 0.0f;
+};
+
+core::Result<TerrainMaterial> terrain_solution_material(const SceneWaterShader &p_shader,
+		const ShaderSolution &p_solution, const LookEnvState &p_look, const SolutionBinding &p_binding);
 
 struct TerrainWaterStats {
 	uint32_t records = 0;

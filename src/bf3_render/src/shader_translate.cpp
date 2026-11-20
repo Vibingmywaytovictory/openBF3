@@ -1200,7 +1200,7 @@ public:
 private:
 	core::Status slice() {
 		std::set<uint64_t> live;
-		if (request_.target == ProgramTarget::Deferred) {
+		if (request_.target == ProgramTarget::Deferred || request_.target == ProgramTarget::DeferredDecal) {
 			bool albedo = false;
 			for (const dxbc::SignatureElement &e : ps_.outputs) {
 				albedo = albedo || (e.reg == kGbufferAlbedo && e.name == "SV_Target");
@@ -1208,7 +1208,8 @@ private:
 			if (!albedo) {
 				return refuse("no albedo target o1");
 			}
-			for (uint8_t c = 0; c < 3; ++c) {
+			const uint8_t lanes = request_.target == ProgramTarget::DeferredDecal ? 4 : 3;
+			for (uint8_t c = 0; c < lanes; ++c) {
 				live.insert(lane_key(uint8_t(OperandType::Output), kGbufferAlbedo, c));
 			}
 			outputs_used_.insert(kGbufferAlbedo);
@@ -1225,6 +1226,15 @@ private:
 					live.insert(lane_key(uint8_t(OperandType::Output), kGbufferNormal, c));
 				}
 				outputs_used_.insert(kGbufferNormal);
+			}
+			for (const dxbc::SignatureElement &e : ps_.outputs) {
+				if (request_.target == ProgramTarget::DeferredDecal && e.reg == kGbufferNormal &&
+						e.name == "SV_Target") {
+					for (uint8_t c = 0; c < 4; ++c) {
+						live.insert(lane_key(uint8_t(OperandType::Output), kGbufferNormal, c));
+					}
+					outputs_used_.insert(kGbufferNormal);
+				}
 			}
 		} else {
 			for (uint8_t c = 0; c < 4; ++c) {
@@ -1644,6 +1654,9 @@ private:
 		std::string code = "shader_type spatial;\nrender_mode ";
 		if (request_.target == ProgramTarget::Deferred) {
 			code += "blend_mix, depth_draw_opaque, diffuse_burley, specular_schlick_ggx";
+		} else if (request_.target == ProgramTarget::DeferredDecal) {
+			code += "blend_mix, depth_draw_never, diffuse_burley, specular_schlick_ggx";
+			code += request_.view_pull > 0.0f ? ", skip_vertex_transform" : "";
 		} else {
 			code += request_.blend == ProgramBlend::Add				? "blend_add"
 					: request_.blend == ProgramBlend::Multiply		? "blend_mul"
@@ -1681,6 +1694,13 @@ uniform float roughness_value = 0.6;
 			declarations += stage_->varyings();
 			body += *computed;
 		}
+		if (request_.target == ProgramTarget::DeferredDecal && request_.view_pull > 0.0f) {
+			body += "\tVERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz * " +
+					std::to_string(1.0f - request_.view_pull) +
+					";\n\tNORMAL = normalize((MODELVIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);\n"
+					"\tTANGENT = normalize((MODELVIEW_MATRIX * vec4(TANGENT, 0.0)).xyz);\n"
+					"\tBINORMAL = normalize((MODELVIEW_MATRIX * vec4(BINORMAL, 0.0)).xyz);\n";
+		}
 		if (body.empty()) {
 			return std::string();
 		}
@@ -1705,6 +1725,16 @@ uniform float roughness_value = 0.6;
 		NORMAL_MAP = vec3(texture(normal_tex, (normal_uv == 1 ? UV2 : UV) * normal_scale).rg, 1.0);
 	}
 )";
+		}
+		if (request_.target == ProgramTarget::DeferredDecal) {
+			std::string code =
+					"\tfloat decal_cover = max(o1.w, 0.0001);\n\tvec3 decal_colour = o1.xyz / decal_cover;\n"
+					"\tALBEDO = decal_colour * decal_colour;\n\tALPHA = clamp(o1.w, 0.0, 1.0);\n\tROUGHNESS = 1.0;\n";
+			if (outputs_used_.count(kGbufferNormal) != 0) {
+				code += "\tNORMAL = normalize((VIEW_MATRIX * vec4(o0.xyz / max(o0.w, 0.0001) * 2.0 - 1.0, "
+						"0.0)).xyz);\n";
+			}
+			return code;
 		}
 		if (request_.blend == ProgramBlend::Mix || request_.blend == ProgramBlend::Premultiplied) {
 			return "\tALBEDO = o0.rgb;\n\tALPHA = o0.a;\n";

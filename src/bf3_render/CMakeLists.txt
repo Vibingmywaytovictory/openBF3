@@ -114,4 +114,6 @@ target_sources(bf3_render PRIVATE
     src/terrain_page.cpp
     include/bf3/render/water.h
     src/water.cpp
+    include/bf3/render/surface_decals.h
+    src/surface_decals.cpp
 )

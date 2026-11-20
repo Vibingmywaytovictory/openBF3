@@ -84,6 +84,11 @@ struct DecalCounts {
 	uint32_t asphalt_records = 0;
 	uint32_t water_records = 0;
 	size_t water_shapes = 0;
+	size_t surface_shapes = 0;
+	uint32_t surface_records = 0;
+	size_t without_shader = 0;
+	size_t shaderless_under_decal = 0;
+	size_t shaderless_under_water = 0;
 };
 
 constexpr double kRoadLayerMargin = 64.0;
@@ -188,9 +193,24 @@ void check_terrain_decals(const char *p_level, const char *p_mode, const DecalCo
 	REQUIRE_MESSAGE(terrain.ok(), (terrain.ok() ? std::string() : terrain.error().message));
 	REQUIRE(terrain->look.has_value());
 
-	DrawnDecals drawn, water;
-	size_t decal_surfaces = 0, water_surfaces = 0;
+	DrawnDecals drawn, water, surface;
+	size_t decal_surfaces = 0, water_surfaces = 0, surface_surfaces = 0;
 	for (const render::PreparedSurface &s : terrain->mesh.surfaces) {
+		const bool is_surface =
+				std::any_of(plan->terrains[0].surface_decals.begin(), plan->terrains[0].surface_decals.end(),
+						[&](const render::SceneWaterShader &w) { return w.shader == s.material_name; });
+		if (is_surface) {
+			surface.add(s);
+			REQUIRE(s.material_index < terrain->look->materials.size());
+			const std::string &code = terrain->look->materials[s.material_index].code;
+			CHECK(code.find("ALBEDO = decal_colour * decal_colour;") != std::string::npos);
+			CHECK(code.find("NORMAL = normalize((VIEW_MATRIX * vec4(o0.xyz") != std::string::npos);
+			CHECK(code.find("skip_vertex_transform") != std::string::npos);
+			CHECK(code.find("VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz * " +
+						  std::to_string(1.0f - render::kTerrainDecalViewPull)) != std::string::npos);
+			++surface_surfaces;
+			continue;
+		}
 		const bool is_water = std::any_of(plan->terrains[0].water.begin(), plan->terrains[0].water.end(),
 				[&](const render::SceneWaterShader &w) { return w.shader == s.material_name; });
 		if (is_water) {
@@ -210,10 +230,48 @@ void check_terrain_decals(const char *p_level, const char *p_mode, const DecalCo
 	const EbxPartition *partition = lvl.db().partition_by_name(render::terrain_decals_name(plan->terrains[0].asset));
 	REQUIRE(partition != nullptr);
 	size_t shapes = 0, shapes_drawn = 0, shapes_without_length = 0, shapes_refused = 0, points = 0, points_drawn = 0;
+	size_t surface_shapes = 0, surface_shapes_drawn = 0, without_shader = 0, without_shader_recorded = 0;
+	size_t without_shader_under_water = 0;
 	for (const char *type : { "RoadData", "TerrainQuadDecalData" }) {
 		for (const EbxInstance &shape : partition->instances_of(type)) {
 			const std::optional<EbxInstance> shader2d = lvl.db().follow(shape.data(), "Shader2d");
 			if (!shader2d) {
+				const bool has_surface = lvl.db().follow(shape.data(), "Shader3d").has_value();
+				const std::optional<EbxValue> list = shape.get("Points");
+				const OptionalEbxArray array = list ? list->as_array() : OptionalEbxArray();
+				REQUIRE(bool(array));
+				std::vector<Vec3> at;
+				for (const EbxValue &v : *array) {
+					const std::optional<EbxStruct> st = v.as_struct();
+					const std::optional<Vec3> p = st ? st->vec3() : std::nullopt;
+					REQUIRE(p.has_value());
+					at.push_back(*p);
+				}
+				if (has_surface) {
+					++surface_shapes;
+					size_t covered = 0;
+					for (const Vec3 &p : at) {
+						covered += surface.covers(p.x, p.z) ? 1 : 0;
+					}
+					surface_shapes_drawn += covered == at.size() ? 1 : 0;
+				} else {
+					++without_shader;
+					size_t under_decal = 0, under_water = 0;
+					float lowest = INFINITY, highest = -INFINITY;
+					for (const Vec3 &p : at) {
+						under_decal += drawn.covers(p.x, p.z) || surface.covers(p.x, p.z) ? 1 : 0;
+						under_water += water.covers(p.x, p.z) ? 1 : 0;
+						lowest = std::min(lowest, p.y);
+						highest = std::max(highest, p.y);
+					}
+					without_shader_recorded += under_decal;
+					without_shader_under_water += under_water;
+					std::printf("%s %s: %s %s has neither Shader2d nor Shader3d; of its %zu points at y %.2f..%.2f, "
+								"%zu lie "
+								"under a drawn decal and %zu under the drawn water\n",
+							p_level, p_mode, type, shape.guid().to_string().c_str(), at.size(), double(lowest),
+							double(highest), under_decal, under_water);
+				}
 				continue;
 			}
 			const std::optional<std::string_view> shader_name = lvl.db().name_of(shader2d->partition().guid());
@@ -396,6 +454,24 @@ void check_terrain_decals(const char *p_level, const char *p_mode, const DecalCo
 		}
 	}
 	CHECK(decal_surfaces == stats.surfaces);
+	const render::TerrainSurfaceDecalStats &ss = terrain->surface_decals;
+	std::printf("%s %s: surface (Shader3d) decals of the shapes without a Shader2d: %zu shapes, %zu with every corner "
+				"under a drawn triangle; records %u of %u, shaders %u of %u, %zu surfaces, %llu triangles\n",
+			p_level, p_mode, surface_shapes, surface_shapes_drawn, ss.drawn_records, ss.records, ss.drawn_shaders,
+			ss.shaders, surface_surfaces, (unsigned long long)ss.triangles);
+	for (const auto &[shader, why] : ss.undrawn) {
+		std::printf("  surface decal not drawn: %s: %s\n", shader.c_str(), why.c_str());
+	}
+	CHECK(surface_shapes == p_data.surface_shapes);
+	CHECK(surface_shapes_drawn == surface_shapes);
+	CHECK(ss.records == p_data.surface_records);
+	CHECK(ss.drawn_records == ss.records);
+	CHECK(ss.drawn_shaders == ss.shaders);
+	CHECK(ss.undrawn.empty());
+	CHECK(surface_surfaces == ss.surfaces);
+	CHECK(without_shader == p_data.without_shader);
+	CHECK(without_shader_recorded == p_data.shaderless_under_decal);
+	CHECK(without_shader_under_water == p_data.shaderless_under_water);
 }
 
 }
@@ -518,11 +594,12 @@ TEST_SUITE("terrain-decals-draw-unit") {
 TEST_SUITE("terrain-decals-draw") {
 	TEST_CASE("terrain decals: MP_007 ConquestLarge0 draws its roads and quad decals") {
 		check_terrain_decals("MP_007", "ConquestLarge0",
-				DecalCounts{ 156, 1, 281, 5, {}, "levels/mp_007/shaders/mp_007_roadasphalt2d", {}, 72, 42, 4 });
+				DecalCounts{ 156, 1, 281, 5, {}, "levels/mp_007/shaders/mp_007_roadasphalt2d", {}, 72, 42, 4, 0, 0, 1,
+						1, 53 });
 	}
 
 	TEST_CASE("terrain decals: MP_Subway ConquestLarge0 draws its roads and quad decals") {
-		check_terrain_decals("MP_Subway", "ConquestLarge0", DecalCounts{ 75, 0, 44, 3, {}, {}, {}, 0, 25, 2 });
+		check_terrain_decals("MP_Subway", "ConquestLarge0", DecalCounts{ 75, 0, 44, 3, {}, {}, {}, 0, 25, 2, 4, 2, 0 });
 	}
 
 	TEST_CASE("terrain decals: MP_018 ConquestLarge0 draws its roads and quad decals") {

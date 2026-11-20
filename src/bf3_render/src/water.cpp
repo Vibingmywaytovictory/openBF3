@@ -19,9 +19,14 @@ constexpr std::string_view kEnvmapBinding = "texture_outdoorLightSkyEnvmap";
 constexpr std::string_view kHeightBinding = "texture_heightfieldAtlas";
 constexpr std::string_view kHeightScale = "heightmapWorldSizeY";
 constexpr std::string_view kHeightUv = "worldToHeightfieldUvTransform";
+constexpr std::string_view kHeightPixel = "heightfieldPixelSizeAndAspect";
 
-core::Result<TerrainMaterial> solution_material(const SceneWaterShader &p_shader, const ShaderSolution &p_solution,
-		const LookEnvState &p_look, const SceneTerrainTexture &p_envmap, const std::array<float, 4> &p_height_uv) {
+}
+
+core::Result<TerrainMaterial> terrain_solution_material(const SceneWaterShader &p_shader,
+		const ShaderSolution &p_solution, const LookEnvState &p_look, const SolutionBinding &p_binding) {
+	const SceneTerrainTexture &p_envmap = p_binding.envmap;
+	const std::array<float, 4> &p_height_uv = p_binding.height_uv;
 	if (p_solution.pixel_program == nullptr || p_solution.vertex_program == nullptr) {
 		return core::make_error("no pixel and vertex program");
 	}
@@ -68,8 +73,9 @@ core::Result<TerrainMaterial> solution_material(const SceneWaterShader &p_shader
 	request.vertex_formats = p_solution.vertex_program->element_formats;
 	request.vertex_lanes = p_solution.vertex_program->element_lanes;
 	request.bound_textures = registers;
-	request.target = ProgramTarget::Forward;
-	request.blend = ProgramBlend::Premultiplied;
+	request.target = p_binding.target;
+	request.blend = p_binding.blend;
+	request.view_pull = p_binding.view_pull;
 	request.double_sided = (p_solution.flags & 1u) != 0;
 	request.srgb = [&](uint32_t p_reg) {
 		const auto b = std::find_if(
@@ -84,6 +90,7 @@ core::Result<TerrainMaterial> solution_material(const SceneWaterShader &p_shader
 	}
 	TerrainMaterial material;
 	material.code = std::move(translated->code);
+	material.render_priority = p_binding.render_priority;
 	for (uint32_t reg : translated->textures) {
 		const auto b = std::find_if(
 				bindings.begin(), bindings.end(), [&](const TerrainTextureBinding &t) { return t.slot == reg; });
@@ -106,6 +113,8 @@ core::Result<TerrainMaterial> solution_material(const SceneWaterShader &p_shader
 				value[lane] = 1.0f;
 			} else if (l.value == kHeightUv) {
 				value[lane] = p_height_uv[l.component & 3u];
+			} else if (l.value == kHeightPixel) {
+				value[lane] = p_binding.height_pixel[l.component & 3u];
 			} else {
 				return core::make_error("unknown constant " + l.value);
 			}
@@ -115,10 +124,17 @@ core::Result<TerrainMaterial> solution_material(const SceneWaterShader &p_shader
 	return material;
 }
 
-}
-
 std::vector<SceneWaterShader> plan_terrain_water(const core::LevelMount &p_mount, const ShaderLookup &p_shaders,
 		std::string_view p_asset, const std::function<int32_t(const std::string &)> &p_texture,
+		std::vector<std::pair<std::string, std::string>> &r_failures) {
+	return plan_terrain_record_shaders(
+			p_mount, p_shaders, p_asset, TerrainDecalGroup::Water, {}, p_texture, r_failures);
+}
+
+std::vector<SceneWaterShader> plan_terrain_record_shaders(const core::LevelMount &p_mount,
+		const ShaderLookup &p_shaders, std::string_view p_asset, TerrainDecalGroup p_group,
+		const std::function<bool(const std::string &)> &p_keep,
+		const std::function<int32_t(const std::string &)> &p_texture,
 		std::vector<std::pair<std::string, std::string>> &r_failures) {
 	std::vector<SceneWaterShader> out;
 	const std::string name = terrain_decals_name(p_asset);
@@ -130,9 +146,13 @@ std::vector<SceneWaterShader> plan_terrain_water(const core::LevelMount &p_mount
 	if (!core::res::TerrainDecals::parse(res->second, decals).ok()) {
 		return out;
 	}
+	const core::res::TerrainDecalSet &set = p_group == TerrainDecalGroup::Water ? decals.water : decals.surface;
 	std::vector<std::string> names;
-	for (const core::res::TerrainDecalRecord &r : decals.water.records) {
-		names.push_back(to_lower_ascii(r.shader));
+	for (const core::res::TerrainDecalRecord &r : set.records) {
+		const std::string lower = to_lower_ascii(r.shader);
+		if (!p_keep || p_keep(lower)) {
+			names.push_back(lower);
+		}
 	}
 	std::sort(names.begin(), names.end());
 	names.erase(std::unique(names.begin(), names.end()), names.end());
@@ -140,7 +160,10 @@ std::vector<SceneWaterShader> plan_terrain_water(const core::LevelMount &p_mount
 	for (const std::string &shader_name : names) {
 		const SurfaceShader *shader = p_shaders.by_name(shader_name);
 		if (shader == nullptr) {
-			r_failures.emplace_back("terrain water shader " + shader_name, "not in the shader database");
+			r_failures.emplace_back(
+					(p_group == TerrainDecalGroup::Water ? "terrain water shader " : "terrain surface decal shader ") +
+							shader_name,
+					"not in the shader database");
 			continue;
 		}
 		SceneWaterShader water;
@@ -166,9 +189,13 @@ std::vector<SceneWaterShader> plan_terrain_water(const core::LevelMount &p_mount
 core::Result<TerrainMaterial> terrain_water_material(const SceneWaterShader &p_shader, const LookEnvState &p_look,
 		const SceneTerrainTexture &p_envmap, const std::array<float, 4> &p_height_uv) {
 	std::string refused;
+	SolutionBinding binding;
+	binding.envmap = p_envmap;
+	binding.height_uv = p_height_uv;
+	binding.blend = ProgramBlend::Premultiplied;
 	for (size_t i = 0; i < p_shader.solutions.size(); ++i) {
 		core::Result<TerrainMaterial> material =
-				solution_material(p_shader, p_shader.solutions[i], p_look, p_envmap, p_height_uv);
+				terrain_solution_material(p_shader, p_shader.solutions[i], p_look, binding);
 		if (material) {
 			return material;
 		}

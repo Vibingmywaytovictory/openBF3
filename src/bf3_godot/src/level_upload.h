@@ -130,6 +130,7 @@ private:
 		std::shared_ptr<const bf3::render::TerrainDetailSource> detail;
 		std::vector<godot::RID> images;
 		std::vector<uint32_t> surface_materials;
+		std::vector<uint32_t> surface_decal_materials;
 		std::optional<godot::AABB> bounds;
 	};
 

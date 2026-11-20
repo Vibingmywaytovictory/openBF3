@@ -549,12 +549,32 @@ void LevelUpload::run_task() {
 					water += "; not drawn: " + shader + ": " + why;
 				}
 				UtilityFunctions::print(to_godot(water));
+				const render::TerrainSurfaceDecalStats &ss = item.terrain->surface_decals;
+				std::string surface = "[level] terrain surface decals: " + std::to_string(ss.drawn_records) + " of " +
+						std::to_string(ss.records) + " records drawn, " + std::to_string(ss.drawn_shaders) + " of " +
+						std::to_string(ss.shaders) + " shaders, " + std::to_string(ss.triangles) + " triangles";
+				for (const auto &[shader, why] : ss.undrawn) {
+					surface += "; not drawn: " + shader + ": " + why;
+				}
+				UtilityFunctions::print(to_godot(surface));
 				for (const render::TerrainImage &img : item.terrain->look->images) {
 					done.images.push_back(terrain_image(img));
 				}
 			}
+			static const bool surface_decals_off =
+					("," + user_arg_value("look-off") + ",").find(",surface_decals,") != std::string::npos;
 			TypedArray<Dictionary> surfaces;
 			for (const render::PreparedSurface &s : pm.surfaces) {
+				const bool surface_decal = look &&
+						std::any_of(plan.terrains[item.index].surface_decals.begin(),
+								plan.terrains[item.index].surface_decals.end(),
+								[&](const render::SceneWaterShader &w) { return w.shader == s.material_name; });
+				if (surface_decal && surface_decals_off) {
+					continue;
+				}
+				if (surface_decal) {
+					done.surface_decal_materials.push_back(s.material_index);
+				}
 				RID material;
 				if (look) {
 					material = RID();
@@ -778,10 +798,27 @@ void LevelUpload::apply_done(double p_deadline_us) {
 void LevelUpload::create_terrain_look(const Done &p_done) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const render::TerrainLook &look = *p_done.look;
+	static const bool surface_decal_lift =
+			("," + user_arg_value("look-off") + ",").find(",surface_decal_lift,") != std::string::npos;
 	std::vector<RID> materials;
 	for (const render::TerrainMaterial &m : look.materials) {
 		const RID shader = rs->shader_create();
-		rs->shader_set_code(shader, to_godot(m.code));
+		const bool lifted = surface_decal_lift &&
+				std::find(p_done.surface_decal_materials.begin(), p_done.surface_decal_materials.end(),
+						uint32_t(materials.size())) != p_done.surface_decal_materials.end();
+		std::string code = m.code;
+		if (lifted) {
+			constexpr std::string_view kVertex = "void vertex() {\n";
+			const std::string lift =
+					"\tPOSITION = PROJECTION_MATRIX * vec4((MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz * 0.99, 1.0);\n";
+			const size_t vertex = code.find(kVertex);
+			if (vertex != std::string::npos) {
+				code.insert(vertex + kVertex.size(), lift);
+			} else if (const size_t fragment = code.find("void fragment()"); fragment != std::string::npos) {
+				code.insert(fragment, std::string(kVertex) + lift + "}\n");
+			}
+		}
+		rs->shader_set_code(shader, to_godot(code));
 		const RID material = rs->material_create();
 		rs->material_set_shader(material, shader);
 		rs->material_set_render_priority(material, m.render_priority);

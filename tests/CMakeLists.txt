@@ -432,6 +432,9 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
         "-DVIEWS=water_e@-17.9,7,-12,30,-35|water_w@-17.9,7,-12,-30,-35|water_n@-17.9,7,-12,60,-35"
         -DMIN_MATERIALS=19 -DMIN_INSTANCES=131)
     set_tests_properties(godot.look_programs.palace PROPERTIES RUN_SERIAL TRUE)
+    openbf3_godot_row(godot.surface_decals godot_surface_decals.cmake WINDOW TIMEOUT 900
+        ARGS "-DPYTHON=${Python3_EXECUTABLE}" -DMAX_HIDDEN=0.05)
+    set_tests_properties(godot.surface_decals PROPERTIES RUN_SERIAL TRUE)
 endif()
 openbf3_test(test_s1_contract test_main.cpp s1_contract_tests.cpp test_support.h)
 target_link_libraries(test_s1_contract PRIVATE bf3_host)
@@ -919,6 +922,7 @@ openbf3_cost(sim.nav.bake 1 49)
 openbf3_cost(godot.s3_crowd 1 270)
 openbf3_cost(godot.l1_look 1 96)
 openbf3_cost(godot.m1_load 1 49)
+openbf3_cost(godot.surface_decals 1 78)
 openbf3_cost(godot.audio 1 33)
 openbf3_cost(audio.decode.perf 1 11)
 openbf3_cost(tools.tc_cost 1 9)
