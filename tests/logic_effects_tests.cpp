@@ -357,8 +357,11 @@ TEST_SUITE("logic-effects") {
 				std::vector<core::Vec3> points;
 				if (t == 30 || t == 31 || t == 4 * 60 || t == 27 * 60) {
 					for (const sim::logic::UnderFireTriggerData &d : (*params)->triggers) {
-						core::Vec3 p = d.position;
-						p.y += p_inside ? d.radius * 0.5f : d.radius * 1.5f;
+						REQUIRE(d.volume.has_value());
+						core::Vec3 p = d.volume->centre();
+						const float along = p_inside ? d.radius * 0.5f : d.volume->half[1] + d.radius * 1.5f;
+						p = core::vec::add(p, core::vec::scale(d.volume->axes[1], along));
+						REQUIRE((d.distance(p) <= d.radius) == p_inside);
 						points.push_back(p);
 					}
 				}
@@ -394,19 +397,35 @@ TEST_SUITE("logic-effects") {
 				(unsigned long long)in_stats.spent, inside, (unsigned long long)out_stats.fired, outside);
 		CHECK(outside == 0);
 		CHECK(out_stats.fired == 0);
-		size_t rearmed = 0;
+		const std::span<const gp::LogicEdge> edges = server_graph->event_edges();
+		size_t with_enable = 0, rearmed = 0, repeating = 0;
 		for (const sim::logic::UnderFireTriggerData &d : (*params)->triggers) {
-			rearmed += std::any_of(server_graph->event_edges().begin(), server_graph->event_edges().end(),
-							   [&d](const gp::LogicEdge &e) {
-								   return e.target == d.node && e.target_port == gp::logic_port::kEnable;
-							   })
-					? 1
-					: 0;
+			const auto into = [&](uint32_t p_from, int32_t p_from_port, uint32_t p_to, int32_t p_to_port) {
+				return std::any_of(edges.begin(), edges.end(), [&](const gp::LogicEdge &e) {
+					return e.source == p_from && e.source_port == p_from_port && e.target == p_to &&
+							e.target_port == p_to_port;
+				});
+			};
+			bool enable = false, own = false;
+			for (const gp::LogicEdge &e : edges) {
+				if (e.target == d.node && e.target_port == gp::logic_port::kEnable) {
+					enable = true;
+					own = own || into(d.node, sim::logic::kUnderFireOut, e.source, gp::logic_port::kIn);
+				}
+			}
+			with_enable += enable ? 1 : 0;
+			rearmed += own ? 1 : 0;
+			repeating += d.run_once ? 0 : 1;
 		}
-		std::printf("logic.effects MP_007: %zu of the triggers have an Enable input in the data\n", rearmed);
-		CHECK(rearmed > 0);
-		CHECK(in_stats.fired > (*params)->triggers.size());
-		CHECK(in_stats.fired <= (*params)->triggers.size() + rearmed);
+		std::printf("logic.effects MP_007: %zu of the triggers have an Enable input in the data, %zu of them from a "
+					"Delay their own output starts; %zu are not RunOnce\n",
+				with_enable, rearmed, repeating);
+		CHECK(with_enable == 10);
+		CHECK(rearmed == 9);
+		CHECK(repeating == 1);
+		CHECK(in_stats.fired == (*params)->triggers.size() + rearmed);
+		CHECK(in_stats.cooling == repeating);
+		CHECK(in_stats.spent == (*params)->triggers.size() - repeating + 2 * ((*params)->triggers.size() - rearmed));
 		CHECK(inside == 10);
 		CHECK(o->session->errors().empty());
 	}

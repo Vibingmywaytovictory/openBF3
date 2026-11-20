@@ -1,6 +1,7 @@
 #include "bf3/sim/logic/under_fire.h"
 
 #include "bf3/core/gameplay/logic_types.h"
+#include "bf3/core/level/connections.h"
 #include "bf3/core/level/world.h"
 #include "bf3/sim/logic/conquest_data.h"
 
@@ -27,6 +28,22 @@ bool field_bool(const core::EbxInstance &p_entity, std::string_view p_field, boo
 	return b.value_or(p_default);
 }
 
+std::optional<core::level::AreaVolume> linked_box(
+		const core::level::World &p_level, const core::level::PlacedObject &p_trigger) {
+	for (const core::level::Connection &link : p_level.scopes.connections(p_trigger.scope).link) {
+		if (!(link.source == p_trigger.entity) || !link.target.is_a("OBBData")) {
+			continue;
+		}
+		const core::level::PlacedObject *placed = p_level.placed(p_trigger.scope, link.target);
+		core::Result<core::level::AreaVolume> v = core::level::read_area_volume(
+				link.target, placed != nullptr ? placed->transform : core::level::LevelTransform::identity());
+		if (v) {
+			return std::move(*v);
+		}
+	}
+	return std::nullopt;
+}
+
 bool value_true(const LogicValue &p_value) {
 	switch (p_value.kind) {
 		case LogicValue::Kind::Bool:
@@ -40,6 +57,14 @@ bool value_true(const LogicValue &p_value) {
 	}
 }
 
+}
+
+float UnderFireTriggerData::distance(const core::Vec3 &p_point) const {
+	if (volume) {
+		return volume->distance(p_point);
+	}
+	const float dx = p_point[0] - position[0], dy = p_point[1] - position[1], dz = p_point[2] - position[2];
+	return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 core::Result<std::shared_ptr<const UnderFireParams>> read_under_fire_params(
@@ -61,7 +86,8 @@ core::Result<std::shared_ptr<const UnderFireParams>> read_under_fire_params(
 		UnderFireTriggerData t;
 		t.node = *node;
 		t.level_object = i;
-		t.position = o.transform.trans;
+		t.volume = linked_box(p_level, o);
+		t.position = t.volume ? t.volume->centre() : o.transform.trans;
 		t.radius = std::max(0.0f, field_f32(o.entity, "Radius", 0.0f));
 		t.cool_down_s = std::max(0.0f, field_f32(o.entity, "CoolDownTime", 0.0f));
 		t.delay_s = std::max(0.0f, field_f32(o.entity, "Delay", 0.0f));
@@ -126,8 +152,7 @@ core::Status UnderFireNatives::impacts(Tick p_tick, std::span<const core::Vec3> 
 		Trigger &t = triggers_[i];
 		bool inside = false;
 		for (const core::Vec3 &p : p_points) {
-			const float dx = p[0] - d.position[0], dy = p[1] - d.position[1], dz = p[2] - d.position[2];
-			if (dx * dx + dy * dy + dz * dz <= d.radius * d.radius) {
+			if (d.distance(p) <= d.radius) {
 				inside = true;
 				break;
 			}

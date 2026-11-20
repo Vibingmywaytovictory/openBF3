@@ -1,12 +1,14 @@
 #pragma once
 
 #include "bf3/core/gameplay/logic_graph.h"
+#include "bf3/core/level/area_volume.h"
 #include "bf3/core/math.h"
 #include "bf3/core/result.h"
 #include "bf3/sim/logic/logic_runtime.h"
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -24,11 +26,14 @@ struct UnderFireTriggerData {
 	uint32_t node = core::gameplay::kNoLogicIndex;
 	uint32_t level_object = core::gameplay::kNoLogicIndex;
 	core::Vec3 position{};
+	std::optional<core::level::AreaVolume> volume;
 	float radius = 0.0f;
 	float cool_down_s = 0.0f;
 	float delay_s = 0.0f;
 	bool run_once = false;
 	bool enabled = true;
+
+	float distance(const core::Vec3 &p_point) const;
 };
 
 struct UnderFireParams {
