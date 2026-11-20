@@ -648,6 +648,15 @@ core::Status load_shared_tdm(const LevelDatabase &p_db, const SharedLoadOptions 
 		params->notes.insert(params->notes.end(), (*conquest)->notes.begin(), (*conquest)->notes.end());
 		params->conquest = std::move(*conquest);
 	}
+	if (!shared_graph->nodes_of_type(gp::LogicTypeId::UnderFireTrigger).empty() && p_db.world != nullptr) {
+		core::Result<std::shared_ptr<const sim::logic::UnderFireParams>> under_fire =
+				sim::logic::read_under_fire_params(*shared_graph, *p_db.world);
+		if (!under_fire) {
+			return core::error_at("tdm: under fire", under_fire.error());
+		}
+		params->notes.insert(params->notes.end(), (*under_fire)->notes.begin(), (*under_fire)->notes.end());
+		params->under_fire = std::move(*under_fire);
+	}
 	core::Result<std::shared_ptr<const LevelVehicles>> vehicles =
 			load_level_vehicles(p_db, p_options.vehicle_tuning, shared_graph.get());
 	if (!vehicles) {

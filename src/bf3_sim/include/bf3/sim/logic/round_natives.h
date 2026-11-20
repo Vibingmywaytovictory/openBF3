@@ -6,6 +6,7 @@
 #include "bf3/sim/logic/conquest_natives.h"
 #include "bf3/sim/logic/logic_native.h"
 #include "bf3/sim/logic/logic_runtime.h"
+#include "bf3/sim/logic/under_fire.h"
 #include "bf3/sim/sim_types.h"
 
 #include <cstdint>
@@ -42,6 +43,7 @@ struct RoundNativeParams {
 	bool from_data = false;
 	std::vector<std::string> notes;
 	std::shared_ptr<const ConquestParams> conquest;
+	std::shared_ptr<const UnderFireParams> under_fire;
 };
 
 struct RoundNativeConfig {

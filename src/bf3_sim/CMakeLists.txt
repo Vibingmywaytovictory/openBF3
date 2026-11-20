@@ -213,3 +213,8 @@ target_sources(bf3_sim PRIVATE
     src/logic/conquest_data.cpp
     src/logic/conquest_natives.cpp
 )
+
+target_sources(bf3_sim PRIVATE
+    include/bf3/sim/logic/under_fire.h
+    src/logic/under_fire.cpp
+)

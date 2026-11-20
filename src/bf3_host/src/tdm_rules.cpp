@@ -321,6 +321,7 @@ struct TdmRules::Impl {
 	lg::RoundNativeConfig native_config;
 	std::optional<lg::LogicRuntime> runtime;
 	std::optional<lg::RoundNatives> natives;
+	std::optional<lg::UnderFireNatives> under_fire;
 	std::vector<lg::LogicNetworkedEvent> networked;
 	uint32_t base = 0;
 	bool based = false;
@@ -396,6 +397,10 @@ struct TdmRules::Impl {
 		}
 		runtime.emplace(std::move(*rt));
 		natives.emplace(std::move(*n));
+		under_fire.reset();
+		if (native_config.params && native_config.params->under_fire) {
+			under_fire.emplace(native_config.params->under_fire);
+		}
 		core::Result<lg::LogicTickStats> started = runtime->start();
 		if (!started) {
 			return core::error_at("tdm rules: logic start", started.error());
@@ -1161,6 +1166,17 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 		core::Status st = m.natives->apply(next, m.runtime->effects(), *m.runtime);
 		if (st.ok()) {
 			st = m.natives->tick_round(next, *m.runtime);
+		}
+		if (st.ok() && m.under_fire) {
+			m.under_fire->apply(next, m.runtime->effects());
+			std::vector<core::Vec3> points;
+			for (const sim::weapons::ImpactEvent &e : p_gunplay.step_output().impacts) {
+				points.push_back(e.position);
+			}
+			for (const sim::weapons::DetonationEvent &e : p_gunplay.step_output().detonations) {
+				points.push_back(e.position);
+			}
+			st = m.under_fire->impacts(next, points, *m.runtime);
 		}
 		if (st.ok() && m.natives->conquest() != nullptr) {
 			std::vector<lg::ConquestPlayerSample> players;

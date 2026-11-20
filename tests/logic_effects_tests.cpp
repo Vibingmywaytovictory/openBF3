@@ -1,11 +1,13 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/gameplay/logic_types.h"
+#include "bf3/core/gameplay/logic_world.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/placed_effects.h"
 #include "bf3/core/level/world.h"
 #include "bf3/host/ui_flow_session.h"
 #include "bf3/sim/logic/conquest_data.h"
+#include "bf3/sim/logic/under_fire.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -301,5 +303,95 @@ TEST_SUITE("logic-effects") {
 				live, late);
 		CHECK(live == 6);
 		CHECK(late == 0);
+	}
+	TEST_CASE("logic effects: a hit inside an UnderFireTrigger's Radius fires it on the server once, and its networked "
+			  "Start starts the 10 placed effects behind it on the client; a hit outside starts none") {
+		std::optional<Opened> o = open("MP_007", "ConquestLarge0");
+		if (!o) {
+			return;
+		}
+		gp::LogicGraphOptions go;
+		go.mode = o->level->mode;
+		go.side = gp::LogicSide::Server;
+		gp::LogicWorldOptions wo;
+		wo.mode = go.mode;
+		wo.expand_root_objects = true;
+		core::Result<gp::LogicWorld> world = gp::LogicWorld::build(o->level->db(), o->level->root(), wo);
+		REQUIRE(world.ok());
+		core::Result<gp::LogicGraph> built = gp::build_logic_graph(*world, go);
+		REQUIRE(built.ok());
+		auto server_graph = std::make_shared<const gp::LogicGraph>(std::move(*built));
+		core::Result<std::shared_ptr<const sim::logic::UnderFireParams>> params =
+				sim::logic::read_under_fire_params(*server_graph, *o->world);
+		REQUIRE(params.ok());
+		REQUIRE_FALSE((*params)->triggers.empty());
+		for (const std::string &n : (*params)->notes) {
+			MESSAGE(n);
+		}
+
+		const gp::LogicGraph &client = o->session->runtime().graph();
+		core::Result<std::vector<lvl::PlacedEffect>> placed = lvl::read_placed_effects(*o->world);
+		REQUIRE(placed.ok());
+		std::set<uint32_t> waiting;
+		for (const lvl::PlacedEffect &e : *placed) {
+			if (!e.auto_start) {
+				const std::optional<uint32_t> node =
+						sim::logic::placed_logic_node(client, *o->world, e.object, gp::LogicTypeId::Effect);
+				REQUIRE(node.has_value());
+				waiting.insert(*node);
+			}
+		}
+
+		const auto shoot = [&](bool p_inside) -> std::pair<size_t, sim::logic::UnderFireStats> {
+			sim::logic::LogicRuntimeOptions ro;
+			core::Result<sim::logic::LogicRuntime> rt = sim::logic::LogicRuntime::create(server_graph, ro);
+			REQUIRE(rt.ok());
+			REQUIRE(rt->start().ok());
+			sim::logic::UnderFireNatives natives(*params);
+			std::vector<sim::logic::LogicNetworkedEvent> sent;
+			for (int t = 0; t < 5 * 60; ++t) {
+				const sim::Tick next = rt->tick() + 1u;
+				natives.apply(next, rt->effects());
+				std::vector<core::Vec3> points;
+				if (t == 30 || t == 31 || t == 4 * 60) {
+					for (const sim::logic::UnderFireTriggerData &d : (*params)->triggers) {
+						core::Vec3 p = d.position;
+						p.y += p_inside ? d.radius * 0.5f : d.radius * 1.5f;
+						points.push_back(p);
+					}
+				}
+				REQUIRE(natives.impacts(next, points, *rt).ok());
+				REQUIRE(rt->step().ok());
+				for (const sim::logic::LogicNetworkedEvent &e : rt->networked()) {
+					sent.push_back(e);
+				}
+			}
+			const uint64_t cursor = o->session->effect_feed().end();
+			o->session->receive_networked(sent);
+			for (int t = 0; t < 30 * 60; ++t) {
+				REQUIRE(o->session->update(o->state).ok());
+			}
+			std::set<uint32_t> started;
+			for (const host::LogicEffectEvent &e : o->session->effect_feed().since(cursor)) {
+				if (e.start && waiting.count(e.node) != 0) {
+					started.insert(e.node);
+				}
+			}
+			return { started.size(), natives.stats() };
+		};
+		const auto [outside, out_stats] = shoot(false);
+		const auto [inside, in_stats] = shoot(true);
+		std::printf("logic.effects MP_007: %zu UnderFireTriggers (radius %.1f, cool down %.1f s, run once %d); hits "
+					"inside: fired %llu, %llu inside, %llu spent, %zu waiting effects started; hits outside: fired "
+					"%llu, %zu started\n",
+				(*params)->triggers.size(), double((*params)->triggers[0].radius),
+				double((*params)->triggers[0].cool_down_s), int((*params)->triggers[0].run_once),
+				(unsigned long long)in_stats.fired, (unsigned long long)in_stats.inside,
+				(unsigned long long)in_stats.spent, inside, (unsigned long long)out_stats.fired, outside);
+		CHECK(outside == 0);
+		CHECK(out_stats.fired == 0);
+		CHECK(in_stats.fired == (*params)->triggers.size());
+		CHECK(inside == 10);
+		CHECK(o->session->errors().empty());
 	}
 }
