@@ -304,8 +304,10 @@ TEST_SUITE("logic-effects") {
 		CHECK(live == 6);
 		CHECK(late == 0);
 	}
-	TEST_CASE("logic effects: a hit inside an UnderFireTrigger's Radius fires it on the server once, and its networked "
-			  "Start starts the 10 placed effects behind it on the client; a hit outside starts none") {
+	TEST_CASE(
+			"logic effects: a hit inside an UnderFireTrigger's Radius fires it on the server, and its networked "
+			"Start starts the 10 placed effects behind it on the client; its own Delays disable it for 25 s and re-arm "
+			"it; a hit outside starts none") {
 		std::optional<Opened> o = open("MP_007", "ConquestLarge0");
 		if (!o) {
 			return;
@@ -349,11 +351,11 @@ TEST_SUITE("logic-effects") {
 			REQUIRE(rt->start().ok());
 			sim::logic::UnderFireNatives natives(*params);
 			std::vector<sim::logic::LogicNetworkedEvent> sent;
-			for (int t = 0; t < 5 * 60; ++t) {
+			for (int t = 0; t < 28 * 60; ++t) {
 				const sim::Tick next = rt->tick() + 1u;
 				natives.apply(next, rt->effects());
 				std::vector<core::Vec3> points;
-				if (t == 30 || t == 31 || t == 4 * 60) {
+				if (t == 30 || t == 31 || t == 4 * 60 || t == 27 * 60) {
 					for (const sim::logic::UnderFireTriggerData &d : (*params)->triggers) {
 						core::Vec3 p = d.position;
 						p.y += p_inside ? d.radius * 0.5f : d.radius * 1.5f;
@@ -382,15 +384,29 @@ TEST_SUITE("logic-effects") {
 		const auto [outside, out_stats] = shoot(false);
 		const auto [inside, in_stats] = shoot(true);
 		std::printf("logic.effects MP_007: %zu UnderFireTriggers (radius %.1f, cool down %.1f s, run once %d); hits "
-					"inside: fired %llu, %llu inside, %llu spent, %zu waiting effects started; hits outside: fired "
+					"inside: fired %llu, %llu inside, %llu cooling, %llu disabled, %llu spent, %zu waiting effects "
+					"started; hits outside: fired "
 					"%llu, %zu started\n",
 				(*params)->triggers.size(), double((*params)->triggers[0].radius),
 				double((*params)->triggers[0].cool_down_s), int((*params)->triggers[0].run_once),
 				(unsigned long long)in_stats.fired, (unsigned long long)in_stats.inside,
+				(unsigned long long)in_stats.cooling, (unsigned long long)in_stats.disabled,
 				(unsigned long long)in_stats.spent, inside, (unsigned long long)out_stats.fired, outside);
 		CHECK(outside == 0);
 		CHECK(out_stats.fired == 0);
-		CHECK(in_stats.fired == (*params)->triggers.size());
+		size_t rearmed = 0;
+		for (const sim::logic::UnderFireTriggerData &d : (*params)->triggers) {
+			rearmed += std::any_of(server_graph->event_edges().begin(), server_graph->event_edges().end(),
+							   [&d](const gp::LogicEdge &e) {
+								   return e.target == d.node && e.target_port == gp::logic_port::kEnable;
+							   })
+					? 1
+					: 0;
+		}
+		std::printf("logic.effects MP_007: %zu of the triggers have an Enable input in the data\n", rearmed);
+		CHECK(rearmed > 0);
+		CHECK(in_stats.fired > (*params)->triggers.size());
+		CHECK(in_stats.fired <= (*params)->triggers.size() + rearmed);
 		CHECK(inside == 10);
 		CHECK(o->session->errors().empty());
 	}

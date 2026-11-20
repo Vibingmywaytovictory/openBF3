@@ -110,6 +110,7 @@ void UnderFireNatives::apply(Tick p_tick, std::span<const LogicEffect> p_effects
 		Trigger &t = triggers_[i];
 		if (e.kind == LogicEffectKind::Event && e.port == gp::logic_port::kEnable) {
 			t.enabled = true;
+			t.spent = false;
 		} else if (e.kind == LogicEffectKind::Event && e.port == gp::logic_port::kDisable) {
 			t.enabled = false;
 		} else if (e.kind == LogicEffectKind::Property && e.port == gp::logic_port::kEnabled) {
