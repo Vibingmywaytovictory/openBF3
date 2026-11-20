@@ -115,6 +115,16 @@ struct NavTileInput {
 	size_t terrain_triangles = 0;
 };
 
+struct NavWetTest {
+	bool wet = false;
+	size_t units = 0;
+};
+
+std::vector<std::array<float, 4>> nav_water_boxes(std::span<const core::level::WaterPlane> p_water);
+
+NavWetTest nav_terrain_wet(const std::array<Vec3, 3> &p_triangle, std::span<const core::level::WaterPlane> p_water,
+		std::span<const std::array<float, 4>> p_boxes);
+
 bool nav_terrain_wet(const std::array<Vec3, 3> &p_triangle, std::span<const core::level::WaterPlane> p_water);
 
 core::Result<std::vector<NavTileInput>> nav_tile_inputs(const core::level::CollisionSoup &p_soup, std::span<const NavTileKey> p_tiles,

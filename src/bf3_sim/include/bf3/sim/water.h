@@ -30,6 +30,7 @@ public:
 	size_t triangle_count() const;
 	Vec3 body_min(size_t p_body) const { return bodies_[p_body].min; }
 	Vec3 body_max(size_t p_body) const { return bodies_[p_body].max; }
+	std::span<const std::array<Vec3, 3>> body_triangles(size_t p_body) const { return bodies_[p_body].triangles; }
 	uint64_t digest() const { return digest_; }
 
 private:

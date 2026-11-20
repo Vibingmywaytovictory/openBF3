@@ -160,6 +160,16 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 	nav_options.world.build.threads = p_options.threads;
 	nav_options.world.soup_threads = p_options.threads;
 	nav_options.bake.water = combat->water;
+	if (p_shared.water != nullptr) {
+		for (size_t b = 0; b < p_shared.water->body_count(); ++b) {
+			for (const std::array<sim::Vec3, 3> &t : p_shared.water->body_triangles(b)) {
+				core::level::WaterPlane plane;
+				plane.y = std::max({ t[0][1], t[1][1], t[2][1] });
+				plane.polygon = { { t[0][0], t[0][2] }, { t[1][0], t[1][2] }, { t[2][0], t[2][2] } };
+				nav_options.bake.water.push_back(std::move(plane));
+			}
+		}
+	}
 	nav_options.region = out->region;
 	core::Result<std::shared_ptr<const sim::NavWorld>> nav =
 			sim::load_nav_world_cached(p_options.cache, *p_db.level, *p_db.world, nullptr, *p_shared.static_world, nav_options);

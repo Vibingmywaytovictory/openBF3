@@ -367,6 +367,35 @@ TEST_SUITE("sim-terrain-unit") {
 		CHECK_FALSE(sim::nav_terrain_wet(steep, water));
 	}
 
+	TEST_CASE("sim.terrain.unit: nav_terrain_wet with the plane boxes: the same answer, the work only for planes whose "
+			  "box holds the centre") {
+		level::WaterPlane lake;
+		lake.y = 50.0f;
+		lake.polygon = { { 0.0f, 0.0f }, { 100.0f, 0.0f }, { 100.0f, 100.0f }, { 0.0f, 100.0f } };
+		level::WaterPlane river;
+		river.y = 50.0f;
+		river.polygon = { { 300.0f, 0.0f }, { 400.0f, 0.0f }, { 350.0f, 60.0f } };
+		const std::vector<level::WaterPlane> water{ lake, river };
+		const std::vector<std::array<float, 4>> boxes = sim::nav_water_boxes(water);
+		REQUIRE(boxes.size() == 2);
+		CHECK(boxes[1] == std::array<float, 4>{ 300.0f, 0.0f, 400.0f, 60.0f });
+		const auto tri = [](float y, float x) {
+			return std::array<sim::Vec3, 3>{ sim::Vec3{ x, y, 10.0f }, sim::Vec3{ x + 2.0f, y, 10.0f },
+				sim::Vec3{ x, y, 12.0f } };
+		};
+		for (const float y : { 40.0f, 48.1f, 48.3f, 60.0f }) {
+			for (const float x : { 10.0f, 200.0f, 310.0f, 390.0f }) {
+				const std::array<sim::Vec3, 3> t = tri(y, x);
+				CHECK(sim::nav_terrain_wet(t, water, boxes).wet == sim::nav_terrain_wet(t, water));
+			}
+		}
+		CHECK(sim::nav_terrain_wet(tri(40.0f, 10.0f), water, boxes).units == lake.polygon.size());
+		CHECK(sim::nav_terrain_wet(tri(40.0f, 310.0f), water, boxes).units == river.polygon.size());
+		CHECK(sim::nav_terrain_wet(tri(40.0f, 200.0f), water, boxes).units == 0);
+		CHECK(sim::nav_terrain_wet(tri(60.0f, 10.0f), water, boxes).units == 0);
+		CHECK(sim::nav_terrain_wet(tri(40.0f, 310.0f), water, {}).units == lake.polygon.size() + river.polygon.size());
+	}
+
 	TEST_CASE("sim.terrain.unit: a terrain hit: kNoStaticTile, the terrain index, the terrain tag, the Collision layer, an upward normal") {
 		res::HeightGrid g = make_grid(9, 9, { 0.0f, 0.0f }, { 2.0f, 2.0f }, [](size_t, size_t) { return 7.0f; });
 		g.holes[2] = 1;

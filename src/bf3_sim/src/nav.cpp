@@ -386,24 +386,20 @@ core::Result<std::vector<NavTileInput>> gather(std::span<const NavTileKey> p_til
 					const size_t first = in.layers.size() - in.terrain_triangles;
 					in.unwalkable.assign(in.layers.size(), 0);
 					bool any = false;
+					const std::vector<std::array<float, 4>> boxes = nav_water_boxes(p_water);
 					for (size_t tri = first; tri < in.layers.size(); ++tri) {
 						std::array<Vec3, 3> v;
 						for (size_t k = 0; k < 3; ++k) {
 							v[k] = { in.vertices[tri * 9 + k * 3], in.vertices[tri * 9 + k * 3 + 1], in.vertices[tri * 9 + k * 3 + 2] };
 						}
 
-						size_t units = 1;
-						const float top = std::max({ v[0][1], v[1][1], v[2][1] });
-						for (const core::level::WaterPlane &w : p_water) {
-							units += w.y - core::level::kCoverWaterDepth > top ? w.polygon.size() : 0;
-						}
-						if (core::Status st = terrain_budget.charge(units); !st.ok()) {
+						const NavWetTest test = nav_terrain_wet(v, p_water, boxes);
+						if (core::Status st = terrain_budget.charge(1 + test.units); !st.ok()) {
 							errors[p_i] = st.error();
 							return;
 						}
-						const bool wet = nav_terrain_wet(v, p_water);
-						in.unwalkable[tri] = wet ? 1 : 0;
-						any = any || wet;
+						in.unwalkable[tri] = test.wet ? 1 : 0;
+						any = any || test.wet;
 					}
 					if (!any) {
 						in.unwalkable.clear();
@@ -488,20 +484,39 @@ core::Result<std::vector<GatherTerrain>> gather_terrains(const core::level::Coll
 
 }
 
-bool nav_terrain_wet(const std::array<Vec3, 3> &p_triangle, std::span<const core::level::WaterPlane> p_water) {
-
-	const float top = std::max({ p_triangle[0][1], p_triangle[1][1], p_triangle[2][1] });
-	if (!std::isfinite(top)) {
-		return false;
-	}
-	const float cx = (p_triangle[0][0] + p_triangle[1][0] + p_triangle[2][0]) / 3.0f;
-	const float cz = (p_triangle[0][2] + p_triangle[1][2] + p_triangle[2][2]) / 3.0f;
-	for (const core::level::WaterPlane &w : p_water) {
-		if (w.y - core::level::kCoverWaterDepth > top && core::level::water_plane_covers(w, cx, cz)) {
-			return true;
+std::vector<std::array<float, 4>> nav_water_boxes(std::span<const core::level::WaterPlane> p_water) {
+	std::vector<std::array<float, 4>> boxes(p_water.size());
+	for (size_t k = 0; k < p_water.size(); ++k) {
+		boxes[k] = { INFINITY, INFINITY, -INFINITY, -INFINITY };
+		for (const std::array<float, 2> &p : p_water[k].polygon) {
+			boxes[k] = { std::min(boxes[k][0], p[0]), std::min(boxes[k][1], p[1]), std::max(boxes[k][2], p[0]),
+				std::max(boxes[k][3], p[1]) };
 		}
 	}
-	return false;
+	return boxes;
+}
+
+NavWetTest nav_terrain_wet(const std::array<Vec3, 3> &p_triangle, std::span<const core::level::WaterPlane> p_water,
+		std::span<const std::array<float, 4>> p_boxes) {
+	NavWetTest out;
+	const float top = std::max({ p_triangle[0][1], p_triangle[1][1], p_triangle[2][1] });
+	const float cx = (p_triangle[0][0] + p_triangle[1][0] + p_triangle[2][0]) / 3.0f;
+	const float cz = (p_triangle[0][2] + p_triangle[1][2] + p_triangle[2][2]) / 3.0f;
+	for (size_t k = 0; k < p_water.size(); ++k) {
+		const core::level::WaterPlane &w = p_water[k];
+		const bool boxed = k >= p_boxes.size() ||
+				(cx >= p_boxes[k][0] && cz >= p_boxes[k][1] && cx <= p_boxes[k][2] && cz <= p_boxes[k][3]);
+		if (!(w.y - core::level::kCoverWaterDepth > top) || !boxed) {
+			continue;
+		}
+		out.units += w.polygon.size();
+		out.wet = out.wet || (std::isfinite(top) && core::level::water_plane_covers(w, cx, cz));
+	}
+	return out;
+}
+
+bool nav_terrain_wet(const std::array<Vec3, 3> &p_triangle, std::span<const core::level::WaterPlane> p_water) {
+	return nav_terrain_wet(p_triangle, p_water, nav_water_boxes(p_water)).wet;
 }
 
 core::Result<std::vector<NavTileInput>> nav_tile_inputs_threads(const core::level::CollisionSoup &p_soup, std::span<const NavTileKey> p_tiles,
