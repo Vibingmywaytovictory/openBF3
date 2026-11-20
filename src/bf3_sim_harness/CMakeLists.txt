@@ -5,6 +5,7 @@ add_library(bf3_sim_harness STATIC
     include/bf3/sim_harness/sound_area_probe.h
     include/bf3/sim_harness/vault_spots.h
     include/bf3/sim_harness/vehicle_course.h
+    include/bf3/sim_harness/water_spots.h
     include/bf3/sim_harness/vehicle_replay.h
     include/bf3/sim_harness/weapon_checks.h
     include/bf3/sim_harness/weapon_install_checks.h
@@ -14,6 +15,7 @@ add_library(bf3_sim_harness STATIC
     src/sound_area_probe.cpp
     src/vault_spots.cpp
     src/vehicle_course.cpp
+    src/water_spots.cpp
     src/vehicle_replay.cpp
     src/weapon_checks.cpp
     src/weapon_install_checks.cpp

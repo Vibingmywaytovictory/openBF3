@@ -318,6 +318,9 @@ void Bf3LevelSession::game_parse_args() {
 	if (has_check_arg("vault-run")) {
 		g.vault_run = std::make_unique<VaultRunCheck>(user_arg_value("vault-shots"));
 	}
+	if (has_check_arg("water-run")) {
+		g.water_run = std::make_unique<WaterRunCheck>(user_arg_value("water-shots"));
+	}
 	if (has_check_arg("net-overlay-check")) {
 		g.net_overlay_check = std::make_unique<NetOverlayCheck>(user_arg_value("net-overlay-shots"));
 	}
@@ -1643,6 +1646,18 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			UtilityFunctions::print(
 					to_godot(std::string("VAULT RUN: ") + (g.vault_run->exit_code() == 0 ? "PASS" : "FAIL")));
 			finish(g.vault_run->exit_code());
+			return true;
+		}
+	}
+	if (g.water_run != nullptr && !g.finished) {
+		WaterRunInputs in;
+		in.alive = g.alive;
+		in.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		if (g.water_run->step(*this, in, p_delta)) {
+			g.finished = true;
+			UtilityFunctions::print(
+					to_godot(std::string("WATER RUN: ") + (g.water_run->exit_code() == 0 ? "PASS" : "FAIL")));
+			finish(g.water_run->exit_code());
 			return true;
 		}
 	}
