@@ -151,6 +151,9 @@ struct VehicleDef {
 	float velocity_damage_threshold = 0;
 	float velocity_damage_magnifier = 0;
 	float water_damage = 0;
+	float water_damage_offset = 0;
+	float below_water_damage_delay = 0;
+	bool throw_out_on_water_damage = false;
 	float upside_down_angle = 0;
 	float upside_down_damage = 0;
 	float upside_down_damage_delay = 0;

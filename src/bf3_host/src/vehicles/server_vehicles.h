@@ -10,6 +10,7 @@
 #include "bf3/sim/vehicle_world.h"
 #include "bf3/sim/vehicles/vehicle_armament.h"
 #include "bf3/sim/vehicles/vehicle_obstacles.h"
+#include "bf3/sim/water.h"
 #include "bf3/sim/weapons/gadgets.h"
 #include "vehicle_gunnery.h"
 #include "vehicle_hits.h"
@@ -57,6 +58,8 @@ struct ServerVehicleStats {
 	uint64_t pushes = 0;
 	uint64_t obstacle_failures = 0;
 	uint64_t run_overs = 0;
+	uint64_t water_hits = 0;
+	uint64_t water_throw_outs = 0;
 };
 
 inline constexpr sim::Tick kWreckWireTicks = 6;
@@ -121,6 +124,8 @@ public:
 	void configure_damage(const sim::weapons::WeaponTable &p_soldier_table,
 			std::span<const core::gameplay::WeaponDef> p_soldier_defs);
 	void step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_soldiers);
+	void set_water(const sim::WaterSurface *p_water) { water_ = p_water; }
+	std::vector<uint8_t> take_thrown_out();
 	void take_hits(Gunplay &r_gunplay, std::vector<sim::weapons::DamageEvent> &r_damage);
 	void run_over(sim::Tick p_tick, size_t p_slot, std::span<const sim::ObstacleContact> p_contacts);
 	const sim::VehicleObstacles &obstacles() const { return obstacles_; }
@@ -169,6 +174,8 @@ private:
 
 	std::shared_ptr<const LevelVehicles> level_;
 	std::shared_ptr<const sim::StaticWorldShapes> shapes_;
+	const sim::WaterSurface *water_ = nullptr;
+	std::vector<uint8_t> thrown_out_;
 	float modifier_ = 1.0f;
 	std::unique_ptr<sim::VehicleWorld> world_;
 	std::vector<ServerVehicle> vehicles_;

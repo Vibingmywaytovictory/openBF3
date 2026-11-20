@@ -138,6 +138,10 @@ sim::vehicles::VehicleDamageRule vehicle_damage_rule(const core::gameplay::Vehic
 	r.upside_down_degrees = p_def.upside_down_angle;
 	r.upside_down_damage = p_def.upside_down_damage;
 	r.upside_down_delay = p_def.upside_down_damage_delay;
+	r.water_damage = p_def.water_damage;
+	r.water_damage_offset = p_def.water_damage_offset;
+	r.below_water_delay = p_def.below_water_damage_delay;
+	r.water_throw_out = p_def.throw_out_on_water_damage;
 	return r;
 }
 

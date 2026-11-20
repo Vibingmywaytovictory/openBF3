@@ -483,13 +483,29 @@ void ServerVehicles::step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_
 			kept = dx * dx + dy * dy + dz * dz <= keep;
 		}
 		in.abandoned = !kept;
+		in.water_check = water_ != nullptr && p_tick % sim::vehicles::kWaterCheckTicks == 0;
+		if (in.water_check) {
+			const sim::Vec3 centre = hull_centre(i);
+			const std::optional<float> surface = water_->height(centre[0], centre[2]);
+			in.below_water = surface && centre[1] + in.up_y * kind.damage.water_damage_offset < *surface;
+		}
 		const sim::vehicles::VehicleTickOutcome o = sim::vehicles::step_vehicle_health(kind.damage, v.health, in);
 		if ((o.events & sim::vehicles::vehicle_events::kDisabled) != 0) {
 			++stats_.disabled;
 		}
+		stats_.water_hits += o.water_damage > 0.0f ? 1u : 0u;
+		if (o.throw_out) {
+			++stats_.water_throw_outs;
+			for (const uint8_t occupant : v.occupants) {
+				if (occupant != net::kNoVehicleOccupant) {
+					thrown_out_.push_back(occupant);
+				}
+			}
+		}
 		if ((o.events & sim::vehicles::vehicle_events::kDestroyed) != 0) {
 			++stats_.destroyed;
-			const bool rolled = (o.events & sim::vehicles::vehicle_events::kUpsideDownHit) != 0;
+			const bool rolled =
+					(o.events & sim::vehicles::vehicle_events::kUpsideDownHit) != 0 || o.water_damage > 0.0f;
 			kill_crew(i, rolled ? v.occupants[0] : v.last_attacker, rolled ? sim::weapons::kNoWeapon : v.last_def,
 					sim::weapons::tick_start(p_tick), crew_kills_);
 		}
@@ -498,6 +514,12 @@ void ServerVehicles::step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_
 		}
 	}
 	refresh_targets();
+}
+
+std::vector<uint8_t> ServerVehicles::take_thrown_out() {
+	std::vector<uint8_t> out;
+	out.swap(thrown_out_);
+	return out;
 }
 
 void ServerVehicles::strike(const VehicleStrike &p_strike, Gunplay &r_gunplay) {

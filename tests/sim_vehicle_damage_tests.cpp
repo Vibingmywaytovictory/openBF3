@@ -416,3 +416,57 @@ TEST_SUITE("sim-vehicle-damage-unit") {
 		CHECK(none.targets_for(q).data() == soldiers.targets().data());
 	}
 }
+
+TEST_SUITE("sim-vehicle-damage-unit") {
+	TEST_CASE("vehicle damage: water lumps (R3-G3 F, TV5): occupants thrown out on submersion, WaterDamage x t after "
+			  "BelowWaterDamageDelay, nothing above water or with WaterDamage 0") {
+		VehicleDamageRule r = four_zones(1000.0f, true);
+		r.water_damage = 30.0f;
+		r.below_water_delay = 2.0f;
+		r.water_throw_out = true;
+		VehicleHealth s = spawned_vehicle_health(r);
+		VehicleTickInput t = tick(kServerDt);
+		t.below_water = true;
+		int throw_outs = 0, ticks = 0;
+		VehicleTickOutcome o;
+		for (; ticks < 200; ++ticks) {
+			t.water_check = ticks % 2 == 0;
+			o = step_vehicle_health(r, s, t);
+			throw_outs += o.throw_out ? 1 : 0;
+			if (o.water_damage > 0.0f) {
+				break;
+			}
+		}
+		CHECK(throw_outs == 1);
+		CHECK(ticks >= 59);
+		CHECK(ticks <= 60);
+		CHECK(o.water_damage == doctest::Approx(30.0f * float(ticks + 1) * kServerDt));
+		CHECK(vehicle_health(r, s) == doctest::Approx(1000.0f - o.water_damage));
+		int second = 0;
+		for (; second < 200; ++second) {
+			t.water_check = second % 2 == 1;
+			o = step_vehicle_health(r, s, t);
+			CHECK_FALSE(o.throw_out);
+			if (o.water_damage > 0.0f) {
+				break;
+			}
+		}
+		CHECK(second >= 59);
+		CHECK(second <= 60);
+		t.below_water = false;
+		t.water_check = true;
+		for (int i = 0; i < 200; ++i) {
+			CHECK(step_vehicle_health(r, s, t).water_damage == 0.0f);
+		}
+		VehicleDamageRule dry = four_zones(1000.0f, true);
+		dry.below_water_delay = 2.0f;
+		dry.water_throw_out = true;
+		VehicleHealth d = spawned_vehicle_health(dry);
+		t.below_water = true;
+		for (int i = 0; i < 200; ++i) {
+			const VehicleTickOutcome w = step_vehicle_health(dry, d, t);
+			CHECK(w.water_damage == 0.0f);
+			CHECK_FALSE(w.throw_out);
+		}
+	}
+}

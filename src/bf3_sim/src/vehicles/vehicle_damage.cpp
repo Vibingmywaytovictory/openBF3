@@ -39,6 +39,33 @@ VehicleHit plain_hit(float p_damage) {
 	return h;
 }
 
+void step_water_damage(const VehicleDamageRule &p_rule, VehicleHealth &r_state, const VehicleTickInput &p_input,
+		VehicleTickOutcome &r_out) {
+	if (!(p_rule.water_damage > 0.0f) || !(full_vehicle_health(p_rule) > 0.0f)) {
+		return;
+	}
+	if (p_input.water_check) {
+		if (p_input.below_water) {
+			if (!r_state.below_water) {
+				r_state.below_water = true;
+				r_state.water_timer = 0.0f;
+				r_out.throw_out = p_rule.water_throw_out;
+			}
+		} else {
+			r_state.below_water = false;
+			r_state.water_timer = 0.0f;
+		}
+	}
+	if (!r_state.below_water) {
+		return;
+	}
+	r_state.water_timer += p_input.dt;
+	if (r_state.water_timer > p_rule.below_water_delay) {
+		r_out.water_damage = p_rule.water_damage * r_state.water_timer;
+		r_state.water_timer = 0.0f;
+		r_out.events |= apply_vehicle_damage(p_rule, r_state, plain_hit(r_out.water_damage)).events;
+	}
+}
 }
 
 float angle_of_impact_factor(const AngleOfImpactRule &p_rule, float p_degrees) {
@@ -269,6 +296,10 @@ VehicleTickOutcome step_vehicle_health(
 			}
 		}
 	}
+	if (r_state.condition == VehicleCondition::Destroyed) {
+		return out;
+	}
+	step_water_damage(p_rule, r_state, p_input, out);
 	if (r_state.condition == VehicleCondition::Destroyed) {
 		return out;
 	}

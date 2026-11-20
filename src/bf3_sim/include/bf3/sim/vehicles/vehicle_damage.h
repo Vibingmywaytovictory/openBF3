@@ -15,6 +15,7 @@ inline constexpr size_t kHullZoneCount = 4;
 inline constexpr float kZoneAngleScaleDegrees = 90.0f;
 inline constexpr float kAbandonMinimumLeft = 1e-6f;
 inline constexpr float kHorizontalDirectionFloor = 1e-6f;
+inline constexpr uint32_t kWaterCheckTicks = 4;
 
 struct AngleOfImpactRule {
 	bool enabled = false;
@@ -70,6 +71,10 @@ struct VehicleDamageRule {
 	float upside_down_degrees = 0;
 	float upside_down_damage = 0;
 	float upside_down_delay = 0;
+	float water_damage = 0;
+	float water_damage_offset = 0;
+	float below_water_delay = 0;
+	bool water_throw_out = false;
 };
 
 enum class VehicleCondition : uint8_t { Healthy = 0, Disabled = 1, Destroyed = 2 };
@@ -96,6 +101,8 @@ struct VehicleHealth {
 	bool upside_down = false;
 	float upside_down_timer = 0;
 	float abandon_timer = 0;
+	bool below_water = false;
+	float water_timer = 0;
 };
 
 float full_vehicle_health(const VehicleDamageRule &p_rule);
@@ -146,11 +153,15 @@ struct VehicleTickInput {
 	bool abandoned = false;
 	float time_until_abandoned = 0;
 	float time_until_abandoned_is_destroyed = 0;
+	bool water_check = false;
+	bool below_water = false;
 };
 
 struct VehicleTickOutcome {
 	uint8_t events = 0;
 	float upside_down_damage = 0;
+	float water_damage = 0;
+	bool throw_out = false;
 	float abandon_damage = 0;
 	float decay_damage = 0;
 	float regenerated = 0;

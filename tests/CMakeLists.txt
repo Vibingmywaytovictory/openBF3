@@ -1177,6 +1177,8 @@ add_test(NAME host.vehicles.contact COMMAND test_host_tdm --test-suite=host-vehi
 set_tests_properties(host.vehicles.contact PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 add_test(NAME host.vehicles.wreck_scope COMMAND test_host_tdm --test-suite=host-vehicles-wreck-scope)
 set_tests_properties(host.vehicles.wreck_scope PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+add_test(NAME host.vehicles.water COMMAND test_host_tdm --test-suite=host-vehicles-water)
+set_tests_properties(host.vehicles.water PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 add_test(NAME host.vehicles.exit COMMAND test_host_tdm --test-suite=host-vehicles-exit)
 set_tests_properties(host.vehicles.exit PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 target_sources(test_host_tdm PRIVATE host_vehicles_placed_tests.cpp)

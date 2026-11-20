@@ -14,12 +14,15 @@
 #include "bf3/sim/vehicles/run_over_rules.h"
 #include "bf3/sim/vehicles/vehicle_armament.h"
 #include "bf3/sim/vehicles/vehicle_obstacles.h"
+#include "bf3/sim/water.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <memory>
 #include <optional>
+#include <set>
+#include <string>
 
 using namespace bf3;
 namespace tdm = bf3::test::tdm;
@@ -651,5 +654,122 @@ TEST_SUITE("host-vehicles-exit") {
 		}
 		std::printf("exit points: %zu of %zu seats get out at their nearest point\n", nearest, seats);
 		CHECK(seats > 0u);
+	}
+}
+
+TEST_SUITE("host-vehicles-water") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: a vehicle sunk in the river takes WaterDamage x t after "
+			  "BelowWaterDamageDelay and throws its crew out once: the T-90, M1A2, Growler and VDV buggy") {
+		tdm::TdmLevel *level = tdm::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		REQUIRE(level->shared->water != nullptr);
+		const sim::WaterSurface &water = *level->shared->water;
+		core::Result<std::unique_ptr<sim::CollisionWorld>> world =
+				sim::CollisionWorld::create(level->shared->static_world);
+		REQUIRE(world.ok());
+		sim::Vec3 deepest{};
+		float surface = 0.0f, depth = 0.0f;
+		for (size_t b = 0; b < water.body_count(); ++b) {
+			const sim::Vec3 lo = water.body_min(b), hi = water.body_max(b);
+			for (float z = lo[2] + 2.0f; z <= hi[2]; z += 4.0f) {
+				for (float x = lo[0] + 2.0f; x <= hi[0]; x += 4.0f) {
+					const std::optional<float> h = water.height(x, z);
+					bool around = true;
+					for (const float dx : { -8.0f, 0.0f, 8.0f }) {
+						for (const float dz : { -8.0f, 0.0f, 8.0f }) {
+							around = around && water.height(x + dx, z + dz).has_value();
+						}
+					}
+					sim::StaticHit hit;
+					if (!h || !around ||
+							!(*world)->ground_below({ x, *h + 100.0f, z }, 400.0f, sim::query_mask::kMovement, &hit)) {
+						continue;
+					}
+					if (*h - hit.position[1] > depth) {
+						depth = *h - hit.position[1];
+						surface = *h;
+						deepest = hit.position;
+					}
+				}
+			}
+		}
+		std::printf("MP_007 river: deepest with water 8 m around at (%.1f, %.1f), the bed %.2f m under the surface at "
+					"%.2f\n",
+				double(deepest[0]), double(deepest[2]), double(depth), double(surface));
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		size_t damaged = 0, dry = 0;
+		std::set<std::string> sunk_and_damaged;
+		for (size_t k = 0; k < lv.kinds.size(); ++k) {
+			std::optional<size_t> target;
+			for (size_t i = 0; i < lv.spawners.size() && !target; ++i) {
+				if (lv.spawners[i].kind == k) {
+					target = i;
+				}
+			}
+			if (!target) {
+				continue;
+			}
+			const host::LevelVehicleKind &kind = lv.kinds[k];
+			const char *blueprint = kind.blueprint.c_str();
+			CAPTURE(kind.blueprint);
+			auto vehicles = std::make_shared<host::LevelVehicles>(lv);
+			host::LevelVehicleSpawner &sunk = vehicles->spawners[*target];
+			sunk.placement.position = { deepest[0], deepest[1] + 0.5f, deepest[2] };
+			sunk.initial_spawn_delay = 0.0f;
+			host::ServerVehicles sv;
+			REQUIRE(sv.configure(vehicles, level->shared->static_world, 1.0f).ok());
+			sv.set_water(&water);
+			std::optional<float> first_lump;
+			float health_before = 0.0f;
+			std::optional<sim::Tick> live;
+			for (sim::Tick t = 1; t < 6000 && (!live || t < *live + 60 * 12); ++t) {
+				REQUIRE(sv.step(t, 0, [](uint8_t) { return true; }).ok());
+				const std::optional<float> before = sv.health(*target);
+				live = !live && before ? std::optional<sim::Tick>(t) : live;
+				sv.step_health(t, {});
+				sv.spawn_due(t, nullptr);
+				const std::optional<float> after = sv.health(*target);
+				if (!first_lump && before && after && *after < *before) {
+					first_lump = *before - *after;
+					health_before = *before;
+				}
+			}
+			if (!sv.health(*target)) {
+				std::printf("%s: not live in the vehicle world\n", blueprint);
+				continue;
+			}
+			const sim::Vec3 centre = sv.hull(*target).transform_point(kind.box.centre);
+			std::printf(
+					"%s: WaterDamage %.0f, delay %.1f s, offset %.2f; hull centre %.2f m under the surface; %llu water "
+					"hits, %llu throw-outs, first lump %.2f from %.1f\n",
+					blueprint, double(kind.damage.water_damage), double(kind.damage.below_water_delay),
+					double(kind.damage.water_damage_offset), double(surface - centre[1]),
+					(unsigned long long)sv.stats().water_hits, (unsigned long long)sv.stats().water_throw_outs,
+					double(first_lump.value_or(0.0f)), double(health_before));
+			if (kind.damage.water_damage > 0.0f) {
+				++damaged;
+				sunk_and_damaged.insert(kind.blueprint);
+				CHECK(surface - centre[1] > kind.damage.water_damage_offset);
+				CHECK(sv.stats().water_throw_outs == 1);
+				CHECK(sv.stats().water_hits >= 4);
+				REQUIRE(first_lump.has_value());
+				const float lump = kind.damage.water_damage * kind.damage.below_water_delay;
+				CHECK(*first_lump >= lump);
+				CHECK(*first_lump <= lump + kind.damage.water_damage * 2.0f * sim::kTickSeconds);
+			} else {
+				++dry;
+				CHECK(sv.stats().water_hits == 0);
+				CHECK(sv.stats().water_throw_outs == 0);
+				CHECK_FALSE(first_lump.has_value());
+			}
+		}
+		std::printf(
+				"MP_007 ConquestSmall0: %zu vehicles with WaterDamage took it, %zu without took none\n", damaged, dry);
+		CHECK(sunk_and_damaged ==
+				std::set<std::string>{ "vehicles/growleritv/growleritv", "vehicles/m1a2/m1abrams", "vehicles/t90/t90",
+						"vehicles/vdv_buggy/vdv_buggy" });
+		CHECK(damaged == sunk_and_damaged.size());
 	}
 }

@@ -375,6 +375,19 @@ struct GameServer::Impl {
 			}
 		}
 		vehicles.step_health(p_tick, alive_at);
+		for (const uint8_t slot : vehicles.take_thrown_out()) {
+			if (slot >= slots.size() || !slots[slot].used || !soldiers.alive(slot)) {
+				continue;
+			}
+			const std::optional<sim::Vec3> out = vehicles.exit_position(slot, motor);
+			vehicles.leave(slot);
+			if (out) {
+				sim::SoldierState moved = soldiers[slot].state;
+				moved.position = *out;
+				moved.velocity = {};
+				soldiers.teleport(slot, moved);
+			}
+		}
 		for (const uint32_t node : vehicles.take_destroyed_spawners()) {
 			if (TdmRules *rules = match.rules()) {
 				rules->vehicle_spawner_destroyed(node);
@@ -719,6 +732,7 @@ core::Status GameServer::init(const GameServerConfig &p_config) {
 	m.vehicles.configure_scope(p_config.max_slots, p_config.ghost_scope);
 	m.motor.set_obstacles(m.vehicles.on() ? &m.vehicles.obstacles() : nullptr);
 	m.motor.set_water(p_config.level->water.get());
+	m.vehicles.set_water(p_config.level->water.get());
 	m.handshake.configure(p_config.game_build.value_or(net::game_build()), *p_config.level, p_config.max_slots);
 	m.loads.configure(p_config.max_slots, p_config.load, p_config.round_id);
 	for (size_t i = 0; i < m.slots.size(); ++i) {

@@ -340,6 +340,9 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 	out.velocity_damage_threshold = static_cast<float>(number_or(e, "VelocityDamageThreshold", 0));
 	out.velocity_damage_magnifier = static_cast<float>(number_or(e, "VelocityDamageMagnifier", 0));
 	out.water_damage = static_cast<float>(number_or(e, "WaterDamage", 0));
+	out.water_damage_offset = static_cast<float>(number_or(e, "WaterDamageOffset", 0));
+	out.below_water_damage_delay = static_cast<float>(number_or(e, "BelowWaterDamageDelay", 0));
+	out.throw_out_on_water_damage = boolean(e, "ThrowOutSoldierInsideOnWaterDamage").value_or(false);
 	out.upside_down_angle = static_cast<float>(number_or(e, "UpsideDownAngle", 0));
 	out.upside_down_damage = static_cast<float>(number_or(e, "UpsideDownDamage", 0));
 	out.upside_down_damage_delay = static_cast<float>(number_or(e, "UpsideDownDamageDelay", 0));
