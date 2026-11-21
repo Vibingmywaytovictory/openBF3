@@ -1196,8 +1196,9 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	}
 	out.double_sided = shader_info != nullptr ? shader_info->double_sided : foliage;
 
-	out.glass = has_word(shader_name, kGlassWords) && (shader == nullptr || is_transparent(shader->surface_type)) &&
-			(!color || (out.blend == LookBlend::Blend && !color_alpha));
+	const bool glass_named =
+			has_word(shader_name, kGlassWords) && (!color || (out.blend == LookBlend::Blend && !color_alpha));
+	out.glass = glass_named && (shader == nullptr || is_transparent(shader->surface_type));
 	if (out.glass) {
 		out.blend = LookBlend::Blend;
 	}
@@ -1205,6 +1206,10 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	if (shader != nullptr && !out.graph && out.blend != LookBlend::Blend &&
 			!contains_any(shader_name, kCharacterBackdropWords)) {
 		attach_program(out, *shader, p_slot, false, p_programs);
+	}
+	if (glass_named && !out.glass && !out.graph) {
+		out.glass = true;
+		out.blend = LookBlend::Blend;
 	}
 	if (shader != nullptr) {
 		out.shader_transparent = is_transparent(shader->surface_type);
