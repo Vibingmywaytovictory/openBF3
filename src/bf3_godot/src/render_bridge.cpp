@@ -155,9 +155,14 @@ Ref<ArrayMesh> make_array_mesh(const bf3::render::PreparedMesh &p_mesh, const st
 			arrays[Mesh::ARRAY_BONES] = ints(s.bones);
 			arrays[Mesh::ARRAY_WEIGHTS] = floats(s.weights);
 		}
+		uint64_t flags = 0;
+		if (!s.uv2.empty()) {
+			arrays[Mesh::ARRAY_CUSTOM0] = floats(s.uv2);
+			flags |= uint64_t(Mesh::ARRAY_CUSTOM_RG_FLOAT) << Mesh::ARRAY_FORMAT_CUSTOM0_SHIFT;
+		}
 		arrays[Mesh::ARRAY_INDEX] = ints(s.indices);
 		const int32_t index = int32_t(mesh->get_surface_count());
-		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays, Array(), Dictionary(), flags);
 		if (p_material) {
 			const Ref<Material> m = p_material(s);
 			if (m.is_valid()) {

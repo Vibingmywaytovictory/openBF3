@@ -51,6 +51,7 @@ PreparedSurface part_surface(const PreparedSurface &p_s, std::span<const int32_t
 	gather(p_s.tangents, out.tangents, 4, vertices);
 	gather(p_s.uv0, out.uv0, 2, vertices);
 	gather(p_s.uv1, out.uv1, 2, vertices);
+	gather(p_s.uv2, out.uv2, 2, vertices);
 	gather(p_s.colors, out.colors, 4, vertices);
 	gather(p_s.bones, out.bones, 4, vertices);
 	gather(p_s.weights, out.weights, 4, vertices);
