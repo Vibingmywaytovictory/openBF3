@@ -177,6 +177,10 @@ public:
 					++decode_failures;
 					continue;
 				}
+				for (const net::DeathEvent &k : c->deaths) {
+					++deaths;
+					death_records += k.record.valid && k.record.animation_index < 5 ? 1 : 0;
+				}
 				for (const net::HitEvent &h : c->hits) {
 					if (slot >= 0 && h.victim == uint8_t(slot) && h.shooter < net::kMaxSlots) {
 						attacked_until[h.shooter] =
@@ -265,6 +269,7 @@ public:
 	std::array<sim::Tick, net::kMaxSlots> attacked_until{};
 	uint64_t total_bytes = 0;
 	uint64_t decode_failures = 0;
+	uint64_t deaths = 0, death_records = 0;
 	uint64_t overflow = 0;
 	std::vector<Interval> intervals;
 
@@ -699,6 +704,9 @@ TEST_SUITE("host-ghost") {
 		CHECK(seat->intervals.max_bytes == worst_ever);
 		CHECK(seat->intervals.over_budget == 0);
 		CHECK(peer.decode_failures == 0);
+		std::printf("host.ghost: the peer received %llu deaths, %llu with a death record\n",
+				(unsigned long long)peer.deaths, (unsigned long long)peer.death_records);
+		CHECK(peer.death_records == peer.deaths);
 		CHECK(std::count_if(stats.slots.begin(), stats.slots.end(),
 					  [](const host::SlotStats &p_s) { return p_s.used; }) == 64);
 		CHECK(stats.gunplay.shots > 0);
