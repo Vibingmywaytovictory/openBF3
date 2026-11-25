@@ -1699,8 +1699,8 @@ struct HandlingModels {
 	std::unique_ptr<core::InstallReader> reader;
 	std::shared_ptr<core::Install> install;
 	core::InstallSnapshot before;
-	std::unique_ptr<core::level::LoadedLevel> level, large;
-	std::shared_ptr<const VehicleModel> m1a2, growler, t90, lav_ad;
+	std::unique_ptr<core::level::LoadedLevel> level, large, bazaar;
+	std::shared_ptr<const VehicleModel> m1a2, growler, t90, lav_ad, bmp2, lav25;
 };
 
 HandlingModels *handling_models() {
@@ -1745,6 +1745,17 @@ HandlingModels *handling_models() {
 			load_vehicle_model(h->large->db(), h->large->mount(), "vehicles/lav25/lav_ad", tuning);
 	REQUIRE_MESSAGE(lav.ok(), (lav.ok() ? std::string() : lav.error().message));
 	h->lav_ad = *lav;
+	core::Result<std::unique_ptr<core::level::LoadedLevel>> bazaar =
+			core::level::load_level(h->install, "MP_001", "ConquestSmall0");
+	REQUIRE_MESSAGE(bazaar.ok(), (bazaar.ok() ? std::string() : bazaar.error().message));
+	h->bazaar = std::move(*bazaar);
+	for (const auto &[slot, blueprint] :
+			{ std::pair{ &h->bmp2, "vehicles/bmp2/bmp2" }, std::pair{ &h->lav25, "vehicles/lav25/lav25" } }) {
+		core::Result<std::shared_ptr<const VehicleModel>> ifv =
+				load_vehicle_model(h->bazaar->db(), h->bazaar->mount(), blueprint, tuning);
+		REQUIRE_MESSAGE(ifv.ok(), blueprint << ": " << (ifv.ok() ? std::string() : ifv.error().message));
+		*slot = *ifv;
+	}
 	s_models = std::move(h);
 	return s_models.get();
 }
@@ -1895,6 +1906,71 @@ TEST_SUITE("sim-vehicle-handling") {
 		}
 		const core::SnapshotDiff diff = core::diff_snapshots(h->before, h->reader->snapshot());
 		CHECK(diff.clean());
+	}
+
+	TEST_CASE(
+			"sim.vehicle.handling: MP_001's BMP-2 and LAV-25 on flat ground settle upright with every wheel down, "
+			"the LAV-25's SteeringType 1 wheels turn pi x SteeringSensitivity and the BMP-2's track wheels not at "
+			"all, and each drives on, under the speed where its drive meets TransmissionLoss and rolling resistance") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		const std::shared_ptr<const StaticWorldShapes> flat = ground_shapes(false);
+		for (const std::shared_ptr<const VehicleModel> &model : { h->bmp2, h->lav25 }) {
+			CAPTURE(model->blueprint);
+			std::unique_ptr<VehicleWorld> w = world_at(flat, model, placed(0, 0, -300));
+			settle(*w);
+			const VehicleState rest = w->state(0);
+			const std::array<float, 4> &q = rest.body.rotation;
+			const float up_y = 1.0f - 2.0f * (q[0] * q[0] + q[2] * q[2]);
+			uint32_t down = 0;
+			for (size_t i = 0; i < rest.wheel_count; ++i) {
+				down += rest.wheels[i].in_contact ? 1u : 0u;
+			}
+			std::printf("sim.vehicle.handling: %s settled on flat ground: up.y %.4f, %u of %zu wheels down, vertical "
+						"speed %.4f m/s\n",
+					model->blueprint.c_str(), double(up_y), down, size_t(rest.wheel_count),
+					double(rest.body.linear_velocity[1]));
+			CHECK(up_y > std::cos(2.0f * core::kDegToRadF));
+			CHECK(down == rest.wheel_count);
+			CHECK(std::fabs(rest.body.linear_velocity[1]) < 0.01f);
+
+			for (int t = 0; t < 60; ++t) {
+				step1(*w, command(0, 0, 127));
+			}
+			const VehicleState steered = w->state(0);
+			const float speed = std::hypot(steered.body.linear_velocity[0], steered.body.linear_velocity[2]);
+			const float lock = std::fabs(vehicles::steer_angle(1.0f, vehicle_steer_sensitivity(*model, speed)));
+			uint32_t steering = 0;
+			for (size_t i = 0; i < steered.wheel_count; ++i) {
+				const float a = std::fabs(steered.wheels[i].steer_angle);
+				if (model->wheels[i].steers != 0) {
+					++steering;
+					CHECK(a == doctest::Approx(lock).epsilon(1e-3));
+				} else {
+					CHECK(a == 0.0f);
+				}
+			}
+			std::printf("sim.vehicle.handling: %s full steer: %u steering wheels at %.4f rad\n",
+					model->blueprint.c_str(), steering, double(lock));
+			CHECK((steering > 0) == (model == h->lav25));
+
+			std::unique_ptr<VehicleWorld> run = world_at(flat, model, placed(0, 0, -300));
+			settle(*run);
+			float top = 0.0f;
+			for (uint32_t t = 0; t < 30 * kSimHz; ++t) {
+				step1(*run, command(127, 0, 0));
+				const Vec3 &v = run->state(0).body.linear_velocity;
+				top = std::max(top, std::hypot(v[0], v[2]) * vehicles::kKmhPerMs);
+			}
+			const float governed = land_balance_speed_kmh(*model);
+			std::printf("sim.vehicle.handling: %s full throttle 30 s on flat ground: top %.1f km/h, drive meets "
+						"TransmissionLoss and rolling resistance at %.1f km/h\n",
+					model->blueprint.c_str(), double(top), double(governed));
+			CHECK(top > 5.0f);
+			CHECK(top <= governed);
+		}
 	}
 
 	TEST_CASE("sim.vehicle.handling: a manned idle LAV-AD, M1A2 and Growler hold on a 12 deg slope (the stand-still "
