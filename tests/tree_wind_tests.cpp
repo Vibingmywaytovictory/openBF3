@@ -51,6 +51,31 @@ float motion(render::TreeSim &r_sim, const Vec3 &p_force, int p_steps) {
 	return most;
 }
 
+struct Sway {
+	float degrees = 0.0f;
+	bool finite = true;
+};
+
+Sway sway(const std::shared_ptr<const TreeRig> &p_rig, const render::TreeWind &p_wind, int p_steps) {
+	render::TreeSim sim(p_rig);
+	Sway out;
+	const TreeRig &r = sim.rig();
+	for (int s = 0; s < p_steps; ++s) {
+		sim.step(render::tree_gust(p_wind, Vec3{}, float(s) * render::kTreeStep));
+		for (size_t i = 1; i < r.bones(); ++i) {
+			const Vec3 &x = sim.positions()[i];
+			out.finite = out.finite && std::isfinite(x.x) && std::isfinite(x.y) && std::isfinite(x.z);
+			const Vec3 bone = vec::sub(x, sim.positions()[size_t(r.parents[i])]);
+			const Vec3 rest = vec::sub(r.rest[i].trans, r.rest[size_t(r.parents[i])].trans);
+			if (s >= int(render::kTreePreSimulation / render::kTreeStep) && vec::length(bone) > 1e-6f &&
+					vec::length(rest) > 1e-6f) {
+				const float c = std::clamp(vec::dot(vec::normalize(bone), vec::normalize(rest)), -1.0f, 1.0f);
+				out.degrees = std::fmax(out.degrees, std::acos(c) / core::kDegToRadF);
+			}
+		}
+	}
+	return out;
+}
 }
 
 TEST_SUITE("render-trees-unit") {
@@ -153,7 +178,8 @@ TEST_SUITE("render-trees-unit") {
 }
 
 TEST_SUITE("render-trees") {
-	TEST_CASE("render.trees: MP_007's and MP_Subway's VegetationTree bones move with their level's wind") {
+	TEST_CASE("render.trees: MP_007's, MP_Subway's and MP_001's VegetationTree bones move with their level's wind and "
+			  "stay finite over three minutes") {
 		test::Mounted m;
 		if (!test::open_or_skip(m)) {
 			return;
@@ -162,8 +188,10 @@ TEST_SUITE("render-trees") {
 			const char *level;
 			float direction;
 			float strength;
+			bool branches_below_stem_top;
 		};
-		for (const Case &c : { Case{ "MP_007", 91.485f, 2.0f }, Case{ "MP_Subway", 113.548f, 2.0f } }) {
+		for (const Case &c : { Case{ "MP_007", 91.485f, 2.0f, true }, Case{ "MP_Subway", 113.548f, 2.0f, true },
+					 Case{ "MP_001", 37.593f, 10.0f, false } }) {
 			core::Result<std::unique_ptr<core::level::LoadedLevel>> loaded =
 					core::level::load_level(m.install, c.level, "TeamDeathMatchC0");
 			REQUIRE(loaded.ok());
@@ -238,7 +266,17 @@ TEST_SUITE("render-trees") {
 					c.level, trees.trees.size(), trees.rigs.size(), chained, decisive, forest.active(), camera.x,
 					camera.y, camera.z, (unsigned long long)forest.steps(), double(look->base.wind_direction),
 					double(look->base.wind_strength), mean, most);
-			CHECK(decisive > 0);
+			CHECK((decisive > 0 || !c.branches_below_stem_top));
+			for (const std::shared_ptr<const TreeRig> &rig : trees.rigs) {
+				const Sway s = sway(rig, wind, 12000);
+				const Sway still = sway(rig, calm_wind, 12000);
+				std::printf("render.trees %s rig of %zu bones: largest bone turn from its base pose after its 2 s "
+							"pre-simulation, over 180 s, %.1f "
+							"degrees, %.1f without wind\n",
+						c.level, rig->bones(), double(s.degrees), double(still.degrees));
+				CHECK(s.finite);
+				CHECK(s.degrees > 0.0f);
+			}
 			CHECK(forest.active() > 0);
 			CHECK(forest.steps() > 0);
 			CHECK(measured > 0);
