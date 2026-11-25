@@ -1501,6 +1501,29 @@ void serialize(A &r_a, D &r_d, CombatFrame &r_f) {
 		r_a.check("killer health out of range", [&] { return killer_hp <= kHpMaxCode; });
 		r_a.store(r_d.killer_health, [&] { return hp_value(killer_hp); });
 	}
+	auto &rec = r_d.record;
+	r_a.bits(rec.valid, 1);
+	if (rec.valid) {
+		uint32_t forward = r_a.encode([&] { return uint32_t(int32_t(rec.forward_speed) + 1); });
+		uint32_t right = r_a.encode([&] { return uint32_t(int32_t(rec.right_speed) + 1); });
+		r_a.bits(forward, 2);
+		r_a.bits(right, 2);
+		r_a.check("death speed sign out of range", [&] { return forward <= 2 && right <= 2; });
+		r_a.store(rec.forward_speed, [&] { return int8_t(int32_t(forward) - 1); });
+		r_a.store(rec.right_speed, [&] { return int8_t(int32_t(right) - 1); });
+		r_a.bits(rec.direction, 3);
+		r_a.check("death hit direction out of range",
+				[&] { return uint32_t(rec.direction) <= uint32_t(core::gameplay::DeathHitDirection::None); });
+		r_a.bits(rec.bone, 3);
+		r_a.check("death bone out of range",
+				[&] { return uint32_t(rec.bone) <= uint32_t(core::gameplay::DeathBone::LeftLeg); });
+		r_a.bits(rec.explosion, 1);
+		r_a.bits(rec.sprinting, 1);
+		r_a.bits(rec.animation_index, 3);
+		r_a.check("death animation index out of range",
+				[&] { return rec.animation_index < core::gameplay::kDeathAnimationVariants; });
+		r_a.bits(rec.random, core::gameplay::kDeathRandomBits);
+	}
 }
 
 template <class A, MaybeConst<DetonationWire> D>

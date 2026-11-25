@@ -466,6 +466,7 @@ bool ClientGunplay::combat(const net::NetSim::Datagram &p_d, net::CombatEvents &
 		ev.value = d.killer_health;
 		ev.extra = d.respawn_tick;
 		ev.seed = d.revive_until;
+		present::set_death_record(ev, d.record);
 		events_.push(ev);
 		++combat_deaths_;
 	}

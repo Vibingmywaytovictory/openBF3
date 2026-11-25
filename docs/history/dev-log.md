@@ -3572,3 +3572,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Soldier ragdoll reader: Havok packfiles with inline fixups and the RagdollResource ragdoll01 decoded into bodies and joints (core.res.ragdoll; the res rows' Packfile path is unchanged).
 * Ragdoll physics: `sim::RagdollWorld` builds ragdoll01 in Jolt over the static world (sim.ragdoll: lies down in 2.6 s, joints within 1.2 cm).
 * Death clips from the ANT graph: the 3P DeathNode flow (explosion, prone, crouch, stand), the crouch chooser over RandomValue, the clips' RagdollBlend tags and the ragdoll body to rig joint map (anim.death; anim.vault, anim.s3, anim.server_pose unchanged).
+* Death record on the wire: protocol 19 carries the server's R5-DT1 death record in every DeathEvent and the client puts it in the Death PresentEvent (net.proto.unit golden pins Hello, MatchInfo x4, CombatEvents x3 renewed; net.*, host.gunplay.*, host.tdm.*).

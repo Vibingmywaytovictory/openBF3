@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/core/cache/digest.h"
+#include "bf3/core/gameplay/death_body.h"
 #include "bf3/core/result.h"
 #include "bf3/net/weapons_wire.h"
 #include "bf3/sim/command.h"
@@ -26,7 +27,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 18;
+inline constexpr uint16_t kProtocolVersion = 19;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -543,6 +544,7 @@ struct DeathEvent {
 	sim::Tick respawn_tick = 0;
 	sim::Tick revive_until = 0;
 	float killer_health = 0;
+	core::gameplay::DeathRecord record;
 };
 
 struct DetonationWire {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bf3/core/gameplay/death_body.h"
+
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -57,6 +59,9 @@ struct PresentEvent {
 };
 static_assert(sizeof(PresentEvent) == 64);
 static_assert(std::is_trivially_copyable_v<PresentEvent>);
+
+void set_death_record(PresentEvent &r_event, const core::gameplay::DeathRecord &p_record);
+core::gameplay::DeathRecord death_record_of(const PresentEvent &p_event);
 
 inline constexpr size_t kPresentationEventCapacity = 2048;
 

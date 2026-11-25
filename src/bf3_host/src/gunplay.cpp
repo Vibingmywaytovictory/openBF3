@@ -4,6 +4,7 @@
 #include "bf3/anim/crowd_eval.h"
 #include "bf3/anim/server_pose.h"
 #include "bf3/core/ant/ant_install_source.h"
+#include "bf3/core/gameplay/death_body.h"
 #include "bf3/core/gameplay/kit_def.h"
 #include "bf3/core/gameplay/mode_def.h"
 #include "bf3/core/gameplay/work_budget.h"
@@ -40,6 +41,8 @@ namespace sw = sim::weapons;
 namespace gp = core::gameplay;
 
 namespace {
+
+constexpr uint64_t kDeathRandomStream = 0x6465617468ull;
 
 using bf3::core::ms_since;
 using bf3::core::seconds_since;
@@ -497,6 +500,11 @@ struct Gunplay::Impl {
 	sim::Tick step_tick = 0;
 	std::vector<sw::DamageEvent> tick_damage;
 	std::vector<net::DeathEvent> tick_deaths;
+	core::gameplay::DeathCounter death_counter;
+	uint32_t death_random() const {
+		return uint32_t(core::splitmix64(match_seed ^ (uint64_t(death_counter.count()) + kDeathRandomStream))) &
+				core::gameplay::kDeathRandomMask;
+	}
 	std::vector<sw::DetonationEvent> tick_detonations;
 	std::vector<uint8_t> pending_fall_deaths;
 	std::vector<sw::ShotEvent> interval_shots;
@@ -1025,19 +1033,23 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 				h.time = e.time;
 				h.position = st.position;
 				h.normal = { 0.0f, 1.0f, 0.0f };
+				sim::Vec3 damage_direction{};
 				for (const sw::ImpactEvent &i : m.step_out.impacts) {
 					if (i.kind == sw::ImpactKind::Target && i.target == victim && i.player_slot == e.attacker_slot && i.shot_index == e.shot_index &&
 							i.pellet == e.pellet) {
 						h.position = i.position;
 						h.normal = i.normal;
+						damage_direction = i.velocity;
 						break;
 					}
 				}
-				if (e.kind == sw::DamageKind::Blast || e.kind == sw::DamageKind::DudBlast) {
+				const bool blast = e.kind == sw::DamageKind::Blast || e.kind == sw::DamageKind::DudBlast;
+				if (blast) {
 					for (const sw::DetonationEvent &d : m.step_out.detonations) {
 						if (d.player_slot == e.attacker_slot && d.shot_index == e.shot_index) {
 							h.position = d.position;
 							h.normal = d.normal;
+							damage_direction = core::vec::sub(st.position, d.position);
 							break;
 						}
 					}
@@ -1053,6 +1065,17 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 					d.shot_index = e.shot_index;
 					d.headshot = e.zone == sw::HitZone::Head && e.kind == sw::DamageKind::Bullet;
 					d.time = e.time;
+					core::gameplay::DeathInput record;
+					record.frame = core::gameplay::death_frame_of_yaw(sim::yaw_radians(st.yaw));
+					record.velocity = st.velocity;
+					record.has_hit = true;
+					record.damage_direction = damage_direction;
+					record.bone_type = uint32_t(e.zone == sw::HitZone::Head ? core::gameplay::DeathBone::Head
+																			: core::gameplay::DeathBone::Body);
+					record.explosion = blast;
+					record.sprinting = (st.flags & sim::soldier_flags::kSprinting) != 0;
+					record.random = m.death_random();
+					d.record = core::gameplay::make_death_record(record, m.death_counter);
 					++m.stats.deaths;
 					m.clear(uint8_t(victim));
 					m.gadgets->owner_died(uint8_t(victim), p_tick);
@@ -1071,6 +1094,15 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 		d.killer = slot;
 		d.def = sw::kNoWeapon;
 		d.time = sw::tick_end(p_tick);
+		if (slot < p_states.size()) {
+			const sim::SoldierState &st = p_states[slot];
+			core::gameplay::DeathInput record;
+			record.frame = core::gameplay::death_frame_of_yaw(sim::yaw_radians(st.yaw));
+			record.velocity = st.velocity;
+			record.sprinting = (st.flags & sim::soldier_flags::kSprinting) != 0;
+			record.random = m.death_random();
+			d.record = core::gameplay::make_death_record(record, m.death_counter);
+		}
 		++m.stats.deaths;
 		m.clear(slot);
 		m.gadgets->owner_died(slot, p_tick);
