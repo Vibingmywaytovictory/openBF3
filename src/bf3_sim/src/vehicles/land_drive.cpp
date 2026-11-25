@@ -186,10 +186,6 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 	}
 
 	const float steer_max = vehicles::steer_angle(1.0f, vehicle_steer_sensitivity(m, speed));
-	const float skid_at_rest = vehicles::steer_curve_at(steer_curve(m), 0.0f);
-	const float skid_falloff = skid_at_rest > 0.0f
-			? vehicles::steer_curve_at(steer_curve(m), speed * vehicles::kKmhPerMs) / skid_at_rest
-			: 0.0f;
 	const float wheel_brake = std::max(d.brake_filter, brake_axis);
 	const bool idle = forward_pedal == 0.0f && back_pedal == 0.0f && (!tracked || steer_axis == 0.0f);
 	const bool held = idle && (p_command.flags & vehicle_flags::kDriven) == 0;
@@ -213,7 +209,7 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 		grounded_wheels += grounded ? 1u : 0u;
 		settings.mSuspensionSpring =
 				land_spring(m, wm, speed, grounded ? wm.suspension_max - wheel->GetSuspensionLength() : 0.0f);
-		settings.mMaxSteerAngle = wm.steers != 0 ? steer_max : wm.track_skid_angle * skid_falloff;
+		settings.mMaxSteerAngle = wm.steers != 0 ? steer_max : 0.0f;
 
 		float drive = 0.0f;
 		if (wm.track_steer != 0 && wm.side < 2) {

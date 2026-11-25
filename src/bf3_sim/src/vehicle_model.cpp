@@ -72,7 +72,7 @@ uint64_t digest_of(const VehicleModel &p_m) {
 		for (const float f : { w.radius, w.width, w.suspension_min, w.suspension_max, w.spring_constant,
 					 w.spring_damping, w.progressive_start, w.progressive_exponent, w.rest_compression, w.inertia,
 					 w.mass, w.angular_damping, w.brake_factor, w.hand_brake_factor, w.diff_gear_ratio, w.rolling_base,
-					 w.rolling_velocity_kmh, w.track_skid_angle }) {
+					 w.rolling_velocity_kmh }) {
 			d.add(f);
 		}
 		for (const uint8_t b : { w.steers, w.driven, w.axle, w.side, w.track_steer, w.rolling_resistance,
@@ -416,16 +416,6 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		return fail(land.error().message);
 	}
 	m->land.wheel_torque_scale = p_tuning.wheel_torque_scale;
-	uint32_t axle_count = 0;
-	for (size_t k = 0; k < m->wheel_count; ++k) {
-		axle_count = std::max<uint32_t>(axle_count, m->wheels[k].axle + 1u);
-	}
-	for (size_t k = 0; k < m->wheel_count; ++k) {
-		VehicleWheelModel &w = m->wheels[k];
-		const float axle_sign = w.axle == 0 ? 1.0f : (w.axle + 1u == axle_count ? -1.0f : 0.0f);
-		w.track_skid_angle =
-				w.track_steer != 0 ? p_tuning.track_skid_steer_degrees * core::kDegToRadF * axle_sign : 0.0f;
-	}
 	for (size_t k = 0; k < m->wheel_count; ++k) {
 		const core::gameplay::WheelConfigDef &c = p_def.wheel_configs[p_def.wheels[physics_wheels[k]].config];
 		if (m->wheels[k].driven == 0 || c.transmission_loss.empty()) {

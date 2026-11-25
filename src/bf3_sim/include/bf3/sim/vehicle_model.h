@@ -55,7 +55,6 @@ struct VehicleTuning {
 	float max_pitch_roll_degrees = 180.0f;
 
 	float wheel_torque_scale = 10.0f;
-	float track_skid_steer_degrees = 32.0f;
 	float stand_still_speed = 0.5f;
 
 	uint32_t collision_steps = 1;
@@ -120,7 +119,6 @@ struct VehicleWheelModel {
 	float brake_factor = 0, hand_brake_factor = 0;
 	float diff_gear_ratio = 0;
 	float rolling_base = 0, rolling_velocity_kmh = 0;
-	float track_skid_angle = 0;
 	uint8_t steers = 0, driven = 0, axle = 0;
 	uint8_t side = 0;
 	uint8_t track_steer = 0;

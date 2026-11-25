@@ -1522,8 +1522,8 @@ TEST_SUITE("sim-vehicle") {
 		print_handling("MP_007 Humvee", *h);
 	}
 
-	TEST_CASE("sim.vehicle: the T-90 drives on its tracks: the outer axles counter-steer (the skid stand-in), the "
-			  "track term pulls its sides apart at rest and it turns under way the jeep's way") {
+	TEST_CASE("sim.vehicle: the T-90 drives on its tracks: no track wheel steers (R5-G1-3 rule 4), the track term "
+			  "pulls its sides apart at rest and under way it turns the jeep's way") {
 		Caspian *m = caspian();
 		if (m == nullptr) {
 			return;
@@ -1536,18 +1536,10 @@ TEST_SUITE("sim-vehicle") {
 		REQUIRE_MESSAGE(t90.ok(), (t90.ok() ? std::string() : t90.error().message));
 		const VehicleModel &model = **t90;
 		REQUIRE(model.wheel_count == 6);
-		size_t front = 0, middle = 0, rear = 0;
 		for (size_t i = 0; i < model.wheel_count; ++i) {
-			const VehicleWheelModel &w = model.wheels[i];
-			CHECK(w.track_steer == 1);
-			CHECK(w.steers == 0);
-			front += w.track_skid_angle > 0.0f && w.data_centre[2] > 1.0f ? 1u : 0u;
-			middle += w.track_skid_angle == 0.0f && std::fabs(w.data_centre[2]) < 1.0f ? 1u : 0u;
-			rear += w.track_skid_angle < 0.0f && w.data_centre[2] < -1.0f ? 1u : 0u;
+			CHECK(model.wheels[i].track_steer == 1);
+			CHECK(model.wheels[i].steers == 0);
 		}
-		CHECK(front == 2);
-		CHECK(middle == 2);
-		CHECK(rear == 2);
 		CHECK(model.land.track_forward_speed_limit == doctest::Approx(1.1f));
 		CHECK(model.land.track_turn_speed_limit == doctest::Approx(2.0f));
 		CHECK(model.land.steer_inertia_points == 6);
@@ -1580,6 +1572,9 @@ TEST_SUITE("sim-vehicle") {
 				"T-90 pivot: steer +127 for 4 s at rest -> heading %.1f deg, drift %.2f m, track steer %.0f / %.0f\n",
 				double(pivot_turn / core::kDegToRadF), double(pivot_drift), double(pivoted.driver.track_steer[0]),
 				double(pivoted.driver.track_steer[1]));
+		for (size_t i = 0; i < pivoted.wheel_count; ++i) {
+			CHECK(pivoted.wheels[i].steer_angle == 0.0f);
+		}
 		CHECK(pivot_turn <= 0.0f);
 		CHECK(pivot_drift < 1.5f);
 		CHECK(pivoted.driver.track_steer[0] > 0.0f);
@@ -1607,7 +1602,10 @@ TEST_SUITE("sim-vehicle") {
 				double(across));
 		CHECK(straight_speed > 3.0f);
 		CHECK(std::fabs(heading(straight) - heading(rest)) < 2.0f * core::kDegToRadF);
-		CHECK(run_turn < -10.0f * core::kDegToRadF);
+		for (size_t i = 0; i < turned.wheel_count; ++i) {
+			CHECK(turned.wheels[i].steer_angle == 0.0f);
+		}
+		CHECK(run_turn < 0.0f);
 		CHECK(along > 1.0f);
 		CHECK(std::fabs(across) < 0.5f * along);
 	}
@@ -1811,9 +1809,9 @@ TEST_SUITE("sim-vehicle-handling") {
 	}
 
 	TEST_CASE("sim.vehicle.handling: on flat ground the Growler's front wheels turn pi x 0.28 at full steer, its yaw "
-			  "spin decays by MotionDamping, the M1A2 and T-90 pivot on the spot, their turn terms pulling their sides "
-			  "apart up to 800 x SteeringSensitivity with the hull below 1 rad/s, and each tank stays "
-			  "under the speed where TransmissionLoss and rolling resistance meet its drive") {
+			  "spin decays by MotionDamping, the M1A2's and T-90's track wheels do not steer while their turn terms "
+			  "pull their sides apart up to 800 x SteeringSensitivity with the hull below 1 rad/s, and each tank "
+			  "stays under the speed where TransmissionLoss and rolling resistance meet its drive") {
 		HandlingModels *h = handling_models();
 		if (h == nullptr) {
 			return;
@@ -1859,7 +1857,7 @@ TEST_SUITE("sim-vehicle-handling") {
 				peak = std::max(peak, std::fabs(pivot->state(0).body.angular_velocity[1]));
 			}
 			const VehicleState turned = pivot->state(0);
-			float turn = std::fabs(yaw_of(turned) - yaw_of(rest));
+			const float turn = yaw_of(turned) - yaw_of(rest);
 			const float drift = std::hypot(
 					turned.body.origin[0] - rest.body.origin[0], turned.body.origin[2] - rest.body.origin[2]);
 			std::printf("sim.vehicle.handling: %s pivot, full steer 4 s at rest: turned %.1f deg, peak yaw rate %.3f "
@@ -1871,7 +1869,10 @@ TEST_SUITE("sim-vehicle-handling") {
 			CHECK(turned.driver.track_steer[0] <= full_turn);
 			CHECK(turned.driver.track_steer[1] < -0.5f * full_turn);
 			CHECK(turned.driver.track_steer[1] >= -full_turn);
-			CHECK(turn > 10.0f * core::kDegToRadF);
+			for (size_t i = 0; i < turned.wheel_count; ++i) {
+				CHECK(turned.wheels[i].steer_angle == 0.0f);
+			}
+			CHECK(turn < 0.0f);
 			CHECK(drift < 1.5f);
 		}
 
