@@ -1973,6 +1973,41 @@ TEST_SUITE("sim-vehicle-handling") {
 		}
 	}
 
+	TEST_CASE("sim.vehicle.handling: the handbrake bit locks the M1A2's wheels at once (HandBrakeFactor 25, R5-G1-8 "
+			  "rule 2) and leaves the Growler's rear wheels spinning (HandBrakeFactor 0)") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		for (const std::shared_ptr<const VehicleModel> &model : { h->m1a2, h->growler }) {
+			CAPTURE(model->blueprint);
+			std::unique_ptr<VehicleWorld> w = world_at(ground_shapes(false), model, placed(0, 0, -300));
+			settle(*w);
+			for (uint32_t t = 0; t < 3 * kSimHz; ++t) {
+				step1(*w, command(127, 0, 0));
+			}
+			const VehicleState rolling = w->state(0);
+			step1(*w, command(127, 0, 0, vehicle_buttons::kHandbrake));
+			const VehicleState held = w->state(0);
+			float before = 0.0f, after = 0.0f, factor = 0.0f;
+			for (size_t i = 0; i < held.wheel_count; ++i) {
+				before += std::fabs(rolling.wheels[i].angular_velocity);
+				after += std::fabs(held.wheels[i].angular_velocity);
+				factor = std::max(factor, model->wheels[i].hand_brake_factor);
+			}
+			std::printf("sim.vehicle.handling: %s handbrake under throttle: wheel spin %.2f -> %.2f rad/s in all "
+						"(HandBrakeFactor up to %.2f)\n",
+					model->blueprint.c_str(), double(before), double(after), double(factor));
+			CHECK(before > 1.0f);
+			if (factor >= 1.0f) {
+				CHECK(after == 0.0f);
+			} else {
+				CHECK(factor == 0.0f);
+				CHECK(after > 0.5f * before);
+			}
+		}
+	}
+
 	TEST_CASE("sim.vehicle.handling: a manned idle LAV-AD, M1A2 and Growler hold on a 12 deg slope (the stand-still "
 			  "brake; the LAV-AD has no low-speed auto brake)") {
 		HandlingModels *h = handling_models();
