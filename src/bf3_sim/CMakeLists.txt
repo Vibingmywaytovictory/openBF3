@@ -76,12 +76,14 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/vehicle_ghost.h
     include/bf3/sim/vehicle_model.h
     include/bf3/sim/vehicle_world.h
+    include/bf3/sim/ragdoll_world.h
     src/vehicle_types.cpp
     src/vehicle_ghost.cpp
     src/vehicle_tuning.cpp
     src/vehicle_model.cpp
     src/vehicle_world_internal.h
     src/vehicle_world.cpp
+    src/ragdoll_world.cpp
     include/bf3/sim/vehicles/land_rules.h
     include/bf3/sim/vehicles/vehicle_spawning.h
     include/bf3/sim/vehicles/vehicle_input.h
