@@ -202,6 +202,8 @@ target_sources(bf3_godot PRIVATE
 target_sources(bf3_godot PRIVATE
     src/overlay_screens.h
     src/overlay_screens.cpp
+    src/vehicle_hud_screens.h
+    src/vehicle_hud_screens.cpp
     src/hud_view_paint.h
     src/hud_view_paint.cpp
 )

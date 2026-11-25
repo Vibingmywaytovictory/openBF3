@@ -1,5 +1,8 @@
 #include "bf3/host/hud_feed.h"
 #include "bf3/host/level_vehicles.h"
+#include "bf3/host/vehicle_hud_flow.h"
+#include "bf3/present/vehicle_turrets.h"
+#include "bf3/sim/vehicles/vehicle_armament.h"
 
 #include <algorithm>
 #include <cmath>
@@ -36,6 +39,68 @@ ui::HudPassengerSeat seat_kind(const HudFeedInput &p_input, const PresentedVehic
 																					 : ui::HudPassengerSeat::Idle;
 }
 
+float yaw_deg(const core::Vec3 &p_forward) {
+	return std::atan2(p_forward[0], p_forward[2]) / core::kDegToRadF;
+}
+
+float pitch_deg(const core::Vec3 &p_forward) {
+	return std::asin(std::clamp(p_forward[1], -1.0f, 1.0f)) / core::kDegToRadF;
+}
+
+void fill_vehicle_views(const HudFeedInput &p_input, const PresentedVehicle &p_vehicle, const LevelVehicleKind &p_kind,
+		size_t p_seat, ui::HudVehicle &r_out) {
+	const core::Transform hull = sim::vehicles::hull_transform(p_vehicle.rotation, core::Vec3{});
+	r_out.hull_yaw_deg = yaw_deg(hull.forward);
+	const float hull_pitch = pitch_deg(hull.forward);
+	const size_t angles = std::min<size_t>(p_vehicle.turret_count, p_vehicle.turret_angle.size());
+	const std::span<const float> turret_angles(p_vehicle.turret_angle.data(), angles);
+	const std::vector<core::Transform> offsets = p_kind.armament != nullptr
+			? present::turret_offsets(*p_kind.armament, turret_angles)
+			: std::vector<core::Transform>();
+	for (size_t entry = 0; entry < r_out.entry_yaw_deg.size(); ++entry) {
+		r_out.entry_yaw_deg[entry] = 0.0f;
+		if (entry >= p_kind.seat_defs.size()) {
+			continue;
+		}
+		for (const core::gameplay::VehicleCameraDef &c : p_kind.seat_defs[entry].cameras) {
+			if (!c.first_person) {
+				continue;
+			}
+			const core::Transform local = c.turret >= 0 && size_t(c.turret) < offsets.size()
+					? offsets[size_t(c.turret)].then_inner(c.transform)
+					: c.transform;
+			r_out.entry_yaw_deg[entry] = yaw_deg(hull.transform_vector(local.forward));
+			break;
+		}
+	}
+	const core::gameplay::VehicleCameraDef *camera = p_seat < p_kind.seat_defs.size()
+			? vehicle_seat_camera(p_kind.seat_defs[p_seat], p_input.vehicle_camera)
+			: nullptr;
+	r_out.weapon_orientations = camera != nullptr && camera->hud.use_weapon_orientations;
+	if (p_seat < p_kind.seat_defs.size() && !p_kind.seat_defs[p_seat].weapons.empty()) {
+		const int weapon = p_kind.seat_defs[p_seat].weapons.front();
+		r_out.weapon_item =
+				weapon >= 0 && size_t(weapon) < p_kind.weapons.size() ? p_kind.weapons[size_t(weapon)].item_hash : 0u;
+	}
+	if (!r_out.weapon_orientations || p_kind.armament == nullptr) {
+		return;
+	}
+	sim::vehicles::ArmamentState state{};
+	for (size_t k = 0; k < angles && k < state.bodies.size(); ++k) {
+		state.bodies[k].angle = std::isfinite(turret_angles[k]) ? turret_angles[k] : 0.0f;
+	}
+	for (size_t w = 0; w < p_kind.weapons.size() && w < p_kind.armament->weapons.size(); ++w) {
+		const std::string &kind = p_kind.weapons[w].classification;
+		std::optional<float> *slot = kind == "WCPrimary" ? &r_out.primary_pitch_deg
+				: kind == "WCSecondary"					 ? &r_out.secondary_pitch_deg
+														 : nullptr;
+		if (slot == nullptr || slot->has_value()) {
+			continue;
+		}
+		const core::Transform world = sim::vehicles::weapon_world(*p_kind.armament, state, hull, w);
+		*slot = pitch_deg(world.forward) - hull_pitch;
+	}
+}
 }
 
 ui::HudVehicle hud_vehicle(const HudFeedInput &p_input) {
@@ -55,6 +120,17 @@ ui::HudVehicle hud_vehicle(const HudFeedInput &p_input) {
 	out.in_vehicle = true;
 	out.health = std::isfinite(vehicle->health) ? std::clamp(vehicle->health, 0.0f, 1.0f) * 100.0f : 0.0f;
 	out.damage_state_disabled = vehicle->condition != sim::vehicles::VehicleCondition::Healthy;
+	const float speed = std::sqrt(vehicle->linear_velocity.x * vehicle->linear_velocity.x +
+			vehicle->linear_velocity.y * vehicle->linear_velocity.y +
+			vehicle->linear_velocity.z * vehicle->linear_velocity.z);
+	out.speed_kmh = std::isfinite(speed) ? int32_t(std::min(speed * 3.6f, 1.0e6f)) : 0;
+	if (const LevelVehicles *level = p_input.level_vehicles; level != nullptr &&
+			vehicle->spawner < level->spawners.size() && level->spawners[vehicle->spawner].kind < level->kinds.size()) {
+		const LevelVehicleKind &kind = level->kinds[level->spawners[vehicle->spawner].kind];
+		const size_t n = std::min(kind.name_sid.size(), out.short_name.size() - 1);
+		std::copy_n(kind.name_sid.begin(), n, out.short_name.begin());
+		fill_vehicle_views(p_input, *vehicle, kind, seat->seat, out);
+	}
 	const net::PlayerRow *own = row_of(p_input.players, p_input.own_slot);
 	const uint8_t own_squad = own != nullptr ? own->squad : uint8_t(0);
 	const size_t seats = std::min<size_t>(vehicle->seat_count, ui::kHudMaxPassengers);

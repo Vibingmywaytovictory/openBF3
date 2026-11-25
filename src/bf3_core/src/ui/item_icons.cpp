@@ -32,6 +32,7 @@ constexpr Source kSources[] = {
 	{ kVehicleMetadataPartition, ItemIconSource::Vehicle, "TexturePath" },
 	{ kSpecializationMetadataPartition, ItemIconSource::Specialization, "IconTexturePath" },
 	{ kWeaponAccessoryMetadataPartition, ItemIconSource::WeaponAccessory, "IconTexturePath" },
+	{ kVehicleWeaponMetadataPartition, ItemIconSource::VehicleWeapon, "IconTexturePath" },
 };
 
 }

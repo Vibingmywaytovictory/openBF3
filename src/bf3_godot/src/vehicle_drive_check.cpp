@@ -4,6 +4,8 @@
 #include "game_vehicles.h"
 #include "level_session.h"
 #include "native_hud.h"
+#include "ui_screen_records.h"
+#include "vehicle_hud_screens.h"
 #include "viewmodel.h"
 
 #include "bf3/core/util/format.h"
@@ -139,6 +141,33 @@ void VehicleDriveRun::hud_row(const VehicleDriveInputs &p_in, uint8_t p_seat) {
 					double(v.health), unsigned(v.passenger_list.count),
 					own != nullptr && own->is_player ? "bold" : "missing", vehicle_health ? "shown" : "hidden",
 					passengers ? "shown" : "hidden", health ? "shown" : "hidden", ammo ? "shown" : "hidden"));
+}
+
+void VehicleDriveRun::vehicle_screen_row(
+		const VehicleDriveInputs &p_in, const std::string &p_name, std::string_view p_expected) {
+	if (p_in.screens == nullptr) {
+		row(p_name + "_hud", false, "no native screens");
+		return;
+	}
+	std::string shown;
+	bool expected_shown = false;
+	bool other_shown = false;
+	for (const std::string_view partition : kVehicleHudDrawnPartitions) {
+		const std::optional<UiScreenRecord> r = p_in.screens->screen_record(partition);
+		if (!r || !r->visible) {
+			continue;
+		}
+		shown += (shown.empty() ? "" : ", ") + std::string(partition.substr(partition.rfind('/') + 1));
+		if (!p_expected.empty() && partition.ends_with(p_expected)) {
+			expected_shown = true;
+		} else {
+			other_shown = true;
+		}
+	}
+	row(p_name + "_hud", (p_expected.empty() || expected_shown) && !other_shown,
+			fmt("vehicle HUD screens shown: %s; the seat camera's prefab picks %s",
+					shown.empty() ? "none" : shown.c_str(),
+					p_expected.empty() ? "none" : std::string(p_expected).c_str()));
 }
 
 void VehicleDriveRun::turret_rows(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in) {
@@ -405,6 +434,13 @@ bool VehicleDriveRun::guns(Bf3LevelSession &r_session, const VehicleDriveInputs 
 							def != nullptr ? double(def->fire.rate_of_fire) : 0.0,
 							def != nullptr ? int(def->fire.magazine_capacity) : 0,
 							def != nullptr ? double(def->fire.reload_time) : 0.0));
+			const core::gameplay::VehicleCameraDef *camera = gun_seat_ < kind.seat_defs.size()
+					? host::vehicle_seat_camera(kind.seat_defs[gun_seat_], p_in.camera_counter)
+					: nullptr;
+			const bool first_person = camera != nullptr && camera->first_person;
+			vehicle_screen_row(p_in, row_name,
+					gun_seat_ == 0 ? (first_person ? "/defaulttankscreen" : "/tank3pcrosshair")
+								   : (first_person ? "/defaulttankgunnerscreen" : ""));
 			shoot(p_in, (row_name + "_3p").c_str());
 			if (gun_seat_ != 0) {
 				phase_ = Phase::Done;
@@ -650,6 +686,7 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 							double(inside), p_in.own_vm != nullptr && p_in.own_vm->is_visible() ? "shown" : "hidden",
 							mapper.weapons_allowed() ? "live" : "off", unsigned(glass)));
 			hud_row(p_in, seat->seat);
+			vehicle_screen_row(p_in, "growler_driver", "");
 			shoot(p_in, "vehicle_1p");
 			const host::PresentedVehicle *v = presented(f, spawner_);
 			if (v == nullptr) {

@@ -1584,6 +1584,63 @@ TEST_CASE("vehicle: a seated soldier's vehicle health in percent, its disabled s
 	CHECK_FALSE(m.vehicle.in_vehicle);
 }
 
+TEST_CASE("vehicle: the seat's speed in km/h, the vehicle's NameSid, entries 0 and 1's first 1P camera yaw beside the "
+		  "hull's, the seat weapon's item hash and the camera Hud's UseWeaponOrientations (R5-UI2 B3)") {
+	const host::HudStatic st = make_static();
+	std::vector<net::PlayerRow> rows{ player(1, 2, "Me") };
+	host::LevelVehicles level;
+	level.kinds.resize(1);
+	host::LevelVehicleKind &kind = level.kinds[0];
+	kind.name_sid = "M1A2";
+	kind.seat_defs.resize(2);
+	gp::VehicleCameraDef chase;
+	gp::VehicleCameraDef driver;
+	driver.first_person = true;
+	driver.hud.use_weapon_orientations = true;
+	driver.transform.right = { 0.0f, 0.0f, -1.0f };
+	driver.transform.forward = { 1.0f, 0.0f, 0.0f };
+	gp::VehicleCameraDef gunner;
+	gunner.first_person = true;
+	kind.seat_defs[0].cameras = { chase, driver };
+	kind.seat_defs[0].weapons = { 0 };
+	kind.seat_defs[1].cameras = { gunner };
+	kind.weapons.resize(1);
+	kind.weapons[0].item_hash = 545678042u;
+	level.spawners.resize(1);
+	std::vector<host::PresentedVehicle> vehicles(1);
+	vehicles[0].seat_count = 2;
+	vehicles[0].occupants.fill(net::kNoVehicleOccupant);
+	vehicles[0].occupants[0] = 1;
+	const float half = 0.5f * 30.0f * bf3::core::kDegToRadF;
+	vehicles[0].rotation = { 0.0f, std::sin(half), 0.0f, std::cos(half) };
+	vehicles[0].linear_velocity = { 10.0f, 0.0f, 0.2f };
+	host::HudFeedInput in;
+	in.tdm = true;
+	in.match_valid = true;
+	in.match.phase = net::MatchPhase::InRound;
+	in.own_slot = 1;
+	in.own_team = 2;
+	in.alive = true;
+	in.players = rows;
+	in.vehicles = vehicles;
+	in.level_vehicles = &level;
+	host::HudTdmFeedState state;
+	ui::HudModel m;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	const ui::HudVehicle &v = m.vehicle;
+	CHECK(v.speed_kmh == 36);
+	CHECK(name_of(v.short_name) == "M1A2");
+	CHECK(v.hull_yaw_deg == doctest::Approx(30.0f));
+	CHECK(v.entry_yaw_deg[0] == doctest::Approx(120.0f));
+	CHECK(v.entry_yaw_deg[1] == doctest::Approx(30.0f));
+	CHECK(v.weapon_item == 545678042u);
+	CHECK(v.weapon_orientations);
+	CHECK_FALSE(v.primary_pitch_deg.has_value());
+	in.vehicle_camera = 1;
+	host::fill_hud_tdm(in, {}, st, state, m);
+	CHECK_FALSE(m.vehicle.weapon_orientations);
+}
+
 TEST_CASE("vehicle HUD switches: a prefab input is the OR of its cameras' outputs, fires its events only on a change, "
 		  "and every on switch fires its off events when the seat is left (R5-UI1 A4, B)") {
 	using Event = gp::VehicleHudGraphEvent;

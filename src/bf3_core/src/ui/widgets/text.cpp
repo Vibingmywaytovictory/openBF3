@@ -20,6 +20,9 @@ constexpr int32_t kKitNameTextKey = 1978414970;
 
 std::optional<As2Value> text_field_source(
 		const HudModel &p_model, const HudClientState &p_client, const HudDataSource &p_source) {
+	if (std::optional<As2Value> vehicle = hud_vehicle_source(p_model, p_client, p_source)) {
+		return vehicle;
+	}
 	if (p_source.category == kKitCategory && p_source.key == kKitNameTextKey) {
 		const uint32_t name = p_model.kit.selected_kit_name;
 		return As2Value::of(name != 0 && p_client.localise_hash ? p_client.localise_hash(name) : std::string());

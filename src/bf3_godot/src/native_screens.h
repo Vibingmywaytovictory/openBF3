@@ -92,6 +92,7 @@ public:
 	void set_model(const bf3::core::ui::HudModel &p_model) { model_ = p_model; }
 	void set_safe_area(const bf3::core::ui::ScreenAdjustFractions &p_safe) { safe_area_ = p_safe; }
 	void set_client(bf3::core::ui::HudClientState p_client);
+	void set_vehicle_name(std::string p_name) { client_.vehicle_name = std::move(p_name); }
 	void set_options(const bf3::core::ui::OptionsModel *p_options);
 	bf3::core::Status open_movie_screen(std::string_view p_movie, bf3::core::ui::HudRootData *p_data);
 	bf3::core::Status open_asset_screen(const bf3::core::ui::HudScreenAsset &p_asset);

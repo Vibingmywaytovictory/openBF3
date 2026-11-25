@@ -139,6 +139,7 @@ struct HudFeedInput {
 	const sim::logic::ConquestParams *conquest_params = nullptr;
 	std::span<const PresentedVehicle> vehicles;
 	const LevelVehicles *level_vehicles = nullptr;
+	uint32_t vehicle_camera = 0;
 };
 
 struct HudFeedState {

@@ -24,6 +24,7 @@ inline constexpr std::string_view kKitItemMetadataPartition = "ui/uikititemmetad
 inline constexpr std::string_view kVehicleMetadataPartition = "ui/uivehiclemetadata";
 inline constexpr std::string_view kSpecializationMetadataPartition = "ui/uispecializationmetadata";
 inline constexpr std::string_view kWeaponAccessoryMetadataPartition = "ui/uiweaponaccessorymetadata";
+inline constexpr std::string_view kVehicleWeaponMetadataPartition = "ui/uivehicleweaponmetadata";
 
 inline constexpr size_t kMaxHudIcons = 1024;
 inline constexpr size_t kMaxHudIconStates = 16;
@@ -174,6 +175,7 @@ enum class ItemIconSource : uint8_t {
 	Vehicle,
 	Specialization,
 	WeaponAccessory,
+	VehicleWeapon,
 };
 
 struct ItemIcon {

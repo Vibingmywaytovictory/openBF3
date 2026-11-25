@@ -168,6 +168,8 @@ int32_t hud_eor_seconds_left(float p_seconds);
 std::vector<As2Value> hud_scoreboard_rows(const HudModel &p_model, const HudPlayerList &p_list);
 As2Value hud_objective_status(const HudCapturePointList &p_points);
 As2Value hud_passenger_list(const HudPassengerList &p_list);
+std::optional<As2Value> hud_vehicle_source(
+		const HudModel &p_model, const HudClientState &p_client, const HudDataSource &p_source);
 
 struct HudFlagIcon {
 	HudIconChoice icon;

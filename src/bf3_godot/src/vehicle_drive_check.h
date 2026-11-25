@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace godot {
@@ -23,6 +24,7 @@ class Bf3Viewmodel;
 class InputMapper;
 class EorFlash;
 class GameVehicles;
+class UiScreenRecords;
 
 struct VehicleWeaponSounds {
 	uint64_t shots = 0;
@@ -47,6 +49,7 @@ struct VehicleDriveInputs {
 	float vehicle_black = 0.0f;
 	std::function<void()> deploy;
 	std::function<bool(const std::string &)> shot;
+	const UiScreenRecords *screens = nullptr;
 };
 
 class VehicleDriveRun {
@@ -99,6 +102,7 @@ private:
 	bool fail(const std::string &p_name, const std::string &p_detail);
 	void shoot(const VehicleDriveInputs &p_in, const char *p_name);
 	void hud_row(const VehicleDriveInputs &p_in, uint8_t p_seat);
+	void vehicle_screen_row(const VehicleDriveInputs &p_in, const std::string &p_name, std::string_view p_expected);
 	void turret_rows(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in);
 	void track_fade(const VehicleDriveInputs &p_in);
 	bool after_exit(InputMapper &r_mapper, const VehicleDriveInputs &p_in);

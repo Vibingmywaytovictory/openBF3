@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -110,9 +111,10 @@ HudModel moment_m02() {
 	return m;
 }
 
-Screen open_screen(Retail &r_r, std::string_view p_partition, HudClientState p_client = test_client()) {
+Screen open_screen_in(const EbxResolver &p_level, Retail &r_r, std::string_view p_partition,
+		HudClientState p_client = test_client()) {
 	Screen s;
-	Result<HudScreenAsset> asset = read_hud_screen_asset(*r_r.level, p_partition);
+	Result<HudScreenAsset> asset = read_hud_screen_asset(p_level, p_partition);
 	REQUIRE_MESSAGE(asset.ok(), (asset.ok() ? std::string() : asset.error().message));
 	s.asset = *asset;
 	Result<SwfScene> scene = SwfScene::open(*r_r.lib, asset->movie);
@@ -122,6 +124,10 @@ Screen open_screen(Retail &r_r, std::string_view p_partition, HudClientState p_c
 	REQUIRE_MESSAGE(hud.ok(), (hud.ok() ? std::string() : hud.error().message));
 	s.hud = std::move(*hud);
 	return s;
+}
+
+Screen open_screen(Retail &r_r, std::string_view p_partition, HudClientState p_client = test_client()) {
+	return open_screen_in(*r_r.level, r_r, p_partition, std::move(p_client));
 }
 
 Screen initialized(Retail &r_r, std::string_view p_partition, const HudModel &p_model, HudClientState p_client = test_client()) {
@@ -331,7 +337,10 @@ TEST_SUITE("ui-hud-screen-unit") {
 			"Widget.ScreenSpecific.ScreenAdjust", "Widget.List.Rows.BaseRow", "Widget.List.Rows.SquadSpawn",
 			"Widget.List.Rows.SquadListRow", "Widget.List.Rows.SquadDetailedRow", "Widget.Text.DebugField",
 			"Widget.CheckBox.CheckBox", "Widget.Hud.ComRose", "Widget.Hud.ObjectiveBar",
-			"Widget.Icon3D.Capturepoint.CapturepointManager", "Widget.Icon3D.Capturepoint.Capturepointtag" };
+			"Widget.Icon3D.Capturepoint.CapturepointManager", "Widget.Icon3D.Capturepoint.Capturepointtag",
+			"Widget.Hud.TurretDisplay", "Widget.Hud.VehicleHudWarnings", "Widget.Hud.VehicleZoomFlir",
+			"Widget.Hud.VehicleWeaponUnlockDisplay", "Widget.Hud.VehicleWeaponName", "Widget.Hud.VehicleStaticArt",
+			"Widget.Hud.VehicleGunnerWeaponElevation", "Widget.Crosshair.VehicleCrosshair" };
 		const HudWidgetRegistry &installed = HudWidgetRegistry::installed();
 		std::vector<std::string> sorted = want;
 		std::sort(sorted.begin(), sorted.end());
@@ -1615,6 +1624,113 @@ TEST_SUITE("ui-hud-screen") {
 		row("vehicle",
 				"43.6 -> \"44\" and a 44 % meter, disabled loop, 3 of 6 seat rows: friendDriver, squadTurret, "
 				"neutralIdle");
+	}
+
+	TEST_CASE("hud screen: the vehicle screens' widgets run their AS2 classes on the UIVehicleComp values: turret and "
+			  "hull, speed, elevation, warnings, weapon name and crosshair, zoom from the flow (R5-UI1 D, R5-UI2)") {
+		Retail *r = retail_or_skip();
+		if (r == nullptr) {
+			return;
+		}
+		Result<std::unique_ptr<EbxLibrary>> caspian =
+				EbxLibrary::open(r->mount->install, { "Win32/Levels/MP_007/MP_007" });
+		REQUIRE_MESSAGE(caspian.ok(), (caspian.ok() ? std::string() : caspian.error().message));
+		Result<ItemIconIndex> items = ItemIconIndex::read(*r->ui);
+		REQUIRE_MESSAGE(items.ok(), (items.ok() ? std::string() : items.error().message));
+		const TextDatabase &text = ui_retail::retail_text_db(*r);
+		const auto sid = [&](std::string_view p_sid) { return std::string(text.find_sid(p_sid).value_or(p_sid)); };
+		std::map<std::pair<std::string, int32_t>, std::string> flow;
+		HudClientState client = text_client(text);
+		client.items = &*items;
+		client.vehicle_name = "M1A2";
+		client.flow_data = [&flow](std::string_view p_category, int32_t p_key) -> std::optional<std::string> {
+			const auto it = flow.find({ std::string(p_category), p_key });
+			return it != flow.end() ? std::optional<std::string>(it->second) : std::nullopt;
+		};
+		HudModel m = moment_m02();
+		HudVehicle &v = m.vehicle;
+		v.in_vehicle = true;
+		v.health = 60.0f;
+		v.speed_kmh = 36;
+		v.hull_yaw_deg = 30.0f;
+		v.entry_yaw_deg = { 40.0f, 75.0f };
+		v.weapon_orientations = true;
+		v.primary_pitch_deg = 5.0f;
+		v.secondary_pitch_deg = -10.4f;
+		v.weapon_item = 545678042u;
+		const auto open = [&](std::string_view p_partition) {
+			Screen s = open_screen_in(**caspian, *r, p_partition, client);
+			s.hud->initialize(m);
+			CHECK(s.hud->stats().unknown_classes == 0);
+			CHECK(s.hud->stats().widgets_missing == 0);
+			CHECK_MESSAGE(s.hud->stats().as2.missing_paths == 0, std::string(p_partition));
+			CHECK_MESSAGE(s.hud->stats().as2.failed_ops == 0, s.hud->stats().as2.last_failure);
+			return s;
+		};
+
+		Screen tank = open("ui/flow/screen/vehicle/defaulttankscreen");
+		const std::string td = "instance1.TurretDisplay_01.turretDisplay_mc";
+		CHECK(tank.clip(td + ".body_mc").rotation() == doctest::Approx(10.0f));
+		CHECK(tank.clip(td + ".turret_mc").rotation() == doctest::Approx(0.0f));
+		CHECK(tank.clip(td + ".gunner_mc").rotation() == doctest::Approx(-35.0f));
+		CHECK(tank.at("instance1.TextField_03.VehicleTankHudNumbers.txtDisplay").text == "36");
+		CHECK(tank.at("instance1.TextField_05.VehicleTankHudNumbers.txtDisplay").text == "95");
+		CHECK(tank.at("instance1.TextField_01.VehicleTankHudNumbers.txtDisplay").text.empty());
+		const std::string warn = "instance1.VehicleHudWarnings_02.warning";
+		CHECK(tank.at(warn).frame == tank.label(warn, "blink"));
+		CHECK(tank.at(warn + ".textHolder.txt").text == sid("ID_H_VEHICLE_WARN"));
+		const std::string lock = "instance1.VehicleHudWarnings_01.warning";
+		CHECK(tank.at(lock).frame == tank.label(lock, "start"));
+		CHECK(tank.at(lock + ".textHolder.txt").text == sid("ID_H_VEHICLE_LOCK"));
+		const std::string name = "instance1.VehicleWeaponName_01.textHolder.textMc";
+		CHECK(tank.at(name + ".txtDisplay").text == sid("ID_P_VWNAME_M1A2CANNON"));
+		CHECK(tank.at(name + ".txtDisplay2").visible);
+		CHECK(tank.at(name + ".txtDisplay2").text == sid("ID_H_VEHICLE_RDY"));
+		const std::string cross = "instance1.VehicleCrosshair_01";
+		CHECK(tank.at(cross + ".AFPSDS_T").visible);
+		CHECK_FALSE(tank.at(cross + ".M242_HE").visible);
+		CHECK(tank.at(cross + ".AFPSDS_T").frame == tank.label(cross + ".AFPSDS_T", "us_neutral"));
+		const std::string zoom = "instance1.VehicleZoomFlir_01.vehicle_zoom_flir_mc";
+		CHECK(tank.at(zoom + ".txt").text.empty());
+		flow[{ "ui/uicomponents/uivehiclecomp", 1002310988 }] = "true";
+		tank.hud->refresh(m);
+		CHECK(tank.at(zoom + ".txt").text == sid("ID_H_3X"));
+		CHECK(tank.at(cross + ".AFPSDS_T").frame == tank.label(cross + ".AFPSDS_T", "us_zoomed"));
+		flow.clear();
+		v.health = 100.0f;
+		tank.hud->refresh(m);
+		CHECK(tank.at(warn).frame == tank.label(warn, "start"));
+
+		HudClientState russian = client;
+		russian.vehicle_name = "BMP2";
+		Screen bmp = open_screen_in(**caspian, *r, "ui/flow/screen/vehicle/defaulttankscreen", russian);
+		bmp.hud->initialize(m);
+		CHECK(bmp.hud->stats().as2.missing_paths == 0);
+		CHECK(bmp.at(td).frame == bmp.label(td, "ru"));
+		CHECK(bmp.at("instance1.Compass_01.CompassTank").visible);
+
+		HudModel level = m;
+		level.vehicle.secondary_pitch_deg.reset();
+		Screen gunner = open_screen_in(**caspian, *r, "ui/flow/screen/vehicle/defaulttankgunnerscreen", client);
+		gunner.hud->initialize(level);
+		const std::string arrow = "instance1.VehicleGunnerWeaponElevation_01.ArrowMc";
+		const float start_y = gunner.clip(arrow).y();
+		const float start_h = gunner.clip("instance1.VehicleGunnerWeaponElevation_01").height();
+		gunner.hud->refresh(m);
+		CHECK(gunner.hud->stats().unknown_classes == 0);
+		CHECK(gunner.clip(arrow).y() == doctest::Approx(start_h - start_h * (80.0f / 180.0f)));
+		const std::string gtd = "instance1.TurretDisplay_01.turretDisplay_mc";
+		CHECK(gunner.clip(gtd + ".body_mc").rotation() == doctest::Approx(45.0f));
+		CHECK(gunner.clip(gtd + ".turret_mc").rotation() == doctest::Approx(35.0f));
+
+		Screen third = open("ui/flow/screen/vehicle/tank3pcrosshair");
+		CHECK(third.at(cross + ".Vehicle_3p").visible);
+		Screen dot = open("ui/flow/screen/weapon/crosshairdot");
+		Screen hits = open("ui/flow/screen/vehicle/vehiclesimplehitindicator");
+		row("vehicle_screens",
+				"defaulttankscreen hull 10 deg, gunner -35 deg, 36 km/h, 95 deg, WARN blinking at 60 %, " +
+						sid("ID_P_VWNAME_M1A2CANNON") + " on AFPSDS_T, 3X zoomed; gunner arrow at 80 deg from " +
+						std::to_string(start_y));
 	}
 
 	TEST_CASE("hud screen: SquadList") {

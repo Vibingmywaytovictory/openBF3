@@ -1485,6 +1485,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			(f.own_curr.flags & sim::soldier_flags::kSprinting) != 0, g.weapon.valid && g.weapon.zoomed, zoom_look));
 	g.vehicle_black = 0.0f;
 	g.vehicle_view_camera = bf3::core::gameplay::kNoVehicleCamera;
+	g.vehicle_alternate_view = false;
 	if (seat && camera != nullptr && !free_camera) {
 		const VehicleSeatView sv = g.vehicles->seat_view(*seat, g.vehicle_camera, view.yaw, view.pitch,
 				g.settings != nullptr ? g.settings->hip_fov_deg() : FpCamera::kFovDegrees,
@@ -1494,6 +1495,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		camera->set_fov(sv.fov_deg);
 		g.vehicle_black = sv.black;
 		g.vehicle_view_camera = sv.camera_instance;
+		g.vehicle_alternate_view = sv.zoomed;
 	}
 	g.ms_vm = ms_since(part_t0);
 	part_t0 = std::chrono::steady_clock::now();
@@ -1748,6 +1750,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			scripted_ui_key(KEY_ENTER, false);
 		};
 		in.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		in.screens = g.tdm != nullptr ? &g.tdm->screen_records : nullptr;
 		if (g.vehicle_drive->step(*this, in, p_delta)) {
 			g.finished = true;
 			UtilityFunctions::print(

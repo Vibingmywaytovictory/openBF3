@@ -9,7 +9,8 @@ public:
 	void on_clip_load(HudWidgetHost &r_host) override {
 		type_ = param_string(r_host, "m_compassType");
 		mp_ = type_ == "multiplayerCompass";
-		const std::string linkage = mp_ || type_ == "singlePlayerCompass" ? std::string("mc_singlePlayerCompass") : "mc_" + type_ + "_us";
+		const std::string team = hud_vehicle_russian(r_host.client()) ? "_ru" : "_us";
+		const std::string linkage = mp_ || type_ == "singlePlayerCompass" ? std::string("mc_singlePlayerCompass") : "mc_" + type_ + team;
 		heading_ = r_host.attach_movie(r_host.self(), linkage, type_, r_host.self().next_highest_depth());
 		heading_.set_x(0.0f);
 		heading_.set_y(0.0f);
@@ -37,7 +38,9 @@ public:
 
 	void initialize(HudWidgetHost &r_host, const HudWidgetInit &p_init) override {
 		setup_refresh_data(*this, r_host, p_init.data);
-		heading_.child("bg").set_visible(false);
+		if (const As2Clip bg = heading_.child("bg"); bg.exists()) {
+			bg.set_visible(false);
+		}
 		heading_.goto_and_stop("us");
 		if (p_init.value("Visible") == nullptr && p_init.value("VisibleAccess") == nullptr) {
 			r_host.self().set_visible(true);

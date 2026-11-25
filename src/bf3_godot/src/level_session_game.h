@@ -230,6 +230,7 @@ struct GameState {
 	std::unique_ptr<GameVehicles> vehicles;
 	uint32_t vehicle_camera = 0;
 	uint32_t vehicle_view_camera = core::gameplay::kNoVehicleCamera;
+	bool vehicle_alternate_view = false;
 	float vehicle_black = 0.0f;
 	std::unique_ptr<CatalogWeapons> catalog;
 	CatalogCacheSource catalog_cache;

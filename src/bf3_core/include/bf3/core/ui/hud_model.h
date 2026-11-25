@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -285,6 +286,14 @@ struct HudVehicle {
 	float health = 0.0f;
 	bool damage_state_disabled = false;
 	HudPassengerList passenger_list{};
+	HudPlayerName short_name{};
+	int32_t speed_kmh = 0;
+	std::array<float, 2> entry_yaw_deg{};
+	float hull_yaw_deg = 0.0f;
+	bool weapon_orientations = false;
+	std::optional<float> primary_pitch_deg;
+	std::optional<float> secondary_pitch_deg;
+	uint32_t weapon_item = 0;
 };
 
 struct HudTickets {

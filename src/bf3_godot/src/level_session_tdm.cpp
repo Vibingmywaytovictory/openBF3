@@ -193,6 +193,7 @@ void build_tdm_ui(GameState &r_game, TdmState &r_m, bool p_headless, const bf3::
 		screens->set_drawn(bf3::core::ui::kKillScreenPartition, true);
 		DeployScreens::draw(*screens);
 		OverlayScreens::draw(*screens);
+		VehicleHudScreens::draw(*screens);
 		r_game.layer->add_child(screens);
 		if (const Bf3UiPages *pages = Bf3UiPages::current(); pages != nullptr && pages->present_node() != nullptr) {
 			r_game.layer->move_child(pages->present_node(), -1);
@@ -904,7 +905,16 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				level != nullptr && level->logic_natives != nullptr ? level->logic_natives->conquest.get() : nullptr;
 		in.vehicles = std::span<const host::PresentedVehicle>(f.vehicles.data(), f.vehicle_count);
 		in.level_vehicles = level != nullptr ? level->vehicles.get() : nullptr;
+		in.vehicle_camera = r_game.vehicle_camera;
 		host::fill_hud_tdm(in, r_game.events, r_game.hud_static, m.tdm_state, r_game.hud_model);
+		VehicleHudStepInput vin;
+		vin.vehicles = in.vehicles;
+		vin.level = in.level_vehicles;
+		vin.own_slot = m.own_slot;
+		vin.alive = r_game.alive;
+		vin.camera = r_game.vehicle_camera;
+		vin.alternate_view = r_game.vehicle_alternate_view;
+		m.vehicle_hud.step(m.native_flow != nullptr ? m.native_flow->session() : nullptr, tdm_ui_screens(m), vin);
 		if (!m.options.deploy_screen) {
 			r_game.hud_model.spawn_screen.visible = false;
 		}

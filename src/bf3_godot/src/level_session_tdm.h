@@ -6,6 +6,7 @@
 #include "m2b_check.h"
 #include "tdm_flow.h"
 #include "ui_screen_records.h"
+#include "vehicle_hud_screens.h"
 
 #include "bf3/core/level/eor_camera.h"
 #include "bf3/core/ui/hud_squads.h"
@@ -63,6 +64,7 @@ struct TdmState {
 	}
 
 	UiScreenRecordSet screen_records;
+	VehicleHudScreens vehicle_hud;
 	bf3::host::HudTdmFeedState tdm_state;
 	bf3::host::HudKillCardSource kill_card_source;
 
