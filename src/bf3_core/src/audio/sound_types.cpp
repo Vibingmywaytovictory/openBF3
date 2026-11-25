@@ -69,6 +69,7 @@ constexpr std::string_view kSwitcherEntryPorts[] = { "CaseTrigger" };
 constexpr std::string_view kSwitcherEntryFloats[] = { "CaseValue" };
 constexpr std::string_view kValueSelectorEntryPorts[] = { "Input" };
 constexpr std::string_view kValueSelectorEntryFloats[] = { "CaseValue" };
+constexpr std::string_view kDeltaGroupPorts[] = { "Delta", "In" };
 
 constexpr SoundNodeTypeInfo kTypes[] = {
 	{ SoundNodeType::Adsr, "AdsrNodeData", SoundNodeRole::Patch, true, false, kAdsrPorts, kNone, "", "" },
@@ -103,7 +104,7 @@ constexpr SoundNodeTypeInfo kTypes[] = {
 	{ SoundNodeType::Timer, "TimerNodeData", SoundNodeRole::Patch, true, false, kTimerPorts, kNone, "Mode", "" },
 	{ SoundNodeType::ValueSelector, "ValueSelectorNodeData", SoundNodeRole::Patch, true, false, kValueSelectorPorts, kValueSelectorFloats, "", "Inputs" },
 	{ SoundNodeType::WaveSwitcher, "WaveSwitcherNodeData", SoundNodeRole::Patch, true, false, kWaveSwitcherPorts, kWaveSwitcherFloats, "", "" },
-	{ SoundNodeType::Delta, "DeltaNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
+	{ SoundNodeType::Delta, "DeltaNodeData", SoundNodeRole::Patch, true, false, kNone, kNone, "", "Deltas" },
 	{ SoundNodeType::DialogSampler, "DialogSamplerNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
 	{ SoundNodeType::DistortionClip, "DistortionClipNodeData", SoundNodeRole::Patch, false, false, kNone, kNone, "", "" },
 	{ SoundNodeType::DivisibleLoopPlayer, "DivisibleLoopPlayerNodeData", SoundNodeRole::Patch, false, true, kDivisibleLoopPlayerPorts, kDivisibleLoopPlayerFloats, "", "" },
@@ -137,6 +138,7 @@ constexpr SoundNodeTypeInfo kTypes[] = {
 	{ SoundNodeType::ReceiveEntry, "ReceiveEntry", SoundNodeRole::Child, true, false, kReceiveEntryPorts, kReceiveEntryFloats, "", "" },
 	{ SoundNodeType::SwitcherEntry, "SwitcherEntry", SoundNodeRole::Child, true, false, kSwitcherEntryPorts, kSwitcherEntryFloats, "", "" },
 	{ SoundNodeType::ValueSelectorEntry, "ValueSelectorEntry", SoundNodeRole::Child, true, false, kValueSelectorEntryPorts, kValueSelectorEntryFloats, "", "" },
+	{ SoundNodeType::DeltaGroup, "DeltaGroup", SoundNodeRole::Child, true, false, kDeltaGroupPorts, kNone, "", "" },
 };
 static_assert(std::size(kTypes) == size_t(SoundNodeType::Count));
 
@@ -236,6 +238,8 @@ SimpleTransformOp simple_transform_op(std::string_view p_enumerator) {
 	return SimpleTransformOp::Unknown;
 }
 
+constexpr double kGraphDivisorFloor = 1e-6;
+
 float simple_transform(uint8_t p_option, float p_x, float p_y) {
 	constexpr float kPi = 3.14159265358979323846f;
 	const bool degrees = (p_option & port::kSimpleTransformDegrees) != 0;
@@ -243,6 +247,7 @@ float simple_transform(uint8_t p_option, float p_x, float p_y) {
 	const double to_rad = degrees ? double(kPi) / 180.0 : 1.0;
 	const double from_rad = degrees ? 180.0 / double(kPi) : 1.0;
 	const double X = p_x, Y = p_y;
+	const double safe_y = std::fabs(Y) < kGraphDivisorFloor ? kGraphDivisorFloor : Y;
 	switch (op) {
 		case SimpleTransformOp::Add:
 			return finite_or_zero(X + Y);
@@ -251,11 +256,11 @@ float simple_transform(uint8_t p_option, float p_x, float p_y) {
 		case SimpleTransformOp::Multiply:
 			return finite_or_zero(X * Y);
 		case SimpleTransformOp::Divide:
-			return Y == 0.0 ? 0.0f : finite_or_zero(X / Y);
+			return finite_or_zero(X / safe_y);
 		case SimpleTransformOp::Sine:
-			return finite_or_zero(std::sin(X * to_rad));
+			return finite_or_zero(std::sin(X * Y * to_rad));
 		case SimpleTransformOp::Cosine:
-			return finite_or_zero(std::cos(X * to_rad));
+			return finite_or_zero(std::cos(X * Y * to_rad));
 		case SimpleTransformOp::Tangent:
 			return finite_or_zero(std::tan(X * to_rad));
 		case SimpleTransformOp::ArcSine:
@@ -265,9 +270,9 @@ float simple_transform(uint8_t p_option, float p_x, float p_y) {
 		case SimpleTransformOp::ArcTangent:
 			return finite_or_zero(std::atan(X) * from_rad);
 		case SimpleTransformOp::Modulus:
-			return Y == 0.0 ? 0.0f : finite_or_zero(std::fmod(X, Y));
+			return finite_or_zero(std::fmod(X, safe_y));
 		case SimpleTransformOp::Round:
-			return finite_or_zero(std::round(X));
+			return finite_or_zero(std::floor(X + 0.5));
 		case SimpleTransformOp::Floor:
 			return finite_or_zero(std::floor(X));
 		case SimpleTransformOp::Ceiling:
@@ -297,11 +302,12 @@ float simple_transform(uint8_t p_option, float p_x, float p_y) {
 }
 
 float scale_clamp(float p_in, float p_in_min, float p_in_max, float p_out_min, float p_out_max) {
-	if (p_in_min == p_in_max) {
-		return p_in < p_in_min ? p_out_min : p_out_max;
+	const double x = std::min(std::max(double(p_in), double(p_in_min)), double(p_in_max));
+	double range = double(p_in_max) - p_in_min;
+	if (std::fabs(range) < kGraphDivisorFloor) {
+		range = kGraphDivisorFloor;
 	}
-	const double t = std::clamp((double(p_in) - p_in_min) / (double(p_in_max) - p_in_min), 0.0, 1.0);
-	return finite_or_zero(p_out_min + t * (double(p_out_max) - p_out_min));
+	return finite_or_zero((x - p_in_min) / range * (double(p_out_max) - p_out_min) + p_out_min);
 }
 
 }

@@ -70,7 +70,7 @@ TEST_CASE("node type table: the census sets") {
 	CHECK(patch == au::kPatchNodeTypes);
 	CHECK(a2 == au::kA2NodeTypes);
 	CHECK(all == au::kAllNodeTypes);
-	CHECK(children == 8);
+	CHECK(children == 9);
 	CHECK(!au::sound_node_type("SoundPatchAsset").has_value());
 	CHECK(au::sound_node_type_info(au::SoundNodeType::Sampler).option == "Loop");
 	CHECK(au::sound_node_type_info(au::SoundNodeType::MultiCrossfader).children == "CrossfaderGroups");

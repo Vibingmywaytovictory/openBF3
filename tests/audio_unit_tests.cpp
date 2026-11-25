@@ -607,8 +607,12 @@ TEST_SUITE("audio-patch") {
 		CHECK(inst->value(cf2) == 1.0f);
 		eval(1000, -1.0f);
 		CHECK(inst->value(sc) == 310.0f);
-		CHECK(inst->value(step) == 1.0f);
+		CHECK(inst->value(step) == -1.0f);
 		CHECK(inst->value(cf1) == 1.0f);
+		CHECK(scale_clamp(12.5f, 0.0f, 20.0f, 0.0f, 1.0f) == doctest::Approx(0.625f));
+		CHECK(scale_clamp(25.0f, 0.0f, 20.0f, 0.0f, 1.0f) == 1.0f);
+		CHECK(scale_clamp(0.5f, 1.0f, 0.0f, 2.0f, 4.0f) == 4.0f);
+		CHECK(scale_clamp(-3.0f, 1.0f, 0.0f, 2.0f, 4.0f) == 4.0f);
 
 		eval(2, 3);
 		const auto z = [&](SimpleTransformOp op) { return inst->value(ops[size_t(op)]); };
@@ -618,11 +622,12 @@ TEST_SUITE("audio-patch") {
 		CHECK(z(SimpleTransformOp::Divide) == doctest::Approx(2.0 / 3.0));
 		CHECK(z(SimpleTransformOp::Power) == 8.0f);
 		CHECK(z(SimpleTransformOp::Modulus) == 2.0f);
-		CHECK(z(SimpleTransformOp::Sine) == doctest::Approx(std::sin(2.0)));
+		CHECK(z(SimpleTransformOp::Sine) == doctest::Approx(std::sin(6.0)));
+		CHECK(z(SimpleTransformOp::Cosine) == doctest::Approx(std::cos(6.0)));
 		CHECK(z(SimpleTransformOp::SquareRoot) == doctest::Approx(std::sqrt(2.0)));
 		eval(-4, 0);
-		CHECK(z(SimpleTransformOp::Divide) == 0.0f);
-		CHECK(z(SimpleTransformOp::Modulus) == 0.0f);
+		CHECK(z(SimpleTransformOp::Divide) == doctest::Approx(-4.0e6));
+		CHECK(z(SimpleTransformOp::Modulus) == doctest::Approx(std::fmod(-4.0, 1e-6)));
 		CHECK(z(SimpleTransformOp::SquareRoot) == 0.0f);
 		CHECK(z(SimpleTransformOp::Log) == 0.0f);
 		CHECK(z(SimpleTransformOp::Log10) == 0.0f);
@@ -632,8 +637,32 @@ TEST_SUITE("audio-patch") {
 		CHECK(z(SimpleTransformOp::Floor) == -4.0f);
 		eval(-2, 0.5f);
 		CHECK(z(SimpleTransformOp::Power) == 0.0f);
+		eval(-2.5f, -1e-7f);
+		CHECK(z(SimpleTransformOp::Round) == -2.0f);
+		CHECK(z(SimpleTransformOp::Divide) == doctest::Approx(-2.5e6));
 		eval(1000, 1);
 		CHECK(z(SimpleTransformOp::Exp) == 0.0f);
+	}
+
+	TEST_CASE("Delta: each DeltaGroup's output is its input minus the previous update's, 0 on the first update, "
+			  "not divided by the time step (R5-VS1 Rule 10)") {
+		Builder b;
+		const uint16_t x = b.input(1, false);
+		const uint16_t d = b.reg();
+		const uint32_t g = b.child(SoundNodeType::DeltaGroup);
+		b.cset(g, cp::DeltaGroupIn, Builder::R(x));
+		b.cset(g, cp::DeltaGroupDelta, Builder::R(d));
+		b.node(SoundNodeType::Delta, 0, 0, { g });
+		auto inst = instance(b.build());
+		const auto update = [&](float p_in, double p_seconds) {
+			inst->set_parameter(1, p_in);
+			inst->evaluate(p_seconds);
+			return inst->value(d);
+		};
+		CHECK(update(0.20f, 1.0 / 60.0) == 0.0f);
+		CHECK(update(0.35f, 1.0 / 60.0) == doctest::Approx(0.15f));
+		CHECK(update(0.35f, 1.0 / 60.0) == 0.0f);
+		CHECK(update(0.05f, 1.0 / 30.0) == doctest::Approx(-0.30f));
 	}
 
 	TEST_CASE("Orientation: ListenerRelativeYaw and Pitch of the emitter's forward in the listener frame, in degrees") {

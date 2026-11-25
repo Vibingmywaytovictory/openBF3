@@ -47,7 +47,9 @@ struct NodeState {
 
 struct GroupState {
 	float amplitude = 0.0f;
+	float previous = 0.0f;
 	bool started = false;
+	bool primed = false;
 };
 
 struct SlotPlay {

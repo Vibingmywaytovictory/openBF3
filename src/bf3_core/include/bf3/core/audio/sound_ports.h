@@ -60,6 +60,7 @@ enum MultiCrossfaderGroup : uint8_t { GroupAmplitude, GroupStart, GroupStop };
 enum ReceiveEntry : uint8_t { ReceiveOut, ReceiveSource   };
 enum SwitcherEntry : uint8_t { SwitchCaseTrigger };
 enum ValueSelectorEntry : uint8_t { VsEntryInput };
+enum DeltaGroupPort : uint8_t { DeltaGroupDelta, DeltaGroupIn };
 
 enum ConeFloat : uint8_t { ConeGain, ConeHfAngle, ConeHfDistance, ConeHfObstruction, ConeHfOcclusion, ConeMinDistance, ConeOutsideGain, ConePanSize, ConeReverbGain };
 enum DelayFloat : uint8_t { DelayMax };
@@ -181,6 +182,8 @@ constexpr SoundNodeType child_type(SoundNodeType p_type) {
 			return SoundNodeType::SwitcherEntry;
 		case SoundNodeType::ValueSelector:
 			return SoundNodeType::ValueSelectorEntry;
+		case SoundNodeType::Delta:
+			return SoundNodeType::DeltaGroup;
 		default:
 			return SoundNodeType::Count;
 	}

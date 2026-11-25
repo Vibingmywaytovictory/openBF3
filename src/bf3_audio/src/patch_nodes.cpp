@@ -100,6 +100,17 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				write(port(n, cp::PhysVelocity), geometry.velocity);
 				write(port(n, cp::PhysRelativeVelocity), geometry.relative_velocity);
 				break;
+			case SoundNodeType::Delta:
+				for (uint16_t g = 0; g < n.children_count; ++g) {
+					const SoundNode &e = child(n, g);
+					if (!port(e, cp::DeltaGroupIn).connected() || !port(e, cp::DeltaGroupDelta).connected()) {
+						continue;
+					}
+					const GroupState &gs = groups[child_index(n, g)];
+					write(port(e, cp::DeltaGroupDelta),
+							gs.primed ? read(port(e, cp::DeltaGroupIn)) - gs.previous : 0.0f);
+				}
+				break;
 			case SoundNodeType::Orientation:
 				write(port(n, cp::OriYaw), geometry.relative_yaw_deg);
 				write(port(n, cp::OriPitch), geometry.relative_pitch_deg);
@@ -462,6 +473,14 @@ void PatchInstance::State::advance(double p_seconds) {
 				}
 				break;
 			}
+			case SoundNodeType::Delta:
+				for (uint16_t g = 0; g < n.children_count; ++g) {
+					const SoundNode &e = child(n, g);
+					GroupState &gs = groups[child_index(n, g)];
+					gs.previous = read(port(e, cp::DeltaGroupIn));
+					gs.primed = true;
+				}
+				break;
 			case SoundNodeType::ParameterFilterLinear: {
 				const float in = read(port(n, cp::PflIn));
 				if (in > s.value) {
