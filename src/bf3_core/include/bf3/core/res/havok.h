@@ -24,6 +24,8 @@ public:
 
 	static ResError parse(Bytes p_bytes, Bytes p_fixups, Packfile &r_packfile);
 
+	static ResError parse_inline(Bytes p_bytes, Packfile &r_packfile);
+
 	const std::string *class_at(uint32_t p_offset) const;
 
 	bool pointer(uint32_t p_slot, uint32_t &r_target) const;

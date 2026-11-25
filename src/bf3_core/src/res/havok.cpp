@@ -660,6 +660,135 @@ ResError Packfile::parse(Bytes p_bytes, Bytes p_fixups, Packfile &r_packfile) {
 	return ResError();
 }
 
+ResError Packfile::parse_inline(Bytes p_bytes, Packfile &r_packfile) {
+	r_packfile = Packfile();
+	Reader r(p_bytes);
+	const Bytes magic = r.slice(0, 8);
+	if (!r.ok()) {
+		return r.error();
+	}
+	if (std::memcmp(magic.data(), kMagic, 8) != 0) {
+		return ResError::malformed("packfile magic", 0);
+	}
+	const uint8_t pointer_bytes = r.u8(16);
+	const uint8_t little_endian = r.u8(17);
+	const uint64_t section_count = clamp0(r.i32(20));
+	const int32_t contents_section = r.i32(24);
+	const uint32_t contents_offset = r.u32(28);
+	const Bytes version_field = r.slice(40, 16);
+	if (!r.ok()) {
+		return r.error();
+	}
+	if (pointer_bytes != 4 || little_endian != 1) {
+		return ResError::unsupported("packfile layout", pointer_bytes);
+	}
+	{
+		Reader vr(version_field);
+		std::string version;
+		r_packfile.version = vr.cstr(0, version) ? version : std::string();
+	}
+	bool have_names = false, have_data = false;
+	std::array<int32_t, 7> classnames{}, data_section{};
+	for (uint64_t index = 0; index < section_count; index++) {
+		const uint64_t at = off(64, mul(kSectionHeaderBytes, index));
+		const Bytes tag = r.slice(at, 19);
+		std::array<int32_t, 7> fields{};
+		for (uint64_t i = 0; i < 7; i++) {
+			fields[i] = r.i32(off(at, 20 + 4 * i));
+		}
+		if (!r.ok()) {
+			return r.error();
+		}
+		size_t tag_len = 0;
+		while (tag_len < tag.size() && tag[tag_len] != 0) {
+			tag_len++;
+		}
+		const std::string_view name(reinterpret_cast<const char *>(tag.data()), tag_len);
+		if (name == "__classnames__") {
+			classnames = fields;
+			have_names = true;
+		} else if (name == "__data__" && int64_t(index) == int64_t(contents_section)) {
+			data_section = fields;
+			have_data = true;
+		}
+	}
+	if (!have_names) {
+		return ResError::malformed("packfile without class names", 64);
+	}
+	if (!have_data) {
+		return ResError::malformed("packfile without data section", 64);
+	}
+	const Bytes names = r.slice(clamp0(classnames[0]), clamp0(classnames[1]));
+	if (!r.ok()) {
+		return r.error();
+	}
+	std::unordered_map<uint32_t, std::string> class_names;
+	{
+		Reader nr(names);
+		size_t at = 0;
+		while (at + 5 < names.size() && names[at] != 0xFF) {
+			std::string name;
+			if (!nr.cstr(at + 5, name)) {
+				return nr.error();
+			}
+			const size_t len = name.size();
+			class_names[uint32_t(at + 5)] = std::move(name);
+			at += 5 + len + 1;
+		}
+	}
+	const uint64_t data_at = clamp0(data_section[0]);
+	const uint64_t local_at = clamp0(data_section[1]);
+	const uint64_t global_at = clamp0(data_section[2]);
+	const uint64_t virtual_at = clamp0(data_section[3]);
+	const uint64_t exports_at = clamp0(data_section[4]);
+	if (!(local_at <= global_at && global_at <= virtual_at && virtual_at <= exports_at)) {
+		return ResError::malformed("packfile fixup tables", data_at);
+	}
+	const Bytes data = r.slice(data_at, local_at);
+	const Bytes locals = r.slice(off(data_at, local_at), global_at - local_at);
+	const Bytes globals = r.slice(off(data_at, global_at), virtual_at - global_at);
+	const Bytes virtuals = r.slice(off(data_at, virtual_at), exports_at - virtual_at);
+	if (!r.ok()) {
+		return r.error();
+	}
+	r_packfile.data.assign(data.begin(), data.end());
+	for (size_t at = 0; at + 8 <= locals.size(); at += 8) {
+		const int32_t src = le_i32(locals.data() + at);
+		if (src < 0) {
+			continue;
+		}
+		r_packfile.array_fixups_[uint32_t(src)] = uint32_t(le_i32(locals.data() + at + 4));
+	}
+	for (size_t at = 0; at + 12 <= globals.size(); at += 12) {
+		const int32_t src = le_i32(globals.data() + at);
+		if (src < 0) {
+			continue;
+		}
+		if (le_i32(globals.data() + at + 4) != contents_section) {
+			continue;
+		}
+		r_packfile.object_fixups_[uint32_t(src)] = uint32_t(le_i32(globals.data() + at + 8));
+	}
+	for (size_t at = 0; at + 12 <= virtuals.size(); at += 12) {
+		const int32_t object_offset = le_i32(virtuals.data() + at);
+		if (object_offset < 0) {
+			continue;
+		}
+		PackObject object;
+		object.offset = uint32_t(object_offset);
+		const auto it = class_names.find(uint32_t(le_i32(virtuals.data() + at + 8)));
+		if (it != class_names.end()) {
+			object.class_name = it->second;
+		}
+		r_packfile.objects.push_back(std::move(object));
+	}
+	r_packfile.contents_offset = contents_offset;
+	for (size_t index = 0; index < r_packfile.objects.size(); index++) {
+		r_packfile.object_index_[r_packfile.objects[index].offset] = index;
+	}
+	return ResError();
+}
+
 const std::string *Packfile::class_at(uint32_t p_offset) const {
 	const auto it = object_index_.find(p_offset);
 	return it == object_index_.end() ? nullptr : &objects[it->second].class_name;

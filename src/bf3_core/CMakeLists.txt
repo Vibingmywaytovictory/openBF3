@@ -102,11 +102,13 @@ target_sources(bf3_core PRIVATE
     src/res/dx_texture.cpp
     src/res/havok.cpp
     src/res/havok_geometry.cpp
+    src/res/havok_ragdoll.cpp
     include/bf3/core/res/res_types.h
     include/bf3/core/res/res_math.h
     include/bf3/core/res/mesh_set.h
     include/bf3/core/res/dx_texture.h
     include/bf3/core/res/havok.h
+    include/bf3/core/res/havok_ragdoll.h
 )
 
 target_sources(bf3_core PRIVATE
