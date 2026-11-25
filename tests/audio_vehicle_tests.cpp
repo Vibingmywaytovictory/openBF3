@@ -9,6 +9,7 @@
 #include "bf3/audio/weapon_audio.h"
 #include "bf3/client_audio/kit_audio.h"
 #include "bf3/client_audio/vehicle_sounds.h"
+#include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/gameplay/vehicle_sound.h"
@@ -1072,5 +1073,82 @@ TEST_SUITE("audio-vehicles-inputs") {
 		turn(0.0f, 10, 160);
 		CHECK(rig.audio->stats().stops == 1);
 		check_unchanged(*f);
+	}
+
+	TEST_CASE("an engine instance the mixer culls while its driver is in is made again and Started; one that finished "
+			  "is not") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/growleritv/growleritv");
+		REQUIRE(kind.has_value());
+		const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
+		REQUIRE(spawner.has_value());
+		DriveRig rig(*f);
+		host::PresentedVehicle v = parked(*f->level, *spawner);
+		v.occupants[0] = 3;
+		ba::VehicleListenerView view;
+		view.own_slot = 7;
+		view.listener.position = { 10.0f, 101.6f, 0.0f };
+		for (int i = 0; i < 30; ++i) {
+			rig.frame(*f, v, view);
+		}
+		const uint32_t key = ba::vehicle_sound_key(*spawner, v.generation, ba::kVehicleEngineSound);
+		const uint16_t program = f->assets.engine_program[*kind];
+		const auto lose = [&](ba::MixerCutKind p_kind) {
+			ba::MixerCutEvent e;
+			e.kind = p_kind;
+			e.handle = rig.audio->handle_of(key, program);
+			REQUIRE(e.handle != ba::kNoInstance);
+			rig.audio->on_cut(e);
+			for (int i = 0; i < 3; ++i) {
+				rig.frame(*f, v, view);
+			}
+			return rig.audio->handle_of(key, program) != ba::kNoInstance;
+		};
+		CHECK(lose(ba::MixerCutKind::Cull));
+		CHECK(rig.audio->stats().starts == 2);
+		CHECK(rig.audio->stats().start_events == 2);
+		CHECK_FALSE(lose(ba::MixerCutKind::Finish));
+		CHECK(rig.audio->stats().starts == 2);
+		check_unchanged(*f);
+	}
+
+	TEST_CASE("the M1A2 engine patch's DeltaGroup reads 0.4 the update SpringCompression steps from 0.2 to 0.6") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/m1a2/m1abrams");
+		REQUIRE(kind.has_value());
+		const std::shared_ptr<const ca::SoundProgram> &program = f->assets.programs[f->assets.engine_program[*kind]];
+		std::vector<uint16_t> deltas;
+		for (const ca::SoundNode &n : program->nodes) {
+			if (n.type != ca::SoundNodeType::Delta) {
+				continue;
+			}
+			for (uint16_t c = 0; c < n.children_count; ++c) {
+				const ca::SoundNode &g = program->child_nodes[program->children[n.children_begin + c]];
+				deltas.push_back(program->ports[g.ports_begin + ca::port::DeltaGroupDelta].reg);
+			}
+		}
+		REQUIRE(deltas.size() == 1);
+		REQUIRE(deltas.front() != ca::kNoRegister);
+		core::Result<std::unique_ptr<ba::PatchInstance>> inst =
+				ba::PatchInstance::create(program, f->bank, f->tuning, 1, ba::kMixRate);
+		REQUIRE(inst.ok());
+		const uint32_t spring = ba::vehicle_sound_param_hash(P::SpringCompression);
+		(*inst)->set_parameter(spring, 0.2f);
+		(*inst)->evaluate(1.0 / 60.0);
+		(*inst)->evaluate(1.0 / 60.0);
+		const float before = (*inst)->value(deltas.front());
+		(*inst)->set_parameter(spring, 0.6f);
+		(*inst)->evaluate(1.0 / 60.0);
+		const float step = (*inst)->value(deltas.front());
+		std::printf(
+				"M1A2 engine patch Delta: %.3f at rest, %.3f on the 0.2 -> 0.6 update\n", double(before), double(step));
+		CHECK(before == 0.0f);
+		CHECK(step == doctest::Approx(0.4f));
 	}
 }

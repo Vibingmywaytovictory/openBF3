@@ -102,12 +102,14 @@ private:
 		uint32_t key = 0;
 		bool running = false;
 		bool seen = false;
+		bool lost = false;
 	};
 
 	bool start(MixerCore &r_mixer, const VehicleSoundSource &p_source, const ListenerState &p_listener);
 	bool post(MixerCore &r_mixer, Voice &r_voice, bool p_start);
 	void update(MixerCore &r_mixer, Voice &r_voice, const VehicleSoundSource &p_source);
 	void stop(MixerCore &r_mixer, Voice &r_voice);
+	void mark_lost(uint32_t p_key, bool p_lost);
 	bool push(MixerCore &r_mixer, MixerCommandType p_type, InstanceHandle p_handle, uint32_t p_hash, float p_value);
 
 	std::vector<std::shared_ptr<const core::audio::SoundProgram>> programs_;

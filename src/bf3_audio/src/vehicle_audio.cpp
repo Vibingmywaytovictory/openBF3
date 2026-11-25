@@ -169,12 +169,13 @@ void VehicleAudio::step(
 			auto a = std::find_if(
 					activations_.begin(), activations_.end(), [&](const Activation &p_a) { return p_a.key == s.key; });
 			if (a == activations_.end()) {
-				activations_.push_back(Activation{ s.key, false, false });
+				activations_.push_back(Activation{ s.key, false, false, false });
 				a = activations_.end() - 1;
 			}
-			activated = s.running && !a->running;
+			activated = s.running && (!a->running || a->lost);
 			a->running = s.running;
 			a->seen = true;
+			a->lost = false;
 		}
 		auto it = std::find_if(voices_.begin(), voices_.end(),
 				[&](const Voice &v) { return v.handle != kNoInstance && v.key == s.key && v.program == s.program; });
@@ -182,7 +183,8 @@ void VehicleAudio::step(
 		if (it == voices_.end()) {
 			const bool spin_up = s.kind == VehicleSoundKind::Spin && rpm >= s.previous_rpm && rpm >= s.start_rpm;
 			if ((s.kind == VehicleSoundKind::Engine && activated) || spin_up) {
-				(void)start(r_mixer, s, p_listener);
+				const bool started = start(r_mixer, s, p_listener);
+				mark_lost(s.key, s.kind == VehicleSoundKind::Engine && !started);
 			}
 			continue;
 		}
@@ -221,12 +223,21 @@ void VehicleAudio::on_cut(const MixerCutEvent &p_event) {
 		if (v.handle != kNoInstance && v.handle == p_event.handle) {
 			v.handle = kNoInstance;
 			++stats_.ended;
+			mark_lost(v.key, k != MixerCutKind::Finish);
 		}
 	}
 	std::erase_if(voices_, [](const Voice &v) { return v.handle == kNoInstance; });
 	if (const auto it = std::find(stopping_.begin(), stopping_.end(), p_event.handle); it != stopping_.end()) {
 		stopping_.erase(it);
 		++stats_.ended;
+	}
+}
+
+void VehicleAudio::mark_lost(uint32_t p_key, bool p_lost) {
+	for (Activation &a : activations_) {
+		if (a.key == p_key) {
+			a.lost = p_lost;
+		}
 	}
 }
 
