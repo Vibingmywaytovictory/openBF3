@@ -319,10 +319,10 @@ void Bf3TpCrowdCheck::check_at(double p_t) {
 				fmt("%u in the world, %llu started, %llu failed", st.ragdolls, (unsigned long long)st.ragdolls_started,
 						(unsigned long long)st.ragdoll_failures));
 	} else if (std::fabs(p_t - 4.8) < kStep * 0.5) {
-		row("t 4.8 s: the ragdoll lies on the ground, not prone-posed",
-				st.ragdoll_hips_height >= 0.0f && st.ragdoll_hips_height < 0.4f,
-				fmt("hips %.3f m above the death position, %llu frozen", double(st.ragdoll_hips_height),
-						(unsigned long long)st.ragdolls_frozen));
+		row("t 4.8 s: the corpse is all ragdoll, lying on the ground",
+				st.ragdoll_weight == 1.0f && st.ragdoll_hips_height >= 0.0f && st.ragdoll_hips_height < 0.4f,
+				fmt("weight %.3f, hips %.3f m above the death position, %llu frozen", double(st.ragdoll_weight),
+						double(st.ragdoll_hips_height), (unsigned long long)st.ragdolls_frozen));
 	} else if (std::fabs(p_t - 3.4) < kStep * 0.5) {
 		row("t 3.4 s: the holding M67 soldier draws the 3P throw-in", st.throwing == 1,
 				fmt("%u throwing", st.throwing));

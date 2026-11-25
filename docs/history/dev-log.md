@@ -3576,3 +3576,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Dying soldiers: the crowd plays the record's death clip and hands the body to a ragdoll by the RagdollBlend weight instead of blending to the prone idle (the owner, 2026-11-25: "playermodel just goes prone") (godot.m2a_tp_crowd, anim.s3.unit, core.res.ragdoll, anim.*, render.*, contracts).
 * A remote peer gets the death record: host.ghost's Metro peer receives 48 deaths in 20 s, every one with a valid record.
 * godot.m2a_tp_crowd.window: the crowd check windowed with its seven captures in b/dev/shots/<row> (the front-killed soldier sags at 0.25 s, falls at 0.6 s and lies still from 1.4 s).
+* Ragdolls for every crowd index (the world held 64 against 256 indices) and the tp check asserts a full ragdoll weight; the game session loads the ragdoll too (godot.native_screens log, godot.m2a_tp_crowd, godot.m2a_tp_crowd.window).

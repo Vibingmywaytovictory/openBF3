@@ -133,6 +133,7 @@ struct Bf3GameCrowd::Impl {
 	std::vector<Corpse> corpses;
 	uint64_t ragdolls_started = 0, ragdolls_frozen = 0, ragdoll_failures = 0;
 	float ragdoll_hips_height = -1.0f;
+	float ragdoll_weight = 0.0f;
 	int32_t ragdoll_hips = -1;
 	void step_ragdolls(double p_dt);
 	uint8_t death_clip_of(const core::gameplay::DeathRecord &p_record, uint8_t p_pose) const;
@@ -1050,8 +1051,8 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 			why = rig.error().message;
 		} else if (core::Status joints = m.eval->set_ragdoll_joints(rig->joints); !joints.ok()) {
 			why = joints.error().message;
-		} else if (core::Result<std::unique_ptr<sim::RagdollWorld>> world =
-						   sim::RagdollWorld::create(m.catalog_level->static_world, m.ragdoll_def);
+		} else if (core::Result<std::unique_ptr<sim::RagdollWorld>> world = sim::RagdollWorld::create(
+						   m.catalog_level->static_world, m.ragdoll_def, sim::RagdollWorldOptions{ kCrowdSoldiers });
 				!world) {
 			why = world.error().message;
 		} else {
@@ -1177,6 +1178,7 @@ GameCrowdStats Bf3GameCrowd::stats() const {
 	s.ragdolls_frozen = impl_->ragdolls_frozen;
 	s.ragdoll_failures = impl_->ragdoll_failures;
 	s.ragdoll_hips_height = impl_->ragdoll_hips_height;
+	s.ragdoll_weight = impl_->ragdoll_weight;
 	return s;
 }
 
@@ -1372,6 +1374,7 @@ void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
 		++ragdoll_failures;
 	}
 	ragdoll_hips_height = -1.0f;
+	ragdoll_weight = 0.0f;
 	for (uint32_t i = 0; i < kCrowdSoldiers; ++i) {
 		Corpse &c = corpses[i];
 		if (!c.active) {
@@ -1400,6 +1403,7 @@ void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
 		}
 		ragdoll_rig.joints_model(c.bodies, root_x[i], c.joints);
 		eval->set_ragdoll(i, c.joints, c.blend.weight());
+		ragdoll_weight = std::max(ragdoll_weight, c.blend.weight());
 	}
 }
 

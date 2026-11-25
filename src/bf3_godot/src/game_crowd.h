@@ -39,6 +39,7 @@ struct GameCrowdStats {
 	uint64_t ragdolls_frozen = 0;
 	uint64_t ragdoll_failures = 0;
 	float ragdoll_hips_height = -1.0f;
+	float ragdoll_weight = 0.0f;
 };
 
 class Bf3GameCrowd {
