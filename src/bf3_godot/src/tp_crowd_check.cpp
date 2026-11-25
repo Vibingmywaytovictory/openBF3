@@ -43,6 +43,9 @@ constexpr size_t kThrower = 11;
 constexpr double kReleaseLeaveTick = 115.0;
 constexpr float kCorpseSeconds = 4.0f;
 constexpr double kHiddenAt = kDeathAt + double(kCorpseSeconds) + 0.2;
+constexpr double kReviveAt = kDeathAt + double(kCorpseSeconds) - 0.03;
+constexpr size_t kRevived = 9;
+constexpr size_t kReviver = 6;
 
 struct Kill {
 	size_t victim;
@@ -214,12 +217,13 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 	for (size_t k = 0; k < s.soldiers.size(); ++k) {
 		const Script::Soldier &d = s.soldiers[k];
 		const bool victim = killed(k);
-		if (victim && p_t > kDeathAt + 0.1 && p_t < kRespawnAt) {
+		const bool revived = k == kRevived && p_t >= kReviveAt;
+		if (victim && !revived && p_t > kDeathAt + 0.1 && p_t < kRespawnAt) {
 			continue;
 		}
 		host::PresentedSoldier o;
 		o.slot = d.slot;
-		o.generation = victim && p_t >= kRespawnAt ? 2 : 1;
+		o.generation = victim && (revived || p_t >= kRespawnAt) ? 2 : 1;
 		o.position = sim::Vec3{ d.feet.x, d.feet.y, d.feet.z };
 		o.yaw = d.yaw;
 		o.pitch = 0.0f;
@@ -298,6 +302,9 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 			record.explosion = kill.explosion;
 			present::set_death_record(r_events.back(), record);
 		}
+	}
+	if (crossed(kReviveAt)) {
+		event(host::PresentKind::Revive, s.soldiers[kReviver].slot, s.soldiers[kRevived].slot, kReviveAt);
 	}
 	if (crossed(kThrowAt - 0.05)) {
 		event(host::PresentKind::RemoteShot, s.soldiers[kThrower].slot, 0, kThrowAt);
@@ -386,10 +393,29 @@ void Bf3TpCrowdCheck::check_at(double p_t) {
 	} else if (std::fabs(p_t - 4.6) < kStep * 0.5) {
 		row("t 4.6 s: the thrown M67 plays the 3P release", st.throwing == 1, fmt("%u throwing", st.throwing));
 	} else if (std::fabs(p_t - kHiddenAt) < kStep * 0.5) {
-		row(fmt("t %.1f s: the five dead soldiers hidden after %.0f s", p_t, double(kCorpseSeconds)), st.soldiers == 7,
-				fmt("%u", st.soldiers));
-		row(fmt("t %.1f s: the hidden corpses' ragdolls removed", p_t), st.ragdolls == 0, fmt("%u", st.ragdolls));
-		row(fmt("t %.1f s: 6 muzzles", p_t), st.muzzles == 6, fmt("%u", st.muzzles));
+		row(fmt("t %.1f s: four dead soldiers hidden after %.0f s, the revived one drawn", p_t, double(kCorpseSeconds)),
+				st.soldiers == 8, fmt("%u", st.soldiers));
+		row(fmt("t %.1f s: the hidden corpses' ragdolls removed, the revived one's kept", p_t), st.ragdolls == 1,
+				fmt("%u", st.ragdolls));
+		row(fmt("t %.1f s: 7 muzzles", p_t), st.muzzles == 7, fmt("%u", st.muzzles));
+	} else if (std::fabs(p_t - (kReviveAt + 0.5)) < kStep * 0.5) {
+		const GameCrowdCorpse c = crowd_.corpse_of(soldiers[kRevived].slot);
+		row(fmt("t %.2f s: revive: the ragdoll blends out, holding at its hips and head", p_t),
+				c.reviving && c.in_world && c.weight == 0.0f && c.root_fraction == 1.0f && c.root_offset > 0.05f,
+				fmt("blending out %d, weight %.3f, root fraction %.3f, root %.3f m from the soldier", int(c.reviving),
+						double(c.weight), double(c.root_fraction), double(c.root_offset)));
+	} else if (std::fabs(p_t - (kReviveAt + 1.35)) < kStep * 0.5) {
+		const GameCrowdCorpse c = crowd_.corpse_of(soldiers[kRevived].slot);
+		row(fmt("t %.2f s: revive: after the 1.0 s hold the root moves to the soldier", p_t),
+				c.reviving && c.root_fraction > 0.0f && c.root_fraction < 1.0f,
+				fmt("root fraction %.3f, root %.3f m from the soldier", double(c.root_fraction),
+						double(c.root_offset)));
+	} else if (std::fabs(p_t - (kReviveAt + 1.85)) < kStep * 0.5) {
+		const GameCrowdCorpse c = crowd_.corpse_of(soldiers[kRevived].slot);
+		row(fmt("t %.2f s: revive: the blend-out ended after 1.7 s, the ragdoll removed", p_t),
+				!c.active && st.ragdoll_revives == 1 && st.ragdolls == 0,
+				fmt("corpse active %d, %llu blend-outs, %u ragdolls", int(c.active),
+						(unsigned long long)st.ragdoll_revives, st.ragdolls));
 	} else if (std::fabs(p_t - 8.0) < kStep * 0.5) {
 		row("t 8.0 s: the respawned soldier drawn", st.soldiers == 12, fmt("%u", st.soldiers));
 		row("t 8.0 s: 10 muzzles", st.muzzles == 10, fmt("%u", st.muzzles));
@@ -526,7 +552,7 @@ void Bf3TpCrowdCheck::_process(double p_delta) {
 	}
 	check_at(t_);
 	if (shots_) {
-		for (const double at : { 1.5, 2.25, 2.6, 3.4, 3.9, 4.3, 5.9, 6.5 }) {
+		for (const double at : { 1.5, 2.25, 2.6, 3.4, 3.9, 4.3, 5.9, 6.5, 7.3 }) {
 			if (pt1_run_mode()) {
 				break;
 			}

@@ -38,6 +38,7 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <numbers>
 #include <optional>
 #include <set>
 #include <thread>
@@ -130,13 +131,18 @@ struct Bf3GameCrowd::Impl {
 		std::vector<anim::Xform> bodies, previous, joints;
 		std::vector<sim::RagdollBodyPose> poses;
 		GameCrowdCorpse seen;
+		anim::Vec3 facing_position{};
+		float facing_yaw = 0.0f;
 	};
 	std::vector<Corpse> corpses;
-	uint64_t ragdolls_started = 0, ragdolls_frozen = 0, ragdoll_failures = 0;
+	uint64_t ragdolls_started = 0, ragdolls_frozen = 0, ragdoll_failures = 0, ragdoll_revives = 0;
 	float ragdoll_hips_height = -1.0f;
 	float ragdoll_weight = 0.0f;
 	int32_t ragdoll_hips = -1;
+	int32_t ragdoll_head = -1;
 	void step_ragdolls(double p_dt);
+	void begin_revive(Corpse &r_c, const anim::CrowdSoldierInput &p_in);
+	void revive_roots();
 	uint8_t death_clip_of(const core::gameplay::DeathRecord &p_record, uint8_t p_pose) const;
 	anim::CrowdConfig config;
 	std::array<std::vector<anim::CrowdWeapon>, 2> views;
@@ -688,6 +694,7 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 		root_x[index] = root;
 		roots[index] = Transform3D(Basis(Vector3(0, 1, 0), in.yaw), Vector3(in.position.x, in.position.y, in.position.z));
 	}
+	revive_roots();
 	cam_draw_corpses(dt, cam);
 }
 
@@ -1061,6 +1068,7 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 			m.ragdoll_world = std::move(*world);
 			m.have_ragdoll = true;
 			m.ragdoll_hips = m.ragdoll_def->find_body("Hips");
+			m.ragdoll_head = m.ragdoll_def->find_body("Head");
 			m.corpses.assign(kCrowdSoldiers, Impl::Corpse{});
 			log("ragdoll: " + std::to_string(m.ragdoll_def->bodies.size()) + " bodies, " +
 					std::to_string(m.ragdoll_def->joints.size()) + " joints over the static world");
@@ -1180,6 +1188,7 @@ GameCrowdStats Bf3GameCrowd::stats() const {
 	s.ragdoll_failures = impl_->ragdoll_failures;
 	s.ragdoll_hips_height = impl_->ragdoll_hips_height;
 	s.ragdoll_weight = impl_->ragdoll_weight;
+	s.ragdoll_revives = impl_->ragdoll_revives;
 	return s;
 }
 
@@ -1201,6 +1210,12 @@ GameCrowdCorpse Bf3GameCrowd::corpse_of(uint8_t p_slot) const {
 	r.clip = c.clip;
 	r.age = c.active ? float(c.age) : -1.0f;
 	r.weight = c.blend.weight();
+	r.reviving = c.active && c.blend.blending_out();
+	r.root_fraction = c.blend.root_fraction();
+	if (r.reviving && index < m.root_x.size() && index < m.inputs.size()) {
+		const anim::Vec3 d = anim::vec_sub(m.root_x[index].t, m.inputs[index].position);
+		r.root_offset = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+	}
 	return r;
 }
 
@@ -1323,14 +1338,29 @@ void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
 	for (uint32_t i = 0; i < kCrowdSoldiers; ++i) {
 		Corpse &c = corpses[i];
 		const anim::CrowdSoldierInput &in = inputs[i];
-		const bool dead = in.dead && (in.flags & anim::crowd_flags::kHidden) == 0;
+		const bool shown = (in.flags & anim::crowd_flags::kHidden) == 0;
+		const bool dead = in.dead && shown;
 		if (!dead) {
+			if (c.active && shown && in.revived && c.in_world && !c.done && !c.blend.blending_out()) {
+				begin_revive(c, in);
+			}
+			if (c.active && shown && c.blend.blending_out()) {
+				c.blend.update(dt, 0.0f);
+				if (!c.blend.blend_out_done()) {
+					continue;
+				}
+			}
 			if (c.active) {
 				ragdoll_world->remove(i);
 				c = Corpse{};
 				eval->set_ragdoll(i, {}, 0.0f);
 			}
 			continue;
+		}
+		if (c.active && c.blend.blending_out()) {
+			ragdoll_world->remove(i);
+			c = Corpse{};
+			eval->set_ragdoll(i, {}, 0.0f);
 		}
 		if (!c.active) {
 			c = Corpse{};
@@ -1436,6 +1466,40 @@ void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
 		ragdoll_rig.joints_model(c.bodies, root_x[i], c.joints);
 		eval->set_ragdoll(i, c.joints, c.blend.weight());
 		ragdoll_weight = std::max(ragdoll_weight, c.blend.weight());
+	}
+}
+
+void Bf3GameCrowd::Impl::begin_revive(Corpse &r_c, const anim::CrowdSoldierInput &p_in) {
+	r_c.blend.blend_out();
+	++ragdoll_revives;
+	r_c.facing_position = p_in.position;
+	r_c.facing_yaw = p_in.yaw;
+	if (ragdoll_hips < 0 || ragdoll_head < 0 || size_t(std::max(ragdoll_hips, ragdoll_head)) >= r_c.poses.size()) {
+		return;
+	}
+	const sim::RagdollBodyPose &hips = r_c.poses[size_t(ragdoll_hips)];
+	const sim::RagdollBodyPose &head = r_c.poses[size_t(ragdoll_head)];
+	r_c.facing_position = anim::Vec3{ hips.position.x, hips.position.y, hips.position.z };
+	const float dx = head.position.x - hips.position.x;
+	const float dz = head.position.z - hips.position.z;
+	if (dx * dx + dz * dz > core::gameplay::kDeathDirectionMinLengthSq) {
+		r_c.facing_yaw = std::atan2(dx, dz);
+	}
+}
+
+void Bf3GameCrowd::Impl::revive_roots() {
+	for (uint32_t i = 0; i < corpses.size() && i < inputs.size(); ++i) {
+		const Corpse &c = corpses[i];
+		const anim::CrowdSoldierInput &in = inputs[i];
+		if (!c.active || !c.blend.blending_out() || in.dead || (in.flags & anim::crowd_flags::kHidden) != 0) {
+			continue;
+		}
+		const float f = c.blend.root_fraction();
+		const float yaw = in.yaw + std::remainder(c.facing_yaw - in.yaw, 2.0f * float(std::numbers::pi)) * f;
+		const anim::Vec3 p =
+				anim::vec_add(in.position, anim::vec_scale(anim::vec_sub(c.facing_position, in.position), f));
+		root_x[i] = anim::Xform{ yaw_quat(yaw), p };
+		roots[i] = Transform3D(Basis(Vector3(0, 1, 0), yaw), Vector3(p.x, p.y, p.z));
 	}
 }
 

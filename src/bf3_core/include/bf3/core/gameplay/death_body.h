@@ -102,6 +102,7 @@ public:
 	bool ramping() const { return ramp_ > 0.0f; }
 	float root_fraction() const { return root_fraction_; }
 	bool root_interpolating() const { return root_started_ && root_left_ > 0.0f; }
+	bool blend_out_done() const { return blending_out_ && root_started_ && root_left_ <= 0.0f; }
 
 private:
 	void set(float p_weight);

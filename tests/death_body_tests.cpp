@@ -141,7 +141,7 @@ TEST_SUITE("death-body-unit") {
 		REQUIRE(b.weight() == 1.0f);
 		b.blend_out();
 		CHECK(b.blending_out());
-		int root_from = -1, root_done = -1;
+		int root_from = -1, root_done = -1, done = -1;
 		for (int u = 1; u <= 60; ++u) {
 			b.update(kTick, 0.0f);
 			if (root_from < 0 && b.root_fraction() < 1.0f) {
@@ -150,9 +150,13 @@ TEST_SUITE("death-body-unit") {
 			if (root_done < 0 && b.root_fraction() == 0.0f) {
 				root_done = u;
 			}
+			if (done < 0 && b.blend_out_done()) {
+				done = u;
+			}
 		}
 		CHECK(root_from == 30);
 		CHECK(root_done == 50);
+		CHECK(done == 50);
 		CHECK(b.weight() == 0.0f);
 		CHECK_FALSE(b.fully_blended_in());
 	}

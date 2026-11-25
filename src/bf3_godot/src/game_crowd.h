@@ -40,12 +40,14 @@ struct GameCrowdStats {
 	uint64_t ragdoll_failures = 0;
 	float ragdoll_hips_height = -1.0f;
 	float ragdoll_weight = 0.0f;
+	uint64_t ragdoll_revives = 0;
 };
 
 struct GameCrowdCorpse {
 	bool active = false;
 	bool in_world = false;
 	bool frozen = false;
+	bool reviving = false;
 	uint8_t clip = 0xFF;
 	float age = -1.0f;
 	float weight = 0.0f;
@@ -54,6 +56,8 @@ struct GameCrowdCorpse {
 	float start_speed = -1.0f;
 	float start_weight = 0.0f;
 	float frozen_age = -1.0f;
+	float root_fraction = 1.0f;
+	float root_offset = -1.0f;
 	float hips_height = -1.0f;
 };
 
