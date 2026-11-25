@@ -185,7 +185,8 @@ struct Played {
 	uint64_t dropped = 0;
 };
 
-Played play(const CasingFixture &p_f, uint16_t p_def, const std::vector<Pull> &p_pulls, double p_seconds) {
+Played play(const CasingFixture &p_f, uint16_t p_def, uint16_t p_sound, const std::vector<Pull> &p_pulls,
+		double p_seconds) {
 	const ba::AudioTuning tuning;
 	const ba::GameMixerSizes sizes = ba::game_mixer_sizes(tuning);
 	ba::MixerCore mixer(ba::game_mixer_config(tuning, sizes, 8192));
@@ -198,6 +199,7 @@ Played play(const CasingFixture &p_f, uint16_t p_def, const std::vector<Pull> &p
 	router.set_observer(&rec);
 	router.set_own_slot(0);
 	router.set_own_first_person(true);
+	router.set_slot_sound(0, p_def, p_sound);
 	struct Timed {
 		sw::SimTime time = 0;
 		bool shot = true;
@@ -353,7 +355,7 @@ TEST_SUITE("audio-casings") {
 				at += units(10.0 * gp::shot_interval(w.fire));
 				at += pull_gap;
 			}
-			const Played p = play(*f, sound, pulls, double(at) / double(sw::kTimeUnitsPerSecond) + 1.0);
+			const Played p = play(*f, def, sound, pulls, double(at) / double(sw::kTimeUnitsPerSecond) + 1.0);
 			++checked;
 			CHECK(p.dropped == 0);
 			std::string line = w.variant + " [" + a.patch + "] pulls " + std::to_string(pulls.size()) + " casings " +

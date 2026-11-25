@@ -1366,7 +1366,7 @@ struct WeaponAudioRouter::Impl {
 	uint32_t foley_counter = 0;
 
 	InstanceHandle foley_start(const FoleyCue &p_cue, uint32_t p_event, uint32_t p_param, float p_value, const EmitterState &p_emitter) {
-		const WeaponAudioDef *d = def_of(p_cue.def);
+		const WeaponAudioDef *d = def_of(fire_sound(p_cue.slot, p_cue.def));
 		if (d == nullptr || !d->program) {
 			return kNoInstance;
 		}
@@ -1417,7 +1417,7 @@ struct WeaponAudioRouter::Impl {
 		if (r_handle == kNoInstance) {
 			return;
 		}
-		const WeaponAudioDef *d = def_of(p_def);
+		const WeaponAudioDef *d = def_of(fire_sound(p_cue.slot, p_def));
 		if (d != nullptr && d->foley.reload.release_event != 0 && pool.contains(r_handle)) {
 			MixerCommand c;
 			c.type = MixerCommandType::PostEvent;
@@ -1456,7 +1456,7 @@ struct WeaponAudioRouter::Impl {
 	}
 
 	void foley_action(FoleyCue &r_cue, FoleyAction p_action, const EmitterState &p_emitter) {
-		const WeaponAudioDef *d = def_of(r_cue.def);
+		const WeaponAudioDef *d = def_of(fire_sound(r_cue.slot, r_cue.def));
 		if (d == nullptr || !d->foley.action.present) {
 			return;
 		}
@@ -1476,7 +1476,7 @@ struct WeaponAudioRouter::Impl {
 	}
 
 	void foley_reload(FoleyCue &r_cue, int32_t p_magazine, const EmitterState &p_emitter, InstanceHandle &r_handle, uint16_t &r_handle_def) {
-		const WeaponAudioDef *d = def_of(r_cue.def);
+		const WeaponAudioDef *d = def_of(fire_sound(r_cue.slot, r_cue.def));
 		if (d == nullptr || !d->foley.reload.present) {
 			return;
 		}
@@ -1521,7 +1521,7 @@ struct WeaponAudioRouter::Impl {
 				foley_action(c, FoleyAction::FireMode, em);
 				break;
 			case sw::weapon_events::kBoltStarted: {
-				const WeaponAudioDef *d = def_of(p_e.def);
+				const WeaponAudioDef *d = def_of(fire_sound(own_slot, p_e.def));
 				if (d != nullptr && d->foley.bolt.present) {
 					c.kind = FoleyCueKind::Bolt;
 					if (foley_start(c, kHashBolt, 0, 0.0f, em) != kNoInstance) {
