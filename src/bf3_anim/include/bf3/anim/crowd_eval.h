@@ -230,7 +230,6 @@ struct CrowdCombatStats {
 namespace bf3::anim {
 
 inline constexpr float kCrowdCorpseSeconds = 15.0f;
-inline constexpr float kCrowdReviveBlendSeconds = 0.5f;
 
 }
 

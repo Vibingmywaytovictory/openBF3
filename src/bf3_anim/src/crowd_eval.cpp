@@ -506,9 +506,6 @@ struct CrowdEvaluator::Impl::Combat {
 		uint8_t death_stance = 0;
 		bool hidden = false;
 		bool hide_counted = false;
-		bool rising = false;
-		double rise_since = 0.0;
-		LocalPose corpse;
 		uint64_t revives = 0;
 		LocalPose extra, extra2, alive;
 		uint8_t death_clip = kNoCrowdDeathClip;
@@ -880,14 +877,9 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 		xs.death_clip = s.input.death_clip < x.death_clips.size() ? s.input.death_clip : kNoCrowdDeathClip;
 		xs.hide_counted = false;
 		++xs.deaths;
-		xs.rising = false;
 	} else if (!s.input.dead && xs.dead) {
 		xs.dead = false;
-
-		xs.rising = s.input.revived && s.pose.joints.size() == clips->rig.size();
-		if (xs.rising) {
-			xs.rise_since = s.clock;
-			xs.corpse = s.pose;
+		if (s.input.revived) {
 			++xs.revives;
 		}
 	}
@@ -923,7 +915,7 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 		return;
 	}
 
-	if (config.temporal_lod && s.ever && !xs.dead && !xs.rising) {
+	if (config.temporal_lod && s.ever && !xs.dead && !(xs.ragdoll_w > 0.0f)) {
 		const float interval = temporal_lod_interval(config.lod, s.input.camera_distance);
 		bool due = true;
 		if (interval < 0.0f) {
@@ -1088,16 +1080,12 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 		if (clips->root_joint >= 0 && size_t(clips->root_joint) < s.pose.joints.size()) {
 			s.pose.joints[size_t(clips->root_joint)].t = rig.bone(size_t(clips->root_joint)).rest.t;
 		}
-		if (xs.ragdoll_w > 0.0f && !x.ragdoll_joints.empty() && xs.ragdoll.size() == x.ragdoll_joints.size()) {
-			ragdoll_local_pose(rig, s.pose, x.ragdoll_joints, xs.ragdoll, xs.extra);
-			blend_poses(s.pose, xs.extra, std::min(xs.ragdoll_w, 1.0f), s.pose);
-		}
-	} else if (xs.rising && s.clock - xs.rise_since < double(kCrowdReviveBlendSeconds)) {
-		stance_pose(xs.alive);
-		blend_poses(xs.corpse, xs.alive, float((s.clock - xs.rise_since) / double(kCrowdReviveBlendSeconds)), s.pose);
 	} else {
-		xs.rising = false;
 		stance_pose(s.pose);
+	}
+	if (xs.ragdoll_w > 0.0f && !x.ragdoll_joints.empty() && xs.ragdoll.size() == x.ragdoll_joints.size()) {
+		ragdoll_local_pose(rig, s.pose, x.ragdoll_joints, xs.ragdoll, xs.extra);
+		blend_poses(s.pose, xs.extra, std::min(xs.ragdoll_w, 1.0f), s.pose);
 	}
 
 	const CrowdVaultClip *vault_clip = nullptr;

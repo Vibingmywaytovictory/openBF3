@@ -3577,3 +3577,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * A remote peer gets the death record: host.ghost's Metro peer receives 48 deaths in 20 s, every one with a valid record.
 * godot.m2a_tp_crowd.window: the crowd check windowed with its seven captures in b/dev/shots/<row> (the front-killed soldier sags at 0.25 s, falls at 0.6 s and lies still from 1.4 s).
 * Ragdolls for every crowd index (the world held 64 against 256 indices) and the tp check asserts a full ragdoll weight; the game session loads the ragdoll too (godot.native_screens log, godot.m2a_tp_crowd, godot.m2a_tp_crowd.window).
+* The crowd evaluator applies a ragdoll override to a living soldier too (the revive blend-out) and drops the hard-coded 0.5 s revive blend (kCrowdReviveBlendSeconds) (anim.s3.unit changed, anim.s3, anim.death, contracts).

@@ -1668,17 +1668,20 @@ TEST_SUITE("anim-s3-unit") {
 		in[0].dead = false;
 		in[0].revived = true;
 		in[1].dead = false;
+		ev.set_ragdoll(1, {}, 0.0f);
 		run(in, 1);
 		CHECK(ev.combat_stats().revives == 1);
 		CHECK(hips_y(ev, 0) == doctest::Approx(0.2f).epsilon(1e-4));
 		CHECK(hips_y(ev, 1) == doctest::Approx(1.0f).epsilon(1e-4));
 		CHECK(ev.drawn(0));
-		run(in, 15);
+		ev.set_ragdoll(0, lying, 0.5f);
+		run(in, 1);
 		CHECK(hips_y(ev, 0) == doctest::Approx(0.6f).epsilon(1e-3));
 		CHECK(ev.combat_stats().dying == 1);
-		run(in, 16);
+		ev.set_ragdoll(0, {}, 0.0f);
+		run(in, 1);
 		CHECK(hips_y(ev, 0) == doctest::Approx(1.0f).epsilon(1e-4));
-		run(in, 30);
+		run(in, 59);
 		CHECK(ev.combat_stats().revives == 1);
 
 		run(in, 538);
@@ -1689,6 +1692,9 @@ TEST_SUITE("anim-s3-unit") {
 
 		in[0].dead = true;
 		run(in, 60);
+		CHECK(hips_y(ev, 0) == doctest::Approx(1.0f).epsilon(1e-4));
+		ev.set_ragdoll(0, lying, 1.0f);
+		run(in, 1);
 		CHECK(hips_y(ev, 0) == doctest::Approx(0.2f).epsilon(1e-4));
 		in[0].dead = false;
 		run(in, 1);
@@ -1707,6 +1713,8 @@ TEST_SUITE("anim-s3-unit") {
 				(*d)->set_inputs(two, 1.0 / 144.0);
 				(*d)->evaluate_all_here();
 			}
+			REQUIRE((*d)->set_ragdoll_joints(std::vector<int32_t>{ 1 }).ok());
+			(*d)->set_ragdoll(0, lying, 1.0f);
 			two[0].dead = false;
 			two[0].revived = true;
 			uint32_t live = 0, rising = 0;

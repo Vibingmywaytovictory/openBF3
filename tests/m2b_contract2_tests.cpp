@@ -96,7 +96,7 @@ static_assert(host::kHudSpawnSlots == std::array<uint8_t, 5>{ 0, 1, 2, 6, 7 });
 static_assert(host::kHudSpawnSlots[2] == host::kKitGadgetSlot && host::kHudSpawnSlots[0] == host::kKitSlots[0] &&
 		host::kHudSpawnSlots[1] == host::kKitSlots[1] && host::kHudSpawnSlots[3] == host::kKitSlots[2] && host::kHudSpawnSlots[4] == host::kKitSlots[3]);
 static_assert(anim::kCrowdDeathHideSeconds == 3.0f);
-static_assert(anim::kCrowdCorpseSeconds == 15.0f && anim::kCrowdReviveBlendSeconds == 0.5f);
+static_assert(anim::kCrowdCorpseSeconds == 15.0f);
 static_assert(gs::kTdmDefaultBots == 31 && gs::kSpawnRequestRetryTicks == 30);
 static_assert(uint8_t(gs::M2bCase::Play) == 0 && gs::kM2bCaseCount == 1);
 static_assert(gs::m2b_case_name(gs::M2bCase::Play) == "play" && gs::m2b_case_name(gs::M2bCase(7)) == "?");
