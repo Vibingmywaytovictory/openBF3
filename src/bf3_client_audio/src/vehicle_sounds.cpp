@@ -164,6 +164,27 @@ float vehicle_g_force_step(float p_g_force, const core::Vec3 &p_previous_velocit
 	return p_g_force + d;
 }
 
+bool own_view_first_person(std::span<const host::PresentedVehicle> p_vehicles, const host::LevelVehicles *p_level,
+		uint8_t p_own_slot, uint32_t p_camera) {
+	const std::optional<host::PresentedSeat> seat = host::vehicle_seat_of(p_vehicles, p_own_slot);
+	if (!seat) {
+		return true;
+	}
+	if (p_level == nullptr || seat->spawner >= p_level->spawners.size()) {
+		return false;
+	}
+	const uint16_t kind = p_level->spawners[seat->spawner].kind;
+	if (kind >= p_level->kinds.size() || seat->seat >= p_level->kinds[kind].seat_defs.size()) {
+		return false;
+	}
+	for (const core::gameplay::VehicleCameraDef &c : p_level->kinds[kind].seat_defs[seat->seat].cameras) {
+		if (c.instance == p_camera && p_camera != core::gameplay::kNoVehicleCamera) {
+			return c.first_person;
+		}
+	}
+	return false;
+}
+
 float vehicle_slip_input(
 		float p_slip_ratio_sum, uint32_t p_wheels_off_ground, uint32_t p_wheels_in_second_contact, float p_speed) {
 	if (!(p_speed > kSlipGateSpeed)) {

@@ -7,16 +7,19 @@
 #include "bf3/audio/vehicle_audio.h"
 #include "bf3/audio/voice_cull.h"
 #include "bf3/audio/weapon_audio.h"
+#include "bf3/client_audio/game_audio_frame.h"
 #include "bf3/client_audio/kit_audio.h"
 #include "bf3/client_audio/vehicle_sounds.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/audio/wave_bank.h"
 #include "bf3/core/gameplay/vehicle_sound.h"
+#include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/host/level_load.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/host/presented_vehicle.h"
+#include "bf3/sim/vehicles/vehicle_armament.h"
 
 #include <doctest/doctest.h>
 
@@ -27,8 +30,11 @@
 #include <fstream>
 #include <memory>
 #include <numbers>
+#include <optional>
+#include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace bf3;
@@ -1150,5 +1156,660 @@ TEST_SUITE("audio-vehicles-inputs") {
 				"M1A2 engine patch Delta: %.3f at rest, %.3f on the 0.2 -> 0.6 update\n", double(before), double(step));
 		CHECK(before == 0.0f);
 		CHECK(step == doctest::Approx(0.4f));
+	}
+}
+
+namespace {
+
+using Op = ba::WeaponSoundOp;
+using OpKind = ba::WeaponSoundOpKind;
+
+Op post_op(uint32_t p_hash) {
+	return Op{ OpKind::Post, p_hash, 0.0f };
+}
+
+Op set_op(uint32_t p_hash, float p_value) {
+	return Op{ OpKind::Set, p_hash, p_value };
+}
+
+std::vector<uint32_t> posts(const std::vector<Op> &p_ops) {
+	std::vector<uint32_t> out;
+	for (const Op &o : p_ops) {
+		if (o.kind == OpKind::Post) {
+			out.push_back(o.hash);
+		}
+	}
+	return out;
+}
+
+std::optional<float> set_value(const std::vector<Op> &p_ops, uint32_t p_hash) {
+	std::optional<float> v;
+	for (const Op &o : p_ops) {
+		if (o.kind == OpKind::Set && o.hash == p_hash) {
+			v = o.value;
+		}
+	}
+	return v;
+}
+
+bool has_kind(const std::vector<Op> &p_ops, OpKind p_kind) {
+	return std::any_of(p_ops.begin(), p_ops.end(), [&](const Op &o) { return o.kind == p_kind; });
+}
+
+std::vector<Op> step(ba::WeaponSoundState &r_s, bool p_playing) {
+	std::vector<Op> out;
+	r_s.update(p_playing, out);
+	return out;
+}
+
+std::vector<Op> playing_inputs(float p_logic, bool p_p, bool p_a, bool p_b, float p_heat = 0.0f) {
+	return { set_op(ba::kHashFireLogicType, p_logic), set_op(ba::kHashIsFirstPerson, p_p ? 1.0f : 0.0f),
+		set_op(ba::kHashOwnerSameTeam, p_a ? 1.0f : 0.0f), set_op(ba::kHashOwnerLocal, p_b ? 1.0f : 0.0f),
+		set_op(ba::kHashOverheatLevel, p_heat), set_op(ba::kHashLockAmount, 0.0f), set_op(ba::kHashWeaponFlag, 1.0f) };
+}
+
+std::vector<Op> joined(std::vector<Op> p_a, const std::vector<Op> &p_b) {
+	p_a.insert(p_a.end(), p_b.begin(), p_b.end());
+	return p_a;
+}
+
+}
+
+namespace {
+
+struct WeaponRig {
+	struct Starts final : ba::MixTap {
+		void on_block(const float *, uint32_t, uint64_t) override {}
+	} tap;
+	ba::KitAudioSources kits;
+	std::shared_ptr<const ba::WeaponAudioTable> table;
+	std::shared_ptr<const ca::WaveBank> bank;
+	std::unique_ptr<ba::MixerCore> mixer;
+	std::unique_ptr<ba::OneShotPool> pool;
+	std::unique_ptr<ba::SimMixerClock> clock;
+	std::unique_ptr<ba::WeaponAudioRouter> router;
+	ba::ListenerState listener;
+	sim::weapons::SimTime render = 2000 * sim::weapons::kTimeUnitsPerTick;
+	std::vector<float> buffer = std::vector<float>(size_t(ba::kMixRate / sim::kSimHz) * 2);
+	std::vector<ba::MixerCutEvent> cuts;
+	bool crews = false;
+	uint8_t own_team = 0;
+	std::vector<uint32_t> vehicles;
+	std::vector<ba::VehicleCrewSeat> seats;
+	std::vector<ba::VehicleWeaponPose> poses;
+	std::vector<ba::VehicleWeaponOp> ops;
+
+	explicit WeaponRig(const VehicleFixture &p_f) {
+		kits.sources.resize(3);
+		ba::add_vehicle_weapon_sounds(kits, p_f.level->weapons);
+		core::Result<ba::WeaponAudioTable> t = ba::load_weapon_audio(p_f.db->level->db(), kits.sources, ba::kMixRate);
+		REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+		table = std::make_shared<const ba::WeaponAudioTable>(std::move(*t));
+		std::vector<std::shared_ptr<const ca::SoundProgram>> programs;
+		for (const ba::WeaponAudioDef &d : table->defs) {
+			if (d.program) {
+				programs.push_back(d.program);
+			}
+		}
+		core::Result<std::vector<ca::SoundWaveInfo>> waves = ba::read_program_waves(p_f.db->level->db(), programs);
+		REQUIRE_MESSAGE(waves.ok(), (waves.ok() ? std::string() : waves.error().message));
+		core::Result<std::shared_ptr<const ca::WaveBank>> b = ca::WaveBank::load(
+				*p_f.mount.install, p_f.db->level->mount(), std::move(*waves), ca::WaveBankOptions{});
+		REQUIRE_MESSAGE(b.ok(), (b.ok() ? std::string() : b.error().message));
+		bank = *b;
+		const ba::GameMixerSizes sizes = ba::game_mixer_sizes(p_f.tuning);
+		ba::MixerConfig mc = ba::game_mixer_config(p_f.tuning, sizes, 8192);
+		mixer = std::make_unique<ba::MixerCore>(mc);
+		mixer->set_tap(&tap);
+		mixer->record_cuts(true);
+		pool = std::make_unique<ba::OneShotPool>(sizes.one_shots);
+		clock = std::make_unique<ba::SimMixerClock>(*mixer);
+		router = std::make_unique<ba::WeaponAudioRouter>(*mixer, table, bank, p_f.tuning, *pool);
+		listener.position = { 0.0f, 101.6f, 0.0f };
+	}
+	~WeaponRig() { router.reset(); }
+
+	uint16_t def_of(const VehicleFixture &p_f, std::string_view p_variant) const {
+		for (size_t i = 0; i < p_f.level->weapons.size(); ++i) {
+			if (p_f.level->weapons[i].variant == p_variant) {
+				return uint16_t(3 + i);
+			}
+		}
+		FAIL("no vehicle weapon " << p_variant);
+		return 0;
+	}
+
+	present::PresentEvent shot(uint8_t p_slot, uint16_t p_def, uint32_t p_id) const {
+		present::PresentEvent e;
+		e.kind = present::PresentKind::RemoteShot;
+		e.timeline = present::PresentTimeline::Render;
+		e.flags = present::flags::kVehicle;
+		e.slot = p_slot;
+		e.def = p_def;
+		e.id = p_id;
+		e.time = render;
+		e.pos[0] = 0.0f;
+		e.pos[1] = 102.0f;
+		e.pos[2] = 20.0f;
+		e.dir[2] = 1.0f;
+		return e;
+	}
+
+	void frame(std::span<const present::PresentEvent> p_events = {}) {
+		present::PresentClock now;
+		now.predicted_valid = now.render_valid = true;
+		now.predicted = render;
+		now.render = render;
+		clock->set_now(now);
+		router->set_listener(listener);
+		if (crews) {
+			router->set_vehicle_crews(own_team, vehicles, seats, poses);
+		}
+		router->on_events(p_events, *clock);
+		router->on_others({}, {}, {}, *clock);
+		router->update(0);
+		router->take_vehicle_weapon_ops(ops);
+		mixer->mix(buffer.data(), uint32_t(buffer.size() / 2));
+		std::array<ba::MixerCutEvent, 64> batch;
+		for (size_t n = mixer->poll_cuts(batch); n > 0; n = mixer->poll_cuts(batch)) {
+			cuts.insert(cuts.end(), batch.begin(), batch.begin() + std::ptrdiff_t(n));
+		}
+		render += sim::weapons::kTimeUnitsPerTick;
+	}
+
+	std::vector<Op> ops_of(uint8_t p_slot, uint16_t p_def) {
+		std::vector<Op> out;
+		for (const ba::VehicleWeaponOp &o : ops) {
+			if (o.slot == p_slot && o.def == p_def) {
+				out.push_back(o.op);
+			}
+		}
+		return out;
+	}
+
+	std::vector<Op> take(uint8_t p_slot, uint16_t p_def) {
+		std::vector<Op> out = ops_of(p_slot, p_def);
+		ops.clear();
+		return out;
+	}
+
+	size_t requests(std::string_view p_program) const {
+		return size_t(std::count_if(cuts.begin(), cuts.end(), [&](const ba::MixerCutEvent &e) {
+			return e.kind == ba::MixerCutKind::Request &&
+					std::string_view(e.program).find(p_program) != std::string_view::npos;
+		}));
+	}
+};
+
+}
+
+TEST_SUITE("audio-vehicles-weapon-events") {
+	TEST_CASE("R5-VS3 Rule 2: one update posts Reload, ReloadEnd, Action, Fire, Bolt, one ShotFired, LockOn and "
+			  "FireStopped in that order, then sets the playing inputs") {
+		ba::WeaponSoundState s;
+		const ba::WeaponSoundOwner own{ true, true, true };
+		s.reload_start(true, true);
+		s.reload_end();
+		s.action(ba::kFireModeAction, 0.0f, 0);
+		s.fire_start(own);
+		s.bolt();
+		s.shot();
+		s.lock_on(own, 0.25f);
+		s.fire_end();
+		REQUIRE(s.wants_handle());
+		const std::vector<Op> ops = step(s, true);
+		const std::vector<Op> expect =
+				joined({ set_op(ba::kHashIsShortReload, 1.0f), post_op(ba::kHashReload), post_op(ba::kHashReloadEnd),
+							   set_op(ba::kHashActionType, 6.0f), set_op(ba::kHashZoomLevel, 0.0f),
+							   post_op(ba::kHashAction), post_op(ba::kHashFire), post_op(ba::kHashBolt),
+							   post_op(ba::kHashShotFired), post_op(ba::kHashLockOn), post_op(ba::kHashFireStopped) },
+						{ set_op(ba::kHashFireLogicType, 0.0f), set_op(ba::kHashIsFirstPerson, 1.0f),
+								set_op(ba::kHashOwnerSameTeam, 1.0f), set_op(ba::kHashOwnerLocal, 1.0f),
+								set_op(ba::kHashOverheatLevel, 0.0f), set_op(ba::kHashLockAmount, 0.25f),
+								set_op(ba::kHashWeaponFlag, 1.0f) });
+		CHECK(ops == expect);
+		CHECK_FALSE(s.wants_handle());
+		CHECK(posts(step(s, true)).empty());
+	}
+
+	TEST_CASE("R5-VS3 test vector: the M1A2 cannon fired once by its local gunner in first person posts Fire, "
+			  "ShotFired and FireStopped in one update; a reload reports short only in first person") {
+		ba::WeaponSoundState s;
+		CHECK_FALSE(s.wants_handle());
+		s.set_fire_logic(0);
+		s.fire_start({ true, true, true });
+		s.shot();
+		s.fire_end();
+		CHECK(s.queued_shots() == 1);
+		const std::vector<Op> ops = step(s, true);
+		CHECK(ops ==
+				joined({ post_op(ba::kHashFire), post_op(ba::kHashShotFired), post_op(ba::kHashFireStopped) },
+						playing_inputs(0.0f, true, true, true)));
+		CHECK_FALSE(s.firing());
+		s.reload_start(true, true);
+		CHECK(step(s, true) ==
+				joined({ set_op(ba::kHashIsShortReload, 1.0f), post_op(ba::kHashReload) },
+						playing_inputs(0.0f, true, true, true)));
+		s.reload_start(false, true);
+		CHECK(set_value(step(s, true), ba::kHashIsShortReload) == 0.0f);
+		s.reload_end();
+		CHECK(posts(step(s, true)) == std::vector<uint32_t>{ ba::kHashReloadEnd });
+	}
+
+	TEST_CASE("R5-VS3 test vector: a remote coax with three shots before one update and a trigger release spreads "
+			  "one ShotFired per update and posts FireStopped after the last") {
+		ba::WeaponSoundState s;
+		const ba::WeaponSoundOwner remote{ false, true, false };
+		s.fire_start(remote);
+		s.shot();
+		s.shot();
+		s.shot();
+		s.trigger_release();
+		CHECK(s.ending());
+		CHECK(posts(step(s, true)) == std::vector<uint32_t>{ ba::kHashFire, ba::kHashShotFired });
+		CHECK(s.queued_shots() == 2);
+		CHECK(posts(step(s, true)) == std::vector<uint32_t>{ ba::kHashShotFired });
+		const std::vector<Op> last = step(s, true);
+		CHECK(posts(last) == std::vector<uint32_t>{ ba::kHashShotFired, ba::kHashFireStopped });
+		CHECK(set_value(last, ba::kHashFireLogicType) == 2.0f);
+		CHECK(set_value(last, ba::kHashOwnerLocal) == 0.0f);
+		CHECK(posts(step(s, true)).empty());
+	}
+
+	TEST_CASE("R5-VS3 test vector: the local gunner's own coax is not ended by the trigger release once it fired; "
+			  "the fire end does, and FireStopped follows once every ShotFired is out") {
+		ba::WeaponSoundState s;
+		s.fire_start({ true, true, true });
+		s.shot();
+		s.shot();
+		s.trigger_release();
+		CHECK_FALSE(s.ending());
+		CHECK(posts(step(s, true)) == std::vector<uint32_t>{ ba::kHashFire, ba::kHashShotFired });
+		s.fire_end();
+		CHECK(posts(step(s, true)) == std::vector<uint32_t>{ ba::kHashShotFired, ba::kHashFireStopped });
+		s.fire_start({ true, true, true });
+		s.trigger_release();
+		CHECK(s.ending());
+		CHECK(posts(step(s, true)) == std::vector<uint32_t>{ ba::kHashFire, ba::kHashFireStopped });
+	}
+
+	TEST_CASE("R5-VS3 test vector: a remote enemy HMG sends P, A and B as 0 and gives its handle up once it stops "
+			  "playing; the local gunner keeps his; a destroyed weapon still playing posts FireStopped and its end "
+			  "event and plays out detached") {
+		ba::WeaponSoundState enemy;
+		enemy.fire_start({ false, false, false });
+		enemy.shot();
+		enemy.trigger_release();
+		const std::vector<Op> ops = step(enemy, true);
+		CHECK(ops ==
+				joined({ post_op(ba::kHashFire), post_op(ba::kHashShotFired), post_op(ba::kHashFireStopped) },
+						playing_inputs(2.0f, false, false, false)));
+		CHECK(step(enemy, false) == std::vector<Op>{ Op{ OpKind::Release, 0, 0.0f } });
+		ba::WeaponSoundState own;
+		own.fire_start({ false, true, true });
+		CHECK(step(own, false) == std::vector<Op>{ post_op(ba::kHashFire) });
+		ba::WeaponSoundState gone;
+		gone.fire_start({ false, true, false });
+		gone.shot();
+		std::vector<Op> out;
+		gone.destroyed(true, out);
+		CHECK(out ==
+				std::vector<Op>{
+						post_op(ba::kHashFireStopped), post_op(ba::kHashWeaponGone), Op{ OpKind::Detach, 0, 0.0f } });
+		CHECK(gone.queued_shots() == 0);
+		CHECK_FALSE(gone.firing());
+		out.clear();
+		gone.destroyed(false, out);
+		CHECK(out == std::vector<Op>{ Op{ OpKind::Release, 0, 0.0f } });
+	}
+
+	TEST_CASE("R5-VS3 through the router: the local gunner's remote HMG keeps one patch instance across three bursts "
+			  "fired while its tail plays") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		WeaponRig rig(*f);
+		const uint16_t hmg = rig.def_of(*f, "vehicles/common/weapondata/tank_remote_hmg_firing");
+		rig.router->set_own_slot(4);
+		rig.router->set_own_first_person(true);
+		const int every = std::max(1, int(std::lround(rig.table->defs[hmg].shot_interval_s * double(sim::kSimHz))));
+		uint32_t id = 100;
+		for (int burst = 0; burst < 3; ++burst) {
+			for (int round = 0; round < 5; ++round) {
+				const present::PresentEvent e = rig.shot(4, hmg, id++);
+				rig.frame(std::span<const present::PresentEvent>(&e, 1));
+				for (int i = 1; i < every; ++i) {
+					rig.frame();
+				}
+			}
+			for (int i = 0; i < int(sim::kSimHz) / 2; ++i) {
+				rig.frame();
+			}
+		}
+		std::printf("remote HMG instance requests over three bursts: %zu\n", rig.requests("hmg_remotegun"));
+		CHECK(rig.requests("hmg_remotegun") == 1);
+	}
+
+	TEST_CASE("R5-VS3 through the router: P, A and B from the crews, the data's fire logic, one ShotFired per update, "
+			  "FireStopped after the queue drains, the release after the tail and a destroyed vehicle's detached "
+			  "handle") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		WeaponRig rig(*f);
+		const uint16_t cannon = rig.def_of(*f, "vehicles/common/weapondata/mbt_cannon_firing");
+		const uint16_t hmg = rig.def_of(*f, "vehicles/common/weapondata/tank_remote_hmg_firing");
+		const float cannon_logic = float(uint8_t(f->level->weapons[cannon - 3].fire.logic));
+		const float hmg_logic = float(uint8_t(f->level->weapons[hmg - 3].fire.logic));
+		std::printf("M1A2 cannon FireLogicType %.0f, remote HMG %.0f\n", double(cannon_logic), double(hmg_logic));
+		REQUIRE(cannon_logic == 0.0f);
+		REQUIRE(hmg_logic == 2.0f);
+		for (const core::gameplay::WeaponDef &w : f->level->weapons) {
+			CHECK_MESSAGE(w.fire.logic != core::gameplay::FireLogic::SingleWithBoltAction, w.variant);
+			CHECK_MESSAGE(!w.locking.present, w.variant);
+			CHECK_MESSAGE(!w.fire.hold_off_reload_until_fire_release, w.variant);
+		}
+		rig.router->set_trace(true);
+		rig.router->set_own_slot(4);
+		rig.router->set_own_first_person(false);
+		const uint32_t ours = ba::vehicle_crew_key(10, 1), theirs = ba::vehicle_crew_key(11, 1);
+		rig.crews = true;
+		rig.own_team = 1;
+		rig.vehicles = { ours, theirs };
+		rig.seats = { { 4, 1, ours }, { 6, 1, ours }, { 9, 2, theirs } };
+		rig.frame();
+		rig.ops.clear();
+
+		const present::PresentEvent shell = rig.shot(6, cannon, 1);
+		rig.frame(std::span<const present::PresentEvent>(&shell, 1));
+		const uint64_t fired = rig.ops.empty() ? 0 : rig.ops.back().update;
+		const std::vector<Op> first = rig.take(6, cannon);
+		CHECK(first ==
+				joined({ post_op(ba::kHashFire), post_op(ba::kHashShotFired), post_op(ba::kHashFireStopped) },
+						playing_inputs(cannon_logic, false, true, false)));
+		CHECK(rig.router->stats().vehicle_instances == 1);
+		CHECK(rig.router->stats().vehicle_events == 3);
+		int frames = 0;
+		std::vector<ba::VehicleWeaponOp> tail;
+		while (rig.router->stats().vehicle_releases == 0 && frames < 30 * 30) {
+			rig.frame();
+			tail.insert(tail.end(), rig.ops.begin(), rig.ops.end());
+			rig.ops.clear();
+			++frames;
+		}
+		std::printf("M1A2 cannon shot released after %d updates\n", frames);
+		CHECK(rig.router->stats().vehicle_releases == 1);
+		const auto update_of = [&](OpKind p_kind, uint32_t p_hash) -> int64_t {
+			for (const ba::VehicleWeaponOp &o : tail) {
+				if (o.slot == 6 && o.def == cannon && o.op.kind == p_kind && o.op.hash == p_hash) {
+					return int64_t(o.update) - int64_t(fired);
+				}
+			}
+			return -1;
+		};
+		const core::gameplay::FireFunction &cannon_fire = f->level->weapons[cannon - 3].fire;
+		const int64_t interval = std::llround(core::gameplay::shot_interval(cannon_fire) * double(sim::kSimHz));
+		const int64_t reload = std::llround(
+				(double(cannon_fire.reload_delay) + double(cannon_fire.reload_time)) * double(sim::kSimHz));
+		std::printf("M1A2 cannon: Reload %lld updates after the shot (interval %lld), ReloadEnd %lld (reload %lld)\n",
+				(long long)update_of(OpKind::Post, ba::kHashReload), (long long)interval,
+				(long long)update_of(OpKind::Post, ba::kHashReloadEnd), (long long)reload);
+		CHECK(update_of(OpKind::Post, ba::kHashReload) == interval);
+		CHECK(update_of(OpKind::Set, ba::kHashIsShortReload) == interval);
+		CHECK(update_of(OpKind::Post, ba::kHashReloadEnd) == interval + reload);
+		const auto short_reload = std::find_if(tail.begin(), tail.end(), [](const ba::VehicleWeaponOp &o) {
+			return o.op.kind == OpKind::Set && o.op.hash == ba::kHashIsShortReload;
+		});
+		CHECK((short_reload != tail.end() && short_reload->op.value == 0.0f));
+		CHECK(std::any_of(tail.begin(), tail.end(), [&](const ba::VehicleWeaponOp &o) {
+			return o.slot == 6 && o.def == cannon && o.op.kind == OpKind::Release;
+		}));
+
+		std::vector<present::PresentEvent> burst;
+		for (uint32_t i = 0; i < 3; ++i) {
+			burst.push_back(rig.shot(9, hmg, 50 + i));
+		}
+		rig.frame(burst);
+		CHECK(posts(rig.ops_of(9, hmg)) == std::vector<uint32_t>{ ba::kHashFire, ba::kHashShotFired });
+		const std::vector<Op> enemy = rig.take(9, hmg);
+		CHECK(set_value(enemy, ba::kHashIsFirstPerson) == 0.0f);
+		CHECK(set_value(enemy, ba::kHashOwnerSameTeam) == 0.0f);
+		CHECK(set_value(enemy, ba::kHashOwnerLocal) == 0.0f);
+		CHECK(set_value(enemy, ba::kHashFireLogicType) == hmg_logic);
+		CHECK(set_value(enemy, ba::kHashWeaponFlag) == 1.0f);
+		rig.frame();
+		CHECK(posts(rig.take(9, hmg)) == std::vector<uint32_t>{ ba::kHashShotFired });
+		rig.frame();
+		CHECK(posts(rig.take(9, hmg)) == std::vector<uint32_t>{ ba::kHashShotFired });
+		bool stopped = false;
+		for (int i = 0; i < 30 && !stopped; ++i) {
+			rig.frame();
+			const std::vector<uint32_t> p = posts(rig.take(9, hmg));
+			CHECK((p.empty() || p == std::vector<uint32_t>{ ba::kHashFireStopped }));
+			stopped = !p.empty();
+		}
+		CHECK(stopped);
+		for (int i = 0; i < 30 * 30 && rig.router->stats().vehicle_releases < 2; ++i) {
+			rig.frame();
+		}
+		CHECK(rig.router->stats().vehicle_releases == 2);
+
+		const present::PresentEvent again = rig.shot(9, hmg, 60);
+		rig.frame(std::span<const present::PresentEvent>(&again, 1));
+		rig.ops.clear();
+		rig.vehicles = { ours };
+		rig.seats = { { 4, 1, ours }, { 6, 1, ours } };
+		rig.frame();
+		CHECK(posts(rig.ops_of(9, hmg)) == std::vector<uint32_t>{ ba::kHashFireStopped, ba::kHashWeaponGone });
+		CHECK(has_kind(rig.take(9, hmg), OpKind::Detach));
+		CHECK(rig.router->stats().vehicle_detached == 1);
+
+		const ba::WeaponAudioDef &own_hmg = rig.table->defs[hmg];
+		for (const bool first_person : { false, true }) {
+			rig.router->set_own_first_person(first_person);
+			std::vector<present::PresentEvent> own;
+			for (uint32_t i = 0; i < 4; ++i) {
+				own.push_back(rig.shot(4, hmg, (first_person ? 300 : 200) + i));
+			}
+			rig.frame(own);
+			const std::vector<Op> mine = rig.take(4, hmg);
+			CHECK(set_value(mine, ba::kHashIsFirstPerson) == (first_person ? 1.0f : 0.0f));
+			CHECK(set_value(mine, ba::kHashOwnerSameTeam) == 1.0f);
+			CHECK(set_value(mine, ba::kHashOwnerLocal) == 1.0f);
+			const float heat = set_value(mine, ba::kHashOverheatLevel).value_or(-1.0f);
+			std::printf("own remote HMG OverheatLevel after 4 rounds (%.4f per round): %.4f\n",
+					double(own_hmg.heat.heat_per_bullet), double(heat));
+			if (!first_person) {
+				CHECK(heat == doctest::Approx(std::min(1.0f, 4.0f * own_hmg.heat.heat_per_bullet)));
+			}
+			CHECK(heat >= std::min(1.0f, 4.0f * own_hmg.heat.heat_per_bullet) - 1e-6f);
+			CHECK(heat <= 1.0f);
+			for (int i = 0; i < 40; ++i) {
+				rig.frame();
+			}
+			rig.ops.clear();
+		}
+	}
+
+	TEST_CASE("R5-VS3 Rule 2 step 12 through the router: a vehicle weapon's handle sits at its weapon's muzzle and "
+			  "follows it") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		WeaponRig rig(*f);
+		struct Last final : ba::WeaponAudioObserver {
+			ba::PatchInstance *instance = nullptr;
+			void on_driver_instance(uint8_t, uint64_t, uint64_t, ba::PatchInstance &r_instance) override {
+				instance = &r_instance;
+			}
+			void on_trigger_up(uint8_t, uint64_t, uint64_t) override {}
+		} last;
+		rig.router->set_observer(&last);
+		const uint16_t hmg = rig.def_of(*f, "vehicles/common/weapondata/tank_remote_hmg_firing");
+		rig.router->set_own_slot(4);
+		const uint32_t ours = ba::vehicle_crew_key(10, 1);
+		rig.crews = true;
+		rig.own_team = 1;
+		rig.vehicles = { ours };
+		rig.seats = { { 4, 1, ours } };
+		rig.poses = { { ours, hmg, { 30.0f, 103.0f, 40.0f }, { 0.0f, 0.0f, 1.0f } } };
+		const present::PresentEvent round = rig.shot(4, hmg, 1);
+		rig.frame(std::span<const present::PresentEvent>(&round, 1));
+		REQUIRE(last.instance != nullptr);
+		CHECK(last.instance->cull_info().position.x == doctest::Approx(30.0f));
+		CHECK(last.instance->cull_info().position.z == doctest::Approx(40.0f));
+		for (int i = 1; i <= 5; ++i) {
+			rig.poses[0].position.x = 30.0f + float(i);
+			rig.frame();
+		}
+		CHECK(last.instance->cull_info().position.x == doctest::Approx(35.0f));
+		CHECK(last.instance->cull_info().position.y == doctest::Approx(103.0f));
+	}
+
+	TEST_CASE("R5-VS3 Rule 2 step 13 through the router: a destroyed vehicle's detached weapon handle keeps the "
+			  "weapon's last transform and gets zero velocity") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		WeaponRig rig(*f);
+		struct Last final : ba::WeaponAudioObserver {
+			ba::PatchInstance *instance = nullptr;
+			void on_driver_instance(uint8_t, uint64_t, uint64_t, ba::PatchInstance &r_instance) override {
+				instance = &r_instance;
+			}
+			void on_trigger_up(uint8_t, uint64_t, uint64_t) override {}
+		} last;
+		rig.router->set_observer(&last);
+		const uint16_t hmg = rig.def_of(*f, "vehicles/common/weapondata/tank_remote_hmg_firing");
+		rig.router->set_own_slot(4);
+		const uint32_t ours = ba::vehicle_crew_key(10, 1), theirs = ba::vehicle_crew_key(11, 1);
+		rig.crews = true;
+		rig.own_team = 1;
+		rig.vehicles = { ours, theirs };
+		rig.seats = { { 4, 1, ours }, { 9, 2, theirs } };
+		rig.poses = { { theirs, hmg, { 30.0f, 103.0f, 40.0f }, { 0.0f, 0.0f, 1.0f } } };
+		for (uint32_t i = 0; i < 4; ++i) {
+			rig.poses[0].position.x = 30.0f + float(i);
+			const present::PresentEvent round = rig.shot(9, hmg, 1 + i);
+			rig.frame(std::span<const present::PresentEvent>(&round, 1));
+		}
+		REQUIRE(last.instance != nullptr);
+		const float moving = last.instance->cull_info().relative_velocity;
+		std::printf(
+				"remote HMG on a moving tank: relative velocity %.2f m/s before the tank is gone\n", double(moving));
+		CHECK(std::fabs(moving) > 1.0f);
+		const uint64_t emitters_before = rig.router->stats().emitter_updates;
+		rig.vehicles = { ours };
+		rig.seats = { { 4, 1, ours } };
+		rig.poses.clear();
+		rig.frame();
+		rig.frame();
+		REQUIRE(rig.router->stats().vehicle_detached == 1);
+		const bool finished = std::any_of(rig.cuts.begin(), rig.cuts.end(), [](const ba::MixerCutEvent &e) {
+			return e.kind == ba::MixerCutKind::Finish &&
+					std::string_view(e.program).find("remotegun") != std::string_view::npos;
+		});
+		REQUIRE_FALSE(finished);
+		const ba::VoiceCullInfo detached = last.instance->cull_info();
+		std::printf("detached remote HMG tail: relative velocity %.2f m/s at x %.2f, %llu emitter updates after the "
+					"detach\n",
+				double(detached.relative_velocity), double(detached.position.x),
+				(unsigned long long)(rig.router->stats().emitter_updates - emitters_before));
+		CHECK(rig.router->stats().emitter_updates > emitters_before);
+		CHECK(detached.relative_velocity == 0.0f);
+		CHECK(detached.position.x == doctest::Approx(33.0f));
+		CHECK(detached.position.y == doctest::Approx(103.0f));
+		CHECK(detached.position.z == doctest::Approx(40.0f));
+	}
+
+	TEST_CASE("the own view is first person on foot and in a vehicle only through a camera whose IsFirstPerson is "
+			  "set: the M1A2 driver's first-person and chase cameras") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/m1a2/m1abrams");
+		REQUIRE(kind.has_value());
+		const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
+		REQUIRE(spawner.has_value());
+		host::PresentedVehicle v = parked(*f->level, *spawner);
+		v.occupants[0] = 4;
+		const host::PresentedVehicle one[1] = { v };
+		uint32_t first_person = cg::kNoVehicleCamera, chase = cg::kNoVehicleCamera;
+		for (const cg::VehicleCameraDef &c : f->level->kinds[*kind].seat_defs.at(0).cameras) {
+			(c.first_person ? first_person : chase) = c.instance;
+		}
+		REQUIRE(first_person != cg::kNoVehicleCamera);
+		REQUIRE(chase != cg::kNoVehicleCamera);
+		CHECK(ba::own_view_first_person(one, f->level.get(), 4, first_person));
+		CHECK_FALSE(ba::own_view_first_person(one, f->level.get(), 4, chase));
+		CHECK_FALSE(ba::own_view_first_person(one, f->level.get(), 4, cg::kNoVehicleCamera));
+		CHECK(ba::own_view_first_person(one, f->level.get(), 5, chase));
+		CHECK(ba::own_view_first_person({}, f->level.get(), 4, cg::kNoVehicleCamera));
+	}
+
+	TEST_CASE("the crews the router gets: each occupant's team from the player rows and each vehicle weapon at its "
+			  "muzzle from the presented hull and turret angles") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/m1a2/m1abrams");
+		REQUIRE(kind.has_value());
+		const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
+		REQUIRE(spawner.has_value());
+		const host::LevelVehicleKind &k = f->level->kinds[*kind];
+		REQUIRE(k.armament != nullptr);
+		auto frame = std::make_unique<host::PresentationFrame>();
+		host::PresentedVehicle v = parked(*f->level, *spawner);
+		v.team = 1;
+		v.occupants[1] = 5;
+		v.turret_count = uint8_t(std::min<size_t>(k.armament->turrets.size(), v.turret_angle.size()));
+		frame->vehicle_count = 1;
+		frame->vehicles[0] = v;
+		frame->player_count = 1;
+		frame->players[0].slot = 5;
+		frame->players[0].team = 2;
+		ba::VehicleCrews crews;
+		ba::vehicle_crews(*frame, f->level.get(), 3, crews);
+		const uint32_t key = ba::vehicle_crew_key(*spawner, v.generation);
+		CHECK(crews.vehicles == std::vector<uint32_t>{ key });
+		REQUIRE(crews.seats.size() == 1);
+		CHECK(crews.seats[0].slot == 5);
+		CHECK(crews.seats[0].team == 2);
+		REQUIRE(!crews.poses.empty());
+		const size_t w = 0;
+		REQUIRE(k.weapon_defs.size() > w);
+		const uint16_t def = uint16_t(3 + k.weapon_defs[w]);
+		const auto pose_of = [&](const ba::VehicleCrews &p_c) {
+			const auto it = std::find_if(p_c.poses.begin(), p_c.poses.end(),
+					[&](const ba::VehicleWeaponPose &p) { return p.vehicle == key && p.def == def; });
+			REQUIRE(it != p_c.poses.end());
+			return *it;
+		};
+		const core::Transform rot = core::Transform::from_rotation_translation(v.rotation, core::Vec3{});
+		const core::Transform hull = sim::vehicles::hull_transform(
+				v.rotation, core::vec::sub(v.com_position, rot.transform_vector(k.model->center_of_mass)));
+		const core::Vec3 muzzle = sim::vehicles::weapon_muzzle(*k.armament, sim::vehicles::ArmamentState{}, hull, w);
+		const ba::VehicleWeaponPose rest = pose_of(crews);
+		std::printf("M1A2 weapon %zu (%s) muzzle at %.3f %.3f %.3f, hull centre of mass at %.3f %.3f %.3f\n", w,
+				f->level->weapons[k.weapon_defs[w]].variant.c_str(), double(rest.position.x), double(rest.position.y),
+				double(rest.position.z), double(v.com_position.x), double(v.com_position.y), double(v.com_position.z));
+		CHECK(rest.position.x == doctest::Approx(muzzle.x));
+		CHECK(rest.position.y == doctest::Approx(muzzle.y));
+		CHECK(rest.position.z == doctest::Approx(muzzle.z));
+		frame->vehicles[0].com_position.x += 10.0f;
+		ba::vehicle_crews(*frame, f->level.get(), 3, crews);
+		CHECK(pose_of(crews).position.x == doctest::Approx(rest.position.x + 10.0f));
+		CHECK(pose_of(crews).position.z == doctest::Approx(rest.position.z));
+		if (k.armament->weapons[w].frame_turret >= 0) {
+			frame->vehicles[0].turret_angle[size_t(k.armament->weapons[w].frame_turret)] = 0.5f;
+			ba::vehicle_crews(*frame, f->level.get(), 3, crews);
+			CHECK(pose_of(crews).position.z != doctest::Approx(rest.position.z));
+		}
 	}
 }

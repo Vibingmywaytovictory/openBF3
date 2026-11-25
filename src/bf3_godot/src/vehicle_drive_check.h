@@ -24,6 +24,13 @@ class InputMapper;
 class EorFlash;
 class GameVehicles;
 
+struct VehicleWeaponSounds {
+	uint64_t shots = 0;
+	uint64_t instances = 0;
+	uint64_t fires = 0;
+	uint64_t shot_fired = 0;
+};
+
 struct VehicleDriveInputs {
 	bool alive = false;
 	bool spawn_screen = false;
@@ -35,7 +42,7 @@ struct VehicleDriveInputs {
 	uint32_t camera_counter = 0;
 	uint64_t own_shots = 0;
 	bool audio = false;
-	uint64_t weapon_sounds = 0;
+	VehicleWeaponSounds weapon_sounds;
 	const EorFlash *flash = nullptr;
 	float vehicle_black = 0.0f;
 	std::function<void()> deploy;
@@ -102,7 +109,7 @@ private:
 	bool ifv_ = false;
 	uint8_t gun_seat_ = 0;
 	uint64_t gun_before_ = 0;
-	uint64_t sounds_before_ = 0;
+	VehicleWeaponSounds sounds_before_;
 	float regular_fov_ = 0.0f;
 	float turn_ = 0.0f;
 	float shown_black_ = 0.0f;

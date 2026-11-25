@@ -4,6 +4,7 @@
 #include "bf3/audio/haptics_feed.h"
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
+#include "bf3/audio/vehicle_weapon_sound.h"
 #include "bf3/audio/weapon_foley.h"
 #include "bf3/audio/weapon_sound.h"
 #include "bf3/core/audio/sound_program.h"
@@ -12,6 +13,7 @@
 #include "bf3/core/result.h"
 #include "bf3/present/presentation_events.h"
 #include "bf3/present/presented.h"
+#include "bf3/sim/vehicles/vehicle_weapon_rules.h"
 #include "bf3/sim/weapons/sim_time.h"
 #include "bf3/sim/weapons/weapon_rng.h"
 
@@ -103,6 +105,11 @@ struct WeaponAudioDef {
 	double shot_interval_s = 0.0;
 	WeaponFoley foley;
 	bool explosive = false;
+	uint8_t fire_logic = kInitialFireLogicType;
+	sim::vehicles::OverheatRule heat;
+	int32_t magazine = 0;
+	bool auto_reload = false;
+	double reload_s = 0.0;
 };
 
 struct WeaponAudioTable {
@@ -118,6 +125,11 @@ struct WeaponSoundSource {
 	WeaponFireMode fire_mode = WeaponFireMode::Automatic;
 	bool one_shot = false;
 	bool explosive = false;
+	uint8_t fire_logic = kInitialFireLogicType;
+	sim::vehicles::OverheatRule heat;
+	int32_t magazine = 0;
+	bool auto_reload = false;
+	double reload_s = 0.0;
 };
 
 core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, std::span<const WeaponSoundSource> p_defs, uint32_t p_mix_rate);
@@ -246,6 +258,13 @@ struct WeaponAudioStats {
 	uint64_t joins = 0;
 	uint64_t stale_dropped = 0;
 	uint64_t trace_dropped = 0;
+	uint64_t vehicle_shots = 0;
+	uint64_t vehicle_instances = 0;
+	uint64_t vehicle_events = 0;
+	uint64_t vehicle_releases = 0;
+	uint64_t vehicle_detached = 0;
+	uint64_t vehicle_fires = 0;
+	uint64_t vehicle_shot_posts = 0;
 };
 static_assert(std::is_trivially_copyable_v<WeaponAudioStats>);
 
@@ -320,6 +339,10 @@ public:
 
 	void set_trace(bool p_on);
 	void take_starts(std::vector<WeaponSoundStart> &r_out);
+
+	void set_vehicle_crews(uint8_t p_own_team, std::span<const uint32_t> p_vehicles,
+			std::span<const VehicleCrewSeat> p_seats, std::span<const VehicleWeaponPose> p_poses = {});
+	void take_vehicle_weapon_ops(std::vector<VehicleWeaponOp> &r_out);
 
 private:
 	struct Impl;

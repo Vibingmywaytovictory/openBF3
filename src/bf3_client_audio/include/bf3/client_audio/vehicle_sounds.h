@@ -77,4 +77,6 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 		const VehicleAudioAssets &p_assets, const VehicleListenerView &p_view, VehicleSoundMemory &r_memory,
 		std::vector<VehicleSoundSource> &r_out);
 
+bool own_view_first_person(std::span<const host::PresentedVehicle> p_vehicles, const host::LevelVehicles *p_level,
+		uint8_t p_own_slot, uint32_t p_camera);
 }

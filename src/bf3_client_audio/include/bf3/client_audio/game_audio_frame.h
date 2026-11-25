@@ -45,6 +45,14 @@ struct GameAudioInputs {
 	uint8_t own_slot = 0xFF;
 	bool own_first_person = true;
 	std::span<const KitAudioVariant> sound_variants;
+	const host::LevelVehicles *vehicles = nullptr;
+	uint16_t vehicle_weapon_base = 0;
+};
+
+struct VehicleCrews {
+	std::vector<uint32_t> vehicles;
+	std::vector<VehicleCrewSeat> seats;
+	std::vector<VehicleWeaponPose> poses;
 };
 
 class GameAudioDriver {
@@ -56,7 +64,11 @@ public:
 private:
 	std::array<host::PresentedOtherWeapon, net::kMaxSlots> newest_{};
 	host::OwnWeaponsPresenter own_weapons_;
+	VehicleCrews crews_;
 };
+
+void vehicle_crews(const host::PresentationFrame &p_frame, const host::LevelVehicles *p_level, uint16_t p_weapon_base,
+		VehicleCrews &r_out);
 
 inline constexpr const char *kAuditionSuperbundles = "Win32/Levels/MP_001/MP_001";
 

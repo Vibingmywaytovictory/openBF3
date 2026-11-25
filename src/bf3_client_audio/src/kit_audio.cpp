@@ -50,12 +50,22 @@ WeaponSoundSource weapon_sound_source(const gp::WeaponDef &p_def) {
 	s.explosive =
 			p_def.projectile.kind == gp::ProjectileKind::Grenade && p_def.fire.logic == gp::FireLogic::HoldAndRelease;
 	s.fire_mode = fire_mode_of(p_def.fire.logic);
+	s.fire_logic = uint8_t(p_def.fire.logic);
+	s.heat = { p_def.fire.heat_per_bullet, p_def.fire.heat_drop_per_second, p_def.fire.overheat_penalty_time,
+		p_def.fire.overheat_threshold };
+	const bool magazine_reload = p_def.fire.reload_type == gp::ReloadType::Magazine ||
+			p_def.fire.reload_type == gp::ReloadType::MagazineWithPossibleShorterReload;
+	s.magazine = magazine_reload ? p_def.fire.magazine_capacity : 0;
+	s.auto_reload = p_def.fire.always_auto_reload && !p_def.fire.hold_off_reload_until_fire_release;
+	const double empty_reload = double(p_def.fire.reload_delay) + double(p_def.fire.reload_time);
+	s.reload_s = magazine_reload && std::isfinite(empty_reload) ? empty_reload : 0.0;
 	const double interval = gp::shot_interval(p_def.fire);
 	s.shot_interval_s = std::isfinite(interval) && interval > 0.0 ? interval : 0.1;
 	return s;
 }
 
 void add_vehicle_weapon_sounds(KitAudioSources &r_sources, std::span<const gp::WeaponDef> p_weapons) {
+	r_sources.vehicle_base = uint16_t(r_sources.sources.size());
 	for (const gp::WeaponDef &d : p_weapons) {
 		r_sources.sources.push_back(weapon_sound_source(d));
 	}

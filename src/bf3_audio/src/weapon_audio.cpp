@@ -1,6 +1,7 @@
 #include "bf3/audio/weapon_audio.h"
 
 #include "bf3/audio/audio_load.h"
+#include "bf3/audio/vehicle_weapon_audio.h"
 #include "bf3/core/audio/sound_ports.h"
 #include "bf3/core/util/finite.h"
 #include "bf3/core/util/format.h"
@@ -208,6 +209,11 @@ core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, 
 		d.fire_mode = src.fire_mode;
 		d.shot_interval_s = src.shot_interval_s;
 		d.explosive = src.explosive;
+		d.fire_logic = src.fire_logic;
+		d.heat = src.heat;
+		d.magazine = src.magazine;
+		d.auto_reload = src.auto_reload;
+		d.reload_s = src.reload_s;
 		if (src.sound.empty()) {
 			d.error = "no sound partition";
 			continue;
@@ -484,6 +490,7 @@ struct WeaponAudioRouter::Impl {
 	uint64_t frame_counter = 0;
 	bool trace = false;
 	std::vector<WeaponSoundStart> trace_starts;
+	VehicleWeaponAudio vehicle_weapons;
 
 	void traced(WeaponSoundStartKind p_kind, uint8_t p_slot, uint16_t p_def, uint32_t p_key, uint64_t p_seed) {
 		if (!trace) {
@@ -573,7 +580,8 @@ struct WeaponAudioRouter::Impl {
 
 	Impl(MixerCore &r_mixer, std::shared_ptr<const WeaponAudioTable> p_table, std::shared_ptr<const ca::WaveBank> p_bank, const AudioTuning &p_tuning,
 			OneShotPool &r_pool, const WeaponAudioConfig &p_config) :
-			mixer(r_mixer), table(std::move(p_table)), bank(std::move(p_bank)), tuning(p_tuning), pool(r_pool), config(p_config) {
+			mixer(r_mixer), table(std::move(p_table)), bank(std::move(p_bank)), tuning(p_tuning), pool(r_pool), config(p_config),
+			vehicle_weapons(r_mixer, table, bank, p_tuning, p_config.mix_rate, stats) {
 		voices.reserve(std::max<uint32_t>(config.max_weapon_voices, 1));
 	}
 
@@ -935,8 +943,11 @@ struct WeaponAudioRouter::Impl {
 	}
 
 	void remote_shot(const present::PresentEvent &p_e, SimMixerClock &r_clock) {
-		const bool vehicle = (p_e.flags & present::flags::kVehicle) != 0;
-		if (p_e.slot == own_slot && !vehicle) {
+		if ((p_e.flags & present::flags::kVehicle) != 0) {
+			vehicle_weapons.on_shot(p_e, own_slot, own_first_person);
+			return;
+		}
+		if (p_e.slot == own_slot) {
 			return;
 		}
 		Track &t = tracks[p_e.slot];
@@ -946,7 +957,7 @@ struct WeaponAudioRouter::Impl {
 			return;
 		}
 		EmitterState em = event_emitter(p_e);
-		if (!vehicle && t.seen && t.present_frame + 2 >= frame_counter) {
+		if (t.seen && t.present_frame + 2 >= frame_counter) {
 			em = t.emitter;
 		}
 		const float dist = distance(em.position, listener.position);
@@ -1041,6 +1052,7 @@ struct WeaponAudioRouter::Impl {
 				}
 				case present::PresentKind::Death:
 					foley_death(e.aux, r_clock);
+					vehicle_weapons.slot_gone(e.aux);
 					if (e.aux == own_slot) {
 						end_track(own);
 					} else {
@@ -1048,6 +1060,7 @@ struct WeaponAudioRouter::Impl {
 					}
 					break;
 				case present::PresentKind::Spawn:
+					vehicle_weapons.slot_gone(e.slot);
 					if (e.slot == own_slot) {
 						end_track(own);
 					} else {
@@ -1250,6 +1263,7 @@ struct WeaponAudioRouter::Impl {
 				end_track(t);
 			}
 		}
+		vehicle_weapons.step(now, listener);
 	}
 
 	void set_others_newest(std::span<const present::PresentedOtherWeapon> p_newest, sw::SimTime p_horizon) {
@@ -1315,7 +1329,7 @@ struct WeaponAudioRouter::Impl {
 				}
 				if (voice(fb[i].handle) != nullptr) {
 					erase_voice(fb[i].handle);
-				} else {
+				} else if (!vehicle_weapons.on_finished(fb[i].handle)) {
 					pool.on_finished(fb[i].handle);
 				}
 			}
@@ -1695,6 +1709,7 @@ void WeaponAudioRouter::update(uint64_t) {
 }
 
 void WeaponAudioRouter::set_observer(WeaponAudioObserver *p_observer) {
+	impl_->vehicle_weapons.set_observer(p_observer);
 	impl_->observer = p_observer;
 }
 
@@ -1710,7 +1725,17 @@ HapticsFeed &WeaponAudioRouter::haptics() {
 	return impl_->haptics;
 }
 
+void WeaponAudioRouter::set_vehicle_crews(uint8_t p_own_team, std::span<const uint32_t> p_vehicles,
+		std::span<const VehicleCrewSeat> p_seats, std::span<const VehicleWeaponPose> p_poses) {
+	impl_->vehicle_weapons.set_crews(p_own_team, p_vehicles, p_seats, p_poses);
+}
+
+void WeaponAudioRouter::take_vehicle_weapon_ops(std::vector<VehicleWeaponOp> &r_out) {
+	impl_->vehicle_weapons.take_ops(r_out);
+}
+
 void WeaponAudioRouter::set_trace(bool p_on) {
+	impl_->vehicle_weapons.set_trace(p_on);
 	impl_->trace = p_on;
 	if (!p_on) {
 		impl_->trace_starts.clear();

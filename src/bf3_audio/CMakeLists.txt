@@ -88,3 +88,10 @@ target_sources(bf3_audio PRIVATE
     include/bf3/audio/vehicle_audio.h
     src/vehicle_audio.cpp
 )
+
+target_sources(bf3_audio PRIVATE
+    include/bf3/audio/vehicle_weapon_sound.h
+    src/vehicle_weapon_sound.cpp
+    include/bf3/audio/vehicle_weapon_audio.h
+    src/vehicle_weapon_audio.cpp
+)

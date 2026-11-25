@@ -980,6 +980,7 @@ VoiceCullInfo PatchInstance::cull_info() const {
 	VoiceCullInfo info;
 	info.distance_m = st.geometry.distance;
 	info.position = st.emitter_position;
+	info.relative_velocity = st.geometry.relative_velocity;
 	bool any_hdr = false;
 	for (const ca::SoundOutput &out : p.outputs) {
 		any_hdr = any_hdr || out.enable_hdr;

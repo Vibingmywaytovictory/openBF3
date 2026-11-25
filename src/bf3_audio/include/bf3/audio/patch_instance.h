@@ -142,6 +142,7 @@ struct VoiceCullInfo {
 	bool hdr = false;
 	float distance_m = 0.0f;
 	Vec3 position;
+	float relative_velocity = 0.0f;
 	uint32_t voices = 0;
 };
 

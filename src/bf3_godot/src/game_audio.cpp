@@ -386,8 +386,15 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 	in.listener.up = p_frame.camera.up;
 	in.listener.velocity = p_frame.camera_velocity;
 	in.own_slot = p_frame.own_slot;
-	in.own_first_person = p_frame.own_alive && !p_frame.free_camera;
+	in.own_first_person = p_frame.own_alive && !p_frame.free_camera &&
+			(p_frame.frame == nullptr ||
+					ba::own_view_first_person(
+							std::span<const host::PresentedVehicle>(p_frame.frame->vehicles.data(),
+									std::min<size_t>(p_frame.frame->vehicle_count, p_frame.frame->vehicles.size())),
+							m.level_vehicles.get(), p_frame.own_slot, p_frame.own_vehicle_camera));
 	in.sound_variants = m.kits.variants;
+	in.vehicles = m.level_vehicles.get();
+	in.vehicle_weapon_base = m.kits.vehicle_base;
 	m.listener = in.listener;
 
 	m.muzzles.assign(p_frame.others.size(), ba::MuzzlePoint{});
@@ -1033,6 +1040,12 @@ void capture_end(Impl &r_m) {
 		const ba::WeaponAudioStats &rs = r_m.router->stats();
 		UtilityFunctions::print(String::utf8(("[audio] weapon foley: " + std::to_string(rs.reloads) + " reloads, " + std::to_string(rs.foley) + " foley one-shots, " +
 				std::to_string(rs.foley_releases) + " releases, " + std::to_string(rs.foley_out_of_reach) + " out of reach, " + std::to_string(rs.one_shots) + " pool one-shots").c_str()));
+		UtilityFunctions::print(String::utf8(("[audio] vehicle weapons: " + std::to_string(rs.vehicle_shots) +
+				" shots, " + std::to_string(rs.vehicle_instances) + " instances, " + std::to_string(rs.vehicle_fires) +
+				" Fire, " + std::to_string(rs.vehicle_shot_posts) + " ShotFired, " + std::to_string(rs.vehicle_events) +
+				" events, " + std::to_string(rs.vehicle_releases) + " releases, " +
+				std::to_string(rs.vehicle_detached) + " detached")
+						.c_str()));
 	}
 	if (r_m.impacts) {
 		const ba::ImpactAudioStats &is = r_m.impacts->stats();

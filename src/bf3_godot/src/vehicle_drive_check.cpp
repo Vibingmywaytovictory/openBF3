@@ -381,17 +381,25 @@ bool VehicleDriveRun::guns(Bf3LevelSession &r_session, const VehicleDriveInputs 
 				}
 			}
 			const uint64_t fired = f.stats.vehicle_shots - gun_before_;
-			const uint64_t heard = p_in.weapon_sounds - sounds_before_;
+			const uint64_t routed = p_in.weapon_sounds.shots - sounds_before_.shots;
+			const uint64_t made = p_in.weapon_sounds.instances - sounds_before_.instances;
+			const uint64_t fires = p_in.weapon_sounds.fires - sounds_before_.fires;
+			const uint64_t heard = p_in.weapon_sounds.shot_fired - sounds_before_.shot_fired;
 			const bool automatic = def != nullptr && def->fire.logic == core::gameplay::FireLogic::Automatic;
 			const bool one_per_reload =
 					def != nullptr && def->fire.magazine_capacity == 1 && def->fire.reload_time > float(kGunHold);
 			const bool rule =
 					def != nullptr && (automatic ? fired >= 2u : (one_per_reload ? fired == 1u : fired >= 1u));
 			const std::string row_name = std::string(name) + (gun_seat_ == 0 ? "_main_gun" : "_gunner");
-			row(row_name, seat.has_value() && seat->seat == gun_seat_ && rule && p_in.audio && heard > 0u,
-					fmt("seat %u's fire key held %.1f s presented %llu vehicle shots and started %llu weapon sounds "
-						"(audio %s); the seat's weapon %s: logic %d, %.0f rounds/min, magazine %d, reload %.2f s",
-							unsigned(gun_seat_ + 1u), kGunHold, (unsigned long long)fired, (unsigned long long)heard,
+			row(row_name,
+					seat.has_value() && seat->seat == gun_seat_ && rule && p_in.audio && routed == fired &&
+							fires > 0u && heard == fired,
+					fmt("seat %u's fire key held %.1f s presented %llu vehicle shots; the weapon sound objects got "
+						"%llu, "
+						"made %llu instances and posted Fire %llu and ShotFired %llu times (audio %s); the seat's "
+						"weapon %s: logic %d, %.0f rounds/min, magazine %d, reload %.2f s",
+							unsigned(gun_seat_ + 1u), kGunHold, (unsigned long long)fired, (unsigned long long)routed,
+							(unsigned long long)made, (unsigned long long)fires, (unsigned long long)heard,
 							p_in.audio ? "on" : "off", def != nullptr ? firing.c_str() : "none",
 							def != nullptr ? int(def->fire.logic) : -1,
 							def != nullptr ? double(def->fire.rate_of_fire) : 0.0,

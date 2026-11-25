@@ -32,6 +32,7 @@ struct KitAudioSources {
 	std::vector<WeaponSoundSource> sources;
 	std::vector<KitAudioItem> items;
 	std::vector<KitAudioVariant> variants;
+	uint16_t vehicle_base = 0;
 };
 
 WeaponSoundSource weapon_sound_source(const core::gameplay::WeaponDef &p_def);

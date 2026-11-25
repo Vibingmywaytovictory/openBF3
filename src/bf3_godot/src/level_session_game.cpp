@@ -1738,7 +1738,8 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		if (g.audio != nullptr) {
 			const audio::WeaponAudioStats router = g.audio->stats().router;
 			in.audio = true;
-			in.weapon_sounds = router.bursts + router.one_shots;
+			in.weapon_sounds = VehicleWeaponSounds{ router.vehicle_shots, router.vehicle_instances,
+				router.vehicle_fires, router.vehicle_shot_posts };
 		}
 		in.flash = g.tdm != nullptr ? g.tdm->eor_flash.get() : nullptr;
 		in.vehicle_black = g.vehicle_black;

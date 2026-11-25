@@ -5,6 +5,7 @@
 #include "bf3/core/level/level.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_vehicles.h"
+#include "bf3/sim/vehicles/vehicle_armament.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <algorithm>
@@ -18,6 +19,77 @@ namespace bf3::audio {
 
 namespace ca = core::audio;
 namespace sw = sim::weapons;
+
+namespace {
+
+uint8_t player_team(const host::PresentationFrame &p_frame, uint8_t p_slot, uint8_t p_fallback) {
+	const size_t n = std::min<size_t>(p_frame.player_count, p_frame.players.size());
+	for (size_t i = 0; i < n; ++i) {
+		if (p_frame.players[i].slot == p_slot) {
+			return p_frame.players[i].team;
+		}
+	}
+	return p_fallback;
+}
+
+void vehicle_weapon_poses(const host::PresentedVehicle &p_vehicle, const host::LevelVehicles &p_level,
+		uint16_t p_weapon_base, uint32_t p_key, std::vector<VehicleWeaponPose> &r_out) {
+	if (p_vehicle.spawner >= p_level.spawners.size()) {
+		return;
+	}
+	const uint16_t kind = p_level.spawners[p_vehicle.spawner].kind;
+	if (kind >= p_level.kinds.size() || !p_level.kinds[kind].model || !p_level.kinds[kind].armament) {
+		return;
+	}
+	const host::LevelVehicleKind &k = p_level.kinds[kind];
+	const sim::vehicles::VehicleArmament &a = *k.armament;
+	const core::Transform rot = core::Transform::from_rotation_translation(p_vehicle.rotation, core::Vec3{});
+	const core::Transform hull = sim::vehicles::hull_transform(
+			p_vehicle.rotation, core::vec::sub(p_vehicle.com_position, rot.transform_vector(k.model->center_of_mass)));
+	sim::vehicles::ArmamentState state;
+	for (size_t t = 0; t < p_vehicle.turret_count && t < state.bodies.size(); ++t) {
+		state.bodies[t].angle = p_vehicle.turret_angle[t];
+	}
+	for (size_t w = 0; w < a.weapons.size() && w < k.weapon_defs.size(); ++w) {
+		if (k.weapon_defs[w] == host::kNoVehicleWeapon) {
+			continue;
+		}
+		const uint16_t def = uint16_t(p_weapon_base + k.weapon_defs[w]);
+		if (std::any_of(r_out.begin(), r_out.end(),
+					[&](const VehicleWeaponPose &p) { return p.vehicle == p_key && p.def == def; })) {
+			continue;
+		}
+		const core::Transform at = sim::vehicles::weapon_world(a, state, hull, w);
+		r_out.push_back(VehicleWeaponPose{ p_key, def, at.transform_point(a.weapons[w].spawn_offset), at.forward });
+	}
+}
+
+}
+
+void vehicle_crews(const host::PresentationFrame &p_frame, const host::LevelVehicles *p_level, uint16_t p_weapon_base,
+		VehicleCrews &r_out) {
+	r_out.vehicles.clear();
+	r_out.seats.clear();
+	r_out.poses.clear();
+	const size_t n = std::min<size_t>(p_frame.vehicle_count, p_frame.vehicles.size());
+	for (size_t i = 0; i < n; ++i) {
+		const host::PresentedVehicle &v = p_frame.vehicles[i];
+		if (v.exploded) {
+			continue;
+		}
+		const uint32_t key = vehicle_crew_key(v.spawner, v.generation);
+		r_out.vehicles.push_back(key);
+		for (size_t s = 0; s < v.seat_count && s < v.occupants.size(); ++s) {
+			if (v.occupants[s] != net::kNoVehicleOccupant) {
+				r_out.seats.push_back(
+						VehicleCrewSeat{ v.occupants[s], player_team(p_frame, v.occupants[s], v.team), key });
+			}
+		}
+		if (p_level != nullptr) {
+			vehicle_weapon_poses(v, *p_level, p_weapon_base, key, r_out.poses);
+		}
+	}
+}
 
 void GameAudioDriver::step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, SimMixerClock &r_clock,
 		const GameAudioInputs &p_in, std::span<const ImpactSoundRequest> p_impacts,
@@ -43,6 +115,10 @@ void GameAudioDriver::step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, 
 		}
 	}
 	r_router.set_own_weapons(own_weapons_.present(p_in.frame));
+	if (p_in.frame != nullptr) {
+		vehicle_crews(*p_in.frame, p_in.vehicles, p_in.vehicle_weapon_base, crews_);
+		r_router.set_vehicle_crews(p_in.frame->own_team, crews_.vehicles, crews_.seats, crews_.poses);
+	}
 	r_router.on_events(p_in.events, r_clock);
 	r_router.on_others(p_in.others, p_in.other_weapons, p_in.muzzles, r_clock);
 	if (r_impacts != nullptr) {
