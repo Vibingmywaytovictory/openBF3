@@ -2,6 +2,8 @@
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/classes/project_settings.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -64,6 +66,20 @@ std::string engine_summary() {
 	const std::string hash = to_std(String(v["hash"]));
 	const bool single = OS::get_singleton()->has_feature("single");
 	return to_std(String(v["string"])) + " " + hash.substr(0, 9) + (single ? " single" : " double");
+}
+
+std::string rendering_summary() {
+	const ProjectSettings *ps = ProjectSettings::get_singleton();
+	const auto setting = [ps](const char *p_name) { return to_std(String(ps->get_setting_with_override(p_name))); };
+	const auto on_off = [ps](const char *p_name) {
+		return bool(ps->get_setting_with_override(p_name)) ? std::string("on") : std::string("off");
+	};
+	const RenderingServer *rs = RenderingServer::get_singleton();
+	const std::string driver = rs != nullptr ? to_std(rs->get_current_rendering_driver_name()) : std::string();
+	return "driver " + (driver.empty() ? std::string("none") : driver) +
+			" (project: " + setting("rendering/rendering_device/driver") +
+			", fallback to d3d12: " + on_off("rendering/rendering_device/fallback_to_d3d12") +
+			", fallback to opengl3: " + on_off("rendering/rendering_device/fallback_to_opengl3") + ")";
 }
 
 }

@@ -23,4 +23,6 @@ bool has_check_arg(const char *p_name);
 
 std::string engine_summary();
 
+std::string rendering_summary();
+
 }

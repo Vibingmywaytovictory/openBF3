@@ -75,6 +75,7 @@ void GameSession::_ready() {
 		install_before_ = install_.snapshot();
 	}
 	UtilityFunctions::print(to_godot("[openbf3] engine " + engine_summary()));
+	UtilityFunctions::print(to_godot("[openbf3] rendering " + rendering_summary()));
 	UtilityFunctions::print(to_godot("[openbf3] install " + install_.describe()));
 
 	screenshot_path_ = user_arg_value("screenshot");

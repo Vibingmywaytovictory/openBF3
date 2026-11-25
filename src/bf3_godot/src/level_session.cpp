@@ -303,6 +303,7 @@ void Bf3LevelSession::_ready() {
 	}
 	guard_ = install_.write_guard();
 	UtilityFunctions::print(to_godot("[level] engine " + engine_summary()));
+	UtilityFunctions::print(to_godot("[level] rendering " + rendering_summary()));
 	UtilityFunctions::print(to_godot("[level] install " + install_.describe()));
 	const std::u8string root8 = cache_root_.u8string();
 	UtilityFunctions::print(to_godot(std::string("[level] ") + level_ + " " + mode_ + (scene_ ? ", scene on" : ", scene off (headless skip, docs 11.1)") +

@@ -30,6 +30,8 @@ joypads/ignore_joypad_on_unfocused_application=true
 [rendering]
 
 rendering_device/driver.windows="vulkan"
+rendering_device/fallback_to_d3d12=false
+rendering_device/fallback_to_opengl3=false
 lights_and_shadows/multi_bounce_occlusion/enabled=true
 limits/global_shader_variables/buffer_size=262144
 

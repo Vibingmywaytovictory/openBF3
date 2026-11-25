@@ -10,7 +10,7 @@ designs with their as-built notes are in [design/](design/); the milestone recor
 ## Shape
 
 openBF3 is a Godot 4.8 GDExtension written entirely in C++20. Godot provides the window, the renderer, the audio
-device, input and the scene tree. Everything else is our own: the install readers, the simulation (our own Jolt
+device, input and the scene tree; it renders Forward+ through Vulkan only (`project.godot` turns off its Direct3D 12 and OpenGL fallbacks, so a PC without Vulkan stops at Godot's driver error instead of rendering on another API). Everything else is our own: the install readers, the simulation (our own Jolt
 world, not Godot's physics), the network protocol (upstream ENet), the bots, the effects simulator and the audio
 mixer. Only the two GDExtensions, `bf3_godot` and the dedicated server's `bf3_godot_server`, include a Godot header. The rest are static libraries that also link into the
 command-line tools and the doctest executables, which is how most of the code is tested without a window.
