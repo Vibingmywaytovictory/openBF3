@@ -95,6 +95,8 @@ functional.
   run on every branch; `OPENBF3_GODOT` overrides it.
 * Windowed rows run only with `OPENBF3_GODOT_WINDOWED=1` and exit 77 while `OPENBF3_USER_ACTIVE_FLAG` names a file
   that exists.
+* The window probe skips only when Godot found no rendering device; it fails a windowed row whose probe renders through
+  any driver but Vulkan, reports a driver Godot cannot start, or fails after starting Vulkan.
 * A `godot_*.cmake` script includes `godot_common.cmake` (the executable, those skips and the window probe), runs Godot
   through `godot_run` (`SKIP_WITHOUT_INSTALL` only where the check needs the install) and gates the pass line with
   `godot_require_pass`.
