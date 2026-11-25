@@ -274,6 +274,7 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 	const bool uv1 = uv0 && p_surface.uv1.size() == size_t(vc) * 2;
 	const bool uv2 = p_surface.uv2.size() == size_t(vc) * 2 && vc > 0;
 	const bool colors = p_surface.colors.size() == size_t(vc) * 4 && vc > 0;
+	const bool skin = p_surface.bones.size() == size_t(vc) * 4 && p_surface.weights.size() == size_t(vc) * 4 && vc > 0;
 	uint64_t format = RenderingServer::ARRAY_FORMAT_VERTEX | RenderingServer::ARRAY_FORMAT_INDEX | RenderingServer::ARRAY_FLAG_FORMAT_CURRENT_VERSION;
 	if (normals) {
 		format |= RenderingServer::ARRAY_FORMAT_NORMAL | RenderingServer::ARRAY_FORMAT_TANGENT;
@@ -290,6 +291,9 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 	if (uv2) {
 		format |= RenderingServer::ARRAY_FORMAT_CUSTOM0 |
 				(uint64_t(RenderingServer::ARRAY_CUSTOM_RG_FLOAT) << RenderingServer::ARRAY_FORMAT_CUSTOM0_SHIFT);
+	}
+	if (skin) {
+		format |= RenderingServer::ARRAY_FORMAT_BONES | RenderingServer::ARRAY_FORMAT_WEIGHTS;
 	}
 	const BitField<RenderingServer::ArrayFormat> f = int64_t(format);
 	const int64_t vstride = rs->mesh_surface_get_format_vertex_stride(f, vc32);
@@ -358,6 +362,22 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 			}
 		}
 	}
+	PackedByteArray skin_data;
+	if (skin) {
+		const int64_t sstride = rs->mesh_surface_get_format_skin_stride(f, vc32);
+		const int64_t off_bones = rs->mesh_surface_get_format_offset(f, vc32, RenderingServer::ARRAY_BONES);
+		const int64_t off_weights = rs->mesh_surface_get_format_offset(f, vc32, RenderingServer::ARRAY_WEIGHTS);
+		skin_data.resize(vc * sstride);
+		uint8_t *sw = skin_data.ptrw();
+		for (int64_t i = 0; i < vc; ++i) {
+			for (size_t l = 0; l < 4; ++l) {
+				const uint16_t bone = uint16_t(std::clamp(p_surface.bones[size_t(i) * 4 + l], 0, 65535));
+				const uint16_t weight = unorm16(std::clamp(p_surface.weights[size_t(i) * 4 + l], 0.0f, 1.0f));
+				std::memcpy(sw + off_bones + i * sstride + int64_t(l) * 2, &bone, 2);
+				std::memcpy(sw + off_weights + i * sstride + int64_t(l) * 2, &weight, 2);
+			}
+		}
+	}
 	const int64_t ic = int64_t(p_surface.indices.size());
 	PackedByteArray index;
 	index.resize(ic * istride);
@@ -379,6 +399,9 @@ Dictionary encode_rs_surface(const render::PreparedSurface &p_surface, const RID
 	d["vertex_count"] = vc;
 	if (astride > 0) {
 		d["attribute_data"] = attributes;
+	}
+	if (skin) {
+		d["skin_data"] = skin_data;
 	}
 	d["index_data"] = index;
 	d["index_count"] = ic;

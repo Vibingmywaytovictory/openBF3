@@ -15,6 +15,7 @@
 #include "bf3/render/terrain_look.h"
 #include "bf3/render/terrain_scatter.h"
 #include "bf3/render/texture_prep.h"
+#include "bf3/render/tree_wind.h"
 #include "bf3/render/water.h"
 
 #include <array>
@@ -120,12 +121,14 @@ struct SceneMeshPlan {
 };
 
 inline constexpr uint32_t kNoSceneDrivers = 0xFFFFFFFFu;
+inline constexpr uint32_t kNoSceneTree = 0xFFFFFFFFu;
 
 struct SceneInstancePlan {
 	uint32_t mesh = 0;
 	core::level::LevelTransform transform;
 	bool visible_at_start = true;
 	uint32_t drivers = kNoSceneDrivers;
+	uint32_t tree = kNoSceneTree;
 };
 
 struct SceneEnvironment {
@@ -159,6 +162,7 @@ struct LevelScenePlan {
 	LookStats look_stats;
 
 	LookEnvironment look_environment;
+	LevelTrees trees;
 	int32_t sky_panorama = -1, sky_panorama_alpha = -1, sky_gradient = -1;
 	SceneLightPlan lights;
 };

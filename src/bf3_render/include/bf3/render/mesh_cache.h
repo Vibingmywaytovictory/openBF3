@@ -38,6 +38,7 @@ struct MeshRequest {
 	core::res::SubsetFilter filter = core::res::SubsetFilter::Drawn;
 
 	const std::vector<std::vector<int32_t>> *lane_binds = nullptr;
+	bool own_skeleton = false;
 };
 
 struct MeshHead {

@@ -1,12 +1,15 @@
 #include <doctest/doctest.h>
 
+#include "bf3/core/level/census.h"
 #include "bf3/core/level/level.h"
 #include "bf3/core/level/world.h"
 #include "bf3/core/util/text.h"
+#include "bf3/render/level_scene.h"
 #include "bf3/render/look_environment.h"
 #include "bf3/render/tree_wind.h"
 #include "test_support.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -322,6 +325,69 @@ TEST_SUITE("render-trees") {
 		CHECK(linden->wind[19] == 12.0f);
 		CHECK(linden->length[1] == doctest::Approx(0.38586882f));
 		CHECK(linden->rest[1].trans.y == doctest::Approx(-0.38586882f));
+		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
+
+	TEST_CASE("render.trees: MP_007's scene plan skins every VegetationTree instance's mesh to its own tree bones") {
+		test::Mounted m;
+		if (!test::open_or_skip(m)) {
+			return;
+		}
+		core::Result<std::unique_ptr<core::level::LoadedLevel>> loaded =
+				core::level::load_level(m.install, "MP_007", "TeamDeathMatchC0");
+		REQUIRE(loaded.ok());
+		core::Result<std::unique_ptr<core::level::World>> world = core::level::World::traverse(**loaded);
+		REQUIRE(world.ok());
+		core::Result<core::level::MeshCensus> census = core::level::mesh_census(**loaded, **world);
+		REQUIRE(census.ok());
+		core::Result<render::LevelScenePlan> plan = render::plan_level_scene(**loaded, **world, *census);
+		REQUIRE(plan.ok());
+		REQUIRE(!plan->trees.trees.empty());
+		std::vector<uint32_t> requests;
+		std::vector<uint32_t> rig_of_request;
+		size_t tree_instances = 0;
+		for (const render::SceneInstancePlan &inst : plan->instances) {
+			if (inst.tree == render::kNoSceneTree) {
+				continue;
+			}
+			++tree_instances;
+			REQUIRE(inst.tree < plan->trees.trees.size());
+			REQUIRE(inst.mesh < plan->meshes.size());
+			const uint32_t r = plan->meshes[inst.mesh].request;
+			CHECK(plan->requests[r].request.own_skeleton);
+			if (std::find(requests.begin(), requests.end(), r) == requests.end()) {
+				requests.push_back(r);
+				rig_of_request.push_back(plan->trees.trees[inst.tree].rig);
+			}
+		}
+		CHECK(tree_instances == plan->trees.trees.size());
+		size_t skinned_vertices = 0;
+		for (size_t k = 0; k < requests.size(); ++k) {
+			core::Result<render::CachedMesh> mesh =
+					render::load_scene_request(nullptr, (*loaded)->mount(), *plan, requests[k]);
+			REQUIRE_MESSAGE(mesh.ok(), (mesh.ok() ? std::string() : mesh.error().message));
+			REQUIRE(!mesh->mesh.meshes.empty());
+			const render::PreparedMesh &lod0 = mesh->mesh.meshes.front();
+			CHECK(lod0.skinned);
+			const size_t bones = plan->trees.rigs[rig_of_request[k]]->bones();
+			for (const render::PreparedSurface &s : lod0.surfaces) {
+				REQUIRE(s.bones.size() == s.vertex_count() * 4);
+				for (size_t v = 0; v < s.vertex_count(); ++v) {
+					float sum = 0.0f;
+					for (size_t l = 0; l < 4; ++l) {
+						CHECK(size_t(s.bones[v * 4 + l]) < bones);
+						sum += s.weights[v * 4 + l];
+					}
+					CHECK(sum == doctest::Approx(1.0f).epsilon(1e-4));
+				}
+				skinned_vertices += s.vertex_count();
+			}
+		}
+		std::printf("render.trees MP_007 plan: %zu tree instances of %zu rigs through %zu meshes, %zu skinned lod 0 "
+					"vertices\n",
+				tree_instances, plan->trees.rigs.size(), requests.size(), skinned_vertices);
+		CHECK(skinned_vertices > 0);
 		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}
