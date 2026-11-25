@@ -1701,8 +1701,8 @@ struct HandlingModels {
 	std::unique_ptr<core::InstallReader> reader;
 	std::shared_ptr<core::Install> install;
 	core::InstallSnapshot before;
-	std::unique_ptr<core::level::LoadedLevel> level;
-	std::shared_ptr<const VehicleModel> m1a2, growler, t90;
+	std::unique_ptr<core::level::LoadedLevel> level, large;
+	std::shared_ptr<const VehicleModel> m1a2, growler, t90, lav_ad;
 };
 
 HandlingModels *handling_models() {
@@ -1739,6 +1739,14 @@ HandlingModels *handling_models() {
 	h->m1a2 = load("vehicles/m1a2/m1abrams");
 	h->growler = load("vehicles/growleritv/growleritv");
 	h->t90 = load("vehicles/t90/t90");
+	core::Result<std::unique_ptr<core::level::LoadedLevel>> large =
+			core::level::load_level(h->install, "MP_007", "ConquestLarge0");
+	REQUIRE_MESSAGE(large.ok(), (large.ok() ? std::string() : large.error().message));
+	h->large = std::move(*large);
+	core::Result<std::shared_ptr<const VehicleModel>> lav =
+			load_vehicle_model(h->large->db(), h->large->mount(), "vehicles/lav25/lav_ad", tuning);
+	REQUIRE_MESSAGE(lav.ok(), (lav.ok() ? std::string() : lav.error().message));
+	h->lav_ad = *lav;
 	s_models = std::move(h);
 	return s_models.get();
 }
@@ -1886,5 +1894,30 @@ TEST_SUITE("sim-vehicle-handling") {
 		}
 		const core::SnapshotDiff diff = core::diff_snapshots(h->before, h->reader->snapshot());
 		CHECK(diff.clean());
+	}
+
+	TEST_CASE("sim.vehicle.handling: a manned idle LAV-AD, M1A2 and Growler hold on a 12 deg slope (the stand-still "
+			  "brake; the LAV-AD has no low-speed auto brake)") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		const VehicleCourse slope = synthetic_vehicle_courses()[size_t(VehicleCourseKind::SlopeIdle)];
+		for (const std::shared_ptr<const VehicleModel> &model : { h->lav_ad, h->m1a2, h->growler }) {
+			std::unique_ptr<VehicleWorld> w = world_at(ground_shapes(true), model, slope.start);
+			settle(*w);
+			const Vec3 at = w->state(0).body.origin;
+			VehicleCommand idle = command(0, 0, 0);
+			idle.flags = vehicle_flags::kDriven;
+			for (uint32_t t = 0; t < 5 * kSimHz; ++t) {
+				step1(*w, idle);
+			}
+			const Vec3 to = w->state(0).body.origin;
+			const float moved = std::hypot(to[0] - at[0], to[2] - at[2]);
+			std::printf("sim.vehicle.handling: %s manned and idle 5 s on the %.0f deg slope: moved %.2f m\n",
+					model->blueprint.c_str(), double(slope.slope_degrees), double(moved));
+			CHECK(model->stand_still_brake);
+			CHECK(moved < 0.1f);
+		}
 	}
 }

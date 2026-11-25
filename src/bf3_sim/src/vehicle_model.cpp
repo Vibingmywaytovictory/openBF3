@@ -138,6 +138,9 @@ uint64_t digest_of(const VehicleModel &p_m) {
 	d.add(p_m.down_force_per_wheel);
 	d.add(p_m.anti_roll_front);
 	d.add(p_m.anti_roll_rear);
+	d.add(p_m.stand_still_brake);
+	d.add(p_m.stand_still_ticks);
+	d.add(p_m.stand_still_speed);
 	d.add(p_m.tester);
 	d.add(p_m.max_pitch_roll_angle);
 	d.add_text(format_vehicle_tuning(p_m.tuning));
@@ -481,6 +484,13 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	m->down_force_per_wheel = ch.down_force_wheel_factor;
 	m->anti_roll_front = ch.anti_roll_front;
 	m->anti_roll_rear = ch.anti_roll_rear;
+	m->stand_still_brake = ch.use_stand_still_brake;
+	if (!finite(ch.stand_still_low_speed_time_limit) || ch.stand_still_low_speed_time_limit < 0.0f ||
+			ch.stand_still_low_speed_time_limit > 600.0f) {
+		return fail("stand-still time limit outside 0..600 s");
+	}
+	m->stand_still_ticks = uint16_t(seconds_to_ticks(ch.stand_still_low_speed_time_limit));
+	m->stand_still_speed = p_tuning.stand_still_speed;
 	const float chassis_numbers[] = { m->motion_damping.pitch, m->motion_damping.yaw, m->motion_damping.roll,
 		m->motion_damping.linear, m->motion_damping.linear_modifier[0], m->motion_damping.linear_modifier[1],
 		m->motion_damping.linear_modifier[2], m->wind.coefficient_of_air_friction, m->wind.air_drag_area,

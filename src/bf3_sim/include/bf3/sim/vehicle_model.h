@@ -56,6 +56,7 @@ struct VehicleTuning {
 
 	float wheel_torque_scale = 10.0f;
 	float track_skid_steer_degrees = 32.0f;
+	float stand_still_speed = 0.5f;
 
 	uint32_t collision_steps = 1;
 	uint32_t velocity_steps = 10;
@@ -152,6 +153,9 @@ struct VehicleModel {
 	vehicles::WindRule wind;
 	bool down_force = false, down_force_wheel_factor = false;
 	float anti_roll_front = 0, anti_roll_rear = 0;
+	bool stand_still_brake = false;
+	uint16_t stand_still_ticks = 0;
+	float stand_still_speed = 0;
 	float down_force_base = 0, down_force_per_wheel = 0;
 
 	WheelCollisionTester tester = WheelCollisionTester::Cylinder;

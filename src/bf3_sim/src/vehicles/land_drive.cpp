@@ -193,6 +193,15 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 	const float wheel_brake = std::max(d.brake_filter, brake_axis);
 	const bool idle = forward_pedal == 0.0f && back_pedal == 0.0f && (!tracked || steer_axis == 0.0f);
 	const bool held = idle && (p_command.flags & vehicle_flags::kDriven) == 0;
+	bool stand_still = false;
+	if (m.stand_still_brake && m.stand_still_ticks > 0) {
+		if (idle && speed < m.stand_still_speed) {
+			d.stand_still_ticks = uint16_t(std::min<uint32_t>(d.stand_still_ticks + 1u, m.stand_still_ticks));
+		} else {
+			d.stand_still_ticks = 0;
+		}
+		stand_still = d.stand_still_ticks >= m.stand_still_ticks;
+	}
 	const std::span<const vehicles::CurvePoint> loss(land.transmission_loss.data(), land.transmission_loss_points);
 	bool any_locked = false;
 	uint32_t grounded_wheels = 0;
@@ -236,7 +245,7 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 		omega = vehicles::brake_scale(omega, wm.hand_brake_factor, hand_brake ? 1.0f : 0.0f);
 		const bool auto_brake = wm.low_speed_auto_brake != 0 && wm.driven != 0 && grounded &&
 				planar_speed < vehicles::kLowSpeedAutoBrakeSpeed && drive == 0.0f;
-		const bool locked = auto_brake || held || brake_locks;
+		const bool locked = auto_brake || held || brake_locks || stand_still;
 		if (locked) {
 			omega = 0.0f;
 		}
