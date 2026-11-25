@@ -17,6 +17,7 @@
 #include "bf3/sim/vehicle_model.h"
 #include "bf3/sim/vehicle_types.h"
 #include "bf3/sim/vehicle_world.h"
+#include "bf3/sim/vehicles/chassis_rules.h"
 #include "bf3/sim/vehicles/tracked_rules.h"
 #include "bf3/sim_harness/vehicle_course.h"
 #include "bf3/sim_harness/vehicle_replay.h"
@@ -1690,6 +1691,200 @@ TEST_SUITE("sim-vehicle") {
 		}
 		const core::SnapshotDiff diff = core::diff_snapshots(m->before, m->reader->snapshot());
 		std::printf("install.unchanged: %s\n", diff.clean() ? "clean" : diff.summary().c_str());
+		CHECK(diff.clean());
+	}
+}
+
+namespace {
+
+struct HandlingModels {
+	std::unique_ptr<core::InstallReader> reader;
+	std::shared_ptr<core::Install> install;
+	core::InstallSnapshot before;
+	std::unique_ptr<core::level::LoadedLevel> level;
+	std::shared_ptr<const VehicleModel> m1a2, growler, t90;
+};
+
+HandlingModels *handling_models() {
+	static std::unique_ptr<HandlingModels> s_models;
+	static bool s_tried = false;
+	if (s_tried) {
+		if (s_models == nullptr) {
+			bf3::test::skip_install_case("no BF3 install (see the first sim-vehicle-handling case)");
+		}
+		return s_models.get();
+	}
+	s_tried = true;
+	auto h = std::make_unique<HandlingModels>();
+	h->reader = std::make_unique<core::InstallReader>();
+	if (!h->reader->locate({})) {
+		bf3::test::skip_install_case(h->reader->describe().c_str());
+		return nullptr;
+	}
+	h->before = h->reader->snapshot();
+	core::Result<std::shared_ptr<core::Install>> opened = core::Install::open(*h->reader);
+	REQUIRE_MESSAGE(opened.ok(), (opened.ok() ? std::string() : opened.error().message));
+	h->install = *opened;
+	const VehicleTuning tuning = shipped_vehicle_tuning();
+	core::Result<std::unique_ptr<core::level::LoadedLevel>> level =
+			core::level::load_level(h->install, "MP_007", "ConquestSmall0");
+	REQUIRE_MESSAGE(level.ok(), (level.ok() ? std::string() : level.error().message));
+	h->level = std::move(*level);
+	const auto load = [&](const char *p_blueprint) {
+		core::Result<std::shared_ptr<const VehicleModel>> m =
+				load_vehicle_model(h->level->db(), h->level->mount(), p_blueprint, tuning);
+		REQUIRE_MESSAGE(m.ok(), p_blueprint << ": " << (m.ok() ? std::string() : m.error().message));
+		return *m;
+	};
+	h->m1a2 = load("vehicles/m1a2/m1abrams");
+	h->growler = load("vehicles/growleritv/growleritv");
+	h->t90 = load("vehicles/t90/t90");
+	s_models = std::move(h);
+	return s_models.get();
+}
+
+float yaw_of(const VehicleState &p_s) {
+	const std::array<float, 4> &q = p_s.body.rotation;
+	return std::atan2(2.0f * (q[0] * q[2] + q[3] * q[1]), 1.0f - 2.0f * (q[0] * q[0] + q[1] * q[1]));
+}
+
+}
+
+TEST_SUITE("sim-vehicle-handling") {
+	TEST_CASE("sim.vehicle.handling: the M1A2's and the Growler's MP_007 models carry the R5-G1 per-tick terms "
+			  "(spring K, drive per wheel, forward term, TransmissionLoss, air drag, steer inertia, motion damping)") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		const VehicleModel &g = *h->growler;
+		REQUIRE(g.wheel_count == 4);
+		CHECK(g.wheel_list == 4);
+		CHECK(g.wheels[0].spring_constant == doctest::Approx(14766.9f).epsilon(1e-4));
+		const LandDriveModel &gl = g.land;
+		const float growler_torque =
+				vehicles::torque_curve_at(0.0f, std::span<const float>(gl.rpm_points.data(), gl.curve_points),
+						std::span<const float>(gl.torque_points.data(), gl.curve_points)) *
+				gl.power_multiplier;
+		CHECK(vehicles::wheel_drive_torque(growler_torque, land_gear_ratio(gl, 1), g.wheels[0].diff_gear_ratio,
+					  gl.transmission_efficiency, 1.0f) == doctest::Approx(106.875f));
+		CHECK(gl.transmission_loss_points == 0);
+		CHECK(!g.wind_resistance);
+		CHECK(vehicle_steer_sensitivity(g, 20.0f / 3.6f) == doctest::Approx(-0.28f));
+		CHECK(vehicles::motion_damping_angular(g.motion_damping, 1.0f / 30.0f)[1] ==
+				doctest::Approx(0.935507f).epsilon(1e-5));
+
+		const VehicleModel &t = *h->m1a2;
+		REQUIRE(t.wheel_count == 6);
+		CHECK(t.wheel_list == 18);
+		const LandDriveModel &tl = t.land;
+		const float tank_torque =
+				vehicles::torque_curve_at(0.0f, std::span<const float>(tl.rpm_points.data(), tl.curve_points),
+						std::span<const float>(tl.torque_points.data(), tl.curve_points)) *
+				tl.power_multiplier;
+		CHECK(vehicles::track_forward_term(tank_torque, land_gear_ratio(tl, 1)) == doctest::Approx(77.59125f));
+		const std::span<const vehicles::CurvePoint> loss(tl.transmission_loss.data(), tl.transmission_loss_points);
+		CHECK(vehicles::transmission_loss_resistance(loss, 10.0f, 1.0f, t.mass, t.wheel_list) ==
+				doctest::Approx(10.598f).epsilon(1e-3));
+		CHECK(vehicles::transmission_loss_resistance(loss, 58.0f / 3.6f, 1.0f, t.mass, t.wheel_list) ==
+				doctest::Approx(55.556f).epsilon(1e-3));
+		CHECK(t.wind_resistance);
+		CHECK(vehicles::wind_drag(t.wind, 15.0f) == doctest::Approx(124.03f).epsilon(1e-3));
+		CHECK(vehicles::wind_drag(t.wind, 40.0f) == doctest::Approx(1829.0f).epsilon(1e-3));
+		const vehicles::TrackSteerRule rule{ tl.track_turn_speed_limit, tl.track_forward_speed_limit,
+			std::span<const std::array<float, 2>>(tl.steer_inertia.data(), tl.steer_inertia_points) };
+		CHECK(vehicles::track_steer_inertia(rule, 20.0f / 3.6f) == doctest::Approx(39.286f).epsilon(1e-4));
+		CHECK(tl.track_turn_speed_limit == doctest::Approx(2.0f));
+		CHECK(tl.track_forward_speed_limit == doctest::Approx(1.5f));
+		CHECK(-vehicle_steer_sensitivity(t, 0.0f) == doctest::Approx(0.3f));
+		for (size_t i = 0; i < t.wheel_count; ++i) {
+			CHECK(t.wheels[i].steers == 0);
+		}
+	}
+
+	TEST_CASE("sim.vehicle.handling: on flat ground the Growler's front wheels turn pi x 0.28 at full steer, its yaw "
+			  "spin decays by MotionDamping, the M1A2 and T-90 pivot on the spot, their turn terms pulling their sides "
+			  "apart up to 800 x SteeringSensitivity with the hull below 1 rad/s, and each tank stays "
+			  "under the speed where TransmissionLoss and rolling resistance meet its drive") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		const std::shared_ptr<const StaticWorldShapes> flat = ground_shapes(false);
+
+		std::unique_ptr<VehicleWorld> steer = world_at(flat, h->growler, placed(0, 0, -300));
+		settle(*steer);
+		for (int t = 0; t < 60; ++t) {
+			step1(*steer, command(0, 0, 127));
+		}
+		const VehicleState steered = steer->state(0);
+		float front = 0.0f, rear = 0.0f;
+		for (size_t i = 0; i < steered.wheel_count; ++i) {
+			const float a = std::fabs(steered.wheels[i].steer_angle);
+			(h->growler->wheels[i].data_centre[2] > 0.0f ? front : rear) = a;
+		}
+		std::printf(
+				"sim.vehicle.handling: Growler full steer at rest: front wheel %.4f rad (%.1f deg), rear %.4f rad\n",
+				double(front), double(front / core::kDegToRadF), double(rear));
+		CHECK(front == doctest::Approx(3.14159265f * 0.28f).epsilon(1e-4));
+		CHECK(rear == 0.0f);
+
+		std::unique_ptr<VehicleWorld> spin = world_at(flat, h->growler, placed(0, 40, -300));
+		VehicleState airborne = spin->state(0);
+		airborne.body.angular_velocity = { 0.0f, 1.0f, 0.0f };
+		REQUIRE(spin->restore_vehicle_state(0, airborne, vehicle_restore::kBody, ContactCachePolicy::Keep).ok());
+		for (uint32_t t = 0; t < kSimHz; ++t) {
+			step1(*spin, command(0, 0, 0));
+		}
+		const float yaw_rate = spin->state(0).body.angular_velocity[1];
+		std::printf(
+				"sim.vehicle.handling: Growler in the air, yaw 1 rad/s -> %.4f rad/s after 1 s\n", double(yaw_rate));
+		CHECK(yaw_rate == doctest::Approx(std::exp(-2.0f)).epsilon(1e-3));
+
+		for (const std::shared_ptr<const VehicleModel> &tank : { h->m1a2, h->t90 }) {
+			std::unique_ptr<VehicleWorld> pivot = world_at(flat, tank, placed(0, 0, -300));
+			settle(*pivot);
+			const VehicleState rest = pivot->state(0);
+			float peak = 0.0f;
+			for (uint32_t t = 0; t < 4 * kSimHz; ++t) {
+				step1(*pivot, command(0, 0, 127));
+				peak = std::max(peak, std::fabs(pivot->state(0).body.angular_velocity[1]));
+			}
+			const VehicleState turned = pivot->state(0);
+			float turn = std::fabs(yaw_of(turned) - yaw_of(rest));
+			const float drift = std::hypot(
+					turned.body.origin[0] - rest.body.origin[0], turned.body.origin[2] - rest.body.origin[2]);
+			std::printf("sim.vehicle.handling: %s pivot, full steer 4 s at rest: turned %.1f deg, peak yaw rate %.3f "
+						"rad/s, drift %.2f m\n",
+					tank->blueprint.c_str(), double(turn / core::kDegToRadF), double(peak), double(drift));
+			const float full_turn = vehicles::kTrackSteerForce * -vehicle_steer_sensitivity(*tank, 0.0f);
+			CHECK(peak < 1.0f / (tank->land.track_turn_speed_limit * vehicles::kTrackSpinShare));
+			CHECK(turned.driver.track_steer[0] > 0.5f * full_turn);
+			CHECK(turned.driver.track_steer[0] <= full_turn);
+			CHECK(turned.driver.track_steer[1] < -0.5f * full_turn);
+			CHECK(turned.driver.track_steer[1] >= -full_turn);
+			CHECK(turn > 10.0f * core::kDegToRadF);
+			CHECK(drift < 1.5f);
+		}
+
+		for (const std::shared_ptr<const VehicleModel> &model : { h->m1a2, h->t90 }) {
+			std::unique_ptr<VehicleWorld> run = world_at(flat, model, placed(0, 0, -300));
+			settle(*run);
+			float top = 0.0f;
+			for (uint32_t t = 0; t < 30 * kSimHz; ++t) {
+				step1(*run, command(127, 0, 0));
+				const Vec3 &v = run->state(0).body.linear_velocity;
+				top = std::max(top, std::hypot(v[0], v[2]) * vehicles::kKmhPerMs);
+			}
+			const float governed = land_balance_speed_kmh(*model);
+			std::printf("sim.vehicle.handling: %s full throttle 30 s on flat ground: top %.1f km/h, drive meets "
+						"TransmissionLoss and rolling resistance at %.1f km/h\n",
+					model->blueprint.c_str(), double(top), double(governed));
+			CHECK(model->land.transmission_loss_points > 0);
+			CHECK(top > 5.0f);
+			CHECK(top <= governed);
+		}
+		const core::SnapshotDiff diff = core::diff_snapshots(h->before, h->reader->snapshot());
 		CHECK(diff.clean());
 	}
 }
