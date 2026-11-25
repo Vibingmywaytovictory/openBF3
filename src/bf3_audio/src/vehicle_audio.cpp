@@ -13,41 +13,33 @@ namespace vsp = core::gameplay::vehicle_sound_port;
 
 namespace {
 
-struct ParamDef {
-	int32_t hash = 0;
-	float step = 0.0f;
-};
-
 constexpr size_t kMaxStopping = 64;
 
-constexpr std::array<ParamDef, kVehicleSoundParams> kParams = { {
-		{ vsp::kThrottle, 0.01f },
-		{ vsp::kRpm, 10.0f },
-		{ vsp::kGear, 0.5f },
-		{ vsp::kLoad, 0.01f },
-		{ vsp::kVelocity, 0.05f },
-		{ vsp::kAngularVelocity, 0.01f },
-		{ vsp::kRelativeVelocity, 0.05f },
-		{ vsp::kSlip, 0.02f },
-		{ vsp::kTilt, 0.005f },
-		{ vsp::kContact, 0.01f },
-		{ vsp::kBoost, 0.5f },
-		{ vsp::kSpringCompression, 0.01f },
-		{ vsp::kInteriorCam, 0.5f },
-		{ vsp::kLocalPlayerInVehicle, 0.5f },
-		{ vsp::kHealth, 0.001f },
-		{ vsp::kDisabledDamageThreshold, 0.001f },
-		{ vsp::kInDriverPos, 0.5f },
+constexpr std::array<int32_t, kVehicleSoundParams> kParams = { {
+		vsp::kThrottle,
+		vsp::kRpm,
+		vsp::kGear,
+		vsp::kLoad,
+		vsp::kVelocity,
+		vsp::kAngularVelocity,
+		vsp::kRelativeVelocity,
+		vsp::kSlip,
+		vsp::kTilt,
+		vsp::kContact,
+		vsp::kBoost,
+		vsp::kSpringCompression,
+		vsp::kInteriorCam,
+		vsp::kLocalPlayerInVehicle,
+		vsp::kHealth,
+		vsp::kDisabledDamageThreshold,
+		vsp::kInDriverPos,
+		vsp::kRoll,
+		vsp::kGForce,
 } };
-
 }
 
 uint32_t vehicle_sound_param_hash(VehicleSoundParam p_param) {
-	return uint32_t(kParams[size_t(p_param)].hash);
-}
-
-float vehicle_sound_param_step(VehicleSoundParam p_param) {
-	return kParams[size_t(p_param)].step;
+	return uint32_t(kParams[size_t(p_param)]);
 }
 
 VehicleAudio::VehicleAudio(std::vector<std::shared_ptr<const core::audio::SoundProgram>> p_programs,
@@ -57,7 +49,7 @@ VehicleAudio::VehicleAudio(std::vector<std::shared_ptr<const core::audio::SoundP
 	for (size_t p = 0; p < programs_.size(); ++p) {
 		for (size_t i = 0; i < kVehicleSoundParams; ++i) {
 			connected_[p][i] =
-					programs_[p] != nullptr && programs_[p]->input_register(uint32_t(kParams[i].hash)).has_value();
+					programs_[p] != nullptr && programs_[p]->input_register(uint32_t(kParams[i])).has_value();
 		}
 	}
 }
@@ -90,7 +82,7 @@ bool VehicleAudio::start(MixerCore &r_mixer, const VehicleSoundSource &p_source,
 	v.program = p_source.program;
 	for (size_t i = 0; i < kVehicleSoundParams; ++i) {
 		if (connected_[p_source.program][i]) {
-			(*inst)->set_parameter(uint32_t(kParams[i].hash), p_source.params[i]);
+			(*inst)->set_parameter(uint32_t(kParams[i]), p_source.params[i]);
 		}
 		v.sent[i] = p_source.params[i];
 	}
@@ -104,13 +96,41 @@ bool VehicleAudio::start(MixerCore &r_mixer, const VehicleSoundSource &p_source,
 		return false;
 	}
 	(void)inst->release();
-	if (program->start_event != 0) {
-		(void)push(r_mixer, MixerCommandType::PostEvent, v.handle, program->start_event, 0.0f);
-	}
 	v.seen = true;
-	voices_.push_back(v);
 	++stats_.starts;
+	(void)post(r_mixer, v, true);
+	voices_.push_back(v);
 	return true;
+}
+
+bool VehicleAudio::post(MixerCore &r_mixer, Voice &r_voice, bool p_start) {
+	const core::audio::SoundProgram &program = *programs_[r_voice.program];
+	const uint32_t event = p_start ? program.start_event : program.stop_event;
+	r_voice.running = p_start;
+	if (event == 0 || !push(r_mixer, MixerCommandType::PostEvent, r_voice.handle, event, 0.0f)) {
+		return false;
+	}
+	++(p_start ? stats_.start_events : stats_.stops);
+	return true;
+}
+
+void VehicleAudio::update(MixerCore &r_mixer, Voice &r_voice, const VehicleSoundSource &p_source) {
+	MixerCommand em;
+	em.type = MixerCommandType::SetEmitter;
+	em.handle = r_voice.handle;
+	em.emitter = p_source.emitter;
+	if (!r_mixer.push(em)) {
+		++stats_.push_failures;
+	}
+	for (size_t i = 0; i < kVehicleSoundParams; ++i) {
+		if (!connected_[p_source.program][i] || p_source.params[i] == r_voice.sent[i]) {
+			continue;
+		}
+		if (push(r_mixer, MixerCommandType::SetParameter, r_voice.handle, uint32_t(kParams[i]), p_source.params[i])) {
+			r_voice.sent[i] = p_source.params[i];
+			++stats_.updates;
+		}
+	}
 }
 
 void VehicleAudio::stop(MixerCore &r_mixer, Voice &r_voice) {
@@ -129,7 +149,7 @@ void VehicleAudio::stop(MixerCore &r_mixer, Voice &r_voice) {
 	}
 	stopping_.push_back(r_voice.handle);
 	r_voice.handle = kNoInstance;
-	++stats_.stops;
+	stats_.stops += r_voice.running ? 1u : 0u;
 }
 
 void VehicleAudio::step(
@@ -137,41 +157,47 @@ void VehicleAudio::step(
 	for (Voice &v : voices_) {
 		v.seen = false;
 	}
+	for (Activation &a : activations_) {
+		a.seen = false;
+	}
 	for (const VehicleSoundSource &s : p_sources) {
 		if (s.program >= programs_.size() || !programs_[s.program] || !core::finite(s.emitter.position)) {
 			continue;
 		}
+		bool activated = s.running;
+		if (s.kind == VehicleSoundKind::Engine) {
+			auto a = std::find_if(
+					activations_.begin(), activations_.end(), [&](const Activation &p_a) { return p_a.key == s.key; });
+			if (a == activations_.end()) {
+				activations_.push_back(Activation{ s.key, false, false });
+				a = activations_.end() - 1;
+			}
+			activated = s.running && !a->running;
+			a->running = s.running;
+			a->seen = true;
+		}
 		auto it = std::find_if(voices_.begin(), voices_.end(),
 				[&](const Voice &v) { return v.handle != kNoInstance && v.key == s.key && v.program == s.program; });
-		if (!s.running && it == voices_.end()) {
+		const float rpm = s.params[size_t(VehicleSoundParam::Rpm)];
+		if (it == voices_.end()) {
+			const bool spin_up = s.kind == VehicleSoundKind::Spin && rpm >= s.previous_rpm && rpm >= s.start_rpm;
+			if ((s.kind == VehicleSoundKind::Engine && activated) || spin_up) {
+				(void)start(r_mixer, s, p_listener);
+			}
 			continue;
 		}
+		it->seen = true;
 		stats_.peak_velocity = std::max(stats_.peak_velocity, s.params[size_t(VehicleSoundParam::Velocity)]);
 		stats_.peak_throttle = std::max(stats_.peak_throttle, std::fabs(s.params[size_t(VehicleSoundParam::Throttle)]));
-		stats_.peak_rpm = std::max(stats_.peak_rpm, s.params[size_t(VehicleSoundParam::Rpm)]);
+		stats_.peak_rpm = std::max(stats_.peak_rpm, rpm);
 		if (s.params[size_t(VehicleSoundParam::InteriorCam)] > 0.5f) {
 			++stats_.interior_frames;
 		}
-		if (it == voices_.end()) {
-			(void)start(r_mixer, s, p_listener);
-			continue;
-		}
-		it->seen = s.running;
-		MixerCommand em;
-		em.type = MixerCommandType::SetEmitter;
-		em.handle = it->handle;
-		em.emitter = s.emitter;
-		if (!r_mixer.push(em)) {
-			++stats_.push_failures;
-		}
-		for (size_t i = 0; i < kVehicleSoundParams; ++i) {
-			if (!connected_[s.program][i] || std::fabs(s.params[i] - it->sent[i]) < kParams[i].step) {
-				continue;
-			}
-			if (push(r_mixer, MixerCommandType::SetParameter, it->handle, uint32_t(kParams[i].hash), s.params[i])) {
-				it->sent[i] = s.params[i];
-				++stats_.updates;
-			}
+		update(r_mixer, *it, s);
+		if (s.kind == VehicleSoundKind::Engine && s.running != it->running) {
+			(void)post(r_mixer, *it, s.running);
+		} else if (s.kind == VehicleSoundKind::Spin && it->running && rpm <= s.previous_rpm && rpm < s.stop_rpm) {
+			(void)post(r_mixer, *it, false);
 		}
 	}
 	for (Voice &v : voices_) {
@@ -180,6 +206,7 @@ void VehicleAudio::step(
 		}
 	}
 	std::erase_if(voices_, [](const Voice &v) { return v.handle == kNoInstance; });
+	std::erase_if(activations_, [](const Activation &a) { return !a.seen; });
 	stats_.live = uint32_t(voices_.size());
 	stats_.peak_live = std::max(stats_.peak_live, stats_.live);
 }
@@ -208,6 +235,7 @@ void VehicleAudio::stop_all(MixerCore &r_mixer) {
 		stop(r_mixer, v);
 	}
 	std::erase_if(voices_, [](const Voice &v) { return v.handle == kNoInstance; });
+	activations_.clear();
 	stats_.live = 0;
 }
 

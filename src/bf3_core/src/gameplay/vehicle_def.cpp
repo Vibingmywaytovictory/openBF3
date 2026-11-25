@@ -237,6 +237,7 @@ VehicleHealthZoneDef read_zone(const EbxStruct &p_entity, std::string_view p_fie
 
 Result<VehicleCameraDef> read_camera(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_component) {
 	VehicleCameraDef out;
+	out.instance = p_component.index();
 	const EbxStruct c = p_component.data();
 	out.field_of_view = static_cast<float>(number_or(c, "FieldOfView", 0));
 	out.regular_field_of_view = static_cast<float>(number_or(c, "RegularView.FieldOfView", 0));
@@ -487,6 +488,8 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		t.frame_turret = t.parent;
 		t.frame = model_transform(layout.nodes[static_cast<size_t>(node)].turret_frame);
 		t.sound = ref_name(budget, p_db, component, "SoundEffect");
+		t.sound_start_rpm = static_cast<float>(number_or(component, "SoundEffectStartRpm", 0));
+		t.sound_stop_rpm = static_cast<float>(number_or(component, "SoundEffectStopRpm", 0));
 		out.turrets.push_back(std::move(t));
 	}
 

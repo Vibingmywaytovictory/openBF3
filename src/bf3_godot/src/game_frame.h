@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bf3/core/gameplay/vehicle_def.h"
 #include "bf3/fx/fx_types.h"
 #include "bf3/fx/triggers.h"
 #include "bf3/host/client_session.h"
@@ -44,6 +45,7 @@ struct GameFrame {
 	bool own_alive = false;
 	uint8_t own_slot = 0xFF;
 	uint8_t own_team = 0;
+	uint32_t own_vehicle_camera = core::gameplay::kNoVehicleCamera;
 	std::span<const int32_t> own_step_tags;
 	bool own_steps_animated = false;
 	std::span<const uint8_t> other_plants;

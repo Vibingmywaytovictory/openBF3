@@ -237,6 +237,16 @@ host::PresentedVehicle parked(const host::LevelVehicles &p_level, uint16_t p_spa
 	return v;
 }
 
+uint32_t sound_view_camera(const VehicleFixture &p_f, uint16_t p_kind, size_t p_seat) {
+	const std::vector<uint32_t> &wired = p_f.assets.defs[p_kind].engines.front().first_person_cameras;
+	for (const cg::VehicleCameraDef &c : p_f.level->kinds[p_kind].seat_defs.at(p_seat).cameras) {
+		if (std::find(wired.begin(), wired.end(), c.instance) != wired.end()) {
+			return c.instance;
+		}
+	}
+	return cg::kNoVehicleCamera;
+}
+
 void drive(host::PresentedVehicle &r_v, const sim::VehicleModel &p_model, float p_speed, float p_throttle) {
 	r_v.linear_velocity = { 0.0f, 0.0f, p_speed };
 	r_v.throttle = p_throttle;
@@ -292,11 +302,12 @@ TEST_SUITE("audio-vehicles-install") {
 			const std::string inputs = connected_inputs(*f->assets.programs[program]);
 			std::printf("%s: engine %s at (%.4f, %.4f, %.4f), first person sounds %d, surface `%s`, %zu turret sounds "
 						"(first `%s`), impact %s, view switch %s / %s, inputs [%s], disabled fraction %.3f\n",
-					e.blueprint, engine.patch.c_str(), double(engine.position.x), double(engine.position.y),
-					double(engine.position.z), int(engine.first_person_sounds), engine.surface_patch.c_str(),
-					def.turrets.size(), def.turrets.empty() ? "" : def.turrets.front().patch.c_str(),
-					def.bullet_impact.c_str(), def.switch_to_alternate_view.c_str(), def.switch_to_normal_view.c_str(),
-					inputs.c_str(), double(f->assets.disabled_fraction[*kind]));
+					e.blueprint, engine.patch.c_str(), double(engine.transform.trans.x),
+					double(engine.transform.trans.y), double(engine.transform.trans.z), int(engine.first_person_sounds),
+					engine.surface_patch.c_str(), def.turrets.size(),
+					def.turrets.empty() ? "" : def.turrets.front().patch.c_str(), def.bullet_impact.c_str(),
+					def.switch_to_alternate_view.c_str(), def.switch_to_normal_view.c_str(), inputs.c_str(),
+					double(f->assets.disabled_fraction[*kind]));
 			CHECK(engine.patch == e.engine);
 			CHECK(inputs == e.inputs);
 			CHECK(engine.surface_patch.empty());
@@ -504,6 +515,8 @@ TEST_SUITE("audio-vehicles-drive") {
 		const core::Vec3 origin = core::vec::sub(v.com_position, rot.transform_vector(model.center_of_mass));
 		inside.listener.position = core::vec::add(origin, f->level->kinds[*kind].box.centre);
 		inside.listener.forward = { 0.0f, 0.0f, 1.0f };
+		inside.own_camera = sound_view_camera(*f, *kind, 0);
+		REQUIRE(inside.own_camera != cg::kNoVehicleCamera);
 		for (int i = 0; i < 30; ++i) {
 			rig.frame(*f, v, inside);
 		}
@@ -563,8 +576,8 @@ TEST_SUITE("audio-vehicles-drive") {
 		check_unchanged(*f);
 	}
 
-	TEST_CASE("the Growler's gunner turret: silent turning with nobody in its seat; manned, its traverse sound starts "
-			  "while it turns, reads its speed as RPM and stops when it stops") {
+	TEST_CASE("the Growler's gunner turret: its traverse sound starts while it turns, manned or not, reads its speed "
+			  "as RPM and stops when it stops") {
 		VehicleFixture *f = need_install();
 		if (f == nullptr) {
 			return;
@@ -587,7 +600,7 @@ TEST_SUITE("audio-vehicles-drive") {
 			v.turret_angle[size_t(turret)] = float(i - 30) * (std::numbers::pi_v<float> / 60.0f);
 			rig.frame(*f, v, view);
 		}
-		CHECK(rig.audio->stats().starts == 0);
+		CHECK(rig.audio->stats().starts == 1);
 		const double still_db = rig.rms(0.0, 0.5);
 		const int8_t seat = f->level->kinds[*kind].armament->turrets[size_t(turret)].seat;
 		REQUIRE(seat > 0);
@@ -621,7 +634,7 @@ TEST_SUITE("audio-vehicles-drive") {
 		CHECK(end.stops == 1);
 		CHECK(end.ended == 1);
 		CHECK(rig.finished_s() > 1.5);
-		CHECK(still_db < -100.0);
+		CHECK(still_db > -70.0);
 		CHECK(turning_db > -70.0);
 		CHECK(after_db < -100.0);
 		check_unchanged(*f);
@@ -655,6 +668,8 @@ TEST_SUITE("audio-vehicles-drive") {
 			const core::Vec3 origin = core::vec::sub(v.com_position, rot.transform_vector(model.center_of_mass));
 			view.listener.position = core::vec::add(origin, f->level->kinds[*kind].box.centre);
 			view.own_slot = 7;
+			view.own_camera = sound_view_camera(*f, *kind, 0);
+			REQUIRE(view.own_camera != cg::kNoVehicleCamera);
 			for (int i = 0; i < 120; ++i) {
 				rig.frame(*f, v, view);
 			}
@@ -727,5 +742,335 @@ TEST_SUITE("audio-vehicles-drive") {
 		const host::PresentedVehicle v = host::present_vehicle(w, 40);
 		CHECK(v.throttle == -0.75f);
 		CHECK(v.wheel_contact == 0b1101);
+	}
+}
+
+namespace {
+
+std::optional<float> patch_input(const ba::VehicleSoundSource &p_source, std::string_view p_name) {
+	const uint32_t hash = uint32_t(cg::logic_port_id(p_name));
+	for (size_t i = 0; i < ba::kVehicleSoundParams; ++i) {
+		if (ba::vehicle_sound_param_hash(P(i)) == hash) {
+			return p_source.params[i];
+		}
+	}
+	return std::nullopt;
+}
+
+struct InputVector {
+	const char *name;
+	float value;
+};
+
+void check_inputs(const ba::VehicleSoundSource &p_source, std::initializer_list<InputVector> p_vector) {
+	for (const InputVector &e : p_vector) {
+		CAPTURE(e.name);
+		const std::optional<float> got = patch_input(p_source, e.name);
+		std::printf(
+				"  %s = %s (notes %.6g)\n", e.name, got ? std::to_string(*got).c_str() : "not sent", double(e.value));
+		REQUIRE(got.has_value());
+		CHECK(*got == doctest::Approx(e.value).epsilon(1e-4).scale(1.0));
+	}
+}
+
+std::array<float, 4> axis_rotation(int p_axis, float p_radians) {
+	std::array<float, 4> q{ 0.0f, 0.0f, 0.0f, std::cos(0.5f * p_radians) };
+	q[size_t(p_axis)] = std::sin(0.5f * p_radians);
+	return q;
+}
+
+const ba::VehicleSoundSource &engine_source(const std::vector<ba::VehicleSoundSource> &p_sources, uint32_t p_key) {
+	const auto it = std::find_if(
+			p_sources.begin(), p_sources.end(), [&](const ba::VehicleSoundSource &s) { return s.key == p_key; });
+	REQUIRE(it != p_sources.end());
+	return *it;
+}
+
+void set_spring(host::PresentedVehicle &r_v, const sim::VehicleModel &p_model, float p_compression) {
+	for (size_t i = 0; i < p_model.wheel_count; ++i) {
+		r_v.suspension_length[i] = p_model.wheels[i].suspension_max * (1.0f - p_compression);
+	}
+}
+
+void roll_wheels(host::PresentedVehicle &r_v, const sim::VehicleModel &p_model, float p_speed) {
+	for (size_t i = 0; i < p_model.wheel_count; ++i) {
+		r_v.wheel_spin[i] = p_model.wheels[i].radius > 0.0f ? p_speed / p_model.wheels[i].radius : 0.0f;
+	}
+}
+
+}
+
+TEST_SUITE("audio-vehicles-inputs") {
+	TEST_CASE(
+			"R5-VS4 A: the M1A2's engine patch inputs for its own driver at idle and climbing 10 degrees at 20 km/h") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/m1a2/m1abrams");
+		REQUIRE(kind.has_value());
+		const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
+		REQUIRE(spawner.has_value());
+		const sim::VehicleModel &model = *f->level->kinds[*kind].model;
+		host::PresentedVehicle v = parked(*f->level, *spawner);
+		v.occupants[0] = 7;
+		set_spring(v, model, 0.2f);
+		const host::LevelVehicleKind &tank = f->level->kinds[*kind];
+		const std::vector<uint32_t> &wired = f->assets.defs[*kind].engines.front().first_person_cameras;
+		std::printf("M1A2 cameras feeding UseFirstPersonSounds:");
+		for (const uint32_t c : wired) {
+			std::printf(" %u", c);
+		}
+		std::printf("\n");
+		CHECK(wired.size() == 4);
+		uint32_t driver_view = cg::kNoVehicleCamera, driver_chase = cg::kNoVehicleCamera;
+		uint32_t gunner_view = cg::kNoVehicleCamera;
+		uint8_t gunner_seat = 0;
+		for (size_t s = 0; s < tank.seat_defs.size(); ++s) {
+			for (const cg::VehicleCameraDef &c : tank.seat_defs[s].cameras) {
+				const bool feeds = std::find(wired.begin(), wired.end(), c.instance) != wired.end();
+				std::printf("  seat %zu camera %u %s, %s\n", s, c.instance, c.first_person ? "first person" : "chase",
+						feeds ? "feeds the engine" : "does not feed the engine");
+				CHECK(feeds == c.first_person);
+				if (s == 0 && c.first_person && driver_view == cg::kNoVehicleCamera) {
+					driver_view = c.instance;
+				}
+				if (s == 0 && !c.first_person && driver_chase == cg::kNoVehicleCamera) {
+					driver_chase = c.instance;
+				}
+				if (s > 0 && feeds && gunner_view == cg::kNoVehicleCamera) {
+					gunner_view = c.instance;
+					gunner_seat = uint8_t(s);
+				}
+			}
+		}
+		REQUIRE(driver_view != cg::kNoVehicleCamera);
+		REQUIRE(driver_chase != cg::kNoVehicleCamera);
+		REQUIRE(gunner_view != cg::kNoVehicleCamera);
+		ba::VehicleListenerView view;
+		view.own_slot = 7;
+		view.own_camera = driver_view;
+		const core::Transform rot = core::Transform::from_rotation_translation(v.rotation, core::Vec3{});
+		view.listener.position =
+				core::vec::add(core::vec::sub(v.com_position, rot.transform_vector(model.center_of_mass)),
+						f->level->kinds[*kind].box.centre);
+		ba::VehicleSoundMemory memory;
+		std::vector<ba::VehicleSoundSource> sources;
+		const uint32_t key = ba::vehicle_sound_key(*spawner, v.generation, ba::kVehicleEngineSound);
+		for (int i = 0; i < 60; ++i) {
+			v.tick = sim::Tick(100 + i);
+			const host::PresentedVehicle one[1] = { v };
+			ba::vehicle_sound_sources(one, *f->level, f->assets, view, memory, sources);
+		}
+		std::printf("M1A2 A1 idle, own driver in the first-person view:\n");
+		check_inputs(engine_source(sources, key),
+				{ { "Velocity", 0.0f }, { "Throttle", 0.0f }, { "Load", 0.0f }, { "Gear", 0.0f }, { "RPM", 0.0f },
+						{ "Slip", 0.0f }, { "SpringCompression", 0.2f }, { "Contact", 1.0f },
+						{ "AngularVelocity", 0.0f }, { "Roll", 0.0f }, { "Tilt", 0.0f }, { "GForce", 1.0f },
+						{ "Health", 1.0f }, { "DisabledDamageThreshold", 0.5f }, { "InDriverPos", 1.0f },
+						{ "LocalPlayerInVehicle", 1.0f }, { "InteriorCam", 1.0f }, { "RelativeVelocity", 0.0f },
+						{ "Boost", 0.0f } });
+		const auto one_view = [&](uint32_t p_camera) {
+			view.own_camera = p_camera;
+			const host::PresentedVehicle one[1] = { v };
+			ba::vehicle_sound_sources(one, *f->level, f->assets, view, memory, sources);
+			return engine_source(sources, key);
+		};
+		std::printf("M1A2, the same driver in the chase camera:\n");
+		check_inputs(one_view(driver_chase), { { "InteriorCam", 0.0f }, { "LocalPlayerInVehicle", 1.0f } });
+		v.occupants[0] = 3;
+		v.occupants[gunner_seat] = 7;
+		std::printf(
+				"M1A2, the own soldier in seat %u's first-person view, someone else driving:\n", unsigned(gunner_seat));
+		check_inputs(one_view(gunner_view),
+				{ { "InteriorCam", 1.0f }, { "LocalPlayerInVehicle", 1.0f }, { "InDriverPos", 1.0f } });
+		v.occupants[gunner_seat] = net::kNoVehicleOccupant;
+		v.occupants[0] = 7;
+		view.own_camera = driver_view;
+		const float pitch = 10.0f * std::numbers::pi_v<float> / 180.0f;
+		v.rotation = axis_rotation(0, -pitch);
+		const core::Transform climb = core::Transform::from_rotation_translation(v.rotation, core::Vec3{});
+		const float speed = 20.0f / 3.6f;
+		v.linear_velocity = core::vec::scale(climb.forward, speed);
+		view.listener.velocity = v.linear_velocity;
+		roll_wheels(v, model, speed);
+		v.throttle = 1.0f;
+		v.gear = 1;
+		v.engine_rpm = 700.0f;
+		for (int i = 0; i < 60; ++i) {
+			v.tick = sim::Tick(200 + i);
+			const host::PresentedVehicle one[1] = { v };
+			ba::vehicle_sound_sources(one, *f->level, f->assets, view, memory, sources);
+		}
+		std::printf("M1A2 A5 full throttle, 20 km/h, climbing 10 degrees:\n");
+		check_inputs(engine_source(sources, key),
+				{ { "Velocity", speed }, { "Throttle", 1.0f }, { "Gear", 1.0f }, { "RPM", 700.0f },
+						{ "Tilt", std::sin(pitch) }, { "Roll", 0.5f * (1.0f - std::cos(pitch)) },
+						{ "Load", std::asin(std::sin(pitch)) * 4.0f / std::numbers::pi_v<float> }, { "Slip", 0.0f },
+						{ "Contact", 1.0f }, { "GForce", 1.0f }, { "RelativeVelocity", 0.0f } });
+		check_unchanged(*f);
+	}
+
+	TEST_CASE("R5-VS4 B: the Growler's engine patch inputs with wheels in the air, yawing on its side, and passing an "
+			  "outside listener") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/growleritv/growleritv");
+		REQUIRE(kind.has_value());
+		const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
+		REQUIRE(spawner.has_value());
+		const sim::VehicleModel &model = *f->level->kinds[*kind].model;
+		REQUIRE(model.wheel_count == 4);
+		host::PresentedVehicle v = parked(*f->level, *spawner);
+		v.occupants[0] = 3;
+		set_spring(v, model, 0.25f);
+		ba::VehicleListenerView view;
+		view.listener.position = { 30.0f, 100.0f, 0.0f };
+		view.own_slot = 7;
+		ba::VehicleSoundMemory memory;
+		std::vector<ba::VehicleSoundSource> sources;
+		const uint32_t key = ba::vehicle_sound_key(*spawner, v.generation, ba::kVehicleEngineSound);
+		const auto run = [&](sim::Tick p_from) {
+			for (int i = 0; i < 60; ++i) {
+				v.tick = p_from + sim::Tick(i);
+				const host::PresentedVehicle one[1] = { v };
+				ba::vehicle_sound_sources(one, *f->level, f->assets, view, memory, sources);
+			}
+			return engine_source(sources, key);
+		};
+		float speed = 30.0f / 3.6f;
+		v.linear_velocity = { 0.0f, 0.0f, speed };
+		roll_wheels(v, model, speed);
+		v.throttle = 0.5f;
+		v.wheel_contact = 0b1110;
+		std::printf("Growler B5, one wheel in the air at 30 km/h, someone else driving:\n");
+		check_inputs(run(100),
+				{ { "Contact", 1.0f }, { "Slip", 1.0f }, { "SpringCompression", 0.25f }, { "InDriverPos", 1.0f },
+						{ "LocalPlayerInVehicle", 0.0f }, { "InteriorCam", 0.0f },
+						{ "DisabledDamageThreshold", 0.6f } });
+		speed = 50.0f / 3.6f;
+		v.linear_velocity = { 0.0f, 0.0f, speed };
+		roll_wheels(v, model, speed);
+		v.wheel_contact = 0;
+		std::printf("Growler B6, all four wheels in the air at 50 km/h:\n");
+		check_inputs(run(200), { { "Contact", 0.0f }, { "Slip", 4.0f } });
+		const float roll = 20.0f * std::numbers::pi_v<float> / 180.0f;
+		v.rotation = axis_rotation(2, roll);
+		v.linear_velocity = {};
+		roll_wheels(v, model, 0.0f);
+		v.angular_velocity = { 0.0f, 0.5f, 0.0f };
+		v.wheel_contact = 0b1111;
+		std::printf("Growler on its side by 20 degrees, yawing at 0.5 rad/s:\n");
+		check_inputs(run(300),
+				{ { "AngularVelocity", 0.5f }, { "Roll", 0.5f * (1.0f - std::cos(roll)) }, { "Tilt", 0.0f },
+						{ "Slip", 0.0f } });
+		v.rotation = { 0.0f, 0.0f, 0.0f, 1.0f };
+		v.angular_velocity = {};
+		speed = 60.0f / 3.6f;
+		v.linear_velocity = { 0.0f, 0.0f, speed };
+		roll_wheels(v, model, speed);
+		std::printf("Growler B7, passing a standing outside listener at 60 km/h:\n");
+		check_inputs(run(400),
+				{ { "RelativeVelocity", speed }, { "Velocity", speed }, { "InteriorCam", 0.0f },
+						{ "LocalPlayerInVehicle", 0.0f }, { "InDriverPos", 1.0f } });
+		check_unchanged(*f);
+	}
+
+	TEST_CASE("R5-VS1 Rule 1: the engine sound lives from the driver's entry to the end of its stop sound; a re-entry "
+			  "in the tail posts Start on the same sound, and every input change is sent") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/growleritv/growleritv");
+		REQUIRE(kind.has_value());
+		const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
+		REQUIRE(spawner.has_value());
+		const sim::VehicleModel &model = *f->level->kinds[*kind].model;
+		DriveRig rig(*f);
+		host::PresentedVehicle v = parked(*f->level, *spawner);
+		ba::VehicleListenerView outside;
+		outside.listener.position = { 10.0f, 101.6f, 0.0f };
+		outside.own_slot = 7;
+		v.occupants[0] = 3;
+		for (int i = 0; i < 120; ++i) {
+			rig.frame(*f, v, outside);
+		}
+		CHECK(rig.audio->stats().starts == 1);
+		const uint64_t updates = rig.audio->stats().updates;
+		drive(v, model, 1.0f, 0.5f);
+		rig.frame(*f, v, outside);
+		const uint64_t moved = rig.audio->stats().updates;
+		v.linear_velocity.z += 0.01f;
+		rig.frame(*f, v, outside);
+		std::printf("Growler inputs sent: %llu at idle, %llu after a 1 m/s move, %llu after a further 0.01 m/s\n",
+				(unsigned long long)updates, (unsigned long long)moved, (unsigned long long)rig.audio->stats().updates);
+		CHECK(rig.audio->stats().updates > moved);
+		v.occupants[0] = net::kNoVehicleOccupant;
+		for (int i = 0; i < 6; ++i) {
+			rig.frame(*f, v, outside);
+		}
+		CHECK(rig.audio->stats().stops == 1);
+		v.occupants[0] = 3;
+		for (int i = 0; i < 60; ++i) {
+			rig.frame(*f, v, outside);
+		}
+		std::printf("Growler engine after a re-entry 0.1 s into its stop sound: %llu sounds started, %llu stops, %llu "
+					"ended, %u live\n",
+				(unsigned long long)rig.audio->stats().starts, (unsigned long long)rig.audio->stats().stops,
+				(unsigned long long)rig.audio->stats().ended, rig.audio->stats().live);
+		CHECK(rig.audio->stats().starts == 1);
+		CHECK(rig.audio->stats().live == 1);
+		check_unchanged(*f);
+	}
+
+	TEST_CASE("R5-VS1 Rule 7: the Growler mount's spin sound starts when it turns at 0.1 rpm or more and stops when it "
+			  "slows below 0.1 rpm, manned or not") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/growleritv/growleritv");
+		REQUIRE(kind.has_value());
+		const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
+		REQUIRE(spawner.has_value());
+		REQUIRE(f->assets.turret_programs[*kind].size() == 1);
+		const auto [turret, program] = f->assets.turret_programs[*kind].front();
+		DriveRig rig(*f);
+		host::PresentedVehicle v = parked(*f->level, *spawner);
+		v.turret_count = uint8_t(f->level->kinds[*kind].armament->turrets.size());
+		ba::VehicleListenerView view;
+		view.listener.position = { 3.0f, 101.6f, 0.0f };
+		const uint32_t key = ba::vehicle_sound_key(*spawner, v.generation, 1u + uint32_t(turret));
+		float angle = 0.0f;
+		const auto turn = [&](float p_rpm, int p_ticks, sim::Tick p_from) {
+			float rpm = 0.0f;
+			for (int i = 0; i < p_ticks; ++i) {
+				v.tick = p_from + sim::Tick(i);
+				angle += p_rpm / 9.549296f / float(sim::kSimHz);
+				v.turret_angle[size_t(turret)] = angle;
+				rig.frame(*f, v, view);
+				for (const ba::VehicleSoundSource &src : rig.sources) {
+					if (src.key == key) {
+						rpm = src.params[size_t(P::Rpm)];
+					}
+				}
+			}
+			return rpm;
+		};
+		turn(0.05f, 30, 100);
+		const uint64_t slow = rig.audio->stats().starts;
+		const float rpm = turn(0.5f, 30, 130);
+		std::printf("Growler mount, unmanned: 0.05 rpm gives %llu starts; 0.5 rpm gives %llu starts, RPM input %.4f\n",
+				(unsigned long long)slow, (unsigned long long)rig.audio->stats().starts, double(rpm));
+		CHECK(slow == 0);
+		CHECK(rig.audio->stats().starts == 1);
+		CHECK(rig.audio->handle_of(key, program) != ba::kNoInstance);
+		CHECK(rpm == doctest::Approx(0.5f).epsilon(0.01));
+		turn(0.0f, 10, 160);
+		CHECK(rig.audio->stats().stops == 1);
+		check_unchanged(*f);
 	}
 }

@@ -34,19 +34,26 @@ enum class VehicleSoundParam : uint8_t {
 	Health,
 	DisabledDamageThreshold,
 	InDriverPos,
+	Roll,
+	GForce,
 	Count
 };
 inline constexpr size_t kVehicleSoundParams = size_t(VehicleSoundParam::Count);
 
 uint32_t vehicle_sound_param_hash(VehicleSoundParam p_param);
-float vehicle_sound_param_step(VehicleSoundParam p_param);
 
 inline constexpr uint16_t kNoVehicleProgram = 0xFFFF;
+
+enum class VehicleSoundKind : uint8_t { Engine, Spin };
 
 struct VehicleSoundSource {
 	uint32_t key = 0;
 	uint16_t program = kNoVehicleProgram;
+	VehicleSoundKind kind = VehicleSoundKind::Engine;
 	bool running = false;
+	float start_rpm = 0.0f;
+	float stop_rpm = 0.0f;
+	float previous_rpm = 0.0f;
 	EmitterState emitter;
 	std::array<float, kVehicleSoundParams> params{};
 };
@@ -54,6 +61,7 @@ static_assert(std::is_trivially_copyable_v<VehicleSoundSource>);
 
 struct VehicleAudioStats {
 	uint64_t starts = 0;
+	uint64_t start_events = 0;
 	uint64_t stops = 0;
 	uint64_t ended = 0;
 	uint64_t updates = 0;
@@ -87,9 +95,18 @@ private:
 		InstanceHandle handle = kNoInstance;
 		std::array<float, kVehicleSoundParams> sent{};
 		bool seen = false;
+		bool running = false;
+	};
+
+	struct Activation {
+		uint32_t key = 0;
+		bool running = false;
+		bool seen = false;
 	};
 
 	bool start(MixerCore &r_mixer, const VehicleSoundSource &p_source, const ListenerState &p_listener);
+	bool post(MixerCore &r_mixer, Voice &r_voice, bool p_start);
+	void update(MixerCore &r_mixer, Voice &r_voice, const VehicleSoundSource &p_source);
 	void stop(MixerCore &r_mixer, Voice &r_voice);
 	bool push(MixerCore &r_mixer, MixerCommandType p_type, InstanceHandle p_handle, uint32_t p_hash, float p_value);
 
@@ -98,6 +115,7 @@ private:
 	std::shared_ptr<const core::audio::WaveBank> bank_;
 	AudioTuning tuning_;
 	std::vector<Voice> voices_;
+	std::vector<Activation> activations_;
 	std::vector<InstanceHandle> stopping_;
 	VehicleAudioStats stats_;
 };

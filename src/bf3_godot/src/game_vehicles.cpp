@@ -546,6 +546,7 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 	const uint32_t index = p_camera % uint32_t(cameras.size());
 	const core::gameplay::VehicleCameraDef &c = *cameras[index];
 	out.first_person = c.first_person;
+	out.camera_instance = c.instance;
 	const std::array<uint32_t, 3> view_key{ p_seat.spawner, p_seat.seat, index };
 	if (zoom_key_ != view_key) {
 		zoom_.reset();

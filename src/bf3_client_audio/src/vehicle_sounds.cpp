@@ -3,11 +3,11 @@
 #include "bf3/client_audio/game_audio_frame.h"
 #include "bf3/core/math.h"
 #include "bf3/core/util/finite.h"
+#include "bf3/sim/vehicles/land_rules.h"
 #include "bf3/sim/vehicles/turret_rules.h"
 
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 
 namespace bf3::audio {
 
@@ -68,16 +68,59 @@ core::Result<VehicleAudioAssets> load_vehicle_audio(
 
 namespace {
 
+constexpr float kGravity = 9.82f;
+constexpr float kGForceMovingSpeedSquared = 1.0f;
+constexpr float kGForceSnap = 0.2f;
+constexpr float kGForceSmoothing = 0.05f;
+constexpr float kSlipGateSpeed = 1.0f / 36.0f;
+constexpr float kSecondContactSlipWeight = 0.5f;
+constexpr float kLoadFadeKmh = 0.1f;
+
 float spring_compression(const host::PresentedVehicle &p_v, const sim::VehicleModel &p_model) {
 	float out = 0.0f;
 	for (size_t i = 0; i < p_v.wheel_count && i < p_model.wheel_count; ++i) {
-		const sim::VehicleWheelModel &w = p_model.wheels[i];
-		const float travel = w.suspension_max - w.suspension_min;
-		if (travel > 0.0f) {
-			out = std::max(out, std::clamp((w.suspension_max - p_v.suspension_length[i]) / travel, 0.0f, 1.0f));
+		const float length = p_model.wheels[i].suspension_max;
+		if (length > 0.0f) {
+			out = std::max(out, (length - p_v.suspension_length[i]) / length);
 		}
 	}
 	return out;
+}
+
+float engine_load_input(const host::PresentedVehicle &p_v, const sim::VehicleModel &p_model,
+		const core::Transform &p_hull, float p_speed) {
+	const sim::LandDriveModel &land = p_model.land;
+	const float ratio = sim::land_gear_ratio(land, p_v.gear);
+	float wheel_rpm_sum = 0.0f;
+	uint32_t driven = 0;
+	bool grounded = false;
+	for (size_t i = 0; i < p_v.wheel_count && i < p_model.wheel_count; ++i) {
+		const sim::VehicleWheelModel &w = p_model.wheels[i];
+		if (w.driven == 0) {
+			continue;
+		}
+		const float omega = p_v.wheel_spin[i];
+		wheel_rpm_sum += sim::vehicles::wheel_rpm(
+				std::span<const float>(&omega, 1), ratio, w.diff_gear_ratio, land.transmission_efficiency);
+		grounded = grounded || ((p_v.wheel_contact >> i) & 1u) != 0;
+		++driven;
+	}
+	if (!grounded || driven == 0) {
+		return 0.0f;
+	}
+	const float load = sim::vehicles::engine_load(wheel_rpm_sum / float(driven), p_v.engine_rpm, p_hull.forward.y,
+			core::vec::dot(p_v.linear_velocity, p_hull.forward));
+	return std::clamp(p_speed * sim::vehicles::kKmhPerMs * kLoadFadeKmh, 0.0f, 1.0f) * load;
+}
+
+VehicleChassisMotion &chassis_of(VehicleSoundMemory &r_memory, uint32_t p_key, const host::PresentedVehicle &p_v) {
+	for (VehicleChassisMotion &m : r_memory.chassis) {
+		if (m.key == p_key) {
+			return m;
+		}
+	}
+	r_memory.chassis.push_back(VehicleChassisMotion{ p_key, p_v.tick, p_v.linear_velocity, kVehicleRestGForce, false });
+	return r_memory.chassis.back();
 }
 
 VehicleTurretMotion &motion_of(VehicleSoundMemory &r_memory, uint32_t p_key, sim::Tick p_tick, float p_angle) {
@@ -86,18 +129,47 @@ VehicleTurretMotion &motion_of(VehicleSoundMemory &r_memory, uint32_t p_key, sim
 			return m;
 		}
 	}
-	r_memory.turrets.push_back(VehicleTurretMotion{ p_key, p_tick, p_angle, 0.0f, false });
+	r_memory.turrets.push_back(VehicleTurretMotion{ p_key, p_tick, p_angle, 0.0f, 0.0f, 0.0f, false });
 	return r_memory.turrets.back();
 }
 
-bool inside(const sim::vehicles::HullBox &p_box, const core::Transform &p_hull, const Vec3 &p_point) {
-	const Vec3 d = core::vec::sub(p_point, p_hull.trans);
-	const Vec3 local{ core::vec::dot(d, p_hull.right), core::vec::dot(d, p_hull.up),
-		core::vec::dot(d, p_hull.forward) };
-	return std::fabs(local.x - p_box.centre.x) <= p_box.half.x && std::fabs(local.y - p_box.centre.y) <= p_box.half.y &&
-			std::fabs(local.z - p_box.centre.z) <= p_box.half.z;
+bool first_person_view(const core::gameplay::VehicleSoundDef &p_def, uint32_t p_camera) {
+	if (p_def.engines.empty() || p_camera == core::gameplay::kNoVehicleCamera) {
+		return false;
+	}
+	const std::vector<uint32_t> &cameras = p_def.engines.front().first_person_cameras;
+	return std::find(cameras.begin(), cameras.end(), p_camera) != cameras.end();
 }
 
+}
+
+float vehicle_g_force_step(float p_g_force, const core::Vec3 &p_previous_velocity, const core::Vec3 &p_velocity,
+		const core::Vec3 &p_up, float p_dt) {
+	if (!(p_dt > 0.0f)) {
+		return p_g_force;
+	}
+	float target = kVehicleRestGForce;
+	if (core::vec::dot(p_previous_velocity, p_previous_velocity) > kGForceMovingSpeedSquared) {
+		const core::Vec3 a =
+				core::vec::add(core::vec::scale(core::vec::sub(p_velocity, p_previous_velocity), 1.0f / p_dt),
+						core::Vec3{ 0.0f, kGravity, 0.0f });
+		const float along = core::vec::dot(a, p_up);
+		const float sign = along > 0.0f ? 1.0f : (along < 0.0f ? -1.0f : 0.0f);
+		target = sign * core::vec::length(a) / kGravity;
+	}
+	float d = target - p_g_force;
+	if (std::fabs(d) >= kGForceSnap) {
+		d *= kGForceSmoothing;
+	}
+	return p_g_force + d;
+}
+
+float vehicle_slip_input(
+		float p_slip_ratio_sum, uint32_t p_wheels_off_ground, uint32_t p_wheels_in_second_contact, float p_speed) {
+	if (!(p_speed > kSlipGateSpeed)) {
+		return p_slip_ratio_sum;
+	}
+	return p_slip_ratio_sum + float(p_wheels_off_ground) + kSecondContactSlipWeight * float(p_wheels_in_second_contact);
 }
 
 void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, const host::LevelVehicles &p_level,
@@ -105,6 +177,9 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 		std::vector<VehicleSoundSource> &r_out) {
 	r_out.clear();
 	for (VehicleTurretMotion &m : r_memory.turrets) {
+		m.seen = false;
+	}
+	for (VehicleChassisMotion &m : r_memory.chassis) {
 		m.seen = false;
 	}
 	const std::optional<host::PresentedSeat> own = host::vehicle_seat_of(p_vehicles, p_view.own_slot);
@@ -116,7 +191,8 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 		if (kind >= p_level.kinds.size() || kind >= p_assets.engine_program.size() || !p_level.kinds[kind].model) {
 			continue;
 		}
-		const bool engine = p_assets.engine_program[kind] != kNoVehicleProgram && !p_assets.defs[kind].engines.empty();
+		const core::gameplay::VehicleSoundDef &def = p_assets.defs[kind];
+		const bool engine = p_assets.engine_program[kind] != kNoVehicleProgram && !def.engines.empty();
 		const host::LevelVehicleKind &k = p_level.kinds[kind];
 		const sim::VehicleModel &model = *k.model;
 		const core::Transform rot = core::Transform::from_rotation_translation(v.rotation, Vec3{});
@@ -125,47 +201,55 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 		if (!core::finite(hull.trans)) {
 			continue;
 		}
-		VehicleSoundSource s;
-		s.key = vehicle_sound_key(v.spawner, v.generation, kVehicleEngineSound);
-		s.program = p_assets.engine_program[kind];
-		s.running = host::vehicle_engine_running(v);
-		s.emitter.position = engine ? hull.transform_point(p_assets.defs[kind].engines.front().position) : hull.trans;
-		s.emitter.velocity = v.linear_velocity;
-		s.emitter.forward = hull.forward;
-		const bool local = own && own->spawner == v.spawner;
-		const float speed = core::vec::length(v.linear_velocity);
-		const float forward_speed = core::vec::dot(v.linear_velocity, hull.forward);
-		uint32_t contacts = 0;
-		float slip = 0.0f;
-		uint32_t slipping = 0;
-		for (size_t i = 0; i < v.wheel_count && i < model.wheel_count; ++i) {
-			if ((v.wheel_contact >> i) & 1u) {
-				++contacts;
-				if (model.wheels[i].driven) {
-					slip += v.wheel_spin[i] * model.wheels[i].radius - forward_speed;
-					++slipping;
-				}
-			}
+		const core::Transform at = engine ? hull.then_inner(def.engines.front().transform) : hull;
+		const uint32_t key = vehicle_sound_key(v.spawner, v.generation, kVehicleEngineSound);
+		VehicleChassisMotion &chassis = chassis_of(r_memory, key, v);
+		chassis.seen = true;
+		if (v.tick != chassis.tick) {
+			const float seconds = float(v.tick - chassis.tick) / float(sim::kSimHz);
+			chassis.g_force =
+					vehicle_g_force_step(chassis.g_force, chassis.velocity, v.linear_velocity, hull.up, seconds);
+			chassis.velocity = v.linear_velocity;
+			chassis.tick = v.tick;
 		}
-		const float contact = v.wheel_count > 0 ? float(contacts) / float(v.wheel_count) : 0.0f;
+		VehicleSoundSource s;
+		s.key = key;
+		s.program = p_assets.engine_program[kind];
+		s.kind = VehicleSoundKind::Engine;
+		s.running = host::vehicle_engine_running(v);
+		s.emitter.position = at.trans;
+		s.emitter.velocity = v.linear_velocity;
+		s.emitter.forward = at.forward;
+		const bool local = own && own->spawner == v.spawner;
+		const bool first_person = local && first_person_view(def, p_view.own_camera);
+		const float speed = core::vec::length(v.linear_velocity);
+		bool any_contact = false;
+		uint32_t off_ground = 0;
+		for (size_t i = 0; i < v.wheel_count && i < model.wheel_count; ++i) {
+			const bool contact = ((v.wheel_contact >> i) & 1u) != 0;
+			any_contact = any_contact || contact;
+			off_ground += contact ? 0u : 1u;
+		}
 		auto &p = s.params;
-		p[size_t(P::Throttle)] = v.throttle;
-		p[size_t(P::Rpm)] = v.engine_rpm;
+		p[size_t(P::AngularVelocity)] = v.angular_velocity.y;
+		p[size_t(P::Contact)] = any_contact ? 1.0f : 0.0f;
 		p[size_t(P::Gear)] = float(v.gear);
-		p[size_t(P::Load)] = std::fabs(v.throttle) * contact;
-		p[size_t(P::Velocity)] = speed;
-		p[size_t(P::AngularVelocity)] = core::vec::dot(v.angular_velocity, hull.up);
-		p[size_t(P::RelativeVelocity)] = core::vec::length(core::vec::sub(v.linear_velocity, p_view.listener.velocity));
-		p[size_t(P::Slip)] = slipping > 0 ? slip / float(slipping) : 0.0f;
-		p[size_t(P::Tilt)] = std::asin(std::clamp(hull.forward.y, -1.0f, 1.0f));
-		p[size_t(P::Contact)] = contact;
-		p[size_t(P::Boost)] = 0.0f;
-		p[size_t(P::SpringCompression)] = spring_compression(v, model);
-		p[size_t(P::InteriorCam)] = local && inside(k.box, hull, p_view.listener.position) ? 1.0f : 0.0f;
+		p[size_t(P::InDriverPos)] = s.running ? 1.0f : 0.0f;
+		p[size_t(P::InteriorCam)] = first_person ? 1.0f : 0.0f;
 		p[size_t(P::LocalPlayerInVehicle)] = local ? 1.0f : 0.0f;
+		p[size_t(P::RelativeVelocity)] = core::vec::length(core::vec::sub(p_view.listener.velocity, v.linear_velocity));
+		p[size_t(P::Roll)] = 0.5f * (1.0f - at.up.y);
+		p[size_t(P::Rpm)] = v.engine_rpm;
+		p[size_t(P::Slip)] = vehicle_slip_input(0.0f, off_ground, 0, speed);
+		p[size_t(P::SpringCompression)] = spring_compression(v, model);
+		p[size_t(P::Throttle)] = v.throttle;
+		p[size_t(P::Tilt)] = at.forward.y;
+		p[size_t(P::Velocity)] = speed;
+		p[size_t(P::Load)] = engine_load_input(v, model, hull, speed);
+		p[size_t(P::Boost)] = 0.0f;
+		p[size_t(P::GForce)] = chassis.g_force;
 		p[size_t(P::Health)] = v.health;
 		p[size_t(P::DisabledDamageThreshold)] = p_assets.disabled_fraction[kind];
-		p[size_t(P::InDriverPos)] = local && own->seat == 0 ? 1.0f : 0.0f;
 		if (engine) {
 			r_out.push_back(s);
 		}
@@ -173,9 +257,9 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 			if (size_t(turret) >= v.turret_count) {
 				continue;
 			}
-			const uint32_t key = vehicle_sound_key(v.spawner, v.generation, 1u + uint32_t(turret));
+			const uint32_t turret_key = vehicle_sound_key(v.spawner, v.generation, 1u + uint32_t(turret));
 			const float angle = v.turret_angle[size_t(turret)];
-			VehicleTurretMotion &m = motion_of(r_memory, key, v.tick, angle);
+			VehicleTurretMotion &m = motion_of(r_memory, turret_key, v.tick, angle);
 			m.seen = true;
 			if (v.tick != m.tick) {
 				const float seconds = float(v.tick - m.tick) / float(sim::kSimHz);
@@ -183,24 +267,27 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 				m.tick = v.tick;
 				m.angle = angle;
 			}
-			VehicleSoundSource t = s;
-			for (const core::gameplay::VehicleTurretSound &c : p_assets.defs[kind].turrets) {
+			m.previous_rpm = m.rpm;
+			m.rpm = m.speed * sim::vehicles::kRadPerSecToRpm;
+			VehicleSoundSource t;
+			t.key = turret_key;
+			t.program = program;
+			t.kind = VehicleSoundKind::Spin;
+			t.emitter = s.emitter;
+			for (const core::gameplay::VehicleTurretSound &c : def.turrets) {
 				if (c.turret == turret) {
 					t.emitter.position = hull.transform_point(c.position);
+					t.start_rpm = c.start_rpm;
+					t.stop_rpm = c.stop_rpm;
 				}
 			}
-			t.key = key;
-			t.program = program;
-			const int8_t seat = k.armament && size_t(turret) < k.armament->turrets.size()
-					? k.armament->turrets[size_t(turret)].seat
-					: int8_t(-1);
-			t.running = seat >= 0 && seat < v.seat_count && v.occupants[size_t(seat)] != net::kNoVehicleOccupant &&
-					m.speed > 0.0f;
-			t.params[size_t(P::Rpm)] = m.speed * 60.0f / (2.0f * float(std::numbers::pi));
+			t.previous_rpm = m.previous_rpm;
+			t.params[size_t(P::Rpm)] = m.rpm;
 			r_out.push_back(t);
 		}
 	}
 	std::erase_if(r_memory.turrets, [](const VehicleTurretMotion &m) { return !m.seen; });
+	std::erase_if(r_memory.chassis, [](const VehicleChassisMotion &m) { return !m.seen; });
 }
 
 }

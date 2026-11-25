@@ -4,6 +4,7 @@
 #include "bf3/audio/vehicle_audio.h"
 #include "bf3/core/audio/sound_program.h"
 #include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/vehicle_def.h"
 #include "bf3/core/gameplay/vehicle_sound.h"
 #include "bf3/core/result.h"
 #include "bf3/host/level_vehicles.h"
@@ -29,17 +30,36 @@ struct VehicleAudioAssets {
 core::Result<VehicleAudioAssets> load_vehicle_audio(
 		const core::EbxResolver &p_db, const host::LevelVehicles &p_level, std::vector<std::string> &r_report);
 
+inline constexpr float kVehicleRestGForce = 1.0f;
+
 struct VehicleTurretMotion {
 	uint32_t key = 0;
 	sim::Tick tick = 0;
 	float angle = 0.0f;
 	float speed = 0.0f;
+	float previous_rpm = 0.0f;
+	float rpm = 0.0f;
+	bool seen = false;
+};
+
+struct VehicleChassisMotion {
+	uint32_t key = 0;
+	sim::Tick tick = 0;
+	core::Vec3 velocity{};
+	float g_force = kVehicleRestGForce;
 	bool seen = false;
 };
 
 struct VehicleSoundMemory {
 	std::vector<VehicleTurretMotion> turrets;
+	std::vector<VehicleChassisMotion> chassis;
 };
+
+float vehicle_g_force_step(float p_g_force, const core::Vec3 &p_previous_velocity, const core::Vec3 &p_velocity,
+		const core::Vec3 &p_up, float p_dt);
+
+float vehicle_slip_input(
+		float p_slip_ratio_sum, uint32_t p_wheels_off_ground, uint32_t p_wheels_in_second_contact, float p_speed);
 
 inline constexpr uint32_t kVehicleEngineSound = 0;
 
@@ -50,6 +70,7 @@ constexpr uint32_t vehicle_sound_key(uint16_t p_spawner, uint8_t p_generation, u
 struct VehicleListenerView {
 	ListenerState listener;
 	uint8_t own_slot = 0xFF;
+	uint32_t own_camera = core::gameplay::kNoVehicleCamera;
 };
 
 void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, const host::LevelVehicles &p_level,

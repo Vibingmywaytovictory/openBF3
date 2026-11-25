@@ -434,6 +434,7 @@ void Bf3GameAudio::step(const GameFrame &p_frame, std::span<const fx::ImpactSoun
 		ba::VehicleListenerView view;
 		view.listener = in.listener;
 		view.own_slot = p_frame.own_slot;
+		view.own_camera = p_frame.own_vehicle_camera;
 		const std::span<const host::PresentedVehicle> presented(p_frame.frame->vehicles.data(),
 				std::min<size_t>(p_frame.frame->vehicle_count, p_frame.frame->vehicles.size()));
 		ba::vehicle_sound_sources(

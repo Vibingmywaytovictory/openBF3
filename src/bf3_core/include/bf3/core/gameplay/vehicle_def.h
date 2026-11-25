@@ -9,6 +9,7 @@
 #include "bf3/core/result.h"
 
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -33,7 +34,10 @@ struct VehicleAngleOfImpactDef {
 	std::array<float, 3> multiplier{ 1, 1, 1 };
 };
 
+inline constexpr uint32_t kNoVehicleCamera = 0xFFFFFFFFu;
+
 struct VehicleCameraDef {
+	uint32_t instance = kNoVehicleCamera;
 	std::string camera_type;
 	std::string camera;
 	float field_of_view = 0;
@@ -75,6 +79,7 @@ struct VehicleTurretDef {
 	int frame_turret = -1;
 	core::Transform frame;
 	std::string sound;
+	float sound_start_rpm = 0, sound_stop_rpm = 0;
 };
 
 struct VehicleWeaponDef {

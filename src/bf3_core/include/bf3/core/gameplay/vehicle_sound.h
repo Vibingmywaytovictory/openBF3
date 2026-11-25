@@ -33,19 +33,27 @@ inline constexpr int32_t kLocalPlayerInVehicle = logic_port_id("LocalPlayerInVeh
 inline constexpr int32_t kHealth = logic_port_id("Health");
 inline constexpr int32_t kDisabledDamageThreshold = logic_port_id("DisabledDamageThreshold");
 inline constexpr int32_t kInDriverPos = logic_port_id("InDriverPos");
+inline constexpr int32_t kRoll = logic_port_id("Roll");
+inline constexpr int32_t kGForce = logic_port_id("GForce");
 }
+
+inline constexpr int32_t kUseFirstPersonSoundsField = logic_port_id("UseFirstPersonSounds");
+inline constexpr int32_t kCameraViewActiveField = int32_t(4294257708u);
 
 struct VehicleEngineSound {
 	std::string patch;
 	std::string surface_patch;
-	Vec3 position{};
+	Transform transform;
 	bool first_person_sounds = false;
+	std::vector<uint32_t> first_person_cameras;
 };
 
 struct VehicleTurretSound {
 	std::string patch;
 	Vec3 position{};
 	int8_t turret = -1;
+	float start_rpm = 0;
+	float stop_rpm = 0;
 };
 
 struct VehicleSoundDef {

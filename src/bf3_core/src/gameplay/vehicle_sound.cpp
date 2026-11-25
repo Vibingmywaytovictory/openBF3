@@ -5,16 +5,82 @@
 #include "bf3/core/level/level_transform.h"
 #include "gameplay_read.h"
 
+#include <algorithm>
+#include <span>
+
 namespace bf3::core::gameplay {
 
 using namespace detail;
 
 namespace {
 
+constexpr size_t kMaxSoundViewDepth = 4;
+
+struct PropertyLink {
+	EbxInstance source;
+	int32_t source_field = 0;
+	EbxInstance target;
+	int32_t target_field = 0;
+};
+
+std::vector<PropertyLink> property_links(
+		const EbxResolver &p_db, const EbxInstance &p_blueprint, WorkBudget &r_budget) {
+	std::vector<PropertyLink> out;
+	const std::optional<EbxValue> list = p_blueprint.get("PropertyConnections");
+	const OptionalEbxArray array = list ? list->as_array() : OptionalEbxArray();
+	if (!array) {
+		return out;
+	}
+	for (const EbxValue entry : *array) {
+		if (!r_budget.take(1)) {
+			return out;
+		}
+		const auto end = [&](std::string_view p_field) -> std::optional<EbxInstance> {
+			const std::optional<EbxValue> v = entry.get(p_field);
+			const std::optional<EbxRef> r = v ? v->as_ref() : std::nullopt;
+			return r ? p_db.resolve(p_blueprint.partition(), *r) : std::nullopt;
+		};
+		const auto id = [&](std::string_view p_field) -> int32_t {
+			const std::optional<EbxValue> v = entry.get(p_field);
+			const std::optional<int32_t> i = v ? v->as_i32() : std::nullopt;
+			return i.value_or(0);
+		};
+		const std::optional<EbxInstance> source = end("Source");
+		const std::optional<EbxInstance> target = end("Target");
+		if (source && target) {
+			out.push_back(PropertyLink{ *source, id("SourceFieldId"), *target, id("TargetFieldId") });
+		}
+	}
+	return out;
+}
+
+void sound_view_cameras(std::span<const PropertyLink> p_links, const EbxInstance &p_source, int32_t p_field,
+		size_t p_depth, std::vector<uint32_t> &r_cameras) {
+	if (p_depth > kMaxSoundViewDepth) {
+		return;
+	}
+	if (p_source.is_a("CameraComponentData")) {
+		if (p_field == kCameraViewActiveField &&
+				std::find(r_cameras.begin(), r_cameras.end(), p_source.index()) == r_cameras.end()) {
+			r_cameras.push_back(p_source.index());
+		}
+		return;
+	}
+	if (!p_source.is_a("OrEntityData") && !p_source.is_a("Or4EntityData")) {
+		return;
+	}
+	for (const PropertyLink &l : p_links) {
+		if (l.target == p_source) {
+			sound_view_cameras(p_links, l.source, l.source_field, p_depth + 1, r_cameras);
+		}
+	}
+}
+
 struct Walk {
 	const EbxResolver &db;
 	WorkBudget &budget;
 	VehicleSoundDef &out;
+	std::span<const PropertyLink> links;
 	size_t components = 0;
 	bool bad_transform = false;
 
@@ -54,8 +120,13 @@ struct Walk {
 				VehicleEngineSound e;
 				e.patch = ref_name(budget, db, c, "SoundEffect");
 				e.surface_patch = ref_name(budget, db, c, "SurfaceSoundEffect");
-				e.position = here.trans;
+				e.transform = Transform::from_axes({ here.right, here.up, here.forward }, here.trans);
 				e.first_person_sounds = boolean(c, "UseFirstPersonSounds").value_or(false);
+				for (const PropertyLink &l : links) {
+					if (l.target == component && l.target_field == kUseFirstPersonSoundsField) {
+						sound_view_cameras(links, l.source, l.source_field, 0, e.first_person_cameras);
+					}
+				}
 				if (!e.patch.empty() || !e.surface_patch.empty()) {
 					out.engines.push_back(std::move(e));
 				}
@@ -89,7 +160,8 @@ Result<VehicleSoundDef> read_vehicle_sounds(
 	if (const std::optional<EbxInstance> s = p_db.follow(entity->data(), "Sound"); s && budget.take_type(s->data())) {
 		out.bullet_impact = ref_name(budget, p_db, s->data(), "BulletImpact");
 	}
-	Walk w{ p_db, budget, out };
+	const std::vector<PropertyLink> links = property_links(p_db, blueprint, budget);
+	Walk w{ p_db, budget, out, links };
 	w.walk(*entity, level::LevelTransform::identity(), 0);
 	if (w.bad_transform) {
 		return make_error("vehicle sounds " + name + ": non-finite or out-of-range component Transform");
@@ -106,7 +178,8 @@ Result<VehicleSoundDef> read_vehicle_sounds(
 		for (int up = def->turrets[t].parent; up >= 0 && size_t(up) < t; up = def->turrets[size_t(up)].parent) {
 			position = def->turrets[size_t(up)].frame.transform_point(position);
 		}
-		out.turrets.push_back(VehicleTurretSound{ def->turrets[t].sound, position, static_cast<int8_t>(t) });
+		out.turrets.push_back(VehicleTurretSound{ def->turrets[t].sound, position, static_cast<int8_t>(t),
+				def->turrets[t].sound_start_rpm, def->turrets[t].sound_stop_rpm });
 	}
 	return out;
 }

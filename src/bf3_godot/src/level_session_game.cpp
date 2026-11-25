@@ -1121,6 +1121,7 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 	mf.own_alive = r_game.alive;
 	mf.own_slot = r_game.own_slot;
 	mf.own_team = r_game.own_team;
+	mf.own_vehicle_camera = r_game.vehicle_view_camera;
 	if (p_own_vm != nullptr && p_own_vm->is_visible() && r_game.alive && !p_free_camera) {
 		const bf3::anim::ViewmodelOutput &vo = p_own_vm->output();
 		mf.own_step_tags = std::span<const int32_t>(
@@ -1483,6 +1484,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	mapper_.set_own_look(own_look_of(own_aims ? &g.def_aiming[g.weapon.def] : nullptr, f.own_curr.pose,
 			(f.own_curr.flags & sim::soldier_flags::kSprinting) != 0, g.weapon.valid && g.weapon.zoomed, zoom_look));
 	g.vehicle_black = 0.0f;
+	g.vehicle_view_camera = bf3::core::gameplay::kNoVehicleCamera;
 	if (seat && camera != nullptr && !free_camera) {
 		const VehicleSeatView sv = g.vehicles->seat_view(*seat, g.vehicle_camera, view.yaw, view.pitch,
 				g.settings != nullptr ? g.settings->hip_fov_deg() : FpCamera::kFovDegrees,
@@ -1491,6 +1493,7 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 		camera->set_global_transform(sv.camera);
 		camera->set_fov(sv.fov_deg);
 		g.vehicle_black = sv.black;
+		g.vehicle_view_camera = sv.camera_instance;
 	}
 	g.ms_vm = ms_since(part_t0);
 	part_t0 = std::chrono::steady_clock::now();

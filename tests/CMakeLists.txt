@@ -1781,7 +1781,8 @@ target_compile_definitions(test_audio_vehicle PRIVATE OPENBF3_AUDIO_TUNING_CFG="
 add_test(NAME core.audio.vehicles COMMAND test_audio_vehicle --test-suite=audio-vehicles-install)
 add_test(NAME audio.vehicles.drive COMMAND test_audio_vehicle --test-suite=audio-vehicles-drive)
 add_test(NAME audio.vehicles.weapons COMMAND test_audio_vehicle --test-suite=audio-vehicles-weapons)
-set_tests_properties(core.audio.vehicles audio.vehicles.drive audio.vehicles.weapons PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+add_test(NAME audio.vehicles.inputs COMMAND test_audio_vehicle --test-suite=audio-vehicles-inputs)
+set_tests_properties(core.audio.vehicles audio.vehicles.drive audio.vehicles.weapons audio.vehicles.inputs PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 
 add_test(NAME test.scratch.before COMMAND test_scratch_tests --test-suite=test-scratch-pass-before)
 add_test(NAME test.scratch.after COMMAND test_scratch_tests --test-suite=test-scratch-pass-after)
