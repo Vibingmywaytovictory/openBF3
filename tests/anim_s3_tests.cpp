@@ -945,7 +945,9 @@ struct SynthStance {
 	CrowdMoveClips moves;
 	CrowdStanceSet set;
 
-	explicit SynthStance(const SynthCrowd &p_c, CrowdDeathStyle p_death = kCrowdDeathDefault) {
+	std::vector<CrowdDeathClip> deaths;
+
+	explicit SynthStance(const SynthCrowd &p_c) {
 		const Skeleton &r = p_c.set.rig;
 		pose.rig = r;
 		pose.root_joint = 0;
@@ -976,13 +978,16 @@ struct SynthStance {
 		moves.moves_ok = { true, false };
 		moves.clips[size_t(CrowdMoveClip::CrouchFire)] = synth_clip(r, 21, { 2 }, axis_angle(0, 0, 1, 10), {}, Vec3{}, Vec3{}, true);
 		moves.present[size_t(CrowdMoveClip::CrouchFire)] = true;
-		for (const CrowdMoveClip d : { CrowdMoveClip::DeathStand, CrowdMoveClip::DeathCrouch, CrowdMoveClip::DeathProne }) {
-			moves.clips[size_t(d)] = synth_clip(r, 15, { 1 }, axis_angle(1, 0, 0, 80), { 1 }, Vec3{ 0, 1.0f, 0 }, Vec3{ 0, 0.1f, 0 });
-			moves.present[size_t(d)] = true;
-		}
+		CrowdDeathClip fall;
+		fall.clip = synth_clip(r, 15, { 1 }, axis_angle(1, 0, 0, 80), { 1 }, Vec3{ 0, 1.0f, 0 }, Vec3{ 0, 0.1f, 0 });
+		fall.play.start_tick = 0.0f;
+		fall.play.end_tick = 30.0f;
+		fall.play.clip_ticks_per_tick = 1.0f;
+		fall.play.frames_per_tick = 0.5f;
+		deaths.push_back(std::move(fall));
 		set.pose = &pose;
 		set.moves = &moves;
-		set.death = p_death;
+		set.death_clips = deaths;
 	}
 };
 
@@ -1306,13 +1311,27 @@ TEST_SUITE("anim-s3-unit") {
 			ev.set_inputs(in, dt);
 			ev.evaluate_all_here();
 		}
-		CHECK(hips_y(ev, 0) < 0.95f);
-		CHECK(hips_y(ev, 0) > 0.25f);
+		CHECK(hips_y(ev, 0) == doctest::Approx(1.0f).epsilon(1e-4));
 		for (int f = 0; f < 30; ++f) {
 			ev.set_inputs(in, dt);
 			ev.evaluate_all_here();
 		}
-		CHECK(hips_y(ev, 0) == doctest::Approx(0.2f).epsilon(1e-4));
+		CHECK(hips_y(ev, 0) == doctest::Approx(1.0f).epsilon(1e-4));
+		REQUIRE(ev.set_ragdoll_joints(std::vector<int32_t>{ 1 }).ok());
+		CHECK_FALSE(ev.set_ragdoll_joints(std::vector<int32_t>{ 99 }).ok());
+		const std::vector<Xform> lying{ Xform{ Quat{}, Vec3{ 0.0f, 0.3f, 0.0f } } };
+		ev.set_ragdoll(0, lying, 1.0f);
+		ev.set_inputs(in, dt);
+		ev.evaluate_all_here();
+		CHECK(hips_y(ev, 0) == doctest::Approx(0.3f).epsilon(1e-4));
+		ev.set_ragdoll(0, lying, 0.5f);
+		ev.set_inputs(in, dt);
+		ev.evaluate_all_here();
+		CHECK(hips_y(ev, 0) == doctest::Approx(0.65f).epsilon(1e-4));
+		ev.set_ragdoll(0, {}, 0.0f);
+		ev.set_inputs(in, dt);
+		ev.evaluate_all_here();
+		CHECK(hips_y(ev, 0) == doctest::Approx(1.0f).epsilon(1e-4));
 		CHECK(ev.drawn(0));
 		CHECK(ev.weapon_of(0) == 0);
 		for (int f = 0; f < 150; ++f) {
@@ -1331,12 +1350,13 @@ TEST_SUITE("anim-s3-unit") {
 		CHECK(hips_y(ev, 0) == doctest::Approx(1.0f).epsilon(1e-4));
 
 		{
-			SynthStance clip_style(w.c, CrowdDeathStyle::Clip);
+			SynthStance clip_style(w.c);
 			auto d = CrowdEvaluator::make(w.c.set, clip_style.set, w.teams_one, 1, config);
 			REQUIRE(d.ok());
 			std::vector<CrowdSoldierInput> one(1);
 			one[0].dead = true;
-			for (int f = 0; f < 60; ++f) {
+			one[0].death_clip = 0;
+			for (int f = 0; f < 120; ++f) {
 				(*d)->set_inputs(one, dt);
 				(*d)->evaluate_all_here();
 			}
@@ -1626,6 +1646,11 @@ TEST_SUITE("anim-s3-unit") {
 
 		std::vector<CrowdSoldierInput> in(3);
 		run(in, 2);
+		REQUIRE(ev.set_ragdoll_joints(std::vector<int32_t>{ 1 }).ok());
+		const std::vector<Xform> lying{ Xform{ Quat{}, Vec3{ 0.0f, 0.2f, 0.0f } } };
+		for (uint32_t i = 0; i < 3; ++i) {
+			ev.set_ragdoll(i, lying, 1.0f);
+		}
 		for (CrowdSoldierInput &i : in) {
 			i.dead = true;
 		}

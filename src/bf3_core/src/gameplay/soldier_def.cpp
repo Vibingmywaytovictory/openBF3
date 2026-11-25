@@ -491,6 +491,12 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 	if (const std::optional<EbxInstance> c = first_of(budget, components, "SpecialMovesComponentData")) {
 		out.special_moves = read_special_moves(budget, p_db, *c);
 	}
+	if (const std::optional<EbxInstance> c = first_of(budget, components, "RagdollComponentData")) {
+		if (const std::optional<EbxInstance> asset = p_db.follow(c->data(), "RagdollAsset");
+				asset && budget.take_type(asset->data())) {
+			out.ragdoll_asset = to_lower_ascii(text(budget, asset->data(), "Name"));
+		}
+	}
 
 	Result<LogicConnections> wiring = LogicConnections::of(p_db, blueprint, budget);
 	if (!wiring) {

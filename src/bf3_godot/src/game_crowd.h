@@ -34,6 +34,11 @@ struct GameCrowdStats {
 	uint32_t catalog_added = 0;
 	uint32_t catalog_failed = 0;
 	uint32_t catalog_pending = 0;
+	uint32_t ragdolls = 0;
+	uint64_t ragdolls_started = 0;
+	uint64_t ragdolls_frozen = 0;
+	uint64_t ragdoll_failures = 0;
+	float ragdoll_hips_height = -1.0f;
 };
 
 class Bf3GameCrowd {

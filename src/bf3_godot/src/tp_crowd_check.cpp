@@ -6,6 +6,7 @@
 
 #include "bf3/anim/crowd_eval.h"
 #include "bf3/anim/crowd_stage.h"
+#include "bf3/core/gameplay/death_body.h"
 #include "bf3/core/install.h"
 #include "bf3/core/util/format.h"
 #include "bf3/host/gunplay.h"
@@ -268,6 +269,10 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 	}
 	if (crossed(kDeathAt - 0.05)) {
 		event(host::PresentKind::Death, s.soldiers[3].slot, s.soldiers[9].slot, kDeathAt);
+		core::gameplay::DeathRecord record;
+		record.valid = true;
+		record.direction = core::gameplay::DeathHitDirection::Front;
+		present::set_death_record(r_events.back(), record);
 	}
 	if (crossed(kThrowAt - 0.05)) {
 		event(host::PresentKind::RemoteShot, s.soldiers[kThrower].slot, 0, kThrowAt);
@@ -309,6 +314,15 @@ void Bf3TpCrowdCheck::check_at(double p_t) {
 		}
 	} else if (std::fabs(p_t - 2.4) < kStep * 0.5) {
 		row("t 2.4 s: the dying soldier still drawn", st.soldiers == 12, fmt("%u", st.soldiers));
+		row("t 2.4 s: the dying soldier is a ragdoll",
+				st.ragdolls == 1 && st.ragdolls_started == 1 && st.ragdoll_failures == 0,
+				fmt("%u in the world, %llu started, %llu failed", st.ragdolls, (unsigned long long)st.ragdolls_started,
+						(unsigned long long)st.ragdoll_failures));
+	} else if (std::fabs(p_t - 4.8) < kStep * 0.5) {
+		row("t 4.8 s: the ragdoll lies on the ground, not prone-posed",
+				st.ragdoll_hips_height >= 0.0f && st.ragdoll_hips_height < 0.4f,
+				fmt("hips %.3f m above the death position, %llu frozen", double(st.ragdoll_hips_height),
+						(unsigned long long)st.ragdolls_frozen));
 	} else if (std::fabs(p_t - 3.4) < kStep * 0.5) {
 		row("t 3.4 s: the holding M67 soldier draws the 3P throw-in", st.throwing == 1,
 				fmt("%u throwing", st.throwing));
@@ -316,6 +330,7 @@ void Bf3TpCrowdCheck::check_at(double p_t) {
 		row("t 4.6 s: the thrown M67 plays the 3P release", st.throwing == 1, fmt("%u throwing", st.throwing));
 	} else if (std::fabs(p_t - 5.5) < kStep * 0.5) {
 		row("t 5.5 s: the dead soldier hidden after 3 s", st.soldiers == 11, fmt("%u", st.soldiers));
+		row("t 5.5 s: the hidden corpse's ragdoll removed", st.ragdolls == 0, fmt("%u", st.ragdolls));
 		row("t 5.5 s: 9 muzzles", st.muzzles == 9, fmt("%u", st.muzzles));
 	} else if (std::fabs(p_t - 8.0) < kStep * 0.5) {
 		row("t 8.0 s: the respawned soldier drawn", st.soldiers == 12, fmt("%u", st.soldiers));

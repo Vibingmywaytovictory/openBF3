@@ -1,3 +1,5 @@
+#include "bf3/core/ebx_db.h"
+#include "bf3/core/gameplay/soldier_def.h"
 #include "bf3/core/res/havok_ragdoll.h"
 #include "bf3/core/res_types.h"
 #include "bf3/core/superbundle_mount.h"
@@ -15,7 +17,8 @@ using namespace bf3::core;
 using namespace bf3::core::res;
 
 TEST_SUITE("res-ragdoll") {
-	TEST_CASE("ragdoll01: 15 bodies of 5 kg on the soldier bones, 12 ragdoll joints and 2 limited hinges with "
+	TEST_CASE("ragdoll01 (the MP soldier's RagdollAsset): 15 bodies of 5 kg on the soldier bones, 12 ragdoll joints "
+			  "and 2 limited hinges with "
 			  "coinciding pivots") {
 		test::Mounted *m = test::shared_mount_or_skip();
 		if (m == nullptr) {
@@ -24,7 +27,13 @@ TEST_SUITE("res-ragdoll") {
 		Result<LevelMount> mount = m->install->mount_superbundle("Win32/Levels/MP_001/MP_001");
 		REQUIRE(mount.ok());
 		REQUIRE(mount->load_all_bundles().ok());
-		auto res = mount->read_res("animations/settings/ragdolls/ragdoll01");
+		auto ebx = EbxLibrary::open(m->install, { "Win32/Levels/MP_001/MP_001" });
+		REQUIRE_MESSAGE(ebx.ok(), (ebx.ok() ? std::string() : ebx.error().message));
+		Result<gameplay::SoldierDef> soldier = gameplay::read_soldier_def(**ebx);
+		REQUIRE_MESSAGE(soldier.ok(), (soldier.ok() ? std::string() : soldier.error().message));
+		CHECK(soldier->ragdoll_asset == "animations/settings/ragdolls/ragdoll01");
+		CHECK(soldier->time_for_corpse == 15.0f);
+		auto res = mount->read_res(soldier->ragdoll_asset);
 		REQUIRE_MESSAGE(res.ok(), (res.ok() ? std::string() : res.error().message));
 		CHECK(res_type_name(res->first.res_type) == "RagdollResource");
 		RagdollDef def;

@@ -487,7 +487,6 @@ struct CrowdEvaluator::Impl::Combat {
 		std::array<const CrowdClipData *, kLocoClips> cycle{};
 		const CrowdClipData *cycle_bwd2 = nullptr;
 		bool moves_fallback = false;
-		const CrowdClipData *death = nullptr;
 	};
 	struct Soldier {
 		std::array<std::vector<Mat34>, 2> weapon_palette;
@@ -512,6 +511,9 @@ struct CrowdEvaluator::Impl::Combat {
 		LocalPose corpse;
 		uint64_t revives = 0;
 		LocalPose extra, extra2, alive;
+		uint8_t death_clip = kNoCrowdDeathClip;
+		std::vector<Xform> ragdoll;
+		float ragdoll_w = 0.0f;
 
 		uint8_t stance = 0;
 		bool transition = false, moving = false, firing = false, throwing = false, dying = false, wrote_weapon = false,
@@ -529,7 +531,8 @@ struct CrowdEvaluator::Impl::Combat {
 	bool stance_set = false;
 	std::array<const CrowdClipData *, core::gameplay::kCapsuleTransitions> transitions{};
 	const CrowdClipData *crouch_fire = nullptr;
-	CrowdDeathStyle death = kCrowdDeathDefault;
+	std::span<const CrowdDeathClip> death_clips;
+	std::vector<int32_t> ragdoll_joints;
 	float corpse_seconds = kCrowdDeathHideSeconds;
 	LocalPose identity;
 	std::vector<Soldier> soldiers;
@@ -738,7 +741,7 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 
 	std::unique_ptr<Impl::Combat, Impl::CombatDeleter> x(new Impl::Combat());
 	x->teams = std::move(combat_teams);
-	x->death = p_stance.death;
+	x->death_clips = p_stance.death_clips;
 	if (!std::isfinite(p_stance.corpse_seconds) || p_stance.corpse_seconds < 0.0f || p_stance.corpse_seconds > kCrowdMaxCorpseSeconds) {
 		return core::make_error("crowd: corpse_seconds " + std::to_string(p_stance.corpse_seconds) + " outside [0, 3600]");
 	}
@@ -825,10 +828,6 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			d.cycle_bwd2 = ms == 0 ? &mv.get(CrowdMoveClip::SneakBwdRight) : nullptr;
 			d.moves_fallback = false;
 		}
-		static constexpr CrowdMoveClip kDeath[3] = { CrowdMoveClip::DeathStand, CrowdMoveClip::DeathCrouch, CrowdMoveClip::DeathProne };
-		for (size_t st = 0; st < 3; ++st) {
-			x->stances[st].death = mv.has(kDeath[st]) && mv.get(kDeath[st]).tracks.end_frame > 0 ? &mv.get(kDeath[st]) : nullptr;
-		}
 		const CrowdClipData &fire = mv.get(CrowdMoveClip::CrouchFire);
 		if (mv.has(CrowdMoveClip::CrouchFire) && fire.mask.size() == rig.size() && fire.tracks.end_frame > 0) {
 			x->crouch_fire = &fire;
@@ -878,6 +877,7 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 		xs.dead = true;
 		xs.dead_since = s.clock;
 		xs.death_stance = uint8_t(std::min<uint32_t>(s.input.target_pose, 2));
+		xs.death_clip = s.input.death_clip < x.death_clips.size() ? s.input.death_clip : kNoCrowdDeathClip;
 		xs.hide_counted = false;
 		++xs.deaths;
 		xs.rising = false;
@@ -1075,15 +1075,22 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 	};
 	if (xs.dead) {
 		xs.dying = true;
-		const Combat::Stance &ds = x.stances[xs.death_stance];
-		if (x.death == CrowdDeathStyle::Clip && ds.death != nullptr) {
-			const float frame = std::min(float(dead_age) * ds.death->tracks.fps, float(ds.death->tracks.end_frame));
-			sample_pose(rig, ds.death->clip, ds.death->tracks, frame, s.pose, s.scratch);
-		} else {
-
+		const CrowdDeathClip *dc = xs.death_clip < x.death_clips.size() ? &x.death_clips[xs.death_clip] : nullptr;
+		bool sampled = false;
+		if (dc != nullptr) {
+			const float age = std::min(float(dead_age), dc->play.seconds());
+			sampled = sample_pose(rig, dc->clip.clip, dc->clip.tracks, dc->play.frame_at(age), s.pose, s.scratch);
+		}
+		if (!sampled) {
 			stance_pose(xs.alive);
-			const float w = std::min(1.0f, float(dead_age) / kCrowdDeathBlendSeconds);
-			blend_poses(xs.alive, *x.stances[2].idle, w, s.pose);
+			s.pose = xs.alive;
+		}
+		if (clips->root_joint >= 0 && size_t(clips->root_joint) < s.pose.joints.size()) {
+			s.pose.joints[size_t(clips->root_joint)].t = rig.bone(size_t(clips->root_joint)).rest.t;
+		}
+		if (xs.ragdoll_w > 0.0f && !x.ragdoll_joints.empty() && xs.ragdoll.size() == x.ragdoll_joints.size()) {
+			ragdoll_local_pose(rig, s.pose, x.ragdoll_joints, xs.ragdoll, xs.extra);
+			blend_poses(s.pose, xs.extra, std::min(xs.ragdoll_w, 1.0f), s.pose);
 		}
 	} else if (xs.rising && s.clock - xs.rise_since < double(kCrowdReviveBlendSeconds)) {
 		stance_pose(xs.alive);
@@ -1300,6 +1307,33 @@ core::Status CrowdEvaluator::set_weapon_vault(
 	}
 	m.combat->teams[p_team].weapons[p_weapon].vault[p_kind] = p_clip;
 	return core::Status::success();
+}
+
+core::Status CrowdEvaluator::set_ragdoll_joints(std::span<const int32_t> p_joints) {
+	Impl &m = *impl_;
+	if (!m.combat) {
+		return core::make_error("crowd: no combat stance set for a ragdoll");
+	}
+	for (const int32_t j : p_joints) {
+		if (j < 0 || size_t(j) >= m.clips->rig.size()) {
+			return core::make_error("crowd: ragdoll joint " + std::to_string(j) + " outside the rig");
+		}
+	}
+	m.combat->ragdoll_joints.assign(p_joints.begin(), p_joints.end());
+	return core::Status::success();
+}
+
+void CrowdEvaluator::set_ragdoll(uint32_t p_i, std::span<const Xform> p_model, float p_weight) {
+	Impl &m = *impl_;
+	if (!m.combat || p_i >= m.combat->soldiers.size()) {
+		return;
+	}
+	Impl::Combat::Soldier &xs = m.combat->soldiers[p_i];
+	const bool usable = p_model.size() == m.combat->ragdoll_joints.size() && std::isfinite(p_weight) && p_weight > 0.0f;
+	xs.ragdoll_w = usable ? std::min(p_weight, 1.0f) : 0.0f;
+	if (usable) {
+		xs.ragdoll.assign(p_model.begin(), p_model.end());
+	}
 }
 
 uint8_t CrowdEvaluator::weapon_of(uint32_t p_i) const {

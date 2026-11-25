@@ -5,16 +5,21 @@
 #include "render_bridge.h"
 #include "skin_upload.h"
 
+#include "bf3/anim/death_anim.h"
 #include "bf3/anim/server_pose.h"
 #include "bf3/anim/viewmodel_anim.h"
 #include "bf3/audio/footstep_driver.h"
 #include "bf3/core/ant/ant_install_source.h"
+#include "bf3/core/gameplay/death_body.h"
 #include "bf3/core/install.h"
 #include "bf3/core/job_queue.h"
+#include "bf3/core/level/level.h"
+#include "bf3/core/res/havok_ragdoll.h"
 #include "bf3/core/worker_group.h"
 #include "bf3/host/loadout.h"
 #include "bf3/net/protocol.h"
 #include "bf3/render/soldier_assets.h"
+#include "bf3/sim/ragdoll_world.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/display_server.hpp>
@@ -105,6 +110,32 @@ struct Bf3GameCrowd::Impl {
 	bool have_moves = false;
 	anim::CrowdMoveGroupSet move_groups;
 	bool have_move_groups = false;
+	anim::CrowdDeathClips death_clips;
+	bool have_death_clips = false;
+	std::shared_ptr<const core::res::RagdollDef> ragdoll_def;
+	std::unique_ptr<sim::RagdollWorld> ragdoll_world;
+	anim::RagdollRig ragdoll_rig;
+	bool have_ragdoll = false;
+	struct Corpse {
+		bool active = false;
+		bool in_world = false;
+		bool copied = false;
+		bool have_previous = false;
+		bool done = false;
+		core::gameplay::RagdollBlend blend;
+		core::gameplay::RagdollSettle settle;
+		uint8_t clip = anim::kNoCrowdDeathClip;
+		double age = 0.0;
+		float copy_dt = 0.0f;
+		std::vector<anim::Xform> bodies, previous, joints;
+		std::vector<sim::RagdollBodyPose> poses;
+	};
+	std::vector<Corpse> corpses;
+	uint64_t ragdolls_started = 0, ragdolls_frozen = 0, ragdoll_failures = 0;
+	float ragdoll_hips_height = -1.0f;
+	int32_t ragdoll_hips = -1;
+	void step_ragdolls(double p_dt);
+	uint8_t death_clip_of(const core::gameplay::DeathRecord &p_record, uint8_t p_pose) const;
 	anim::CrowdConfig config;
 	std::array<std::vector<anim::CrowdWeapon>, 2> views;
 	std::vector<anim::CrowdTeam> teams;
@@ -151,6 +182,7 @@ struct Bf3GameCrowd::Impl {
 		uint8_t kit = 0;
 		bool vault_held = false;
 		float vault_y = 0.0f;
+		uint8_t death_clip = anim::kNoCrowdDeathClip;
 	};
 	std::array<Slot, kSlotsPerTeam> slots{};
 	std::array<uint8_t, kSlotsPerTeam> plants{};
@@ -177,6 +209,7 @@ struct Bf3GameCrowd::Impl {
 		host::PresentTimeline timeline;
 		uint8_t slot;
 		int64_t time;
+		core::gameplay::DeathRecord record;
 	};
 	std::deque<Pending> pending;
 	bool remote_shot_seen = false;
@@ -486,6 +519,7 @@ void Bf3GameCrowd::Impl::apply(const Pending &p_e) {
 			if (!s.dead) {
 				s.dead = true;
 				s.dead_seconds = 0.0;
+				s.death_clip = death_clip_of(p_e.record, s.input.pose);
 			}
 			break;
 		case host::PresentKind::Spawn:
@@ -503,9 +537,10 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 		if (cam_event(e, p_frame)) {
 			continue;
 		}
-		Pending p{ e.kind, e.timeline, e.slot, e.time };
+		Pending p{ e.kind, e.timeline, e.slot, e.time, {} };
 		if (e.kind == host::PresentKind::Death) {
 			p.slot = e.aux;
+			p.record = present::death_record_of(e);
 		} else if (e.kind == host::PresentKind::RemoteShot) {
 			remote_shot_seen = true;
 			if ((e.flags & (host::present_flags::kNoRound | host::present_flags::kVehicle)) != 0) {
@@ -638,6 +673,7 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 		anim::CrowdSoldierInput in = s.input;
 		in.dead = s.dead;
 		in.revived = s.revived;
+		in.death_clip = s.dead ? s.death_clip : anim::kNoCrowdDeathClip;
 		if (!s.present) {
 			in.velocity = anim::Vec3{};
 			in.flags = 0;
@@ -823,6 +859,14 @@ core::Status Bf3GameCrowd::load_body(const core::InstallReader &p_reader, core::
 		} else {
 			m.body_notes.push_back("move clips: " + moves.error().message);
 		}
+		core::Result<anim::CrowdDeathClips> deaths =
+				anim::load_crowd_death_clips((*assets)->clips, *(*assets)->library, anim::ChooserIndices{});
+		if (deaths) {
+			m.death_clips = std::move(*deaths);
+			m.have_death_clips = true;
+		} else {
+			m.body_notes.push_back("death clips: " + deaths.error().message + " (deaths play no clip)");
+		}
 		core::Result<anim::CrowdMoveGroupSet> groups = anim::load_crowd_move_groups((*assets)->clips, *(*assets)->library);
 		if (groups) {
 			m.move_groups = std::move(*groups);
@@ -911,6 +955,31 @@ core::Status Bf3GameCrowd::load(const GameLoadInputs &p_in) {
 			m.weapon_index[t].emplace(m.weapons->teams[t][i].spec.def, uint8_t(i));
 		}
 	}
+	if (gunplay != nullptr && !gunplay->soldier.ragdoll_asset.empty()) {
+		const std::string &name = gunplay->soldier.ragdoll_asset;
+		std::optional<core::LevelMount> own;
+		const core::LevelMount *mount = p_in.db->level ? &p_in.db->level->mount() : nullptr;
+		if (mount == nullptr && p_in.shared != nullptr) {
+			core::Result<core::LevelMount> described =
+					core::level::mount_level_description(*p_in.db->install, p_in.shared->level);
+			if (described) {
+				own.emplace(std::move(*described));
+				mount = &*own;
+			}
+		}
+		auto res = mount != nullptr ? mount->read_res(name)
+									: decltype(mount->read_res(name))(core::make_error("no level mount"));
+		auto def = std::make_shared<core::res::RagdollDef>();
+		const core::res::ResError parsed =
+				res ? core::res::RagdollDef::parse(res->second, res->first.res_meta, *def) : core::res::ResError();
+		if (!res) {
+			m.weapons->notes.push_back("ragdoll " + name + ": " + res.error().message + " (no ragdolls)");
+		} else if (!parsed.ok()) {
+			m.weapons->notes.push_back("ragdoll " + name + ": " + parsed.message() + " (no ragdolls)");
+		} else {
+			m.ragdoll_def = std::move(def);
+		}
+	}
 	m.catalog_install = p_in.db->install;
 	m.catalog_level = p_in.shared;
 	m.catalog_spec = spec;
@@ -958,11 +1027,46 @@ bool Bf3GameCrowd::build(Node3D *p_parent, std::string *r_error) {
 		stance.move_groups = nullptr;
 	}
 	stance.corpse_seconds = m.corpse_seconds;
+	if (m.have_death_clips) {
+		stance.death_clips = m.death_clips.clips;
+	}
 	core::Result<std::unique_ptr<anim::CrowdEvaluator>> e = anim::CrowdEvaluator::make(m.assets->clips, stance, m.teams, kCrowdSoldiers, m.config);
 	if (!e) {
 		return fail(e.error().message);
 	}
 	m.eval = std::move(*e);
+	if (m.ragdoll_def != nullptr && m.catalog_level != nullptr && m.catalog_level->static_world != nullptr) {
+		std::vector<std::string> bones;
+		std::vector<anim::Vec3> pivots(m.ragdoll_def->bodies.size(), anim::Vec3{});
+		for (const core::res::RagdollBodyDef &b : m.ragdoll_def->bodies) {
+			bones.push_back(b.bone);
+		}
+		for (const core::res::RagdollJointDef &j : m.ragdoll_def->joints) {
+			pivots[j.child] = j.child_frame.trans;
+		}
+		std::string why;
+		core::Result<anim::RagdollRig> rig = anim::RagdollRig::make(m.assets->clips.rig, bones, pivots);
+		if (!rig) {
+			why = rig.error().message;
+		} else if (core::Status joints = m.eval->set_ragdoll_joints(rig->joints); !joints.ok()) {
+			why = joints.error().message;
+		} else if (core::Result<std::unique_ptr<sim::RagdollWorld>> world =
+						   sim::RagdollWorld::create(m.catalog_level->static_world, m.ragdoll_def);
+				!world) {
+			why = world.error().message;
+		} else {
+			m.ragdoll_rig = std::move(*rig);
+			m.ragdoll_world = std::move(*world);
+			m.have_ragdoll = true;
+			m.ragdoll_hips = m.ragdoll_def->find_body("Hips");
+			m.corpses.assign(kCrowdSoldiers, Impl::Corpse{});
+			log("ragdoll: " + std::to_string(m.ragdoll_def->bodies.size()) + " bodies, " +
+					std::to_string(m.ragdoll_def->joints.size()) + " joints over the static world");
+		}
+		if (!why.empty()) {
+			log("ragdoll: " + why + " (no ragdolls)");
+		}
+	}
 	std::vector<uint8_t> team_of(kCrowdSoldiers);
 	for (uint32_t i = 0; i < kCrowdSoldiers; ++i) {
 		team_of[i] = uint8_t(i / kSlotsPerTeam);
@@ -1019,6 +1123,7 @@ void Bf3GameCrowd::step(const GameFrame &p_frame) {
 	}
 	m.build_inputs(p_frame);
 	m.eval->wait_and_publish(*m.lanes);
+	m.step_ragdolls(std::clamp(p_frame.dt, 0.0, 0.25));
 	m.collect_plants();
 	m.adopt_catalog();
 	m.adopt_vaults();
@@ -1067,6 +1172,11 @@ GameCrowdStats Bf3GameCrowd::stats() const {
 	s.catalog_added = impl_->catalog_added;
 	s.catalog_failed = impl_->catalog_failed;
 	s.catalog_pending = impl_->catalog_jobs != nullptr ? impl_->catalog_jobs->stats().pending : 0;
+	s.ragdolls = impl_->ragdoll_world != nullptr ? uint32_t(impl_->ragdoll_world->ragdoll_count()) : 0u;
+	s.ragdolls_started = impl_->ragdolls_started;
+	s.ragdolls_frozen = impl_->ragdolls_frozen;
+	s.ragdoll_failures = impl_->ragdoll_failures;
+	s.ragdoll_hips_height = impl_->ragdoll_hips_height;
 	return s;
 }
 
@@ -1168,6 +1278,131 @@ void Bf3GameCrowd::set_corpse_seconds(float p_seconds) {
 	m.corpses_kept = true;
 }
 
+uint8_t Bf3GameCrowd::Impl::death_clip_of(const core::gameplay::DeathRecord &p_record, uint8_t p_pose) const {
+	if (!have_death_clips || !p_record.valid) {
+		return anim::kNoCrowdDeathClip;
+	}
+	anim::CrowdDeathChoice choice;
+	choice.explosion = p_record.explosion;
+	choice.crouch = p_pose == uint8_t(sim::Pose::Crouch);
+	choice.prone = p_pose == uint8_t(sim::Pose::Prone);
+	choice.random_value = p_record.random_value();
+	return death_clips.choose(choice);
+}
+
+void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
+	if (!have_ragdoll || eval == nullptr) {
+		return;
+	}
+	const float dt = float(p_dt);
+	const size_t n = ragdoll_world->body_count();
+	for (uint32_t i = 0; i < kCrowdSoldiers; ++i) {
+		Corpse &c = corpses[i];
+		const anim::CrowdSoldierInput &in = inputs[i];
+		const bool dead = in.dead && (in.flags & anim::crowd_flags::kHidden) == 0;
+		if (!dead) {
+			if (c.active) {
+				ragdoll_world->remove(i);
+				c = Corpse{};
+				eval->set_ragdoll(i, {}, 0.0f);
+			}
+			continue;
+		}
+		if (!c.active) {
+			c = Corpse{};
+			c.active = true;
+			c.clip = in.death_clip;
+			c.blend.activate();
+			c.bodies.resize(n);
+			c.previous.resize(n);
+			c.joints.resize(n);
+			c.poses.resize(n);
+		}
+		c.age += p_dt;
+		if (c.done || c.age >= double(corpse_seconds)) {
+			if (c.in_world) {
+				ragdoll_world->remove(i);
+				c.in_world = false;
+			}
+			c.done = true;
+			continue;
+		}
+		const float target =
+				c.clip < death_clips.clips.size() ? death_clips.clips[c.clip].ragdoll_target(float(c.age)) : 1.0f;
+		if (c.blend.copies_pose()) {
+			const std::span<const anim::Xform> model = eval->model(i);
+			if (!model.empty()) {
+				c.have_previous = c.copied;
+				std::swap(c.previous, c.bodies);
+				ragdoll_rig.bodies(model, root_x[i], c.bodies);
+				c.copied = true;
+				c.copy_dt = dt;
+				c.blend.pose_copied();
+			}
+		}
+		c.blend.update(dt, target);
+		if (c.blend.weight() > 0.0f && !c.in_world && c.copied) {
+			std::vector<sim::Vec3> linear(n, sim::Vec3{}), angular(n, sim::Vec3{});
+			for (size_t b = 0; b < n; ++b) {
+				const anim::Xform &x = c.bodies[b];
+				c.poses[b].position = x.t;
+				c.poses[b].rotation = { x.q.x, x.q.y, x.q.z, x.q.w };
+				if (c.have_previous && c.copy_dt > 0.0f) {
+					linear[b] = anim::vec_scale(anim::vec_sub(x.t, c.previous[b].t), 1.0f / c.copy_dt);
+					anim::Quat d = anim::quat_mul(x.q, anim::quat_conj(c.previous[b].q));
+					if (d.w < 0.0f) {
+						d = anim::Quat{ -d.x, -d.y, -d.z, -d.w };
+					}
+					const float s = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+					if (s > 1.0e-6f) {
+						const float angle = 2.0f * std::atan2(s, d.w);
+						angular[b] = anim::vec_scale(anim::Vec3{ d.x, d.y, d.z }, angle / (s * c.copy_dt));
+					}
+				}
+			}
+			if (ragdoll_world->add(i, c.poses, linear, angular).ok()) {
+				c.in_world = true;
+				++ragdolls_started;
+			} else {
+				++ragdoll_failures;
+			}
+		}
+	}
+	if (!ragdoll_world->step(dt).ok()) {
+		++ragdoll_failures;
+	}
+	ragdoll_hips_height = -1.0f;
+	for (uint32_t i = 0; i < kCrowdSoldiers; ++i) {
+		Corpse &c = corpses[i];
+		if (!c.active) {
+			continue;
+		}
+		if (!c.in_world) {
+			eval->set_ragdoll(i, {}, 0.0f);
+			continue;
+		}
+		if (!ragdoll_world->frozen(i) &&
+				c.settle.update(dt, ragdoll_world->max_linear_speed(i), ragdoll_world->max_angular_speed(i))) {
+			ragdoll_world->freeze(i);
+			++ragdolls_frozen;
+		}
+		if (!ragdoll_world->pose(i, c.poses)) {
+			continue;
+		}
+		for (size_t b = 0; b < c.poses.size(); ++b) {
+			const sim::RagdollBodyPose &p = c.poses[b];
+			c.bodies[b] =
+					anim::Xform{ anim::Quat{ p.rotation[0], p.rotation[1], p.rotation[2], p.rotation[3] }, p.position };
+		}
+		if (ragdoll_hips >= 0 && size_t(ragdoll_hips) < c.poses.size()) {
+			ragdoll_hips_height =
+					std::max(ragdoll_hips_height, c.poses[size_t(ragdoll_hips)].position.y - root_x[i].t.y);
+		}
+		ragdoll_rig.joints_model(c.bodies, root_x[i], c.joints);
+		eval->set_ragdoll(i, c.joints, c.blend.weight());
+	}
+}
+
 bool Bf3GameCrowd::Impl::cam_event(const host::PresentEvent &p_e, const GameFrame &p_frame) {
 	if (p_e.kind == host::PresentKind::Revive) {
 		if (p_e.aux < kSlotsPerTeam && p_e.aux != p_frame.own_slot) {
@@ -1207,6 +1442,7 @@ bool Bf3GameCrowd::Impl::cam_event(const host::PresentEvent &p_e, const GameFram
 	c.input.target_pose = uint8_t(std::min<uint32_t>(uint32_t(st.target_pose), 2));
 	c.input.team = team;
 	c.input.dead = true;
+	c.input.death_clip = death_clip_of(present::death_record_of(p_e), c.input.pose);
 	c.input.weapon = 0;
 	if (f->own_weapons_valid && f->own_weapons_curr.active < f->own_weapons_curr.slots.size()) {
 		const uint16_t def = f->own_weapons_curr.slots[f->own_weapons_curr.active].def;
@@ -1248,6 +1484,7 @@ void Bf3GameCrowd::Impl::cam_new_life(uint32_t p_slot, Slot &r_s) {
 	c.seconds = r_s.dead_seconds;
 	c.input = r_s.input;
 	c.input.dead = true;
+	c.input.death_clip = r_s.death_clip;
 	c.input.revived = false;
 	c.input.velocity = anim::Vec3{};
 	c.input.flags = 0;

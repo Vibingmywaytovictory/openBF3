@@ -131,6 +131,7 @@ struct SoldierDef {
 	float post_revive_health = 0;
 	float time_for_corpse = 0;
 	bool interactive_man_down = false;
+	std::string ragdoll_asset;
 
 	float mass = 0;
 	float radius = 0;

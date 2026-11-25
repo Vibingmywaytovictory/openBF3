@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/anim/crowd_clips.h"
+#include "bf3/anim/death_anim.h"
 #include "bf3/anim/layers.h"
 #include "bf3/anim/locomotion.h"
 #include "bf3/anim/pose.h"
@@ -51,6 +52,7 @@ struct CrowdSoldierInput {
 	uint8_t fire_seq = 0;
 	bool ads = false;
 	bool dead = false;
+	uint8_t death_clip = kNoCrowdDeathClip;
 
 	bool revived = false;
 	bool sprinting = false;
@@ -154,6 +156,9 @@ public:
 	static core::Result<std::unique_ptr<CrowdEvaluator>> make(const CrowdClipSet &p_clips, const CrowdStanceSet &p_stance, std::span<const CrowdTeam> p_teams,
 			uint32_t p_soldiers, const CrowdConfig &p_config);
 
+	core::Status set_ragdoll_joints(std::span<const int32_t> p_joints);
+	void set_ragdoll(uint32_t p_i, std::span<const Xform> p_model, float p_weight);
+
 	bool drawn(uint32_t p_i) const;
 	bool vault_of(uint32_t p_i, uint8_t &r_kind, float &r_seconds) const;
 
@@ -185,12 +190,6 @@ static_assert(kMaxCrowdWeapons < kNoCrowdWeapon);
 
 struct ServerPoseClips;
 
-enum class CrowdDeathStyle : uint8_t {
-	BlendToProne = 0,
-	Clip = 1,
-};
-inline constexpr CrowdDeathStyle kCrowdDeathDefault = CrowdDeathStyle::BlendToProne;
-inline constexpr float kCrowdDeathBlendSeconds = 0.5f;
 inline constexpr float kCrowdDeathHideSeconds = 3.0f;
 inline constexpr float kCrowdFireKickSeconds = 0.05f;
 inline constexpr float kCrowdFireKickDeg = 3.0f;
@@ -199,7 +198,7 @@ inline constexpr float kCrowdLayerRampSeconds = 0.15f;
 struct CrowdStanceSet {
 	const ServerPoseClips *pose = nullptr;
 	const CrowdMoveClips *moves = nullptr;
-	CrowdDeathStyle death = kCrowdDeathDefault;
+	std::span<const CrowdDeathClip> death_clips;
 
 	float corpse_seconds = kCrowdDeathHideSeconds;
 	const CrowdMoveGroupSet *move_groups = nullptr;
