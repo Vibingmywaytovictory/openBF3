@@ -3580,3 +3580,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * The crowd evaluator applies a ragdoll override to a living soldier too (the revive blend-out) and drops the hard-coded 0.5 s revive blend (kCrowdReviveBlendSeconds) (anim.s3.unit changed, anim.s3, anim.death, contracts).
 * godot.m2a_tp_crowd kills five soldiers (front, crouching, prone, from behind, by an explosion) and asserts each corpse's clip-then-ragdoll sequence, the clip's motion handed to the ragdoll, and every corpse frozen by the R5-DT2 C rule before it hides (corpse time 4 s in the check).
 * Revive: a revived soldier's ragdoll blends out by R5-DT2 F3 (1.0 s hold at the ragdoll's hips and facing, 0.7 s root interpolation to the soldier, then removed) instead of a 0.5 s pose blend (godot.m2a_tp_crowd revive rows, core.death_body.unit).
+* host.ghost: the death-record check also requires the remote peer to have received deaths (it passed vacuously at zero).

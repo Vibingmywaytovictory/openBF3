@@ -706,6 +706,7 @@ TEST_SUITE("host-ghost") {
 		CHECK(peer.decode_failures == 0);
 		std::printf("host.ghost: the peer received %llu deaths, %llu with a death record\n",
 				(unsigned long long)peer.deaths, (unsigned long long)peer.death_records);
+		CHECK(peer.deaths > 0);
 		CHECK(peer.death_records == peer.deaths);
 		CHECK(std::count_if(stats.slots.begin(), stats.slots.end(),
 					  [](const host::SlotStats &p_s) { return p_s.used; }) == 64);
