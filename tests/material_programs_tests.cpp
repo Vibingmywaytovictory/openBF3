@@ -323,6 +323,30 @@ TEST_SUITE("render-programs-unit") {
 		CHECK(code.find("//") == std::string::npos);
 	}
 
+	TEST_CASE("render.programs.unit: a double-sided G-buffer program without the face input lights one normal on "
+			  "both faces") {
+		const std::vector<uint8_t> ps_blob = layer_pixel_program(), vs_blob = layer_vertex_program();
+		bf3::core::Result<dxbc::Program> ps = dxbc::parse(ps_blob);
+		bf3::core::Result<dxbc::Program> vs = dxbc::parse(vs_blob);
+		REQUIRE(ps.ok());
+		REQUIRE(vs.ok());
+		const std::vector<uint32_t> formats = { 10, kDxgiR16G16Float };
+		const std::vector<uint32_t> bound = { 1, 2, 3 };
+		const std::string face_blind = "void fragment() {\n\tNORMAL = FRONT_FACING ? NORMAL : -NORMAL;\n";
+		for (const bool double_sided : { false, true }) {
+			ProgramRequest request;
+			request.pixel = &*ps;
+			request.vertex = &*vs;
+			request.vertex_formats = formats;
+			request.bound_textures = bound;
+			request.double_sided = double_sided;
+			bf3::core::Result<TranslatedProgram> t = translate_program(request);
+			REQUIRE_MESSAGE(t.ok(), (t.ok() ? std::string() : t.error().message));
+			CHECK((t->code.find(", cull_disabled;") != std::string::npos) == double_sided);
+			CHECK((t->code.find(face_blind) != std::string::npos) == double_sided);
+		}
+	}
+
 	TEST_CASE("render.programs.unit: a program reading what it cannot map is refused with the reason") {
 		const std::vector<uint8_t> ps_blob = layer_pixel_program(), vs_blob = layer_vertex_program();
 		bf3::core::Result<dxbc::Program> ps = dxbc::parse(ps_blob);

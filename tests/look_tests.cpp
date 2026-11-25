@@ -1290,4 +1290,55 @@ TEST_SUITE("render-level-gloss") {
 		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}
+
+	TEST_CASE("render.level_gloss: MP_007's and MP_Subway's double-sided vegetation G-buffer programs light the "
+			  "vertex normal on both faces, as their pixel programs write it without the face") {
+		InstallReader reader;
+		if (!reader.locate({})) {
+			bf3::test::skip_install_case(reader.describe().c_str());
+			return;
+		}
+		const InstallSnapshot before = reader.snapshot();
+		Result<std::shared_ptr<Install>> install = Install::open(reader);
+		REQUIRE(install.ok());
+		const std::string_view vegetation = "objects/vegetation/shaders/vegetation";
+		const std::string_view leaves = "objects/vegetation/shaders/vegetationtranslucentvertexpreset";
+		const std::string_view face_blind = "void fragment() {\n\tNORMAL = FRONT_FACING ? NORMAL : -NORMAL;\n";
+		for (const char *level_name : { "MP_007", "MP_Subway" }) {
+			Result<std::unique_ptr<level::LoadedLevel>> loaded =
+					level::load_level(*install, level_name, "TeamDeathMatchC0");
+			REQUIRE(loaded.ok());
+			Result<std::unique_ptr<level::World>> world = level::World::traverse(**loaded);
+			REQUIRE(world.ok());
+			Result<level::MeshCensus> census = level::mesh_census(**loaded, **world);
+			REQUIRE(census.ok());
+			Result<LevelScenePlan> plan = plan_level_scene(**loaded, **world, *census);
+			REQUIRE(plan.ok());
+			size_t double_sided = 0, unflipped = 0, leaf_materials = 0;
+			for (const SceneMaterialPlan &mat : plan->materials) {
+				const std::string shader = to_lower_ascii(mat.slot.shader);
+				if (shader.rfind(vegetation, 0) != 0 || mat.program < 0) {
+					continue;
+				}
+				REQUIRE(size_t(mat.program) < plan->programs.size());
+				const std::string &code = plan->programs[size_t(mat.program)]->translated.code;
+				if (code.find("cull_disabled") == std::string::npos ||
+						code.find("void light() {") == std::string::npos) {
+					continue;
+				}
+				++double_sided;
+				leaf_materials += shader == leaves ? 1 : 0;
+				const bool one_normal = code.find(face_blind) != std::string::npos;
+				unflipped += one_normal ? 1 : 0;
+				CHECK_MESSAGE(one_normal, (shader + " flips its normal on the back face"));
+			}
+			std::printf("render.level_gloss %s: %zu double-sided lit vegetation materials (%zu leaf), %zu light one "
+						"normal on both faces\n",
+					level_name, double_sided, leaf_materials, unflipped);
+			CHECK(leaf_materials > 0);
+			CHECK(unflipped == double_sided);
+		}
+		const SnapshotDiff diff = diff_snapshots(before, reader.snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
 }

@@ -1482,6 +1482,7 @@ public:
 			return vertex.error();
 		}
 		out_.code = header() + head + common_uniforms() + *vertex + "void fragment() {\n" +
+				(face_blind() ? std::string(kFaceBlindNormal) : std::string()) +
 				(request_.page_hidden ? terrain_page_hidden() : std::string()) + locals + body + tail() + "}\n" +
 				(lit() ? light_pass_code() : std::string());
 		out_.gloss = gloss_;
@@ -1968,6 +1969,12 @@ private:
 
 	bool lit() const {
 		return request_.target == ProgramTarget::Deferred || request_.target == ProgramTarget::DeferredDecal;
+	}
+
+	bool face_blind() const {
+		return request_.target == ProgramTarget::Deferred && request_.double_sided && !page_normal_ &&
+				std::none_of(ps_.inputs.begin(), ps_.inputs.end(),
+						[](const dxbc::SignatureElement &p_e) { return p_e.name == "SV_IsFrontFace"; });
 	}
 
 	std::string common_uniforms() const {

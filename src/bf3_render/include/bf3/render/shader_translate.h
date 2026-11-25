@@ -61,6 +61,8 @@ struct ProgramConstantLane {
 	bool engine = false;
 };
 
+inline constexpr std::string_view kFaceBlindNormal = "\tNORMAL = FRONT_FACING ? NORMAL : -NORMAL;\n";
+
 inline constexpr std::array<std::string_view, 3> kEngineGlobals{ "outdoorLightHemisphereDir", "outdoorLightTopColor",
 	"outdoorLightBottomColor" };
 
