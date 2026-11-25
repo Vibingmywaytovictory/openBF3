@@ -292,6 +292,17 @@ bool read_float_state_tags(const AntLibrary &p_library, const AntPackage &p_pkg,
 				r_tags.size() >= kMaxAntFloatStateTags) {
 			return false;
 		}
+		const GdArray spline = p_tag.array("SplineRaw");
+		if (spline.size() > kMaxAntSplineSamples) {
+			return false;
+		}
+		for (uint32_t k = 0; k < spline.size(); ++k) {
+			int64_t sample = 0;
+			if (!spline.read_int(k, sample) || sample < 0 || sample > 255) {
+				return false;
+			}
+			t.spline.push_back(uint8_t(sample));
+		}
 		t.signal = std::string(value.name());
 		t.tick -= p_start_time;
 		r_tags.push_back(std::move(t));
@@ -1165,4 +1176,145 @@ MoveGroupWeights move_group_weights(const MoveGroupDef &p_def, std::span<const M
 	return out;
 }
 
+float AntFloatStateTag::at(float p_tick) const {
+	if (!(p_tick >= tick)) {
+		return 0.0f;
+	}
+	if (!(ticks > 0.0f) || p_tick >= tick + ticks || spline.empty()) {
+		return value;
+	}
+	const float f = (p_tick - tick) / ticks * float(spline.size() - 1);
+	const size_t i = std::min(size_t(f), spline.size() - 1);
+	const size_t j = std::min(i + 1, spline.size() - 1);
+	const float u = f - float(i);
+	return value * ((1.0f - u) * float(spline[i]) + u * float(spline[j])) / 255.0f;
+}
+
+const AntLinearPick *linear_pick(std::span<const AntLinearPick> p_picks, float p_signal) {
+	const AntLinearPick *chosen = nullptr;
+	for (const AntLinearPick &p : p_picks) {
+		if (p.threshold <= p_signal) {
+			chosen = &p;
+		}
+	}
+	return chosen != nullptr || p_picks.empty() ? chosen : &p_picks.front();
+}
+
+core::Result<AntDeathFlow> read_death_flow(const AntLibrary &p_library, const ChooserIndices &p_indices) {
+	core::gameplay::WorkBudget budget;
+	const AntPackage *stat = p_library.static_package();
+	if (stat == nullptr) {
+		return core::make_error("death flow: the Ant library has no static package");
+	}
+	core::Result<GdStruct> prone = find_static(p_library, "StateFlowNodeControllerAsset", kDeathProneNode, budget);
+	if (!prone) {
+		return prone.error();
+	}
+	core::Result<GdStruct> crouch = find_static(p_library, "StateFlowNodeControllerAsset", kDeathCrouchNode, budget);
+	if (!crouch) {
+		return crouch.error();
+	}
+	auto resolve = [&](const GdGuid &p_g) { return p_g.is_null() ? GdStruct() : p_library.resolve(*stat, p_g); };
+	GdStruct entry;
+	uint32_t entries = 0;
+	for (size_t i = 0; i < stat->object_count(); ++i) {
+		const GdStruct o = stat->object(i);
+		GdGuid to, from;
+		if (o.type_name() != "StateFlowTransitionAsset" || !o.read_guid("To", to) ||
+				to.index() != prone->guid().index() || !o.read_guid("From", from)) {
+			continue;
+		}
+		const GdStruct f = resolve(from);
+		if (f.valid() && f.name() == kDeathFlowEntry) {
+			entry = f;
+			++entries;
+		}
+	}
+	if (entries != 1) {
+		return core::make_error("death flow: " + std::to_string(entries) + " " + std::string(kDeathFlowEntry) +
+				" nodes lead to " + std::string(kDeathProneNode));
+	}
+	AntDeathFlow flow;
+	const GdArray transitions = entry.array("Transitions");
+	if (!transitions.valid() || transitions.empty() || transitions.size() > kMaxDeathNodes) {
+		return core::make_error(
+				"death flow: " + label(entry) + " has " + std::to_string(transitions.size()) + " transitions");
+	}
+	for (uint32_t k = 0; k < transitions.size(); ++k) {
+		GdGuid tg, ng;
+		const GdStruct t = transitions.read_guid(k, tg) ? resolve(tg) : GdStruct();
+		const GdStruct node = t.valid() && t.read_guid("To", ng) ? resolve(ng) : GdStruct();
+		if (!node.valid() || node.type_name() != "StateFlowNodeControllerAsset") {
+			return core::make_error(
+					"death flow: transition " + std::to_string(k) + " of " + label(entry) + " leads to no node");
+		}
+		AntDeathNode n;
+		n.name = std::string(node.name());
+		for (const auto &[field, out] : { std::pair<const char *, std::vector<std::string> *>{
+												  "EntryConditionsRequiredTrue", &n.requires_true },
+					 std::pair<const char *, std::vector<std::string> *>{
+							 "EntryConditionsRequiredFalse", &n.requires_false } }) {
+			const GdArray conds = node.array(field);
+			for (uint32_t c = 0; conds.valid() && c < conds.size() && c < kMaxSignals; ++c) {
+				GdGuid cg;
+				const GdStruct cond = conds.read_guid(c, cg) ? resolve(cg) : GdStruct();
+				if (!cond.valid()) {
+					return core::make_error("death flow: " + label(node) + " " + field + "[" + std::to_string(c) +
+							"] does not resolve");
+				}
+				out->push_back(std::string(cond.name()));
+			}
+		}
+		GdGuid sg;
+		const GdStruct subject = node.read_guid("SubjectController", sg) ? resolve(sg) : GdStruct();
+		n.subject = subject.valid() ? label(subject) : std::string();
+		flow.nodes.push_back(std::move(n));
+	}
+	GdGuid prone_subject;
+	if (!prone->read_guid("SubjectController", prone_subject) || prone_subject.is_null()) {
+		return core::make_error("death flow: " + label(*prone) + " has no SubjectController");
+	}
+	core::Result<AntClipRoute> prone_route = route_ant_controller(p_library, *stat, prone_subject, p_indices);
+	if (!prone_route) {
+		return core::error_at("death flow " + std::string(kDeathProneNode), prone_route.error());
+	}
+	flow.prone = std::move(*prone_route);
+	GdGuid cg, pg;
+	const GdStruct chooser = crouch->read_guid("SubjectController", cg) ? resolve(cg) : GdStruct();
+	const GdStruct policy = chooser.valid() && chooser.read_guid("PolicyAsset", pg) ? resolve(pg) : GdStruct();
+	if (!chooser.valid() || chooser.type_name() != "ChooserControllerAsset" || !policy.valid() ||
+			policy.type_name() != "LinearSignalChooserPolicyAsset") {
+		return core::make_error("death flow: " + label(*crouch) + " is not a linear signal chooser");
+	}
+	const GdArray picks = chooser.array("EntryAssetList");
+	if (!picks.valid() || picks.empty() || picks.size() > kMaxChooserEntries) {
+		return core::make_error("death flow: " + label(chooser) + " has " + std::to_string(picks.size()) + " entries");
+	}
+	for (uint32_t k = 0; k < picks.size(); ++k) {
+		GdGuid eg, sig, ctl;
+		const GdStruct e = picks.read_guid(k, eg) ? resolve(eg) : GdStruct();
+		AntLinearPick pick;
+		if (!e.valid() || e.type_name() != "LinearSignalChooserEntryAsset" ||
+				!e.read_float("Threshold", pick.threshold) || !finite(pick.threshold) ||
+				!e.read_guid("SignalAsset", sig) || !e.read_guid("ControllerAsset", ctl) || ctl.is_null()) {
+			return core::make_error(
+					"death flow: " + label(chooser) + " entry " + std::to_string(k) + " is not a linear signal entry");
+		}
+		const GdStruct signal = resolve(sig);
+		const std::string signal_name = signal.valid() ? std::string(signal.name()) : std::string();
+		if (k == 0) {
+			flow.crouch_signal = signal_name;
+		} else if (signal_name != flow.crouch_signal || !(pick.threshold > flow.crouch.back().threshold)) {
+			return core::make_error("death flow: " + label(chooser) + " entry " + std::to_string(k) +
+					" breaks the ascending thresholds of one signal");
+		}
+		core::Result<AntClipRoute> r = route_ant_controller(p_library, *stat, ctl, p_indices);
+		if (!r) {
+			return core::error_at("death flow " + label(chooser), r.error());
+		}
+		pick.route = std::move(*r);
+		flow.crouch.push_back(std::move(pick));
+	}
+	return flow;
+}
 }

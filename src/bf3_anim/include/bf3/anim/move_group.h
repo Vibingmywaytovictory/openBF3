@@ -46,9 +46,14 @@ inline constexpr size_t kMaxAntEventTags = 32;
 
 inline constexpr size_t kMaxAntFloatStateTags = 256;
 
+inline constexpr size_t kMaxAntSplineSamples = 256;
+
 struct AntFloatStateTag {
 	std::string signal;
 	float tick = 0.0f, ticks = 0.0f, value = 0.0f;
+	std::vector<uint8_t> spline;
+
+	float at(float p_tick) const;
 };
 
 struct AntClipRoute {
@@ -110,6 +115,34 @@ struct AntThrowFlow3p {
 	std::string leave_type, leave_node;
 	float release_end_tick = 0.0f, release_end_window_ticks = 0.0f;
 };
+
+inline constexpr std::string_view kDeathProneNode = "General_ProneDeathNode";
+inline constexpr std::string_view kDeathCrouchNode = "General_CrouchDeathNode";
+inline constexpr std::string_view kDeathFlowEntry = "DeathNode";
+inline constexpr size_t kMaxDeathNodes = 8;
+
+struct AntDeathNode {
+	std::string name;
+	std::vector<std::string> requires_true;
+	std::vector<std::string> requires_false;
+	std::string subject;
+};
+
+struct AntLinearPick {
+	float threshold = 0.0f;
+	AntClipRoute route;
+};
+
+struct AntDeathFlow {
+	std::vector<AntDeathNode> nodes;
+	AntClipRoute prone;
+	std::string crouch_signal;
+	std::vector<AntLinearPick> crouch;
+};
+
+core::Result<AntDeathFlow> read_death_flow(const core::ant::AntLibrary &p_library, const ChooserIndices &p_indices);
+
+const AntLinearPick *linear_pick(std::span<const AntLinearPick> p_picks, float p_signal);
 
 core::Result<AntThrowFlow3p> read_throw_flow_3p(
 		const core::ant::AntLibrary &p_library, std::string_view p_flow, const ChooserIndices &p_indices);

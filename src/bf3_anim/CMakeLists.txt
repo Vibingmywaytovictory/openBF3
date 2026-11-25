@@ -17,12 +17,14 @@ openbf3_module(bf3_anim)
 target_sources(bf3_anim PRIVATE
     src/crowd_clips.cpp
     src/crowd_eval.cpp
+    src/death_anim.cpp
     src/crowd_stage.cpp
     src/layers.cpp
     src/locomotion.cpp
     src/temporal_lod.cpp
     include/bf3/anim/crowd_clips.h
     include/bf3/anim/crowd_eval.h
+    include/bf3/anim/death_anim.h
     include/bf3/anim/crowd_stage.h
     include/bf3/anim/layers.h
     include/bf3/anim/locomotion.h
