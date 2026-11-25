@@ -323,7 +323,8 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 		const double v = double(flt(n, cp::SmpBasePitch)) * read(port(n, cp::SmpPitch)) * program->master_pitch;
 		return std::isfinite(v) && v > 0.0 ? float(std::clamp(v, 1.0 / 64.0, 64.0)) : 1.0f;
 	}();
-	const float amp = read(port(n, cp::SmpAmplitude));
+	const ca::SoundPort &amplitude = port(n, cp::SmpAmplitude);
+	const float amp = read(amplitude) * (amplitude.connected() ? amplitude.constant : 1.0f);
 	s.amplitude = std::isfinite(amp) ? std::clamp(amp, 0.0f, 16.0f) : 0.0f;
 	const bool trigger = rose(port(n, cp::SmpTrigger));
 	const bool step = rose(port(n, cp::SmpStep));

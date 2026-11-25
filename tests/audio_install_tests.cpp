@@ -1987,7 +1987,7 @@ TEST_SUITE("audio-footsteps") {
 		CHECK_FALSE(has(heard[40].names, "clothing/clothes_vest_sp"));
 		CHECK(has(heard[65].names, "clothing/clothes_vest_sp"));
 		CHECK_FALSE(has(heard[65].names, "clothing/clothes_vest_ru"));
-		CHECK(heard[65].peak > heard[40].peak);
+		CHECK(heard[40].peak > heard[65].peak);
 
 		ba::MixerConfig mc;
 		mc.max_instances = 256;

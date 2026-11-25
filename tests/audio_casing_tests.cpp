@@ -389,4 +389,51 @@ TEST_SUITE("audio-casings") {
 		CHECK(checked + silent_by_data == with_casing);
 		check_casing_unchanged(*f);
 	}
+
+	TEST_CASE("casing gain: the AK-74M's, M16A4's and LSAT's casing sampler plays at its AreaType table times "
+			  "its Amplitude port's UnconnectedValue (R5-AU1), so the LSAT's is silent") {
+		CasingFixture *f = need_casing_install();
+		if (f == nullptr) {
+			return;
+		}
+		struct Expected {
+			const char *patch;
+			std::array<float, 7> table;
+			float base;
+		};
+		const std::array<Expected, 3> expected{ {
+				{ "sound/weapons/handheld/ak74/weapon_assaultrifle_ak74_02",
+						{ 1.0f, 2.0f, 3.0f, 2.0f, 1.2f, 0.8f, 3.0f }, 0.4f },
+				{ "sound/weapons/handheld/m16a3/weapon_assaultrifle_m16a4_02",
+						{ 1.0f, 3.0f, 2.5f, 2.0f, 1.2f, 0.8f, 3.0f }, 0.4f },
+				{ "sound/weapons/handheld/xp2_lsat/weapon_lmg_lsat", { 1.0f, 1.2f, 3.0f, 1.5f, 1.2f, 1.0f, 3.0f },
+						0.0f },
+		} };
+		for (const Expected &e : expected) {
+			const ba::WeaponAudioDef *def = nullptr;
+			for (const ba::WeaponAudioDef &d : f->assets.table->defs) {
+				if (d.patch == e.patch && d.program) {
+					def = &d;
+				}
+			}
+			REQUIRE_MESSAGE(def != nullptr, e.patch);
+			const std::vector<CasingSampler> samplers = casing_samplers(*def->program);
+			REQUIRE(samplers.size() == 1);
+			CHECK(samplers[0].amplitude.connected());
+			CHECK(samplers[0].amplitude.constant == doctest::Approx(e.base));
+			for (size_t area = 0; area < e.table.size(); ++area) {
+				Result<std::unique_ptr<ba::PatchInstance>> inst =
+						ba::PatchInstance::create(def->program, f->assets.bank, ba::AudioTuning{}, 1, ba::kMixRate);
+				REQUIRE(inst.ok());
+				(*inst)->set_parameter(ba::kHashIsFirstPerson, 1.0f);
+				(*inst)->set_mixer_value(ca::kMixerAreaType, float(area));
+				(*inst)->evaluate(0.01);
+				const std::span<const ba::SamplerSlotState> slots = (*inst)->sampler_slots(samplers[0].node);
+				REQUIRE(!slots.empty());
+				CHECK_MESSAGE(slots[0].gain == doctest::Approx(e.table[area] * e.base), std::string(e.patch),
+						" AreaType ", area);
+			}
+		}
+		check_casing_unchanged(*f);
+	}
 }
