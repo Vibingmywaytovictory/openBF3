@@ -128,3 +128,8 @@ target_sources(bf3_render PRIVATE
     include/bf3/render/viewmodel_vault.h
     src/viewmodel_vault.cpp
 )
+
+target_sources(bf3_render PRIVATE
+    include/bf3/render/tree_wind.h
+    src/tree_wind.cpp
+)
