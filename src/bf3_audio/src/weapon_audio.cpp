@@ -499,7 +499,7 @@ struct WeaponAudioRouter::Impl {
 	sw::SimTime horizon = 0;
 	bool horizon_valid = false;
 
-	enum class OpKind : uint8_t { Down, Round, Up, Stop };
+	enum class OpKind : uint8_t { Down, Round, Shot, Up, Stop };
 	struct Op {
 		OpKind kind = OpKind::Down;
 		uint32_t round = 0;
@@ -621,6 +621,9 @@ struct WeaponAudioRouter::Impl {
 					break;
 				case OpKind::Round:
 					ok = r_v.driver.round_fired(mixer, op.round);
+					break;
+				case OpKind::Shot:
+					ok = r_v.driver.shot_fired(mixer, op.round);
 					break;
 				case OpKind::Up:
 					ok = r_v.driver.trigger_up(mixer, op.frame);
@@ -760,6 +763,7 @@ struct WeaponAudioRouter::Impl {
 		}
 		(void)inst->release();
 		v.ops.push_back(Op{ OpKind::Down, 0, p_frame });
+		push_shot(v, 0);
 		flush(v);
 		r_track.held = handle;
 		++stats.bursts;
@@ -771,6 +775,12 @@ struct WeaponAudioRouter::Impl {
 		return &v;
 	}
 
+	static void push_shot(Voice &r_v, uint32_t p_round) {
+		if (r_v.driver.posts_shot_event()) {
+			r_v.ops.push_back(Op{ OpKind::Shot, p_round, 0 });
+		}
+	}
+
 	void post_round(Voice &r_v, uint32_t p_round, sw::SimTime p_time, bool p_from_event) {
 		if (p_round < r_v.next_round || r_v.single || !r_v.held) {
 			return;
@@ -779,6 +789,7 @@ struct WeaponAudioRouter::Impl {
 		if (p_from_event && p_round - r_v.next_round <= 64) {
 			for (uint32_t k = r_v.next_round; k < p_round; ++k) {
 				r_v.ops.push_back(Op{ OpKind::Round, k, 0 });
+				push_shot(r_v, k);
 				++stats.rounds;
 				++stats.state_rounds;
 			}
@@ -787,6 +798,7 @@ struct WeaponAudioRouter::Impl {
 		r_v.last_round = p_round;
 		r_v.last_round_time = std::max(r_v.last_round_time, p_time);
 		r_v.ops.push_back(Op{ OpKind::Round, p_round, 0 });
+		push_shot(r_v, p_round);
 		flush(r_v);
 		++stats.rounds;
 		if (p_from_event) {

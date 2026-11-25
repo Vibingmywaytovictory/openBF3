@@ -23,6 +23,7 @@ struct WeaponSoundBinding {
 	uint32_t stop_event = 0;
 	std::optional<uint32_t> step_event;
 	std::optional<uint32_t> enable_step_parameter;
+	std::optional<uint32_t> shot_event;
 	double shot_interval_seconds = 0.0;
 	uint32_t mix_rate = 0;
 };
@@ -39,6 +40,8 @@ public:
 	bool trigger_down(MixerCore &r_mixer, uint64_t p_first_frame);
 
 	bool round_fired(MixerCore &r_mixer, uint32_t p_round);
+	bool shot_fired(MixerCore &r_mixer, uint32_t p_round) const;
+	bool posts_shot_event() const { return binding_.shot_event.has_value(); }
 	bool trigger_up(MixerCore &r_mixer, uint64_t p_frame);
 	uint64_t round_frame(uint32_t p_round) const;
 	uint32_t round_event() const;

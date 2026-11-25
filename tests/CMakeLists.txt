@@ -1047,6 +1047,10 @@ openbf3_test(test_audio_router test_main.cpp audio_router_tests.cpp test_support
 target_link_libraries(test_audio_router PRIVATE bf3_audio bf3_client_audio bf3_host bf3_fx bf3_core bf3_sim_harness)
 target_compile_definitions(test_audio_router PRIVATE OPENBF3_AUDIO_TUNING_CFG="${PROJECT_SOURCE_DIR}/bf3-opensource/config/audio_tuning.cfg"
     OPENBF3_AU3_SHOTS="${CMAKE_BINARY_DIR}/shots")
+openbf3_test(test_audio_casing test_main.cpp audio_casing_tests.cpp test_support.h)
+target_link_libraries(test_audio_casing PRIVATE bf3_audio bf3_client_audio bf3_host bf3_core)
+add_test(NAME audio.casings COMMAND test_audio_casing --test-suite=audio-casings)
+set_tests_properties(audio.casings PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 add_test(NAME audio.router.unit COMMAND test_audio_router --test-suite=audio-router)
 set_tests_properties(audio.router.unit PROPERTIES TIMEOUT 300)
 add_test(NAME audio.game COMMAND test_audio_router --test-suite=audio-game "--test-case-exclude=64 shooters*,24 soldiers*,a burst*")

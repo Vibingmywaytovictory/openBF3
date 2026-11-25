@@ -1,5 +1,6 @@
 #include "bf3/audio/weapon_sound.h"
 
+#include "bf3/audio/weapon_audio.h"
 #include "bf3/core/audio/sound_ports.h"
 
 #include <cmath>
@@ -72,6 +73,9 @@ core::Result<WeaponSoundBinding> bind_weapon_sound(std::shared_ptr<const ca::Sou
 			}
 		}
 	}
+	if (p.start_event != kHashStep && b.step_event != kHashStep && event_reaches_graph(p, kHashStep)) {
+		b.shot_event = kHashStep;
+	}
 	b.program = std::move(p_program);
 	return b;
 }
@@ -114,6 +118,10 @@ bool WeaponSoundDriver::round_fired(MixerCore &r_mixer, uint32_t p_round) {
 		return true;
 	}
 	return r_mixer.push(event_command(instance_, round_event(), round_frame(p_round)));
+}
+
+bool WeaponSoundDriver::shot_fired(MixerCore &r_mixer, uint32_t p_round) const {
+	return !binding_.shot_event || r_mixer.push(event_command(instance_, *binding_.shot_event, round_frame(p_round)));
 }
 
 uint32_t WeaponSoundDriver::round_event() const {
