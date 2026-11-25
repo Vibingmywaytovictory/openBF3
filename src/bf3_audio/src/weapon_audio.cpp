@@ -860,6 +860,9 @@ struct WeaponAudioRouter::Impl {
 		o.set_first_person = true;
 		o.first_person = p_first_person;
 		o.mix_rate = config.mix_rate;
+		if (WeaponAudioObserver *obs = observer) {
+			o.before_start = [obs](PatchInstance &r_instance, InstanceHandle) { obs->on_one_shot(r_instance); };
+		}
 		if (!pool.start(mixer, p_program, bank, tuning, p_seed, p_emitter, listener, p_frame, o)) {
 			return false;
 		}

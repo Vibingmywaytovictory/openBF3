@@ -281,6 +281,8 @@ public:
 	virtual void on_trigger_up(uint8_t p_slot, uint64_t p_seed, uint64_t p_stop_frame) = 0;
 
 	virtual void on_foley(const FoleyCue &, PatchInstance *) {}
+
+	virtual void on_one_shot(PatchInstance &) {}
 };
 
 class WeaponAudioRouter {

@@ -3582,3 +3582,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Revive: a revived soldier's ragdoll blends out by R5-DT2 F3 (1.0 s hold at the ragdoll's hips and facing, 0.7 s root interpolation to the soldier, then removed) instead of a 0.5 s pose blend (godot.m2a_tp_crowd revive rows, core.death_body.unit).
 * host.ghost: the death-record check also requires the remote peer to have received deaths (it passed vacuously at zero).
 * A soldier's revived flag clears when its next death is applied, so a later spawn never starts a ragdoll blend-out (godot.m2a_tp_crowd, godot.m2a_tp_crowd.window, godot.native_screens).
+* Weapon audio observer: WeaponAudioObserver::on_one_shot hands the patch instance of every one-shot weapon sound (shotguns, knife, grenades, detonations) to the observer before it starts, as on_driver_instance does for bursts, so a row can trace their samplers (audio.router.unit).
