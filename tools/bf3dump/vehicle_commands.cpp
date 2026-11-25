@@ -245,10 +245,11 @@ int cmd_vehicledrive(const std::shared_ptr<Install> &p_install, const std::vecto
 			double(m.mass));
 	for (size_t i = 0; i < m.wheel_count; ++i) {
 		const VehicleWheelModel &w = m.wheels[i];
-		std::printf("model_wheel\t%zu\tattach (%.4f %.4f %.4f) r %.3f susp %.3f..%.3f k %.1f c %.1f steer %.4f brake %.1f hand %.1f axle %u side %u\n", i,
-				double(w.attachment[0]), double(w.attachment[1]), double(w.attachment[2]), double(w.radius), double(w.suspension_min), double(w.suspension_max),
-				double(w.spring_stiffness), double(w.spring_damping), double(w.max_steer_angle), double(w.max_brake_torque), double(w.max_hand_brake_torque),
-				unsigned(w.axle), unsigned(w.side));
+		std::printf("model_wheel\t%zu\tattach (%.4f %.4f %.4f) r %.3f susp %.3f..%.3f K %.1f damping %.3f rest %.4f "
+					"steers %u axle %u side %u\n",
+				i, double(w.attachment[0]), double(w.attachment[1]), double(w.attachment[2]), double(w.radius),
+				double(w.suspension_min), double(w.suspension_max), double(w.spring_constant), double(w.spring_damping),
+				double(w.rest_compression), unsigned(w.steers), unsigned(w.axle), unsigned(w.side));
 	}
 	for (const gameplay::DriveRigidBodyDef &b : d.rigid_bodies) {
 		std::printf("rigid_body\t%s\tmass %g damping linear %g angular %g\n", b.body_type.c_str(), double(b.mass),

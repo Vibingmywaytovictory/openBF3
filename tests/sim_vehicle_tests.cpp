@@ -299,14 +299,15 @@ TEST_SUITE("sim-vehicle-unit") {
 		VehicleTuning t;
 		t.gravity = 9.80665f;
 		t.tester = WheelCollisionTester::Ray;
-		t.steer_model = SteerAngleModel::SensitivityRadians;
+		t.lateral_grip = 0.75f;
 		t.velocity_steps = 17;
 		core::Result<VehicleTuning> back = parse_vehicle_tuning(format_vehicle_tuning(t));
 		REQUIRE(back.ok());
 		CHECK(*back == t);
 		CHECK(vehicle_tuning_hash(t) != vehicle_tuning_hash(VehicleTuning{}));
-		const char *bad[] = { "nonsense = 1", "gravity = 1\ngravity = 2", "gravity 9.81", "gravity = nan", "gravity = 1e40", "gravity = -1",
-			"tester = laser", "steer_model = auto", "collision_steps = 0", "collision_steps = 1.5", "velocity_steps = 99999999999" };
+		const char *bad[] = { "nonsense = 1", "gravity = 1\ngravity = 2", "gravity 9.81", "gravity = nan",
+			"gravity = 1e40", "gravity = -1", "tester = laser", "steer_model = auto", "wheel_drive_share = 10",
+			"collision_steps = 0", "collision_steps = 1.5", "velocity_steps = 99999999999" };
 		for (const char *b : bad) {
 			const core::Result<VehicleTuning> r = parse_vehicle_tuning(b);
 			CHECK_MESSAGE(!r.ok(), b);
@@ -542,16 +543,16 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK(m->wheel_count == 4);
 		CHECK(m->chassis.size() == 5);
 		const VehicleWheelModel &fl = m->wheels[0];
-		CHECK(fl.attachment[1] == doctest::Approx(0.48876f + 0.225f).epsilon(1e-6));
+		CHECK(fl.attachment[1] == doctest::Approx(0.48876f + 0.4f - 0.211213f).epsilon(1e-5));
+		CHECK(fl.rest_compression == doctest::Approx(0.211213f).epsilon(1e-5));
 		CHECK(fl.suspension_max == 0.4f);
 		CHECK(fl.suspension_min == doctest::Approx(0.04f));
-		CHECK(fl.spring_stiffness == doctest::Approx(38890.0f).epsilon(0.001));
-		CHECK(fl.spring_damping == doctest::Approx(3437.0f).epsilon(0.001));
-		CHECK(fl.max_brake_torque == doctest::Approx(1840.0f));
-		CHECK(fl.max_hand_brake_torque == 0.0f);
-		CHECK(m->wheels[2].max_hand_brake_torque == 4000.0f);
-		CHECK(fl.max_steer_angle == doctest::Approx(32.0f * 3.14159265f / 180.0f));
-		CHECK(m->wheels[2].max_steer_angle == 0.0f);
+		CHECK(fl.spring_constant == doctest::Approx(18412.5f).epsilon(1e-5));
+		CHECK(fl.spring_damping == doctest::Approx(0.06f));
+		CHECK(fl.steers == 1);
+		CHECK(m->wheels[2].steers == 0);
+		CHECK(fl.mass == 12.0f);
+		CHECK(m->wheels[2].mass == 15.0f);
 		CHECK(fl.side == 0);
 		CHECK(m->wheels[1].side == 1);
 		CHECK(fl.axle == 0);
@@ -572,10 +573,10 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK(m->land.yaw.inertia_min_ratio == 0.1f);
 		CHECK(land_gear_ratio(m->land, -1) == -3.0f);
 		CHECK(land_gear_ratio(m->land, 0) == 0.0f);
-		CHECK(m->drag_coefficient == doctest::Approx(2.756f).epsilon(0.001));
-		CHECK(m->stand_still_ticks == 120);
-		CHECK(vehicle_max_steer_angle(*m, 0.0f) == doctest::Approx(32.0f * 3.14159265f / 180.0f));
-		CHECK(vehicle_max_steer_angle(*m, 40.0f / 3.6f) < vehicle_max_steer_angle(*m, 10.0f / 3.6f));
+		CHECK(!m->wind_resistance);
+		CHECK(m->wind.air_drag_area == 9.0f);
+		CHECK(vehicle_steer_sensitivity(*m, 0.0f) == doctest::Approx(-0.25f));
+		CHECK(vehicle_steer_sensitivity(*m, 40.0f / 3.6f) == doctest::Approx(-0.141667f).epsilon(1e-4));
 
 		CHECK(fixture_model()->model_digest == m->model_digest);
 		VehicleTuning t;
@@ -901,24 +902,22 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK(forward_speed_of(before) <= -2.0f);
 
 		const auto braked_rear_spin = [&](float p_factor) {
-			std::unique_ptr<VehicleWorld> b = world_at(shapes, shifting_jeep_model(p_factor), placed(0, 0, -300));
-			settle(*b);
-			for (int k = 0; k < 120; ++k) {
+			std::unique_ptr<VehicleWorld> b = world_at(shapes, shifting_jeep_model(p_factor), placed(0, 40, -300));
+			for (int k = 0; k < 30; ++k) {
 				step1(*b, drive);
 			}
 			VehicleCommand brake = command(0, 8, 0);
 			brake.flags = vehicle_flags::kDriven;
-			for (int k = 0; k < 3; ++k) {
-				step1(*b, brake);
-			}
+			step1(*b, brake);
 			const VehicleState s = b->state(0);
 			return std::fabs(s.wheels[2].angular_velocity) + std::fabs(s.wheels[3].angular_velocity);
 		};
 		const float with_factor = braked_rear_spin(50.0f), without = braked_rear_spin(0.0f);
-		std::printf(
-				"drive: rear wheel spin after 3 ticks at brake 8/255: %.2f rad/s with BrakeFactor 50, %.2f with 0\n",
+		std::printf("drive: airborne rear wheel spin one tick after brake 8/255: %.2f rad/s with BrakeFactor 50, %.2f "
+					"with 0\n",
 				double(with_factor), double(without));
-		CHECK(with_factor < 0.5f * without);
+		CHECK(with_factor == 0.0f);
+		CHECK(without > 1.0f);
 
 		const auto coasted = [&](uint8_t p_flags) {
 			std::unique_ptr<VehicleWorld> c = world_at(shapes, m, placed(0, 0, -300));
@@ -1152,7 +1151,8 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK_MESSAGE(vehicle_gate_g1m(*r, &why), why);
 	}
 
-	TEST_CASE("sim.vehicle: gate D wants wheel lift on bumps only from the crest's lift speed up") {
+	TEST_CASE("sim.vehicle: gate D wants wheel lift on bumps only from the crest's lift speed up, and a course's top "
+			  "speed only from a vehicle whose drive balances its resistance above it") {
 		VehicleCourseReport r;
 		r.course.kind = VehicleCourseKind::Bumps;
 		r.course.found = true;
@@ -1169,6 +1169,19 @@ TEST_SUITE("sim-vehicle-unit") {
 		CHECK_FALSE(vehicle_course_drove(r));
 		r.course.lift_speed_kmh = 79.6f;
 		CHECK(vehicle_course_drove(r));
+
+		VehicleCourseReport straight;
+		straight.course.kind = VehicleCourseKind::Straight;
+		straight.course.found = true;
+		straight.distance = 400.0f;
+		straight.max_speed_kmh = 54.8f;
+		CHECK_FALSE(vehicle_course_drove(straight, &why));
+		CHECK(why.find("top speed") != std::string::npos);
+		straight.course.balance_speed_kmh = 60.0f;
+		CHECK_FALSE(vehicle_course_drove(straight));
+		straight.course.balance_speed_kmh = 55.5f;
+		CHECK(vehicle_course_drove(straight));
+		CHECK(std::isinf(land_balance_speed_kmh(*fixture_model())) == false);
 	}
 
 	TEST_CASE("sim.vehicle: two worlds stepped on two threads at once give the single-thread hashes") {
@@ -1508,8 +1521,8 @@ TEST_SUITE("sim-vehicle") {
 		print_handling("MP_007 Humvee", *h);
 	}
 
-	TEST_CASE("sim.vehicle: the T-90 drives on its tracks: the outer axles counter-steer, the track term pulls its "
-			  "sides apart at rest and it turns under way the jeep's way") {
+	TEST_CASE("sim.vehicle: the T-90 drives on its tracks: the outer axles counter-steer (the skid stand-in), the "
+			  "track term pulls its sides apart at rest and it turns under way the jeep's way") {
 		Caspian *m = caspian();
 		if (m == nullptr) {
 			return;
@@ -1526,9 +1539,10 @@ TEST_SUITE("sim-vehicle") {
 		for (size_t i = 0; i < model.wheel_count; ++i) {
 			const VehicleWheelModel &w = model.wheels[i];
 			CHECK(w.track_steer == 1);
-			front += w.max_steer_angle > 0.0f && w.data_centre[2] > 1.0f ? 1u : 0u;
-			middle += w.max_steer_angle == 0.0f && std::fabs(w.data_centre[2]) < 1.0f ? 1u : 0u;
-			rear += w.max_steer_angle < 0.0f && w.data_centre[2] < -1.0f ? 1u : 0u;
+			CHECK(w.steers == 0);
+			front += w.track_skid_angle > 0.0f && w.data_centre[2] > 1.0f ? 1u : 0u;
+			middle += w.track_skid_angle == 0.0f && std::fabs(w.data_centre[2]) < 1.0f ? 1u : 0u;
+			rear += w.track_skid_angle < 0.0f && w.data_centre[2] < -1.0f ? 1u : 0u;
 		}
 		CHECK(front == 2);
 		CHECK(middle == 2);
@@ -1568,7 +1582,7 @@ TEST_SUITE("sim-vehicle") {
 		CHECK(pivot_turn <= 0.0f);
 		CHECK(pivot_drift < 1.5f);
 		CHECK(pivoted.driver.track_steer[0] > 0.0f);
-		CHECK(pivoted.driver.track_steer[1] == doctest::Approx(-pivoted.driver.track_steer[0]));
+		CHECK(pivoted.driver.track_steer[1] < 0.0f);
 		CHECK(pivoted.driver.track_steer[0] <= vehicles::kTrackSteerForce);
 
 		std::unique_ptr<VehicleWorld> run = world_at(shapes, *t90, placed(0, 0, -300));

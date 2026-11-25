@@ -556,7 +556,7 @@ bool vehicle_course_drove(const VehicleCourseReport &p_report, std::string *r_wh
 		std::snprintf(buffer, sizeof(buffer), "drove %.1f m (< %.0f m)", double(p_report.distance), double(a.min_distance));
 		return fail(buffer);
 	}
-	if (p_report.max_speed_kmh < a.min_max_speed_kmh) {
+	if (p_report.course.balance_speed_kmh >= a.min_max_speed_kmh && p_report.max_speed_kmh < a.min_max_speed_kmh) {
 		std::snprintf(buffer, sizeof(buffer), "top speed %.1f km/h (< %.0f km/h)", double(p_report.max_speed_kmh), double(a.min_max_speed_kmh));
 		return fail(buffer);
 	}
@@ -824,10 +824,10 @@ std::string format_vehicle_course_report(const VehicleCourseReport &p_report) {
 	}
 	std::snprintf(line, sizeof(line),
 			"  start (%.2f, %.2f, %.2f), a (%.1f, %.1f, %.1f), b (%.1f, %.1f, %.1f), slope %.1f deg, feature %.3f, "
-			"lifts at %.1f km/h\n",
+			"lifts at %.1f km/h, drive balances resistance at %.1f km/h\n",
 			double(c.start.position[0]), double(c.start.position[1]), double(c.start.position[2]), double(c.a[0]),
 			double(c.a[1]), double(c.a[2]), double(c.b[0]), double(c.b[1]), double(c.b[2]), double(c.slope_degrees),
-			double(c.feature), double(c.lift_speed_kmh));
+			double(c.feature), double(c.lift_speed_kmh), double(c.balance_speed_kmh));
 	out += line;
 	std::snprintf(line, sizeof(line),
 			"  D %s%s%s: %.1f m, top %.1f km/h, wheel off %u ticks (all off %u), static contact %u ticks, %u impacts (max %.1f km/h), asleep %u ticks, "

@@ -15,6 +15,7 @@
 #include <Jolt/Physics/StateRecorder.h>
 #include <Jolt/Physics/Vehicle/VehicleCollisionTester.h>
 #include <Jolt/Physics/Vehicle/VehicleConstraint.h>
+#include <Jolt/Physics/Vehicle/WheeledVehicleController.h>
 
 #include <cstdint>
 #include <memory>
@@ -101,6 +102,8 @@ struct VehicleWorld::Impl {
 		JPH::Ref<JPH::VehicleConstraint> constraint;
 		JPH::RefConst<JPH::VehicleCollisionTester> tester;
 		VehicleDriverState driver;
+		std::vector<JPH::WheelSettingsWV *> wheel_settings;
+		std::array<float, kMaxVehicleWheels> tyre_load_scale{};
 	};
 	std::vector<Vehicle> vehicles;
 	std::vector<VehicleContacts> contacts;

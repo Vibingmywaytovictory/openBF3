@@ -302,6 +302,11 @@ private:
 			ch.stand_still_low_speed_time_limit = numbers_.f(c, "StandStillLowSpeedTimeLimit", 0);
 			ch.down_force_base_factor = numbers_.f(c, "DownForceBaseFactor", 0);
 			ch.down_force_wheel_factor = numbers_.f(c, "DownForceWheelFactor", 0);
+			ch.use_down_force_wheel_factor = numbers_.b(c, "UseDownForceWheelFactor", false);
+			ch.wind_resistance_base_factor = numbers_.f(c, "WindResistanceBaseFactor", 0);
+			ch.wind_resistance_velocity_factor = numbers_.f(c, "WindResistanceVelocityFactor", 0);
+			ch.wind_resistance_velocity_factor_min = numbers_.f(c, "WindResistanceVelocityFactorMin", 0);
+			ch.wind_resistance_velocity_factor_max = numbers_.f(c, "WindResistanceVelocityFactorMax", 0);
 			if (const std::optional<EbxInstance> damping = db_.follow(c, "MotionDamping"); damping && budget_.take_type(damping->data())) {
 				const EbxStruct d = damping->data();
 				ch.damping_linear = numbers_.f(d, "Linear", 0);
@@ -375,6 +380,8 @@ private:
 		w.rolling_resistance_base_factor = numbers_.f(c, "RollingResistanceBaseFactor", 0);
 		w.rolling_resistance_velocity_factor = numbers_.f(c, "RollingResistanceVelocityFactor", 0);
 		w.use_engine_brake = numbers_.b(c, "UseEngineBrake", false);
+		w.use_rolling_resistance_velocity_factor = numbers_.b(c, "UseRollingResistanceVelocityFactor", false);
+		w.use_low_speed_auto_brake = numbers_.b(c, "UseLowSpeedAutoBrake", false);
 		w.engine_brake_min_factor = numbers_.f(c, "EngineBrakeMinFactor", 0);
 		w.engine_brake_max_factor = numbers_.f(c, "EngineBrakeMaxFactor", 0);
 		w.engine_brake_velocity_factor = numbers_.f(c, "EngineBrakeVelocityFactor", 0);

@@ -5297,18 +5297,21 @@ TEST_SUITE("host-vehicles-seats") {
 			}
 			return spin;
 		};
+		const auto hand_brake = [&] { return m->server.vehicle_state(spawner)->controller.hand_brake_input; };
 		passenger_forward = 127;
 		passenger = sim::vehicles::seat_buttons::kHandbrake;
 		run(20);
-		const float held = wheel_spin();
+		const float held = wheel_spin(), held_input = hand_brake();
 		passenger = 0;
 		run(20);
-		const float free = wheel_spin();
+		const float free = wheel_spin(), free_input = hand_brake();
 		passenger_forward = 0;
-		std::printf("vehicles: the wheels spin %.2f rad/s in all with the handbrake bit held under throttle, %.2f "
-					"without\n",
-				double(held), double(free));
-		CHECK(held < 0.25f * free);
+		std::printf("vehicles: the handbrake input reads %.2f with the handbrake bit held under throttle, %.2f "
+					"without; the wheels spin %.2f and %.2f rad/s in all (the Growler's HandBrakeFactor is %.2f)\n",
+				double(held_input), double(free_input), double(held), double(free),
+				double(model.wheels[2].hand_brake_factor));
+		CHECK(held_input == 1.0f);
+		CHECK(free_input == 0.0f);
 		std::printf(
 				"vehicles: the Growler of spawner %u has %u seats; driver to seat 3, passenger to the driver seat\n",
 				unsigned(spawner), unsigned(kind.seats));
@@ -5369,7 +5372,7 @@ TEST_SUITE("host-vehicles-seats") {
 		options.tuning = tg::shipped_motor_tuning();
 		options.tdm = true;
 		options.tdm_tuning_cfg = tdm::detail::default_tdm_tuning_cfg();
-		options.vehicle_tuning.hand_brake_torque = 2.0f * sim::VehicleTuning{}.hand_brake_torque;
+		options.vehicle_tuning.lateral_grip = 2.0f * sim::VehicleTuning{}.lateral_grip;
 		core::Result<host::LevelDatabase> db =
 				host::open_level_database(level->install, "MP_007", "ConquestSmall0", 0, nullptr);
 		REQUIRE_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
@@ -5380,14 +5383,13 @@ TEST_SUITE("host-vehicles-seats") {
 		const uint64_t given = sim::vehicle_tuning_hash(options.vehicle_tuning);
 		const uint64_t loaded = sim::vehicle_tuning_hash((*shared)->vehicles->tuning);
 		const uint64_t defaults = sim::vehicle_tuning_hash(sim::VehicleTuning{});
-		std::printf("vehicles: a load given hand_brake_torque %.0f carries tuning %016llx (given %016llx, defaults "
+		std::printf("vehicles: a load given lateral_grip %.1f carries tuning %016llx (given %016llx, defaults "
 					"%016llx)\n",
-				double(options.vehicle_tuning.hand_brake_torque), (unsigned long long)loaded, (unsigned long long)given,
+				double(options.vehicle_tuning.lateral_grip), (unsigned long long)loaded, (unsigned long long)given,
 				(unsigned long long)defaults);
 		CHECK(loaded == given);
 		CHECK(loaded != defaults);
-		CHECK((*shared)->vehicles->tuning.hand_brake_torque ==
-				doctest::Approx(options.vehicle_tuning.hand_brake_torque));
+		CHECK((*shared)->vehicles->tuning.lateral_grip == doctest::Approx(options.vehicle_tuning.lateral_grip));
 	}
 }
 

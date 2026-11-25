@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "bf3/sim/vehicles/chassis_rules.h"
 #include "bf3/sim/vehicles/land_rules.h"
 #include "bf3/sim/vehicles/vehicle_input.h"
 #include "bf3/sim/vehicles/vehicle_spawning.h"
@@ -309,5 +310,84 @@ TEST_SUITE("sim-vehicle-rules-unit") {
 		CHECK(handbrake_held(seat_buttons::kHandbrake | b::kJump));
 		CHECK_FALSE(handbrake_held(b::kJump));
 		CHECK_FALSE(handbrake_held(b::kJump | b::kSprint | b::kUse | b::kFire));
+	}
+
+	TEST_CASE(
+			"sim.vehicles.chassis_rules: R5-G1 vectors: spring K and damper, steer angle, TransmissionLoss and engine "
+			"brake, rolling resistance, motion damping, wind and down force, anti-roll loads, substeps") {
+		CHECK(spring_constant(800.0f, 4, 0.62f, 0.35f) == doctest::Approx(14766.9f).epsilon(1e-4));
+		CHECK(spring_constant(5000.0f, 18, 0.5f, 0.4f) == doctest::Approx(13638.9f).epsilon(1e-4));
+		CHECK(damper_coefficient(800.0f, 4, 0.09f, 1.0f, 1.0f / 30.0f) * 0.5f == doctest::Approx(270.0f));
+		CHECK(chassis_substeps(0.0f, true) == 3u);
+		CHECK(chassis_substeps(14.9f / 3.6f, true) == 3u);
+		CHECK(chassis_substeps(20.0f / 3.6f, true) == 2u);
+
+		const std::array<CurvePoint, 6> growler{ { { 0.0f, 0.28f }, { 15.0f, 0.28f }, { 30.0f, 0.28f },
+				{ 58.0f, 0.28f }, { 66.0f, 0.24f }, { 150.0f, 0.24f } } };
+		CHECK(steer_sensitivity(growler, 20.0f / 3.6f, false) == doctest::Approx(-0.28f));
+		CHECK(steer_angle(1.0f, steer_sensitivity(growler, 20.0f / 3.6f, false)) ==
+				doctest::Approx(0.8796f).epsilon(1e-4));
+		CHECK(steer_angle(0.5f, -0.28f) * 180.0f / kSteerHalfTurn == doctest::Approx(25.2f));
+		CHECK(steer_sensitivity(growler, 62.0f / 3.6f, false) == doctest::Approx(-0.26f));
+		CHECK(steer_sensitivity(growler, 160.0f / 3.6f, false) == doctest::Approx(-0.24f));
+		CHECK(steer_sensitivity(growler, 20.0f / 3.6f, true) == doctest::Approx(0.28f));
+		const std::array<CurvePoint, 1> steep{ { { 0.0f, 0.7f } } };
+		CHECK(steer_sensitivity(steep, 0.0f, false) == doctest::Approx(-0.5f));
+		CHECK(steer_angle(1.0f, steer_sensitivity({}, 3.0f, false)) == doctest::Approx(kSteerHalfTurn * 0.5f));
+		const std::array<CurvePoint, 2> rising{ { { 0.0f, 0.1f }, { 10.0f, 0.2f } } };
+		CHECK(steer_curve_at(rising, 30.0f) == doctest::Approx(0.4f));
+		CHECK(steer_curve_at(rising, -5.0f) == doctest::Approx(0.1f));
+
+		const std::array<CurvePoint, 7> m1a2{ { { 0.0f, 0.0f }, { 8.0f, 7.0f }, { 32.0f, 12.0f }, { 45.0f, 35.0f },
+				{ 50.0f, 60.0f }, { 58.0f, 100.0f }, { 100.0f, 100.0f } } };
+		CHECK(transmission_loss_resistance(m1a2, 10.0f, 1.0f, 5000.0f, 18) == doctest::Approx(10.598f).epsilon(1e-3));
+		CHECK(transmission_loss_resistance(m1a2, 10.0f, 1.12f, 5000.0f, 18) == doctest::Approx(5.741f).epsilon(1e-3));
+		CHECK(transmission_loss_resistance(m1a2, 10.0f, 0.68f, 5000.0f, 18) == doctest::Approx(55.556f).epsilon(1e-3));
+		CHECK(transmission_loss_resistance(m1a2, 8.0f / 3.6f, 1.0f, 5000.0f, 18) ==
+				doctest::Approx(3.889f).epsilon(1e-3));
+		CHECK(transmission_loss_resistance(m1a2, 0.0f, 1.0f, 5000.0f, 18) == 0.0f);
+		CHECK(transmission_loss_resistance({}, 10.0f, 1.0f, 800.0f, 4) == 0.0f);
+		const std::array<CurvePoint, 2> line{ { { 10.0f, 10.0f }, { 20.0f, 20.0f } } };
+		CHECK(loss_curve_at(line, 0.0f) == doctest::Approx(0.0f));
+		CHECK(loss_curve_at(line, 30.0f) == doctest::Approx(30.0f));
+		CHECK(engine_brake_resistance(800.0f, 4.0f) == doctest::Approx(7.0f));
+		CHECK(engine_brake_resistance(800.0f, 20.0f) == doctest::Approx(5.0f));
+		CHECK(wheel_drive_torque(250.0f, 6.0f, 3.8f, 1.0f, 1.0f) == doctest::Approx(106.875f));
+
+		CHECK(rolling_resistance(1.0f, 15.0f, 150.0f, 0.3f, 12.0f, 4) == doctest::Approx(3.24f).epsilon(1e-4));
+		CHECK(rolling_resistance(10.0f, 15.0f, 150.0f, 0.3f, 12.0f, 4) == doctest::Approx(27.0f));
+		CHECK(rolling_resistance(-10.0f, 15.0f, 150.0f, 0.3f, 12.0f, 4) == doctest::Approx(-27.0f));
+		CHECK(rolling_resistance(10.0f, 15.0f, 150.0f, 0.15f, 35.0f, 18) == doctest::Approx(8.75f));
+		CHECK(spin_after_resistance(1.0f, -60.0f, 1.0f / 60.0f, 0.5f) == 0.0f);
+		CHECK(spin_after_resistance(10.0f, -60.0f, 1.0f / 60.0f, 0.5f) == doctest::Approx(8.0f));
+		CHECK(spin_after_resistance(-10.0f, -60.0f, 1.0f / 60.0f, 0.5f) == doctest::Approx(-12.0f));
+
+		const MotionDampingRule damping{ 0.12f, 0.2f, 0.2f, 0.1f, { 0.001f, 0.001f, 0.001f } };
+		const std::array<float, 3> tick = motion_damping_angular(damping, 1.0f / 30.0f);
+		CHECK(tick[0] == doctest::Approx(0.960789f).epsilon(1e-5));
+		CHECK(tick[1] == doctest::Approx(0.935507f).epsilon(1e-5));
+		CHECK(tick[2] == doctest::Approx(0.935507f).epsilon(1e-5));
+		CHECK(motion_damping_linear(damping, 1.0f / 30.0f)[1] == doctest::Approx(0.9999667f).epsilon(1e-7));
+		const std::array<float, 3> half = motion_damping_angular(damping, 1.0f / 60.0f);
+		CHECK(half[1] * half[1] == doctest::Approx(tick[1]).epsilon(1e-6));
+		CHECK(motion_damping_angular(MotionDampingRule{}, 1.0f / 60.0f)[0] == 1.0f);
+
+		const WindRule tank{ 0.5f, 9.0f, 1.225f, 0.2f, 100.0f, 1.0f, 4.0f };
+		CHECK(wind_drag(tank, 15.0f) == doctest::Approx(124.03f).epsilon(1e-3));
+		CHECK(wind_drag(tank, 40.0f) == doctest::Approx(1829.0f).epsilon(1e-3));
+		CHECK(wind_drag(tank, 60.0f) == doctest::Approx(7938.0f).epsilon(1e-3));
+		CHECK(down_force(20.0f, 1.225f, 8.0f, false, 40.0f, 4, 1) == doctest::Approx(196.0f));
+		CHECK(down_force(20.0f, 1.225f, 8.0f, true, 40.0f, 4, 1) == doctest::Approx(23520.0f));
+		CHECK(down_force(20.0f, 1.225f, 8.0f, true, 40.0f, 4, 4) == doctest::Approx(196.0f));
+
+		const std::array<float, 2> front = anti_roll_loads(3000.0f, 1000.0f, 0.5f);
+		CHECK(front[0] == doctest::Approx(4000.0f));
+		CHECK(front[1] == 0.0f);
+		const std::array<float, 2> rear = anti_roll_loads(2200.0f, 1800.0f, 1.5f);
+		CHECK(rear[0] == doctest::Approx(2800.0f));
+		CHECK(rear[1] == doctest::Approx(1200.0f));
+		const std::array<float, 2> airborne = anti_roll_loads(2000.0f, 0.0f, 10.0f);
+		CHECK(airborne[0] == doctest::Approx(12000.0f));
+		CHECK(airborne[1] == 0.0f);
 	}
 }

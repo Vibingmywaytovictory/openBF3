@@ -64,16 +64,19 @@ uint64_t digest_of(const VehicleModel &p_m) {
 		d.add(p.convex_radius);
 	}
 	d.add(p_m.wheel_count);
+	d.add(p_m.wheel_list);
 	for (size_t i = 0; i < p_m.wheel_count; ++i) {
 		const VehicleWheelModel &w = p_m.wheels[i];
 		d.add(w.attachment);
 		d.add(w.data_centre);
-		for (const float f : { w.radius, w.width, w.suspension_min, w.suspension_max, w.spring_stiffness,
-					 w.spring_damping, w.inertia, w.angular_damping, w.max_steer_angle, w.max_brake_torque,
-					 w.max_hand_brake_torque, w.brake_factor, w.hand_brake_factor, w.diff_gear_ratio }) {
+		for (const float f : { w.radius, w.width, w.suspension_min, w.suspension_max, w.spring_constant,
+					 w.spring_damping, w.progressive_start, w.progressive_exponent, w.rest_compression, w.inertia,
+					 w.mass, w.angular_damping, w.brake_factor, w.hand_brake_factor, w.diff_gear_ratio, w.rolling_base,
+					 w.rolling_velocity_kmh, w.track_skid_angle }) {
 			d.add(f);
 		}
-		for (const uint8_t b : { w.steers, w.driven, w.axle, w.side, w.track_steer }) {
+		for (const uint8_t b : { w.steers, w.driven, w.axle, w.side, w.track_steer, w.rolling_resistance,
+					 w.engine_brake, w.low_speed_auto_brake }) {
 			d.add(b);
 		}
 	}
@@ -98,7 +101,7 @@ uint64_t digest_of(const VehicleModel &p_m) {
 	for (const float f : { l.gear_change_time, l.gear_down_speed_factor, l.clutch_speed_factor,
 				 l.opposite_dir_gear_change_max_speed, l.opposite_dir_gear_change_time, l.transmission_efficiency,
 				 l.backward_throttle_limit, l.engine.rpm_min, l.engine.rpm_max, l.engine.internal_acceleration,
-				 l.engine.internal_deceleration, l.power_multiplier, l.drive_share }) {
+				 l.engine.internal_deceleration, l.power_multiplier, l.wheel_torque_scale }) {
 		d.add(f);
 	}
 	d.add(l.rpm_points);
@@ -109,52 +112,87 @@ uint64_t digest_of(const VehicleModel &p_m) {
 	for (size_t i = 0; i < l.steer_inertia_points; ++i) {
 		d.add(l.steer_inertia[i]);
 	}
+	d.add(l.transmission_loss_points);
+	for (size_t i = 0; i < l.transmission_loss_points; ++i) {
+		d.add(l.transmission_loss[i]);
+	}
 	d.add(p_m.steer_points);
 	for (size_t i = 0; i < p_m.steer_points; ++i) {
 		d.add(p_m.steer_sensitivity[i]);
 	}
-	d.add(p_m.steer_model);
-	d.add(p_m.drag_coefficient);
-	d.add(p_m.stand_still_brake);
-	d.add(p_m.stand_still_ticks);
-	d.add(p_m.stand_still_speed);
+	d.add(p_m.steer_inverted);
+	const vehicles::MotionDampingRule &md = p_m.motion_damping;
+	for (const float f : { md.pitch, md.yaw, md.roll, md.linear }) {
+		d.add(f);
+	}
+	d.add(md.linear_modifier);
+	d.add(p_m.wind_resistance);
+	const vehicles::WindRule &wr = p_m.wind;
+	for (const float f : { wr.coefficient_of_air_friction, wr.air_drag_area, wr.air_density, wr.base_factor,
+				 wr.velocity_factor_kmh, wr.velocity_factor_min, wr.velocity_factor_max }) {
+		d.add(f);
+	}
+	d.add(p_m.down_force);
+	d.add(p_m.down_force_wheel_factor);
+	d.add(p_m.down_force_base);
+	d.add(p_m.down_force_per_wheel);
+	d.add(p_m.anti_roll_front);
+	d.add(p_m.anti_roll_rear);
 	d.add(p_m.tester);
 	d.add(p_m.max_pitch_roll_angle);
 	d.add_text(format_vehicle_tuning(p_m.tuning));
 	return d.value();
 }
 
-float sensitivity_at(const VehicleModel &p_model, float p_kmh) {
-	if (p_model.steer_points == 0) {
-		return 1.0f;
+}
+
+float land_balance_speed_kmh(const VehicleModel &p_model) {
+	const LandDriveModel &land = p_model.land;
+	const VehicleWheelModel *w = nullptr;
+	for (size_t i = 0; i < p_model.wheel_count && w == nullptr; ++i) {
+		w = p_model.wheels[i].driven != 0 ? &p_model.wheels[i] : nullptr;
 	}
-	const auto &c = p_model.steer_sensitivity;
-	if (p_kmh <= c[0][0]) {
-		return c[0][1];
+	if (w == nullptr || land.forward_gears == 0) {
+		return 0.0f;
 	}
-	for (size_t i = 1; i < p_model.steer_points; ++i) {
-		if (p_kmh <= c[i][0]) {
-			const float span = c[i][0] - c[i - 1][0];
-			const float t = span > 0.0f ? (p_kmh - c[i - 1][0]) / span : 1.0f;
-			return c[i - 1][1] + (c[i][1] - c[i - 1][1]) * t;
+	const std::span<const float> rpm_points(land.rpm_points.data(), land.curve_points);
+	const std::span<const float> torque_points(land.torque_points.data(), land.curve_points);
+	const std::span<const vehicles::CurvePoint> loss(land.transmission_loss.data(), land.transmission_loss_points);
+	for (uint32_t step = 1; step < kBalanceSpeedSteps; ++step) {
+		const float kmh = float(step) * kBalanceSpeedStepKmh;
+		int32_t gear = land.forward_gears;
+		for (int32_t g = 1; g < int32_t(land.forward_gears); ++g) {
+			if (kmh <= land.forward_speeds[size_t(g) - 1]) {
+				gear = g;
+				break;
+			}
+		}
+		const float ratio = land_gear_ratio(land, gear);
+		const float v = kmh / vehicles::kKmhPerMs;
+		const float spin = v / w->radius;
+		const float rpm = std::min(vehicles::wheel_rpm(std::span<const float>(&spin, 1), ratio, w->diff_gear_ratio,
+										   land.transmission_efficiency),
+				land.engine.rpm_max);
+		const float torque = vehicles::torque_curve_at(rpm, rpm_points, torque_points) * land.power_multiplier;
+		const float drive = w->track_steer != 0
+				? vehicles::track_forward_term(torque, ratio)
+				: vehicles::wheel_drive_torque(torque, ratio, w->diff_gear_ratio, land.transmission_efficiency, 1.0f);
+		const float rolling = w->rolling_resistance != 0
+				? vehicles::rolling_resistance(
+						  spin, w->rolling_base, w->rolling_velocity_kmh, w->width, w->mass, p_model.wheel_list)
+				: 0.0f;
+		if (vehicles::transmission_loss_resistance(loss, v, 1.0f, p_model.mass, p_model.wheel_list) + rolling >=
+				drive) {
+			return kmh;
 		}
 	}
-	return c[p_model.steer_points - 1][1];
+	return INFINITY;
 }
 
-}
-
-float vehicle_max_steer_angle(const VehicleModel &p_model, float p_speed) {
-	const float kmh = std::fabs(p_speed) * 3.6f;
-	const float lock = p_model.tuning.steer_max_degrees * core::kDegToRadF;
-	if (p_model.steer_model == SteerAngleModel::SensitivityRadians) {
-		return p_model.steer_points > 0 ? sensitivity_at(p_model, kmh) : lock;
-	}
-	const float at_rest = sensitivity_at(p_model, 0.0f);
-	if (!(at_rest > 0.0f)) {
-		return lock;
-	}
-	return lock * sensitivity_at(p_model, kmh) / at_rest;
+float vehicle_steer_sensitivity(const VehicleModel &p_model, float p_speed) {
+	return vehicles::steer_sensitivity(
+			std::span<const vehicles::CurvePoint>(p_model.steer_sensitivity.data(), p_model.steer_points), p_speed,
+			p_model.steer_inverted);
 }
 
 core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core::gameplay::VehicleDriveDef &p_def,
@@ -243,8 +281,9 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		return fail(std::to_string(physics_wheels.size()) + " physics wheels (at most " + std::to_string(kMaxVehicleWheels) + ")");
 	}
 	m->wheel_count = uint8_t(physics_wheels.size());
-	const float g_eff = p_tuning.gravity * m->gravity_factor;
-	const float wheels_f = float(m->wheel_count);
+	m->wheel_list = uint8_t(std::min<size_t>(p_def.wheels.size(), 255));
+	const uint32_t wheel_count = m->wheel_count;
+	const float standing_substep_factor = vehicles::spring_substep_factor(vehicles::chassis_substeps(0.0f, true));
 	const core::gameplay::WheelConfigDef *steering_config = nullptr;
 	for (size_t k = 0; k < physics_wheels.size(); ++k) {
 		const core::gameplay::VehicleWheelDef &wd = p_def.wheels[physics_wheels[k]];
@@ -265,11 +304,23 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		w.width = c.width;
 		w.suspension_max = c.spring_length;
 		w.suspension_min = c.spring_length * p_tuning.suspension_min_fraction;
-
-		const float sag = c.spring_length * p_tuning.static_sag_fraction;
-		w.attachment = { w.data_centre[0], w.data_centre[1] + (c.spring_length - sag), w.data_centre[2] };
-		w.spring_stiffness = m->mass * g_eff / (wheels_f * sag);
-		w.spring_damping = 2.0f * p_tuning.damping_ratio * std::sqrt(w.spring_stiffness * m->mass / wheels_f);
+		if (!finite(c.spring_stiffness) || !(c.spring_stiffness >= 0.0f && c.spring_stiffness < 1.0f) ||
+				!finite(c.spring_damping) || c.spring_damping < 0.0f || c.spring_damping > 100.0f ||
+				!finite(c.spring_progressive_start_ratio) || c.spring_progressive_start_ratio < 0.0f ||
+				!finite(c.spring_progressive_exponent) || c.spring_progressive_exponent < 0.0f ||
+				c.spring_progressive_exponent > 100.0f) {
+			return fail("wheel " + std::to_string(k) + " spring stiffness, damping or progression out of range");
+		}
+		w.spring_constant = vehicles::spring_constant(m->mass, wheel_count, c.spring_stiffness, c.spring_length);
+		w.spring_damping = c.spring_damping;
+		w.progressive_start = c.spring_progressive_start_ratio;
+		w.progressive_exponent = c.spring_progressive_exponent;
+		w.rest_compression = std::min(m->mass * p_tuning.gravity * m->gravity_factor /
+						(float(wheel_count) * standing_substep_factor * w.spring_constant),
+				c.spring_length - w.suspension_min);
+		w.attachment = { w.data_centre[0], w.data_centre[1] + (c.spring_length - w.rest_compression),
+			w.data_centre[2] };
+		w.mass = c.mass;
 		w.inertia = c.inertia[0] > 0.0f && finite(c.inertia[0]) && c.inertia[0] < 1000.0f ? c.inertia[0] : 0.5f * c.mass * c.radius * c.radius;
 		if (!(w.inertia > 0.0f)) {
 			w.inertia = 1.0f;
@@ -278,12 +329,16 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		w.track_steer = vehicles::track_steer_wheel(c.steering_type, c.driving_type) ? 1 : 0;
 		w.steers = c.steering_type != 0 ? 1 : 0;
 		w.driven = c.driving_type != 0 ? 1 : 0;
-		w.max_steer_angle = 0.0f;
-		if (!finite(c.brake_force) || c.brake_force < 0.0f || c.brake_force > 1e6f) {
-			return fail("wheel " + std::to_string(k) + " brake force out of range");
+		w.rolling_resistance = c.use_rolling_resistance_velocity_factor ? 1 : 0;
+		w.engine_brake = c.use_engine_brake ? 1 : 0;
+		w.low_speed_auto_brake = c.use_low_speed_auto_brake ? 1 : 0;
+		w.rolling_base = c.rolling_resistance_base_factor;
+		w.rolling_velocity_kmh = c.rolling_resistance_velocity_factor;
+		if (!finite(w.rolling_base) || std::fabs(w.rolling_base) > 1e4f || !finite(w.rolling_velocity_kmh) ||
+				w.rolling_velocity_kmh < 0.0f || w.rolling_velocity_kmh > 1e4f || !finite(w.mass) || w.mass < 0.0f ||
+				w.mass > 1e5f) {
+			return fail("wheel " + std::to_string(k) + " rolling resistance or mass out of range");
 		}
-		w.max_brake_torque = c.brake_force * c.radius * p_tuning.brake_torque_per_force;
-		w.max_hand_brake_torque = w.steers != 0 ? 0.0f : p_tuning.hand_brake_torque;
 		w.brake_factor = c.brake_factor;
 		w.hand_brake_factor = c.hand_brake_factor;
 		w.diff_gear_ratio = c.diff_gear_ratio;
@@ -347,26 +402,46 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 			m->steer_sensitivity[i] = points[i];
 		}
 		m->steer_points = uint8_t(points.size());
-	}
-	m->steer_model = p_tuning.steer_model;
-	const float lock = vehicle_max_steer_angle(*m, 0.0f);
-	uint32_t axle_count = 0;
-	for (size_t k = 0; k < m->wheel_count; ++k) {
-		axle_count = std::max<uint32_t>(axle_count, m->wheels[k].axle + 1u);
+		m->steer_inverted = steering_config->has_steering_inverted;
 	}
 	for (size_t k = 0; k < m->wheel_count; ++k) {
-		const VehicleWheelModel &w = m->wheels[k];
-		const float axle_sign = w.track_steer == 0 ? 1.0f
-				: w.axle == 0					   ? 1.0f
-				: w.axle + 1u == axle_count		   ? -1.0f
-												   : 0.0f;
-		m->wheels[k].max_steer_angle = w.steers != 0 ? lock * axle_sign : 0.0f;
+		const core::gameplay::WheelConfigDef &c = p_def.wheel_configs[p_def.wheels[physics_wheels[k]].config];
+		m->wheels[k].steers = c.steering_type == 1 ? 1 : 0;
 	}
 	core::Status land = build_land_drive(p_def, m->land);
 	if (!land.ok()) {
 		return fail(land.error().message);
 	}
-	m->land.drive_share = p_tuning.wheel_drive_share;
+	m->land.wheel_torque_scale = p_tuning.wheel_torque_scale;
+	uint32_t axle_count = 0;
+	for (size_t k = 0; k < m->wheel_count; ++k) {
+		axle_count = std::max<uint32_t>(axle_count, m->wheels[k].axle + 1u);
+	}
+	for (size_t k = 0; k < m->wheel_count; ++k) {
+		VehicleWheelModel &w = m->wheels[k];
+		const float axle_sign = w.axle == 0 ? 1.0f : (w.axle + 1u == axle_count ? -1.0f : 0.0f);
+		w.track_skid_angle =
+				w.track_steer != 0 ? p_tuning.track_skid_steer_degrees * core::kDegToRadF * axle_sign : 0.0f;
+	}
+	for (size_t k = 0; k < m->wheel_count; ++k) {
+		const core::gameplay::WheelConfigDef &c = p_def.wheel_configs[p_def.wheels[physics_wheels[k]].config];
+		if (m->wheels[k].driven == 0 || c.transmission_loss.empty()) {
+			continue;
+		}
+		if (c.transmission_loss.size() > kMaxModelCurvePoints) {
+			return fail(std::to_string(c.transmission_loss.size()) + " transmission loss points (at most " +
+					std::to_string(kMaxModelCurvePoints) + ")");
+		}
+		for (size_t i = 0; i < c.transmission_loss.size(); ++i) {
+			if (!finite(c.transmission_loss[i][0]) || !finite(c.transmission_loss[i][1]) ||
+					(i > 0 && !(c.transmission_loss[i][0] > c.transmission_loss[i - 1][0]))) {
+				return fail("transmission loss points not finite and ascending");
+			}
+			m->land.transmission_loss[i] = c.transmission_loss[i];
+		}
+		m->land.transmission_loss_points = uint8_t(c.transmission_loss.size());
+		break;
+	}
 	for (size_t k = 0; k < m->wheel_count; ++k) {
 		if (m->wheels[k].track_steer == 0) {
 			continue;
@@ -394,17 +469,29 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		break;
 	}
 
-	const float drag = 0.5f * ch.air_density * ch.coefficient_of_air_friction * ch.air_drag_area * p_tuning.drag_scale;
-	if (!finite(drag) || drag < 0.0f || drag > 1e4f) {
-		return fail("air drag out of range");
+	m->motion_damping = { ch.damping_pitch, ch.damping_yaw, ch.damping_roll, ch.damping_linear,
+		{ ch.damping_linear_modifier[0], ch.damping_linear_modifier[1], ch.damping_linear_modifier[2] } };
+	m->wind_resistance = ch.use_wind_resistance;
+	m->wind = { ch.coefficient_of_air_friction, ch.air_drag_area, ch.air_density, ch.wind_resistance_base_factor,
+		ch.wind_resistance_velocity_factor, ch.wind_resistance_velocity_factor_min,
+		ch.wind_resistance_velocity_factor_max };
+	m->down_force = ch.use_down_force;
+	m->down_force_wheel_factor = ch.use_down_force_wheel_factor;
+	m->down_force_base = ch.down_force_base_factor;
+	m->down_force_per_wheel = ch.down_force_wheel_factor;
+	m->anti_roll_front = ch.anti_roll_front;
+	m->anti_roll_rear = ch.anti_roll_rear;
+	const float chassis_numbers[] = { m->motion_damping.pitch, m->motion_damping.yaw, m->motion_damping.roll,
+		m->motion_damping.linear, m->motion_damping.linear_modifier[0], m->motion_damping.linear_modifier[1],
+		m->motion_damping.linear_modifier[2], m->wind.coefficient_of_air_friction, m->wind.air_drag_area,
+		m->wind.air_density, m->wind.base_factor, m->wind.velocity_factor_kmh, m->wind.velocity_factor_min,
+		m->wind.velocity_factor_max, m->down_force_base, m->down_force_per_wheel, m->anti_roll_front,
+		m->anti_roll_rear };
+	for (const float f : chassis_numbers) {
+		if (!finite(f) || f < 0.0f || f > 1e4f) {
+			return fail("motion damping, wind resistance or down force outside 0..1e4");
+		}
 	}
-	m->drag_coefficient = drag;
-	m->stand_still_brake = ch.use_stand_still_brake;
-	if (!finite(ch.stand_still_low_speed_time_limit) || ch.stand_still_low_speed_time_limit < 0.0f || ch.stand_still_low_speed_time_limit > 600.0f) {
-		return fail("stand-still time limit outside 0..600 s");
-	}
-	m->stand_still_ticks = uint16_t(seconds_to_ticks(ch.stand_still_low_speed_time_limit));
-	m->stand_still_speed = p_tuning.stand_still_speed;
 	m->tester = p_tuning.tester;
 	m->max_pitch_roll_angle = p_tuning.max_pitch_roll_degrees * core::kDegToRadF;
 	m->model_digest = digest_of(*m);

@@ -65,6 +65,8 @@ struct WheelConfigDef {
 	float rolling_resistance_base_factor = 0;
 	float rolling_resistance_velocity_factor = 0;
 	bool use_engine_brake = false;
+	bool use_rolling_resistance_velocity_factor = false;
+	bool use_low_speed_auto_brake = false;
 	float engine_brake_min_factor = 0, engine_brake_max_factor = 0, engine_brake_velocity_factor = 0;
 	std::vector<std::array<float, 2>> transmission_loss;
 
@@ -131,6 +133,9 @@ struct ChassisConfigDef {
 	bool use_turn_around_force = false, use_down_force = false, use_wind_resistance = false;
 	float stand_still_low_speed_time_limit = 0;
 	float down_force_base_factor = 0, down_force_wheel_factor = 0;
+	bool use_down_force_wheel_factor = false;
+	float wind_resistance_base_factor = 0, wind_resistance_velocity_factor = 0;
+	float wind_resistance_velocity_factor_min = 0, wind_resistance_velocity_factor_max = 0;
 
 	float damping_linear = 0, damping_pitch = 0, damping_roll = 0, damping_yaw = 0;
 	DriveVec3 damping_linear_modifier{ 1, 1, 1 };

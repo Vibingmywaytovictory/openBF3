@@ -438,6 +438,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	vehicle.mUp = JPH::Vec3::sAxisY();
 	vehicle.mForward = JPH::Vec3::sAxisZ();
 	vehicle.mMaxPitchRollAngle = m.max_pitch_roll_angle;
+	w.vehicles[p_slot].wheel_settings.clear();
 	for (size_t i = 0; i < m.wheel_count; ++i) {
 		const VehicleWheelModel &wm = m.wheels[i];
 		JPH::WheelSettingsWV *wheel = new JPH::WheelSettingsWV;
@@ -450,14 +451,14 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 		wheel->mSuspensionMinLength = wm.suspension_min;
 		wheel->mSuspensionMaxLength = wm.suspension_max;
 		wheel->mSuspensionPreloadLength = 0.0f;
-		wheel->mSuspensionSpring = JPH::SpringSettings(JPH::ESpringMode::StiffnessAndDamping, wm.spring_stiffness, wm.spring_damping);
+		wheel->mSuspensionSpring = land_spring(m, wm, 0.0f, wm.rest_compression);
 		wheel->mRadius = wm.radius;
 		wheel->mWidth = wm.width;
 		wheel->mInertia = wm.inertia;
 		wheel->mAngularDamping = wm.angular_damping;
-		wheel->mMaxSteerAngle = wm.max_steer_angle;
-		wheel->mMaxBrakeTorque = wm.max_brake_torque;
-		wheel->mMaxHandBrakeTorque = wm.max_hand_brake_torque;
+		wheel->mMaxSteerAngle = 0.0f;
+		wheel->mMaxBrakeTorque = 0.0f;
+		wheel->mMaxHandBrakeTorque = 0.0f;
 		for (JPH::LinearCurve::Point &p : wheel->mLongitudinalFriction.mPoints) {
 			p.mY *= m.tuning.longitudinal_grip;
 		}
@@ -465,6 +466,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 			p.mY *= m.tuning.lateral_grip;
 		}
 		vehicle.mWheels.push_back(wheel);
+		w.vehicles[p_slot].wheel_settings.push_back(wheel);
 	}
 	JPH::WheeledVehicleControllerSettings *controller = new JPH::WheeledVehicleControllerSettings;
 	controller->mTransmission.mMode = JPH::ETransmissionMode::Manual;
@@ -486,15 +488,19 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	v.constraint->SetVehicleCollisionTester(v.tester);
 
 	const float ground = w.options.tuning.ground_friction;
-	v.constraint->SetCombineFriction([ground](JPH::uint, float &r_longitudinal, float &r_lateral, const JPH::Body &p_body, const JPH::SubShapeID &) {
+	v.tyre_load_scale.fill(1.0f);
+	const std::array<float, kMaxVehicleWheels> *load_scale = &v.tyre_load_scale;
+	v.constraint->SetCombineFriction([ground, load_scale](JPH::uint p_wheel, float &r_longitudinal, float &r_lateral,
+											 const JPH::Body &p_body, const JPH::SubShapeID &) {
+		const float load = (*load_scale)[p_wheel];
 		if (p_body.IsStatic()) {
-			r_longitudinal *= ground;
-			r_lateral *= ground;
+			r_longitudinal *= ground * load;
+			r_lateral *= ground * load;
 			return;
 		}
 		const float f = p_body.GetFriction();
-		r_longitudinal = JPH::Sqrt(r_longitudinal * f);
-		r_lateral = JPH::Sqrt(r_lateral * f);
+		r_longitudinal = JPH::Sqrt(r_longitudinal * f) * load;
+		r_lateral = JPH::Sqrt(r_lateral * f) * load;
 	});
 	bi.AddBody(created->GetID(), JPH::EActivation::Activate);
 	w.system->AddConstraint(v.constraint);
@@ -582,6 +588,7 @@ core::Status VehicleWorld::step(std::span<const VehicleSlot> p_slots, std::span<
 		if (!v.used) {
 			continue;
 		}
+		land_motion_damping(w, s);
 		land_engine_update(w, s);
 		uint8_t in_contact = 0;
 		for (const JPH::Wheel *wheel : v.constraint->GetWheels()) {

@@ -10,9 +10,6 @@ namespace {
 
 constexpr std::string_view kTesters[] = { "cylinder", "sphere", "ray" };
 static_assert(std::size(kTesters) == size_t(WheelCollisionTester::Ray) + 1 && sizeof(WheelCollisionTester) == 1);
-constexpr std::string_view kSteerModels[] = { "scaled_lock", "sensitivity_radians" };
-static_assert(
-		std::size(kSteerModels) == size_t(SteerAngleModel::SensitivityRadians) + 1 && sizeof(SteerAngleModel) == 1);
 
 using Key = core::KeyDef<VehicleTuning>;
 using core::KeyKind;
@@ -22,26 +19,19 @@ using core::KeyKind;
 const Key kKeys[] = {
 	{ "gravity", KeyKind::Float, 0.01f, 100.0f, BF3_VEHICLE_FIELD(gravity) },
 	{ "ground_friction", KeyKind::Float, 0.0f, 10.0f, BF3_VEHICLE_FIELD(ground_friction) },
-	{ "static_sag_fraction", KeyKind::Float, 0.01f, 0.95f, BF3_VEHICLE_FIELD(static_sag_fraction) },
-	{ "damping_ratio", KeyKind::Float, 0.0f, 10.0f, BF3_VEHICLE_FIELD(damping_ratio) },
 	{ "suspension_min_fraction", KeyKind::Float, 0.0f, 0.9f, BF3_VEHICLE_FIELD(suspension_min_fraction) },
 	{ "wheel_angular_damping", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(wheel_angular_damping) },
-	{ "brake_torque_per_force", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(brake_torque_per_force) },
-	{ "hand_brake_torque", KeyKind::Float, 0.0f, 1e6f, BF3_VEHICLE_FIELD(hand_brake_torque) },
 	{ "longitudinal_grip", KeyKind::Float, 0.0f, 10.0f, BF3_VEHICLE_FIELD(longitudinal_grip) },
 	{ "lateral_grip", KeyKind::Float, 0.0f, 10.0f, BF3_VEHICLE_FIELD(lateral_grip) },
 	{ "tester", KeyKind::Choice, 0, 0, BF3_VEHICLE_FIELD(tester), kTesters },
-	{ "steer_model", KeyKind::Choice, 0, 0, BF3_VEHICLE_FIELD(steer_model), kSteerModels },
-	{ "steer_max_degrees", KeyKind::Float, 0.0f, 89.0f, BF3_VEHICLE_FIELD(steer_max_degrees) },
-	{ "drag_scale", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(drag_scale) },
 	{ "max_pitch_roll_degrees", KeyKind::Float, 1.0f, 180.0f, BF3_VEHICLE_FIELD(max_pitch_roll_degrees) },
-	{ "stand_still_speed", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(stand_still_speed) },
-	{ "wheel_drive_share", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(wheel_drive_share) },
+	{ "wheel_torque_scale", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(wheel_torque_scale) },
+	{ "track_skid_steer_degrees", KeyKind::Float, 0.0f, 89.0f, BF3_VEHICLE_FIELD(track_skid_steer_degrees) },
 	{ "collision_steps", KeyKind::U32, 1, 8, BF3_VEHICLE_FIELD(collision_steps) },
 	{ "velocity_steps", KeyKind::U32, 1, 128, BF3_VEHICLE_FIELD(velocity_steps) },
 	{ "position_steps", KeyKind::U32, 0, 128, BF3_VEHICLE_FIELD(position_steps) },
 };
-static_assert(std::size(kKeys) == 20);
+static_assert(std::size(kKeys) == 13);
 
 #undef BF3_VEHICLE_FIELD
 

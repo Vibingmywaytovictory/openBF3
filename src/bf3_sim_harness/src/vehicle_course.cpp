@@ -593,6 +593,7 @@ core::Result<std::array<VehicleCourse, kVehicleCourseKindCount>> find_vehicle_co
 			course.seed = best_seed;
 			course.lift_speed_kmh = std::sqrt(p_model.tuning.gravity * p_model.gravity_factor / course.feature) * 3.6f;
 		}
+		course.balance_speed_kmh = land_balance_speed_kmh(p_model);
 		course.queries = s.queries();
 		course.budget_exhausted = s.exhausted();
 	}

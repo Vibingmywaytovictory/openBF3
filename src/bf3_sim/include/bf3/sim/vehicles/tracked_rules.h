@@ -7,9 +7,13 @@ namespace bf3::sim::vehicles {
 
 inline constexpr float kTrackSteerForce = 800.0f;
 inline constexpr float kTankSteer = 1.0f;
+inline constexpr float kTankForward = 1.0f;
+inline constexpr float kTrackForwardQuarter = 0.25f;
+inline constexpr float kTrackForwardShare = 0.33f;
 inline constexpr float kTankSteerFixMultiplier = 7.0f;
 inline constexpr float kTankSteerFixOffset = 1.0f;
 inline constexpr float kTrackSteerWholeChange = 0.01f;
+inline constexpr float kTrackSpinShare = 0.5f;
 
 struct TrackSteerRule {
 	float turn_speed_limit = 0;
@@ -19,12 +23,17 @@ struct TrackSteerRule {
 
 bool track_steer_wheel(int p_steering_type, int p_driving_type);
 
-float track_steer_target(float p_steer, float p_side_sign, float p_wheel_speed, float p_engine_factor);
+float track_forward_term(float p_engine_torque, float p_gear_ratio);
+
+float track_turn_term(float p_yaw, float p_gear_ratio, float p_throttle, bool p_negative_x_side, bool p_inverted);
+
+float track_slip_fade(float p_slip);
 
 float track_steer_inertia(const TrackSteerRule &p_rule, float p_speed);
 
 float track_steer_smooth(float p_previous, float p_target, float p_inertia);
 
-float track_speed_attenuation(float p_limit, float p_vehicle_speed);
+float track_speed_attenuation(float p_limit, float p_angular_speed);
 
+float boost_drive_factor(float p_acceleration_scale, float p_strength);
 }

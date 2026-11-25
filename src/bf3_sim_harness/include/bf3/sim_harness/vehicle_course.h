@@ -6,6 +6,7 @@
 #include "bf3/sim/vehicle_world.h"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -29,6 +30,7 @@ struct VehicleCourse {
 	float slope_degrees = 0;
 	float feature = 0;
 	float lift_speed_kmh = 0;
+	float balance_speed_kmh = INFINITY;
 	uint32_t seed = 0;
 	size_t queries = 0;
 	bool budget_exhausted = false;

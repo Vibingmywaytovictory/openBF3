@@ -1,5 +1,6 @@
 #include "land_drive.h"
 
+#include "bf3/sim/vehicles/chassis_rules.h"
 #include "bf3/sim/vehicles/land_rules.h"
 #include "bf3/sim/vehicles/tracked_rules.h"
 
@@ -9,17 +10,18 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 
 namespace bf3::sim {
 
 namespace {
 
+constexpr float kLockedWheelTorque = std::numeric_limits<float>::max() * kTickSeconds * kTickSeconds;
+constexpr float kUnpairedDriveShare = 1.0f;
+constexpr float kJoltSlipSpeedFloor = 1.0e-3f;
+
 bool channels_swapped(const vehicles::GearboxState &p_gearbox) {
 	return p_gearbox.gear < 0 || (p_gearbox.gear == 0 && p_gearbox.reverse_direction != 0);
-}
-
-float track_side_sign(uint8_t p_side) {
-	return p_side == 0 ? 1.0f : -1.0f;
 }
 
 bool track_steered(const VehicleModel &p_model) {
@@ -31,30 +33,70 @@ bool track_steered(const VehicleModel &p_model) {
 	return false;
 }
 
-void track_steer_update(const VehicleWorld::Impl::Vehicle &p_vehicle, float p_speed, VehicleDriverState &r_driver) {
-	const VehicleModel &m = *p_vehicle.model;
-	std::array<float, 2> rim_speed{};
-	std::array<uint32_t, 2> wheels{};
-	for (size_t i = 0; i < m.wheel_count; ++i) {
-		const VehicleWheelModel &wm = m.wheels[i];
-		if (wm.track_steer == 0 || wm.side > 1) {
-			continue;
-		}
-		rim_speed[wm.side] += std::fabs(p_vehicle.constraint->GetWheel(JPH::uint(i))->GetAngularVelocity()) * wm.radius;
-		++wheels[wm.side];
-	}
-	const vehicles::TrackSteerRule rule{ m.land.track_turn_speed_limit, m.land.track_forward_speed_limit,
-		std::span<const std::array<float, 2>>(m.land.steer_inertia.data(), m.land.steer_inertia_points) };
-	const float inertia = vehicles::track_steer_inertia(rule, p_speed);
-	const float attenuation = vehicles::track_speed_attenuation(rule.forward_speed_limit, p_speed);
-	for (uint8_t side = 0; side < 2; ++side) {
-		const float wheel_speed = wheels[side] > 0 ? rim_speed[side] / float(wheels[side]) : 0.0f;
-		const float target =
-				vehicles::track_steer_target(r_driver.steer_filter, track_side_sign(side), wheel_speed, 1.0f) *
-				attenuation;
-		r_driver.track_steer[side] = vehicles::track_steer_smooth(r_driver.track_steer[side], target, inertia);
-	}
+float signed_unit(float p_value) {
+	return p_value >= 0.0f ? 1.0f : -1.0f;
 }
+
+float contact_speed(const JPH::BodyInterface &p_bi, JPH::BodyID p_body, const JPH::Wheel &p_wheel) {
+	if (!p_wheel.HasContact()) {
+		return 0.0f;
+	}
+	const JPH::Vec3 longitudinal = p_wheel.GetContactNormal().Cross(p_wheel.GetContactLateral());
+	const JPH::Vec3 relative = p_bi.GetPointVelocity(p_body, p_wheel.GetContactPosition());
+	return relative.Dot(longitudinal);
+}
+
+float wheel_slip(float p_rim_speed, float p_contact_speed) {
+	const float ratio = (p_rim_speed - p_contact_speed) / std::max(std::fabs(p_contact_speed), kJoltSlipSpeedFloor);
+	return ratio / (1.0f + std::fabs(ratio));
+}
+
+void anti_roll_bars(VehicleWorld::Impl::Vehicle &r_vehicle) {
+	const VehicleModel &m = *r_vehicle.model;
+	r_vehicle.tyre_load_scale.fill(1.0f);
+	if (m.wheel_count <= 2 || (m.anti_roll_front == 0.0f && m.anti_roll_rear == 0.0f)) {
+		return;
+	}
+	std::array<uint8_t, kMaxVehicleWheels> order{};
+	for (uint8_t i = 0; i < m.wheel_count; ++i) {
+		order[i] = i;
+	}
+	std::stable_sort(order.begin(), order.begin() + m.wheel_count,
+			[&](uint8_t p_a, uint8_t p_b) { return m.wheels[p_a].data_centre[2] > m.wheels[p_b].data_centre[2]; });
+	const auto bar = [&](uint8_t p_a, uint8_t p_b, float p_stiffness) {
+		if (p_stiffness == 0.0f ||
+				!(std::fabs(m.wheels[p_a].data_centre[2] - m.wheels[p_b].data_centre[2]) <
+						vehicles::kAntiRollSameAxle)) {
+			return;
+		}
+		const JPH::Wheel *a = r_vehicle.constraint->GetWheel(p_a);
+		const JPH::Wheel *b = r_vehicle.constraint->GetWheel(p_b);
+		const float load_a = a->HasContact() ? std::max(a->GetSuspensionLambda(), 0.0f) : 0.0f;
+		const float load_b = b->HasContact() ? std::max(b->GetSuspensionLambda(), 0.0f) : 0.0f;
+		const std::array<float, 2> barred = vehicles::anti_roll_loads(load_a, load_b, p_stiffness);
+		r_vehicle.tyre_load_scale[p_a] = load_a > 0.0f ? barred[0] / load_a : 1.0f;
+		r_vehicle.tyre_load_scale[p_b] = load_b > 0.0f ? barred[1] / load_b : 1.0f;
+	};
+	bar(order[0], order[1], m.anti_roll_front);
+	bar(order[m.wheel_count - 2u], order[m.wheel_count - 1u], m.anti_roll_rear);
+}
+
+std::span<const vehicles::CurvePoint> steer_curve(const VehicleModel &p_model) {
+	return std::span<const vehicles::CurvePoint>(p_model.steer_sensitivity.data(), p_model.steer_points);
+}
+
+}
+
+JPH::SpringSettings land_spring(
+		const VehicleModel &p_model, const VehicleWheelModel &p_wheel, float p_speed, float p_compression) {
+	const uint32_t substeps = vehicles::chassis_substeps(p_speed, true);
+	const float ratio = p_wheel.suspension_max > 0.0f ? p_compression / p_wheel.suspension_max : 0.0f;
+	const float progressive = vehicles::spring_progressive(
+			ratio, p_wheel.progressive_start, p_wheel.progressive_exponent, vehicles::kProgressiveSetting);
+	const float stiffness = vehicles::spring_substep_factor(substeps) * p_wheel.spring_constant * progressive;
+	const float damping = vehicles::damper_coefficient(p_model.mass, p_model.wheel_count, p_wheel.spring_damping,
+			progressive, 1.0f / (vehicles::kChassisTickHz * float(substeps)));
+	return JPH::SpringSettings(JPH::ESpringMode::StiffnessAndDamping, stiffness, damping);
 }
 
 VehicleDriverState land_driver_at_rest(const VehicleModel &p_model) {
@@ -86,22 +128,22 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 	d.brake_filter = vehicles::shape_inertia(d.brake_filter, brake_in, dt, land.brake);
 	d.steer_filter = std::clamp(vehicles::shape_inertia(d.steer_filter, steer_in, dt, land.yaw), -1.0f, 1.0f);
 	d.reversing = swapped ? 1 : 0;
+	const float yaw = -d.steer_filter;
 
 	JPH::BodyInterface &bi = r_world.system->GetBodyInterfaceNoLock();
 	const JPH::Vec3 velocity = bi.GetLinearVelocity(v.body);
-	const JPH::Vec3 forward_axis = bi.GetRotation(v.body) * JPH::Vec3::sAxisZ();
-	const float forward_speed = velocity.Dot(forward_axis);
+	const JPH::Quat rotation = bi.GetRotation(v.body);
+	const JPH::Vec3 up_axis = rotation * JPH::Vec3::sAxisY();
 	const float speed = velocity.Length();
+	const float planar_speed = (velocity - up_axis * velocity.Dot(up_axis)).Length();
+	const float spin_rate = bi.GetAngularVelocity(v.body).Length();
+
+	anti_roll_bars(v);
 
 	const vehicles::GearboxRule rule = land_gearbox_rule(land);
 	vehicles::gearbox_accept(
 			rule, d.gearbox, vehicles::gearbox_request(rule, d.gearbox, d.throttle_filter, d.brake_filter, speed));
 	vehicles::gearbox_advance(rule, d.gearbox, dt);
-
-	const bool tracked = track_steered(m);
-	if (tracked) {
-		track_steer_update(v, speed, d);
-	}
 
 	const int32_t gear = d.gearbox.gear;
 	const bool backward_limited = land.limit_backward_throttle && gear < 0 && speed >= land.backward_throttle_limit;
@@ -111,58 +153,134 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 					  std::span<const float>(land.torque_points.data(), land.curve_points), land.power_multiplier,
 					  d.throttle_filter, d.gearbox.clutch);
 	const float ratio = land_gear_ratio(land, gear);
+
+	const bool tracked = track_steered(m);
+	float track_forward = 0.0f;
+	float turn_attenuation = 1.0f;
+	if (tracked) {
+		const vehicles::TrackSteerRule track{ land.track_turn_speed_limit, land.track_forward_speed_limit,
+			std::span<const std::array<float, 2>>(land.steer_inertia.data(), land.steer_inertia_points) };
+		std::array<float, 2> slip{};
+		std::array<uint32_t, 2> grounded{};
+		for (size_t i = 0; i < m.wheel_count; ++i) {
+			const VehicleWheelModel &wm = m.wheels[i];
+			const JPH::Wheel *wheel = v.constraint->GetWheel(JPH::uint(i));
+			if (wm.track_steer == 0 || wm.side > 1 || !wheel->HasContact()) {
+				continue;
+			}
+			slip[wm.side] +=
+					std::fabs(wheel_slip(wheel->GetAngularVelocity() * wm.radius, contact_speed(bi, v.body, *wheel)));
+			++grounded[wm.side];
+		}
+		const float inertia = vehicles::track_steer_inertia(track, planar_speed);
+		const float sensitivity = vehicles::steer_curve_at(steer_curve(m), planar_speed * vehicles::kKmhPerMs);
+		for (uint8_t side = 0; side < 2; ++side) {
+			const float side_slip = grounded[side] > 0 ? slip[side] / float(grounded[side]) : 0.0f;
+			const float target = vehicles::track_turn_term(yaw, ratio, d.throttle_filter, side == 1, m.steer_inverted) *
+					vehicles::track_slip_fade(side_slip) * sensitivity;
+			d.track_steer[side] = vehicles::track_steer_smooth(d.track_steer[side], target, inertia);
+		}
+		turn_attenuation = vehicles::track_speed_attenuation(track.turn_speed_limit, spin_rate);
+		track_forward = vehicles::track_forward_term(engine_torque, ratio) *
+				vehicles::track_speed_attenuation(track.forward_speed_limit, spin_rate);
+	}
+
+	const float steer_max = vehicles::steer_angle(1.0f, vehicle_steer_sensitivity(m, speed));
+	const float skid_at_rest = vehicles::steer_curve_at(steer_curve(m), 0.0f);
+	const float skid_falloff = skid_at_rest > 0.0f
+			? vehicles::steer_curve_at(steer_curve(m), speed * vehicles::kKmhPerMs) / skid_at_rest
+			: 0.0f;
 	const float wheel_brake = std::max(d.brake_filter, brake_axis);
-	JPH::WheeledVehicleController *controller =
-			static_cast<JPH::WheeledVehicleController *>(v.constraint->GetController());
+	const bool idle = forward_pedal == 0.0f && back_pedal == 0.0f && (!tracked || steer_axis == 0.0f);
+	const bool held = idle && (p_command.flags & vehicle_flags::kDriven) == 0;
+	const std::span<const vehicles::CurvePoint> loss(land.transmission_loss.data(), land.transmission_loss_points);
+	bool any_locked = false;
+	uint32_t grounded_wheels = 0;
 	for (size_t i = 0; i < m.wheel_count; ++i) {
 		const VehicleWheelModel &wm = m.wheels[i];
 		JPH::Wheel *wheel = v.constraint->GetWheel(JPH::uint(i));
-		float omega = wheel->GetAngularVelocity();
-		float torque = 0.0f;
-		if (wm.driven != 0) {
-			torque = vehicles::wheel_drive_torque(
-					engine_torque, ratio, wm.diff_gear_ratio, land.transmission_efficiency, land.drive_share);
-		}
+		JPH::WheelSettingsWV &settings = *v.wheel_settings[i];
+		const bool grounded = wheel->HasContact();
+		grounded_wheels += grounded ? 1u : 0u;
+		settings.mSuspensionSpring =
+				land_spring(m, wm, speed, grounded ? wm.suspension_max - wheel->GetSuspensionLength() : 0.0f);
+		settings.mMaxSteerAngle = wm.steers != 0 ? steer_max : wm.track_skid_angle * skid_falloff;
+
+		float drive = 0.0f;
 		if (wm.track_steer != 0 && wm.side < 2) {
-			torque += d.track_steer[wm.side];
+			drive = track_forward + d.track_steer[wm.side] * turn_attenuation;
+		} else if (wm.driven != 0) {
+			drive = vehicles::wheel_drive_torque(
+					engine_torque, ratio, wm.diff_gear_ratio, land.transmission_efficiency, kUnpairedDriveShare);
 		}
-		omega += torque * dt / wm.inertia;
+		float omega = wheel->GetAngularVelocity();
+		const float along = contact_speed(bi, v.body, *wheel);
+		float resistance = 0.0f;
+		if (wm.rolling_resistance != 0) {
+			resistance -= vehicles::rolling_resistance(
+					omega, wm.rolling_base, wm.rolling_velocity_kmh, wm.width, wm.mass, m.wheel_list);
+		}
+		if (wm.driven != 0 && grounded) {
+			resistance -= signed_unit(along) *
+					vehicles::transmission_loss_resistance(loss, planar_speed, 1.0f, m.mass, m.wheel_list);
+			if (wm.engine_brake != 0 && drive == 0.0f && along != 0.0f) {
+				resistance -= signed_unit(along) * vehicles::engine_brake_resistance(m.mass, planar_speed);
+			}
+		}
+		const float applied = land.wheel_torque_scale * dt;
+		omega += drive * applied / wm.inertia;
+		omega = vehicles::spin_after_resistance(omega, resistance, applied, wm.inertia);
+		const bool brake_locks = vehicles::brake_scale(1.0f, wm.brake_factor, wheel_brake) == 0.0f ||
+				vehicles::brake_scale(1.0f, wm.hand_brake_factor, hand_brake ? 1.0f : 0.0f) == 0.0f;
 		omega = vehicles::brake_scale(omega, wm.brake_factor, wheel_brake);
 		omega = vehicles::brake_scale(omega, wm.hand_brake_factor, hand_brake ? 1.0f : 0.0f);
+		const bool auto_brake = wm.low_speed_auto_brake != 0 && wm.driven != 0 && grounded &&
+				planar_speed < vehicles::kLowSpeedAutoBrakeSpeed && drive == 0.0f;
+		const bool locked = auto_brake || held || brake_locks;
+		if (locked) {
+			omega = 0.0f;
+		}
+		any_locked |= locked;
+		settings.mMaxBrakeTorque = locked ? kLockedWheelTorque : 0.0f;
 		wheel->SetAngularVelocity(omega);
 	}
-
-	float jolt_brake = wheel_brake;
-	if (m.stand_still_brake && m.stand_still_ticks > 0) {
-		if (forward_pedal == 0.0f && back_pedal == 0.0f && (!tracked || steer_axis == 0.0f) &&
-				speed < m.stand_still_speed) {
-			if (d.stand_still_ticks < m.stand_still_ticks) {
-				++d.stand_still_ticks;
-			}
-		} else {
-			d.stand_still_ticks = 0;
-		}
-		if (d.stand_still_ticks >= m.stand_still_ticks) {
-			jolt_brake = 1.0f;
-		}
-	}
-	const bool idle = forward_pedal == 0.0f && back_pedal == 0.0f && (!tracked || steer_axis == 0.0f);
-	if (idle && (speed < m.stand_still_speed || (p_command.flags & vehicle_flags::kDriven) == 0)) {
-		jolt_brake = 1.0f;
-	}
-
-	const float lock = vehicle_max_steer_angle(m, 0.0f);
-	const float falloff = lock > 0.0f ? vehicle_max_steer_angle(m, forward_speed) / lock : 0.0f;
-	const float right = d.steer_filter * falloff;
 
 	if (p_command.throttle != 0 || p_command.brake != 0 || p_command.steer != 0 || hand_brake) {
 		bi.ActivateBody(v.body);
 	}
+	JPH::WheeledVehicleController *controller =
+			static_cast<JPH::WheeledVehicleController *>(v.constraint->GetController());
 	controller->GetTransmission().Set(0, 0.0f);
-	controller->SetDriverInput(0.0f, right, jolt_brake, hand_brake ? 1.0f : 0.0f);
-	if (m.drag_coefficient > 0.0f && speed > 0.0f) {
-		bi.AddForce(v.body, velocity * (-m.drag_coefficient * speed), JPH::EActivation::DontActivate);
+	controller->SetDriverInput(0.0f, d.steer_filter, any_locked ? 1.0f : 0.0f, hand_brake ? 1.0f : 0.0f);
+	if (m.wind_resistance && speed > 0.0f) {
+		bi.AddForce(v.body, velocity * (-vehicles::wind_drag(m.wind, speed) / speed), JPH::EActivation::DontActivate);
 	}
+	if (m.down_force) {
+		const float down = vehicles::down_force(speed, m.wind.air_density, m.down_force_base, m.down_force_wheel_factor,
+				m.down_force_per_wheel, m.wheel_count, grounded_wheels);
+		bi.AddForce(v.body, JPH::Vec3(0.0f, -down, 0.0f), JPH::EActivation::DontActivate);
+	}
+}
+
+void land_motion_damping(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
+	VehicleWorld::Impl::Vehicle &v = r_world.vehicles[p_slot];
+	const VehicleModel &m = *v.model;
+	JPH::BodyInterface &bi = r_world.system->GetBodyInterfaceNoLock();
+	if (!bi.IsActive(v.body)) {
+		return;
+	}
+	const std::array<float, 3> angular = vehicles::motion_damping_angular(m.motion_damping, kTickSeconds);
+	const std::array<float, 3> linear = vehicles::motion_damping_linear(m.motion_damping, kTickSeconds);
+	const JPH::Quat rotation = bi.GetRotation(v.body);
+	const std::array<JPH::Vec3, 3> axes{ rotation * JPH::Vec3::sAxisX(), rotation * JPH::Vec3::sAxisY(),
+		rotation * JPH::Vec3::sAxisZ() };
+	JPH::Vec3 w = bi.GetAngularVelocity(v.body);
+	JPH::Vec3 u = bi.GetLinearVelocity(v.body);
+	for (size_t a = 0; a < 3; ++a) {
+		w -= (1.0f - angular[a]) * w.Dot(axes[a]) * axes[a];
+		u -= (1.0f - linear[a]) * u.Dot(axes[a]) * axes[a];
+	}
+	bi.SetLinearAndAngularVelocity(v.body, u, w);
 }
 
 void land_engine_update(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {

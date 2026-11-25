@@ -11,10 +11,19 @@ bool track_steer_wheel(int p_steering_type, int p_driving_type) {
 	return p_steering_type == 2 && p_driving_type == 1;
 }
 
-float track_steer_target(float p_steer, float p_side_sign, float p_wheel_speed, float p_engine_factor) {
-	const float fix =
-			1.0f - std::clamp(kTankSteerFixMultiplier * std::fabs(p_wheel_speed) - kTankSteerFixOffset, 0.0f, 1.0f);
-	return p_steer * p_side_sign * kTankSteer * kTrackSteerForce * fix * p_engine_factor;
+float track_forward_term(float p_engine_torque, float p_gear_ratio) {
+	return p_engine_torque * p_gear_ratio * kTrackForwardQuarter * kTrackForwardShare * kTankForward;
+}
+
+float track_turn_term(float p_yaw, float p_gear_ratio, float p_throttle, bool p_negative_x_side, bool p_inverted) {
+	const float direction = p_gear_ratio < 0.0f && p_throttle != 0.0f ? -1.0f : 1.0f;
+	const float side = p_negative_x_side ? 1.0f : -1.0f;
+	const float inverted = p_inverted ? -1.0f : 1.0f;
+	return p_yaw * direction * side * inverted * kTankSteer * kTrackSteerForce;
+}
+
+float track_slip_fade(float p_slip) {
+	return 1.0f - std::clamp(kTankSteerFixMultiplier * std::fabs(p_slip) - kTankSteerFixOffset, 0.0f, 1.0f);
 }
 
 float track_steer_inertia(const TrackSteerRule &p_rule, float p_speed) {
@@ -53,8 +62,11 @@ float track_steer_smooth(float p_previous, float p_target, float p_inertia) {
 	return previous + change / std::max(p_inertia, 1.0f);
 }
 
-float track_speed_attenuation(float p_limit, float p_vehicle_speed) {
-	return 1.0f - std::clamp(p_limit * std::fabs(p_vehicle_speed) / 2.0f, 0.0f, 1.0f);
+float track_speed_attenuation(float p_limit, float p_angular_speed) {
+	return 1.0f - std::clamp(p_limit * kTrackSpinShare * std::fabs(p_angular_speed), 0.0f, 1.0f);
 }
 
+float boost_drive_factor(float p_acceleration_scale, float p_strength) {
+	return 1.0f + p_acceleration_scale * (p_strength - 1.0f);
+}
 }

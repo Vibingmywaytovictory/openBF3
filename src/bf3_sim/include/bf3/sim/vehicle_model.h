@@ -3,6 +3,7 @@
 #include "bf3/core/result.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/vehicle_types.h"
+#include "bf3/sim/vehicles/chassis_rules.h"
 #include "bf3/sim/vehicles/land_rules.h"
 
 #include <array>
@@ -29,18 +30,13 @@ inline constexpr size_t kMaxChassisPieces = 64;
 inline constexpr size_t kMaxChassisPiecePoints = 256;
 inline constexpr size_t kMaxModelCurvePoints = 16;
 inline constexpr size_t kMaxModelGears = 8;
+inline constexpr uint32_t kBalanceSpeedSteps = 800;
+inline constexpr float kBalanceSpeedStepKmh = 0.5f;
 
 enum class WheelCollisionTester : uint8_t {
 	Cylinder = 0,
 	Sphere = 1,
 	Ray = 2,
-};
-
-enum class SteerAngleModel : uint8_t {
-
-	ScaledLock = 0,
-
-	SensitivityRadians = 1,
 };
 
 struct VehicleTuning {
@@ -49,25 +45,17 @@ struct VehicleTuning {
 
 	float ground_friction = 1.0f;
 
-	float static_sag_fraction = 7.0f / 16.0f;
-	float damping_ratio = 0.45f;
 	float suspension_min_fraction = 0.1f;
 
 	float wheel_angular_damping = 0.2f;
-	float brake_torque_per_force = 1.0f;
-	float hand_brake_torque = 4000.0f;
 	float longitudinal_grip = 1.0f;
 	float lateral_grip = 1.0f;
 	WheelCollisionTester tester = WheelCollisionTester::Cylinder;
 
-	SteerAngleModel steer_model = SteerAngleModel::ScaledLock;
-	float steer_max_degrees = 32.0f;
-
-	float drag_scale = 1.0f;
 	float max_pitch_roll_degrees = 180.0f;
 
-	float stand_still_speed = 0.5f;
-	float wheel_drive_share = 10.0f;
+	float wheel_torque_scale = 10.0f;
+	float track_skid_steer_degrees = 32.0f;
 
 	uint32_t collision_steps = 1;
 	uint32_t velocity_steps = 10;
@@ -105,8 +93,10 @@ struct LandDriveModel {
 	std::array<float, kMaxModelCurvePoints> rpm_points{}, torque_points{};
 	uint8_t curve_points = 0;
 	float power_multiplier = 1;
-	float drive_share = 1;
+	float wheel_torque_scale = 1;
 	float track_forward_speed_limit = 0, track_turn_speed_limit = 0;
+	std::array<std::array<float, 2>, kMaxModelCurvePoints> transmission_loss{};
+	uint8_t transmission_loss_points = 0;
 	std::array<std::array<float, 2>, kMaxModelCurvePoints> steer_inertia{};
 	uint8_t steer_inertia_points = 0;
 };
@@ -119,17 +109,21 @@ struct VehicleWheelModel {
 	Vec3 data_centre{};
 	float radius = 0, width = 0;
 	float suspension_min = 0, suspension_max = 0;
-	float spring_stiffness = 0;
+	float spring_constant = 0;
 	float spring_damping = 0;
+	float progressive_start = 0, progressive_exponent = 0;
+	float rest_compression = 0;
 	float inertia = 0;
+	float mass = 0;
 	float angular_damping = 0;
-	float max_steer_angle = 0;
-	float max_brake_torque = 0, max_hand_brake_torque = 0;
 	float brake_factor = 0, hand_brake_factor = 0;
 	float diff_gear_ratio = 0;
+	float rolling_base = 0, rolling_velocity_kmh = 0;
+	float track_skid_angle = 0;
 	uint8_t steers = 0, driven = 0, axle = 0;
 	uint8_t side = 0;
 	uint8_t track_steer = 0;
+	uint8_t rolling_resistance = 0, engine_brake = 0, low_speed_auto_brake = 0;
 };
 
 struct VehicleModel {
@@ -145,17 +139,20 @@ struct VehicleModel {
 
 	std::array<VehicleWheelModel, kMaxVehicleWheels> wheels{};
 	uint8_t wheel_count = 0;
+	uint8_t wheel_list = 0;
 
 	std::array<std::array<float, 2>, kMaxModelCurvePoints> steer_sensitivity{};
 	uint8_t steer_points = 0;
-	SteerAngleModel steer_model = SteerAngleModel::ScaledLock;
+	bool steer_inverted = false;
 
 	LandDriveModel land;
 
-	float drag_coefficient = 0;
-	bool stand_still_brake = false;
-	uint16_t stand_still_ticks = 0;
-	float stand_still_speed = 0;
+	vehicles::MotionDampingRule motion_damping;
+	bool wind_resistance = false;
+	vehicles::WindRule wind;
+	bool down_force = false, down_force_wheel_factor = false;
+	float anti_roll_front = 0, anti_roll_rear = 0;
+	float down_force_base = 0, down_force_per_wheel = 0;
 
 	WheelCollisionTester tester = WheelCollisionTester::Cylinder;
 	float max_pitch_roll_angle = 0;
@@ -175,6 +172,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 core::Result<std::shared_ptr<const VehicleModel>> load_vehicle_model(const core::EbxResolver &p_db, const core::LevelMount &p_mount,
 		std::string_view p_blueprint, const VehicleTuning &p_tuning, core::gameplay::WorkBudget *p_budget = nullptr);
 
-float vehicle_max_steer_angle(const VehicleModel &p_model, float p_speed);
+float vehicle_steer_sensitivity(const VehicleModel &p_model, float p_speed);
 
+float land_balance_speed_kmh(const VehicleModel &p_model);
 }

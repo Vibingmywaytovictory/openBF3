@@ -139,9 +139,8 @@ TEST_CASE("s2 contract: default plain values") {
 	CHECK(t.up[1] == 1.0f);
 	CHECK(t.forward[2] == 1.0f);
 	const sim::VehicleTuning tuning;
-	CHECK(tuning.static_sag_fraction == 7.0f / 16.0f);
-	CHECK(tuning.damping_ratio == 0.45f);
-	CHECK(tuning.steer_max_degrees == 32.0f);
+	CHECK(tuning.suspension_min_fraction == 0.1f);
+	CHECK(tuning.lateral_grip == 1.0f);
 	const sim::VehicleReplayOptions o;
 	CHECK(o.ticks == sim::kG1Ticks);
 	CHECK(o.snapshot_interval == sim::kG2SnapshotInterval);
@@ -165,11 +164,9 @@ TEST_CASE("s2 contract: default plain values") {
 
 #ifdef OPENBF3_VEHICLE_TUNING_CFG
 TEST_CASE("s2 contract: vehicle_tuning.cfg names exactly the VehicleTuning keys") {
-	const std::set<std::string> expected = { "gravity", "ground_friction", "static_sag_fraction", "damping_ratio",
-		"suspension_min_fraction", "wheel_angular_damping", "brake_torque_per_force", "hand_brake_torque",
-		"longitudinal_grip", "lateral_grip", "tester", "steer_model", "steer_max_degrees", "drag_scale",
-		"max_pitch_roll_degrees", "stand_still_speed", "wheel_drive_share", "collision_steps", "velocity_steps",
-		"position_steps" };
+	const std::set<std::string> expected = { "gravity", "ground_friction", "suspension_min_fraction",
+		"wheel_angular_damping", "longitudinal_grip", "lateral_grip", "tester", "max_pitch_roll_degrees",
+		"wheel_torque_scale", "track_skid_steer_degrees", "collision_steps", "velocity_steps", "position_steps" };
 	std::ifstream f(OPENBF3_VEHICLE_TUNING_CFG, std::ios::binary);
 	REQUIRE(f.good());
 	std::set<std::string> found;

@@ -307,26 +307,36 @@ TEST_SUITE("sim-turret-rules-unit") {
 		CHECK(idle[0] == 0.0f);
 	}
 
-	TEST_CASE("sim.vehicles.tracked_rules: R-G1 tracked steering drive, attenuation and smoothing") {
+	TEST_CASE("sim.vehicles.tracked_rules: R5-G1-5 tracked forward and turn terms, slip fade, spin attenuation and "
+			  "smoothing (M1A2 vectors)") {
 		CHECK(track_steer_wheel(2, 1));
 		CHECK_FALSE(track_steer_wheel(2, 0));
 		CHECK_FALSE(track_steer_wheel(1, 1));
-		CHECK(track_steer_target(1.0f, 1.0f, 0.0f, 1.0f) == doctest::Approx(800.0f));
-		CHECK(track_steer_target(0.5f, -1.0f, 0.1f, 1.0f) == doctest::Approx(-400.0f));
-		CHECK(track_steer_target(1.0f, 1.0f, 0.2f, 1.0f) == doctest::Approx(800.0f * 0.6f));
-		CHECK(track_steer_target(1.0f, 1.0f, 0.3f, 1.0f) == 0.0f);
+		CHECK(track_forward_term(660.0f, 1.5f) == doctest::Approx(81.675f));
+		CHECK(track_forward_term(627.0f, 1.5f) == doctest::Approx(77.59125f));
+		CHECK(track_turn_term(1.0f, 1.5f, 1.0f, true, false) == doctest::Approx(800.0f));
+		CHECK(track_turn_term(1.0f, 1.5f, 1.0f, false, false) == doctest::Approx(-800.0f));
+		CHECK(track_turn_term(1.0f, -1.3f, 1.0f, true, false) == doctest::Approx(-800.0f));
+		CHECK(track_turn_term(1.0f, -1.3f, 0.0f, true, false) == doctest::Approx(800.0f));
+		CHECK(track_turn_term(0.5f, 1.5f, 0.0f, true, true) == doctest::Approx(-400.0f));
+		CHECK(track_slip_fade(0.0f) == 1.0f);
+		CHECK(track_slip_fade(0.2f) == doctest::Approx(0.6f));
+		CHECK(track_slip_fade(2.0f / 7.0f) == doctest::Approx(0.0f).epsilon(1e-6));
+		CHECK(track_speed_attenuation(2.0f, 0.5f) == doctest::Approx(0.5f));
+		CHECK(track_speed_attenuation(1.5f, 0.5f) == doctest::Approx(0.625f));
+		CHECK(track_speed_attenuation(2.0f, -1.0f) == 0.0f);
+		CHECK(track_speed_attenuation(1.5f, 4.0f / 3.0f) == doctest::Approx(0.0f).epsilon(1e-6));
 		CHECK(track_speed_attenuation(1.5f, 0.0f) == 1.0f);
-		CHECK(track_speed_attenuation(1.5f, 1.0f) == doctest::Approx(0.25f));
-		CHECK(track_speed_attenuation(2.0f, -0.5f) == doctest::Approx(0.5f));
-		CHECK(track_speed_attenuation(2.0f, 3.0f) == 0.0f);
-		const std::array<std::array<float, 2>, 2> curve{ { { 0.0f, 4.0f }, { 36.0f, 0.5f } } };
+		const std::array<std::array<float, 2>, 5> curve{ { { 0.0f, 50.0f }, { 15.0f, 50.0f }, { 22.0f, 35.0f },
+				{ 30.0f, 18.0f }, { 50.0f, 1.0f } } };
 		const TrackSteerRule rule{ 2.0f, 1.5f, curve };
-		CHECK(track_steer_inertia(rule, 0.0f) == doctest::Approx(4.0f));
-		CHECK(track_steer_inertia(rule, 5.0f) == doctest::Approx(2.25f));
-		CHECK(track_steer_inertia(rule, 20.0f) == 1.0f);
+		CHECK(track_steer_inertia(rule, 0.0f) == doctest::Approx(50.0f));
+		CHECK(track_steer_inertia(rule, 20.0f / 3.6f) == doctest::Approx(39.286f).epsilon(1e-4));
+		CHECK(track_steer_inertia(rule, 60.0f / 3.6f) == 1.0f);
 		CHECK(track_steer_inertia(TrackSteerRule{}, 3.0f) == 1.0f);
-		CHECK(track_steer_smooth(0.0f, 800.0f, 4.0f) == doctest::Approx(200.0f));
-		CHECK(track_steer_smooth(200.0f, 800.0f, 4.0f) == doctest::Approx(350.0f));
+		const float first = track_steer_smooth(0.0f, 240.0f, 50.0f);
+		CHECK(first == doctest::Approx(4.8f));
+		CHECK(track_steer_smooth(first, 240.0f, 50.0f) == doctest::Approx(9.504f));
 		CHECK(track_steer_smooth(350.0f, 100.0f, 4.0f) == doctest::Approx(100.0f));
 		CHECK(track_steer_smooth(350.0f, -800.0f, 4.0f) == doctest::Approx(-200.0f));
 		CHECK(track_steer_smooth(0.0f, 0.005f, 4.0f) == doctest::Approx(0.005f));
