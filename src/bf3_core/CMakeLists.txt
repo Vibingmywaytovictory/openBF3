@@ -177,6 +177,7 @@ target_sources(bf3_core PRIVATE
     src/gameplay/death_body.cpp
     src/gameplay/vehicle_def.cpp
     src/gameplay/vehicle_disabled_input.cpp
+    src/gameplay/vehicle_hud.cpp
     src/gameplay/vehicle_damage_visuals.cpp
     include/bf3/core/gameplay/logic_world.h
     include/bf3/core/gameplay/soldier_def.h
@@ -188,6 +189,7 @@ target_sources(bf3_core PRIVATE
     include/bf3/core/gameplay/death_body.h
     include/bf3/core/gameplay/vehicle_def.h
     include/bf3/core/gameplay/vehicle_damage_visuals.h
+    include/bf3/core/gameplay/vehicle_hud.h
     include/bf3/core/gameplay/work_budget.h
 )
 

@@ -529,16 +529,36 @@ void UiFlowSession::initialize_opened() {
 }
 
 void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
-	const std::string &graph = ui_graph_of_[p_node];
+	const auto entity = graph_entities_.find(p_node);
+	if (entity != graph_entities_.end()) {
+		entity_input(entity->second, p_node, p_port);
+	}
+}
+
+bool UiFlowSession::graph_entity_event(
+		std::string_view p_graph, std::string_view p_priority, bool p_pop_previous, int32_t p_event) {
+	if (provider_(p_graph) == nullptr) {
+		return false;
+	}
+	graph_owner_.erase(std::string(p_graph));
+	entity_input(GraphEntity{ std::string(p_graph), std::string(p_priority), p_pop_previous }, std::nullopt, p_event);
+	initialize_opened();
+	return true;
+}
+
+void UiFlowSession::entity_input(const GraphEntity &p_entity, std::optional<uint32_t> p_node, int32_t p_port) {
+	const std::string &graph = p_entity.graph;
 	const std::shared_ptr<const ui::UiGraphAsset> &asset = graphs_[graph];
 	const std::string leaf = ui::ui_data_category_leaf(graph);
 	if (p_port == gp::logic_port_id(kUiGraphExitPort)) {
 		note("logic " + leaf + " " + std::string(kUiGraphExitPort));
 		flow_->close_graph(graph);
 	} else if (p_port == gp::logic_port_id(kUiGraphEnterPort)) {
-		graph_owner_[graph] = p_node;
+		if (p_node) {
+			graph_owner_[graph] = *p_node;
+		}
 		note("logic " + leaf + " " + std::string(kUiGraphEnterPort));
-		push_graph(p_node, true);
+		push_graph(p_entity, true);
 		if (asset) {
 			for (const ui::UiGraphNode &n : asset->nodes) {
 				if (n.kind == ui::UiGraphNodeKind::InstanceInput && n.root) {
@@ -563,9 +583,11 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 			note("logic " + leaf + " #" + std::to_string(p_port));
 		} else {
 			++stats_.inputs_fired;
-			graph_owner_[graph] = p_node;
+			if (p_node) {
+				graph_owner_[graph] = *p_node;
+			}
 			note("logic " + leaf + "." + input->name);
-			push_graph(p_node, ui_input_settles(*asset, *input));
+			push_graph(p_entity, ui_input_settles(*asset, *input));
 			flow_->fire_input(graph, input->name);
 		}
 	}
@@ -575,12 +597,8 @@ void UiFlowSession::ui_graph_input(uint32_t p_node, int32_t p_port) {
 	flow_->clear_log();
 }
 
-void UiFlowSession::push_graph(uint32_t p_node, bool p_take_place) {
-	const auto entity = graph_entities_.find(p_node);
-	if (entity == graph_entities_.end()) {
-		return;
-	}
-	const GraphEntity &e = entity->second;
+void UiFlowSession::push_graph(const GraphEntity &p_entity, bool p_take_place) {
+	const GraphEntity e = p_entity;
 	std::erase_if(entered_, [&](const GraphEntity &g) { return !flow_->graph_live(g.graph); });
 	const auto top = std::find_if(
 			entered_.rbegin(), entered_.rend(), [&](const GraphEntity &g) { return g.priority == e.priority; });

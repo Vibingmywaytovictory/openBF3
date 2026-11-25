@@ -60,6 +60,43 @@ VehicleDef vehicle(const EbxResolver &p_db, const char *p_blueprint) {
 	return std::move(*v);
 }
 
+std::string hud_event_name(int32_t p_event) {
+	for (const char *n : { "EnterUIGraph", "ExitUIGraph", "DisableSoldierCrossHair", "EnableSoldierCrosshair",
+				 "ZoomStateOn", "ZoomStateOff", "FlirStateOn", "FlirStateOff", "PlayingSinglePlayer", "DefaultWeapon",
+				 "Crosshair", "Dot", "3pCrossHair", "3pCrossHairGrade" }) {
+		if (static_cast<int32_t>(ebx_name_hash(n)) == p_event) {
+			return n;
+		}
+	}
+	return "#" + std::to_string(p_event);
+}
+
+std::vector<std::string> hud_fired(const VehicleDef &p_v, const VehicleCameraDef &p_c, bool p_alternate) {
+	std::vector<std::string> out;
+	for (const VehicleHudSwitch &s : p_v.hud.switches) {
+		const VehicleHudTerm term{ static_cast<uint32_t>(p_c.hud_camera), p_alternate };
+		if (p_c.hud_camera < 0 || std::find(s.terms.begin(), s.terms.end(), term) == s.terms.end()) {
+			continue;
+		}
+		for (const VehicleHudGraphEvent &e : s.on_true) {
+			const std::string leaf = e.graph.substr(e.graph.rfind('/') + 1);
+			out.push_back(leaf + "." + hud_event_name(e.event) + (e.pop_previous ? " pop" : "") + " " + e.priority);
+		}
+	}
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
+const VehicleCameraDef *seat_camera(const VehicleDef &p_v, size_t p_seat, bool p_first_person) {
+	REQUIRE(p_seat < p_v.seats.size());
+	for (const VehicleCameraDef &c : p_v.seats[p_seat].cameras) {
+		if (c.first_person == p_first_person) {
+			return &c;
+		}
+	}
+	return nullptr;
+}
+
 size_t hq_count(const ModeDef &p_mode) {
 	size_t n = 0;
 	for (const CapturePointDef &c : p_mode.capture_points) {
@@ -2558,5 +2595,60 @@ TEST_SUITE("tables") {
 			}
 			CHECK(ports == 4);
 		}
+	}
+	TEST_CASE("gameplay: vehicle HUD prefabs from the seat cameras (R5-UI1 A, C)") {
+		Mounted m;
+		if (!open_or_skip(m)) {
+			return;
+		}
+		using Lines = std::vector<std::string>;
+		const std::unique_ptr<EbxLibrary> lib = open_level(m, "MP_007");
+		const VehicleDef m1 = vehicle(*lib, "vehicles/m1a2/m1abrams");
+		const VehicleCameraDef *m1_driver = seat_camera(m1, 0, true);
+		REQUIRE(m1_driver != nullptr);
+		CHECK(m1_driver->hud.use_weapon_orientations);
+		CHECK(m1_driver->hud.range_meter);
+		CHECK_FALSE(m1_driver->hud.use_render_target);
+		CHECK(hud_fired(m1, *m1_driver, false) ==
+				Lines{ "defaulttankgraph.EnterUIGraph UIGraphPriority_Low",
+						"vehiclehuddatagraph.DisableSoldierCrossHair UIGraphPriority_Normal" });
+		CHECK(hud_fired(m1, *m1_driver, true) == Lines{ "vehiclehuddatagraph.ZoomStateOn UIGraphPriority_Normal" });
+		const VehicleCameraDef *m1_chase = seat_camera(m1, 0, false);
+		REQUIRE(m1_chase != nullptr);
+		CHECK(hud_fired(m1, *m1_chase, false) == Lines{ "vehiclecommongraph.3pCrossHair UIGraphPriority_Low" });
+		const VehicleCameraDef *m1_gunner = seat_camera(m1, 1, true);
+		REQUIRE(m1_gunner != nullptr);
+		CHECK(hud_fired(m1, *m1_gunner, false) == Lines{ "defaulttankgunnergraph.EnterUIGraph UIGraphPriority_Low" });
+		CHECK(hud_fired(m1, *m1_gunner, true) == Lines{ "vehiclehuddatagraph.ZoomStateOn UIGraphPriority_Normal" });
+		for (const VehicleHudSwitch &s : m1.hud.switches) {
+			for (const VehicleHudGraphEvent &e : s.on_true) {
+				CHECK_FALSE(e.pop_previous);
+			}
+		}
+
+		const VehicleDef bmp = vehicle(*lib, "vehicles/bmp2/bmp2");
+		const VehicleCameraDef *bmp_driver = seat_camera(bmp, 0, true);
+		REQUIRE(bmp_driver != nullptr);
+		CHECK(hud_fired(bmp, *bmp_driver, false) ==
+				Lines{ "defaulttankgraph.EnterUIGraph UIGraphPriority_Low",
+						"vehiclehuddatagraph.DisableSoldierCrossHair UIGraphPriority_Normal" });
+		const VehicleCameraDef *bmp_gunner = seat_camera(bmp, 1, true);
+		REQUIRE(bmp_gunner != nullptr);
+		CHECK(hud_fired(bmp, *bmp_gunner, false) == Lines{ "defaulttankgunnergraph.EnterUIGraph UIGraphPriority_Low" });
+		for (size_t seat = 2; seat < 6; ++seat) {
+			CAPTURE(seat);
+			const VehicleCameraDef *port = seat_camera(bmp, seat, true);
+			REQUIRE(port != nullptr);
+			CHECK(hud_fired(bmp, *port, false) == Lines{ "vehiclecommongraph.Crosshair UIGraphPriority_Low" });
+		}
+
+		const VehicleDef growler = vehicle(*lib, "vehicles/growleritv/growleritv");
+		for (const VehicleCameraDef &c : growler.seats.at(0).cameras) {
+			CHECK(hud_fired(growler, c, false).empty());
+			CHECK(hud_fired(growler, c, true).empty());
+		}
+		const VehicleCameraDef *growler_gunner = seat_camera(growler, 1, true);
+		REQUIRE(growler_gunner != nullptr);
+		CHECK(hud_fired(growler, *growler_gunner, false) == Lines{ "vehiclecommongraph.Dot UIGraphPriority_Low" });
 	}
 }

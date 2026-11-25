@@ -3,6 +3,7 @@
 #include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/soldier_camera.h"
 #include "bf3/core/gameplay/vehicle_damage_visuals.h"
+#include "bf3/core/gameplay/vehicle_hud.h"
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/gameplay/work_budget.h"
 #include "bf3/core/math.h"
@@ -52,6 +53,9 @@ struct VehicleCameraDef {
 	float zoom_fov_transition_time = 0;
 	bool zoom_fade_to_black = false;
 	float zoom_fade_out = 0, zoom_black = 0, zoom_fade_in = 0;
+	int hud_camera = -1;
+	VehicleHudCameraFlags hud;
+	std::optional<VehicleHudCameraFlags> zoom_hud;
 };
 
 struct VehicleTurretDef {
@@ -98,6 +102,7 @@ struct VehicleWeaponDef {
 	float reload_time_multiplier = 1;
 	float overheat_drop_multiplier = 1;
 	std::vector<int> stances;
+	uint32_t item_hash = 0;
 };
 
 struct VehicleSeatDef {
@@ -175,6 +180,7 @@ struct VehicleDef {
 	std::string explosion_effect;
 	std::vector<VehicleInputModifierDef> disabled_input;
 	VehicleDamageVisualsDef damage_visuals;
+	VehicleHudDef hud;
 
 	std::vector<VehicleSeatDef> seats;
 	std::vector<core::Transform> exit_points;

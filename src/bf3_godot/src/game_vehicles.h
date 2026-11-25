@@ -74,6 +74,7 @@ struct VehicleSeatView {
 	float black = 0.0f;
 	bool first_person = true;
 	uint32_t camera_instance = core::gameplay::kNoVehicleCamera;
+	int hud_camera = -1;
 	float left_yaw = 0.0f, right_yaw = 0.0f, up_pitch = 0.0f, down_pitch = 0.0f;
 	float look_centre = 0.0f;
 };

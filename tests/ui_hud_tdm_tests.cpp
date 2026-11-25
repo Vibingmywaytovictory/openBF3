@@ -17,6 +17,7 @@
 #include "bf3/host/kits.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/host/presentation_events.h"
+#include "bf3/host/vehicle_hud_flow.h"
 #include "bf3/net/protocol.h"
 #include "bf3/sim/weapons/sim_time.h"
 #include "bf3/sim/weapons/weapon_install.h"
@@ -1581,6 +1582,39 @@ TEST_CASE("vehicle: a seated soldier's vehicle health in percent, its disabled s
 	in.alive = false;
 	host::fill_hud_tdm(in, {}, st, state, m);
 	CHECK_FALSE(m.vehicle.in_vehicle);
+}
+
+TEST_CASE("vehicle HUD switches: a prefab input is the OR of its cameras' outputs, fires its events only on a change, "
+		  "and every on switch fires its off events when the seat is left (R5-UI1 A4, B)") {
+	using Event = gp::VehicleHudGraphEvent;
+	gp::VehicleHudDef def;
+	gp::VehicleHudSwitch hud;
+	hud.terms = { { 0, false }, { 1, false } };
+	hud.on_true = { Event{ "g/tank", "UIGraphPriority_Low", false, 1 } };
+	hud.on_false = { Event{ "g/tank", "UIGraphPriority_Low", false, 2 } };
+	gp::VehicleHudSwitch zoom;
+	zoom.terms = { { 0, true } };
+	zoom.on_true = { Event{ "g/data", "UIGraphPriority_Normal", false, 3 } };
+	zoom.on_false = { Event{ "g/data", "UIGraphPriority_Normal", false, 4 } };
+	def.switches = { hud, zoom };
+	host::VehicleHudSwitches s;
+	const auto step = [&](const gp::VehicleHudDef *p_def, uint64_t p_vehicle, int p_camera, bool p_zoom) {
+		std::vector<int32_t> out;
+		for (const Event &e : s.step(host::VehicleHudView{ p_def, p_vehicle, p_camera, p_zoom })) {
+			out.push_back(e.event);
+		}
+		return out;
+	};
+	using Ids = std::vector<int32_t>;
+	CHECK(step(&def, 7, 0, false) == Ids{ 1 });
+	CHECK(step(&def, 7, 1, false).empty());
+	CHECK(step(&def, 7, 1, true).empty());
+	CHECK(step(&def, 7, 0, true) == Ids{ 3 });
+	CHECK(step(&def, 7, 2, false) == Ids{ 2, 4 });
+	CHECK(step(&def, 7, 0, true) == Ids{ 1, 3 });
+	CHECK(step(nullptr, 0, -1, false) == Ids{ 2, 4 });
+	CHECK(step(&def, 8, 1, false) == Ids{ 1 });
+	CHECK(step(&def, 9, 1, false) == Ids{ 2, 1 });
 }
 
 TEST_CASE("hostile inputs are skipped or clamped and counted") {

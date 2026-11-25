@@ -208,6 +208,9 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 			k.explosion_effect = def->explosion_effect;
 			k.disabled_input = def->disabled_input;
 			k.damage_visuals = def->damage_visuals;
+			k.hud = def->hud;
+			k.weapons = def->weapons;
+			k.name_sid = def->name_sid;
 			for (const core::gameplay::VehicleSeatDef &seat : def->seats) {
 				k.entry_radius = std::max(k.entry_radius, std::isfinite(seat.entry_radius) ? seat.entry_radius : 0.0f);
 			}

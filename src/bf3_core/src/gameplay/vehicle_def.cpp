@@ -245,6 +245,9 @@ Result<VehicleCameraDef> read_camera(WorkBudget &r_budget, const EbxResolver &p_
 	if (const std::optional<EbxInstance> camera = p_db.follow(c, "Camera"); camera && r_budget.take_type(camera->data())) {
 		out.camera_type = copy_text(r_budget, camera->type_name());
 		out.camera = partition_name(r_budget, p_db, *camera);
+		if (const std::optional<EbxValue> hud = camera->get("Hud"); hud && hud->as_struct()) {
+			out.hud = read_vehicle_hud_flags(p_db, *hud->as_struct());
+		}
 		if (camera->is_a("StaticCameraData")) {
 			const EbxStruct s = camera->data();
 			out.left_yaw = static_cast<float>(number_or(s, "LeftYawAngle", 0));
@@ -268,6 +271,9 @@ Result<VehicleCameraDef> read_camera(WorkBudget &r_budget, const EbxResolver &p_
 		out.zoom_fade_out = static_cast<float>(number_or(alternate->data(), "FadeOutDuration", 0));
 		out.zoom_black = static_cast<float>(number_or(alternate->data(), "BlackDuration", 0));
 		out.zoom_fade_in = static_cast<float>(number_or(alternate->data(), "FadeInDuration", 0));
+		if (const std::optional<EbxValue> hud = alternate->get("Hud"); hud && hud->as_struct()) {
+			out.zoom_hud = read_vehicle_hud_flags(p_db, *hud->as_struct());
+		}
 	}
 	return out;
 }
@@ -493,6 +499,7 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 		out.turrets.push_back(std::move(t));
 	}
 
+	std::vector<EbxInstance> hud_cameras;
 	for (size_t i = 0; i < layout.nodes.size(); ++i) {
 		const Node &node = layout.nodes[i];
 		const int at = static_cast<int>(i);
@@ -513,6 +520,7 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 			w.reload_time_multiplier = static_cast<float>(number_or(d, "ReloadTimeMultiplier", 1));
 			w.overheat_drop_multiplier = static_cast<float>(number_or(d, "OverheatDropPerSecondMultiplier", 1));
 			w.stances = valid_stances(budget, layout, at);
+			w.item_hash = static_cast<uint32_t>(number_or(d, "WeaponItemHash", 0));
 			if (w.seat >= 0) {
 				out.seats[static_cast<size_t>(w.seat)].weapons.push_back(static_cast<int>(out.weapons.size()));
 			}
@@ -533,10 +541,17 @@ Result<VehicleDef> read_vehicle_def(const EbxResolver &p_db, std::string_view p_
 				}
 				camera->transform = model_transform(node.frame);
 				camera->turret = turret_index(layout.enclosing(at, Role::Turret));
+				camera->hud_camera = static_cast<int>(hud_cameras.size());
+				hud_cameras.push_back(node.data);
 				out.seats[static_cast<size_t>(seat)].cameras.push_back(std::move(*camera));
 			}
 		}
 	}
+	Result<VehicleHudDef> hud = read_vehicle_hud(p_db, blueprint, hud_cameras, budget);
+	if (!hud) {
+		return make_error("vehicle " + name + ": hud: " + hud.error().message);
+	}
+	out.hud = std::move(*hud);
 	std::vector<std::pair<EbxInstance, int>> active_turrets;
 	for (size_t i = 0; i < turret_nodes.size(); ++i) {
 		active_turrets.emplace_back(layout.nodes[static_cast<size_t>(turret_nodes[i])].data, static_cast<int>(i));

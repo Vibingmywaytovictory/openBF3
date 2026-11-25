@@ -6,6 +6,7 @@
 #include "viewmodel_muzzle.h"
 
 #include "bf3/host/level_load.h"
+#include "bf3/host/vehicle_hud_flow.h"
 #include "bf3/render/viewmodel_set.h"
 
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -525,16 +526,9 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 	const host::LevelVehicleKind &kind = level_->kinds[p_seat.kind];
 	const core::gameplay::VehicleSeatDef *seat =
 			p_seat.seat < kind.seat_defs.size() ? &kind.seat_defs[p_seat.seat] : nullptr;
-	std::vector<const core::gameplay::VehicleCameraDef *> cameras;
-	if (seat != nullptr) {
-		for (const bool first : { true, false }) {
-			for (const core::gameplay::VehicleCameraDef &c : seat->cameras) {
-				if (c.first_person == first) {
-					cameras.push_back(&c);
-				}
-			}
-		}
-	}
+	const std::vector<const core::gameplay::VehicleCameraDef *> cameras = seat != nullptr
+			? host::vehicle_seat_cameras(*seat)
+			: std::vector<const core::gameplay::VehicleCameraDef *>();
 	const float relative = std::remainder(p_yaw - p_seat.heading, sim::kTwoPi);
 	const Basis look = Basis(Vector3(0, 1, 0), relative + sim::kPi) * Basis(Vector3(1, 0, 0), p_pitch);
 	if (cameras.empty()) {
@@ -547,6 +541,7 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 	const core::gameplay::VehicleCameraDef &c = *cameras[index];
 	out.first_person = c.first_person;
 	out.camera_instance = c.instance;
+	out.hud_camera = c.hud_camera;
 	const std::array<uint32_t, 3> view_key{ p_seat.spawner, p_seat.seat, index };
 	if (zoom_key_ != view_key) {
 		zoom_.reset();

@@ -122,6 +122,8 @@ public:
 	core::Status update(const UiGameState &p_state);
 	core::Status step();
 	bool input_action(int32_t p_action);
+	bool graph_entity_event(
+			std::string_view p_graph, std::string_view p_priority, bool p_pop_previous, int32_t p_event);
 	bool widget_fired(std::string_view p_partition, std::string_view p_instance, std::string_view p_query,
 			std::optional<std::string> p_value = std::nullopt);
 	void set_data(std::string_view p_category, int32_t p_key, std::string p_value);
@@ -183,7 +185,8 @@ private:
 	void raise(uint32_t p_node, int32_t p_port);
 	void deliver(uint32_t p_node, int32_t p_port);
 	void ui_graph_input(uint32_t p_node, int32_t p_port);
-	void push_graph(uint32_t p_node, bool p_take_place);
+	void entity_input(const GraphEntity &p_entity, std::optional<uint32_t> p_node, int32_t p_port);
+	void push_graph(const GraphEntity &p_entity, bool p_take_place);
 	void pre_round(UiPreRoundEvent p_event);
 	void note(std::string p_line);
 	void drain_flow_log();

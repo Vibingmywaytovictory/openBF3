@@ -2,6 +2,7 @@
 
 #include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/core/gameplay/soldier_camera.h"
+#include "bf3/core/ebx_db.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/eor_camera.h"
 #include "bf3/core/level/level.h"
@@ -11,6 +12,7 @@
 #include "bf3/core/ui/ui_input.h"
 #include "bf3/host/logic_screen_effects.h"
 #include "bf3/host/ui_flow_session.h"
+#include "bf3/host/vehicle_hud_flow.h"
 #include "test_support.h"
 
 #include <algorithm>
@@ -843,6 +845,85 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(std::find(spawned.begin(), spawned.end(), "push hudconquestscreen") != spawned.end());
 		CHECK(std::find(spawned.begin(), spawned.end(), "push hudtdmscreen") == spawned.end());
 		CHECK(s.flow().find_screen(ui::kHudConquestScreenPartition) != nullptr);
+		CHECK(s.flow().find_screen(ui::kHudMpScreenPartition) != nullptr);
+		CHECK(s.errors().empty());
+		CHECK(s.flow().errors().empty());
+	}
+
+	TEST_CASE("ui flow session: the local seat camera drives the vehicle HUD prefabs' graphs (R5-UI1 A, B, C)") {
+		Level *l = level_or_skip("MP_007", "ConquestSmall0");
+		if (l == nullptr) {
+			return;
+		}
+		core::Result<std::unique_ptr<UiFlowSession>> made = UiFlowSession::create(*l->level);
+		REQUIRE_MESSAGE(made.ok(), (made.ok() ? std::string() : made.error().message));
+		UiFlowSession &s = **made;
+		ui_flow_tdm_pc_defaults(s, "ConquestSmall0");
+		Script sc{ s };
+		sc.state.phase = net::MatchPhase::InRound;
+		sc.state.joined = true;
+		sc.run_to(60);
+		sc.input(ui::UiInputConcept::Activate);
+		sc.state.own_spawns = 1;
+		sc.run_to(160);
+		REQUIRE(s.flow().find_screen(ui::kHudMpScreenPartition) != nullptr);
+		core::Result<std::unique_ptr<core::EbxLibrary>> caspian =
+				core::EbxLibrary::open(l->mount->install, { "Win32/Levels/MP_007/MP_007" });
+		REQUIRE_MESSAGE(caspian.ok(), (caspian.ok() ? std::string() : caspian.error().message));
+		const auto def = [&](const char *p_blueprint) {
+			core::Result<core::gameplay::VehicleDef> v = core::gameplay::read_vehicle_def(**caspian, p_blueprint);
+			REQUIRE_MESSAGE(v.ok(), (v.ok() ? std::string() : v.error().message));
+			return std::move(*v);
+		};
+		const core::gameplay::VehicleDef m1 = def("vehicles/m1a2/m1abrams");
+		const core::gameplay::VehicleDef bmp = def("vehicles/bmp2/bmp2");
+		const core::gameplay::VehicleDef growler = def("vehicles/growleritv/growleritv");
+		constexpr std::string_view kVehicleComp = "ui/uicomponents/uivehiclecomp";
+		constexpr int32_t kShowSoldierCrossHair = 1320579273;
+		constexpr int32_t kZoomState = 1002310988;
+		const std::vector<std::string> vehicle_screens{ "ui/flow/screen/vehicle/defaulttankscreen",
+			"ui/flow/screen/vehicle/defaulttankgunnerscreen", "ui/flow/screen/vehicle/tank3pcrosshair",
+			"ui/flow/screen/weapon/crosshairdot" };
+		VehicleHudSwitches switches;
+		const auto sit = [&](const core::gameplay::VehicleDef *p_def, uint64_t p_vehicle, size_t p_seat,
+								 uint32_t p_camera, bool p_zoom) {
+			VehicleHudView view;
+			if (p_def != nullptr) {
+				REQUIRE(p_seat < p_def->seats.size());
+				const core::gameplay::VehicleCameraDef *c = vehicle_seat_camera(p_def->seats[p_seat], p_camera);
+				view.hud = &p_def->hud;
+				view.vehicle = p_vehicle;
+				view.camera = c != nullptr ? c->hud_camera : -1;
+				view.alternate_view = p_zoom;
+			}
+			const std::vector<core::gameplay::VehicleHudGraphEvent> events = switches.step(view);
+			CHECK(apply_vehicle_hud_events(s, events) == events.size());
+			sc.run_to(sc.tick + 2);
+			Lines open;
+			for (const std::string &partition : vehicle_screens) {
+				const ui::UiFlowScreen *screen = s.flow().find_screen(partition);
+				if (screen != nullptr && screen->shown && !screen->exiting) {
+					open.push_back(partition.substr(partition.rfind('/') + 1));
+				}
+			}
+			return open;
+		};
+		CHECK(sit(&m1, 1, 0, 0, false) == Lines{ "defaulttankscreen" });
+		CHECK(s.data(kVehicleComp, kShowSoldierCrossHair) == std::optional<std::string>("False"));
+		CHECK(sit(&m1, 1, 0, 0, true) == Lines{ "defaulttankscreen" });
+		CHECK(s.data(kVehicleComp, kZoomState) == std::optional<std::string>("true"));
+		CHECK(sit(&m1, 1, 0, 0, false) == Lines{ "defaulttankscreen" });
+		CHECK(s.data(kVehicleComp, kZoomState) == std::optional<std::string>("false"));
+		CHECK(sit(&m1, 1, 0, 1, false) == Lines{ "tank3pcrosshair" });
+		CHECK(s.data(kVehicleComp, kShowSoldierCrossHair) == std::optional<std::string>("True"));
+		CHECK(sit(&m1, 1, 0, 2, false) == Lines{ "defaulttankscreen" });
+		CHECK(sit(&m1, 1, 1, 0, false) == Lines{ "defaulttankgunnerscreen" });
+		CHECK(sit(nullptr, 0, 0, 0, false).empty());
+		CHECK(sit(&bmp, 2, 0, 0, false) == Lines{ "defaulttankscreen" });
+		CHECK(sit(&bmp, 2, 1, 0, false) == Lines{ "defaulttankgunnerscreen" });
+		CHECK(sit(&growler, 3, 0, 0, false).empty());
+		CHECK(sit(&growler, 3, 1, 0, false) == Lines{ "crosshairdot" });
+		CHECK(sit(nullptr, 0, 0, 0, false).empty());
 		CHECK(s.flow().find_screen(ui::kHudMpScreenPartition) != nullptr);
 		CHECK(s.errors().empty());
 		CHECK(s.flow().errors().empty());

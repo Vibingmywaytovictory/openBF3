@@ -55,6 +55,9 @@ struct LevelVehicleKind {
 	std::string explosion_effect;
 	std::vector<core::gameplay::VehicleInputModifierDef> disabled_input;
 	core::gameplay::VehicleDamageVisualsDef damage_visuals;
+	core::gameplay::VehicleHudDef hud;
+	std::vector<core::gameplay::VehicleWeaponDef> weapons;
+	std::string name_sid;
 };
 
 struct LevelVehicleSpawner {
