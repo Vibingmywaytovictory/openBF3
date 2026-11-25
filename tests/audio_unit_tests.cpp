@@ -1667,7 +1667,8 @@ TEST_SUITE("audio-patch") {
 		REQUIRE(e.size() >= 2);
 		CHECK(e[0].frame == 1024 + 37);
 		CHECK(e[1].frame == 1024 + 411);
-		CHECK(e[0].slot != e[1].slot);
+		CHECK(e[0].slot == 0);
+		CHECK(e[1].slot == 0);
 	}
 
 	TEST_CASE("trigger inputs fire on a rising edge: a Condition held true by a drawn number starts its sampler once") {

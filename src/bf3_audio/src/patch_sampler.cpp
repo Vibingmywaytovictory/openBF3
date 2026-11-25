@@ -215,11 +215,6 @@ NextSegment tail_or_end(const SamplerState &s) {
 	return {};
 }
 
-bool loops_unreleased(const SamplerState &s, ca::WaveId p_wave) {
-	return s.active && !s.released && !s.stepped && s.loop != ca::SamplerLoop::None && s.first_loop >= 0 &&
-			s.wave == p_wave;
-}
-
 }
 
 void PatchInstance::State::trace_entry(uint64_t p_frame, const SamplerState &p_sampler, uint8_t p_slot,
@@ -317,6 +312,18 @@ uint16_t pick_loop_segment(PatchInstance::State &st, SamplerState &s) {
 
 }
 
+void PatchInstance::State::cut_slots(SamplerState &r_sampler) {
+	const float frames = std::max(1.0f, tuning.release_fade_ms * 0.001f * float(mix_rate));
+	for (uint32_t k = 0; k < r_sampler.slots_count; ++k) {
+		SlotState &slot = slots[r_sampler.slots_begin + k];
+		slot.pending.armed = false;
+		if (slot.play.active) {
+			slot.fade_step = -1.0f / frames;
+			slot.fade_kill = true;
+		}
+	}
+}
+
 void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode &n, uint64_t p_frame) {
 	SamplerState &s = samplers[nodes[p_node_index].index];
 	const float pitch = s.pitch = [&] {
@@ -350,7 +357,7 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 		const std::pair<uint32_t, uint32_t> range = wave_index == UINT32_MAX ? std::pair<uint32_t, uint32_t>{ 0, 0 } : wave_variations[wave_index];
 		if (id == ca::kNoWave || range.second == 0) {
 			++stats.starved_slots;
-		} else if (!loops_unreleased(s, id)) {
+		} else {
 			const ca::SoundWaveInfo &wave = bank->waves()[id];
 			const ca::SoundPort &variation_port = port(n, cp::SmpVariation);
 			uint32_t v = 0;
@@ -373,15 +380,9 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 			s.stepped = s.step_connected && on(read(port(n, cp::SmpEnableStep)));
 			s.released = false;
 			s.instant_release = false;
+			cut_slots(s);
 			if (s.segments > 0) {
-				uint32_t slot = (s.last_slot + 1) % s.slots_count;
-				for (uint32_t k = 0; k < s.slots_count; ++k) {
-					const uint32_t c = (s.last_slot + 1 + k) % s.slots_count;
-					if (!slots[s.slots_begin + c].play.active && !slots[s.slots_begin + c].pending.armed) {
-						slot = c;
-						break;
-					}
-				}
+				const uint32_t slot = 0;
 				PendingStart &pend = slots[s.slots_begin + slot].pending;
 				pend.armed = true;
 				pend.frame = p_frame + delay_frames(s.delay_seconds);
@@ -410,15 +411,7 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 		s.released = true;
 		if (s.loop == ca::SamplerLoop::InstantRelease) {
 			s.instant_release = true;
-			const float frames = std::max(1.0f, tuning.release_fade_ms * 0.001f * float(mix_rate));
-			for (uint32_t k = 0; k < s.slots_count; ++k) {
-				SlotState &slot = slots[s.slots_begin + k];
-				slot.pending.armed = false;
-				if (slot.play.active) {
-					slot.fade_step = -1.0f / frames;
-					slot.fade_kill = true;
-				}
-			}
+			cut_slots(s);
 			if (!sampler_busy(s)) {
 				s.active = false;
 				s.finished_pulse = true;

@@ -307,6 +307,7 @@ struct PatchInstance::State {
 			detail::LoopPlayerState &r_loop, uint64_t p_frame, float p_offset_seconds, uint32_t p_fade_frames);
 	void render_slot(detail::SamplerState &r_sampler, uint32_t p_slot, float *r_left, float *r_right, uint64_t p_first_frame, uint32_t p_frames);
 	bool sampler_busy(const detail::SamplerState &p_sampler) const;
+	void cut_slots(detail::SamplerState &r_sampler);
 };
 
 }

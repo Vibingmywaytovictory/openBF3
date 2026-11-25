@@ -2166,8 +2166,8 @@ TEST_SUITE("audio-footsteps") {
 		check_unchanged(*f);
 	}
 
-	TEST_CASE("MovementFoley: sprint-jumps that dip the speed under the breathing Trigger and back keep one breathing "
-			  "loop") {
+	TEST_CASE("MovementFoley: sprint-jumps that dip the speed under the breathing Trigger and back restart the one "
+			  "breathing loop on its first slot at every rising edge") {
 		Fixture *f = need_install();
 		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
 		REQUIRE(d.ok());
@@ -2240,7 +2240,11 @@ TEST_SUITE("audio-footsteps") {
 				trace.dropped, " dropped");
 		CHECK(trace.dropped == 0);
 		CHECK(edges == 5);
-		CHECK(v.starts == 2);
+		CHECK(v.starts == edges);
+		for (uint32_t i = 0; i < std::min<size_t>(trace.count, trace.entries.size()); ++i) {
+			const ba::SamplerTraceEntry &x = trace.entries[i];
+			CHECK((x.node != loop->node || x.kind != ba::SamplerTraceKind::Trigger || x.slot == 0));
+		}
 		CHECK(v.max_busy <= loop->slots);
 		CHECK(v.longest_stack_frames <= fade_frames);
 		check_unchanged(*f);
