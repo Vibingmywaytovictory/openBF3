@@ -2167,7 +2167,7 @@ TEST_SUITE("audio-footsteps") {
 	}
 
 	TEST_CASE("MovementFoley: sprint-jumps that dip the speed under the breathing Trigger and back restart the one "
-			  "breathing loop on its first slot at every rising edge") {
+			  "breathing loop on its first slot at every rising edge; each release plays its tail on the second slot") {
 		Fixture *f = need_install();
 		Result<gp::SoldierSoundDef> d = gp::read_soldier_sounds(f->metro->db());
 		REQUIRE(d.ok());
@@ -2241,10 +2241,17 @@ TEST_SUITE("audio-footsteps") {
 		CHECK(trace.dropped == 0);
 		CHECK(edges == 5);
 		CHECK(v.starts == edges);
+		uint32_t tails = 0;
 		for (uint32_t i = 0; i < std::min<size_t>(trace.count, trace.entries.size()); ++i) {
 			const ba::SamplerTraceEntry &x = trace.entries[i];
 			CHECK((x.node != loop->node || x.kind != ba::SamplerTraceKind::Trigger || x.slot == 0));
+			if (x.node == loop->node && x.kind == ba::SamplerTraceKind::Tail) {
+				++tails;
+				CHECK(x.slot == 1);
+				CHECK(x.segment == 1);
+			}
 		}
+		CHECK(tails == 2);
 		CHECK(v.max_busy <= loop->slots);
 		CHECK(v.longest_stack_frames <= fade_frames);
 		check_unchanged(*f);

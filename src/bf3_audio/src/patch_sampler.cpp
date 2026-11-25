@@ -252,6 +252,9 @@ namespace {
 
 NextSegment next_segment(const SamplerState &s, uint32_t p_slot, uint16_t p_segment) {
 	const int32_t seg = p_segment, fl = s.first_loop, ll = s.last_loop, count = s.segments;
+	if (s.instant_release) {
+		return {};
+	}
 	if (s.loop == ca::SamplerLoop::None || fl < 0) {
 		if (s.released && s.loop == ca::SamplerLoop::None) {
 			return {};
@@ -412,6 +415,19 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 		if (s.loop == ca::SamplerLoop::InstantRelease) {
 			s.instant_release = true;
 			cut_slots(s);
+			const int32_t tails = s.last_loop >= 0 ? int32_t(s.segments) - (s.last_loop + 1) : 0;
+			if (s.slots_count >= 2 && tails > 0) {
+				const int32_t pick =
+						std::min(tails - 1, int32_t(uniform01(seed, s.node | 0x40000000u, s.draws++) * double(tails)));
+				PendingStart &pend = slots[s.slots_begin + 1].pending;
+				pend.armed = true;
+				pend.frame = p_frame;
+				pend.segment = uint16_t(s.last_loop + 1 + pick);
+				pend.kind = SamplerTraceKind::Tail;
+				pend.offset_seconds = 0.0f;
+				s.last_slot = 1;
+				s.last_segment = pend.segment;
+			}
 			if (!sampler_busy(s)) {
 				s.active = false;
 				s.finished_pulse = true;
