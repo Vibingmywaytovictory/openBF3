@@ -526,6 +526,7 @@ void Bf3GameCrowd::Impl::apply(const Pending &p_e) {
 		case host::PresentKind::Death:
 			if (!s.dead) {
 				s.dead = true;
+				s.revived = false;
 				s.dead_seconds = 0.0;
 				s.death_clip = death_clip_of(p_e.record, s.input.pose);
 			}
