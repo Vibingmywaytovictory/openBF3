@@ -3575,3 +3575,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Death record on the wire: protocol 19 carries the server's R5-DT1 death record in every DeathEvent and the client puts it in the Death PresentEvent (net.proto.unit golden pins Hello, MatchInfo x4, CombatEvents x3 renewed; net.*, host.gunplay.*, host.tdm.*).
 * Dying soldiers: the crowd plays the record's death clip and hands the body to a ragdoll by the RagdollBlend weight instead of blending to the prone idle (the owner, 2026-11-25: "playermodel just goes prone") (godot.m2a_tp_crowd, anim.s3.unit, core.res.ragdoll, anim.*, render.*, contracts).
 * A remote peer gets the death record: host.ghost's Metro peer receives 48 deaths in 20 s, every one with a valid record.
+* godot.m2a_tp_crowd.window: the crowd check windowed with its seven captures in b/dev/shots/<row> (the front-killed soldier sags at 0.25 s, falls at 0.6 s and lies still from 1.4 s).
