@@ -41,6 +41,28 @@ constexpr double kHoldAt = 3.0;
 constexpr double kThrowAt = 3.6;
 constexpr size_t kThrower = 11;
 constexpr double kReleaseLeaveTick = 115.0;
+constexpr float kCorpseSeconds = 4.0f;
+constexpr double kHiddenAt = kDeathAt + double(kCorpseSeconds) + 0.2;
+
+struct Kill {
+	size_t victim;
+	size_t killer;
+	core::gameplay::DeathHitDirection direction;
+	bool explosion;
+	const char *name;
+};
+
+constexpr Kill kKills[] = {
+	{ 9, 3, core::gameplay::DeathHitDirection::Front, false, "standing, shot from the front" },
+	{ 1, 6, core::gameplay::DeathHitDirection::Front, false, "crouching" },
+	{ 2, 7, core::gameplay::DeathHitDirection::Front, false, "prone" },
+	{ 10, 0, core::gameplay::DeathHitDirection::Back, false, "standing, shot from behind" },
+	{ 4, kThrower, core::gameplay::DeathHitDirection::Left, true, "standing, killed by an explosion" },
+};
+
+bool killed(size_t p_k) {
+	return std::any_of(std::begin(kKills), std::end(kKills), [&](const Kill &p_kill) { return p_kill.victim == p_k; });
+}
 
 void log(const std::string &p_line) {
 	UtilityFunctions::print(to_godot("[tp] " + p_line));
@@ -191,7 +213,7 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 	};
 	for (size_t k = 0; k < s.soldiers.size(); ++k) {
 		const Script::Soldier &d = s.soldiers[k];
-		const bool victim = k == 9;
+		const bool victim = killed(k);
 		if (victim && p_t > kDeathAt + 0.1 && p_t < kRespawnAt) {
 			continue;
 		}
@@ -268,11 +290,14 @@ void Bf3TpCrowdCheck::scripted_frame(double p_t, std::vector<host::PresentedSold
 		}
 	}
 	if (crossed(kDeathAt - 0.05)) {
-		event(host::PresentKind::Death, s.soldiers[3].slot, s.soldiers[9].slot, kDeathAt);
-		core::gameplay::DeathRecord record;
-		record.valid = true;
-		record.direction = core::gameplay::DeathHitDirection::Front;
-		present::set_death_record(r_events.back(), record);
+		for (const Kill &kill : kKills) {
+			event(host::PresentKind::Death, s.soldiers[kill.killer].slot, s.soldiers[kill.victim].slot, kDeathAt);
+			core::gameplay::DeathRecord record;
+			record.valid = true;
+			record.direction = kill.direction;
+			record.explosion = kill.explosion;
+			present::set_death_record(r_events.back(), record);
+		}
 	}
 	if (crossed(kThrowAt - 0.05)) {
 		event(host::PresentKind::RemoteShot, s.soldiers[kThrower].slot, 0, kThrowAt);
@@ -313,25 +338,58 @@ void Bf3TpCrowdCheck::check_at(double p_t) {
 			row("t 1.5 s: soldier 0 muzzle", false, "none");
 		}
 	} else if (std::fabs(p_t - 2.4) < kStep * 0.5) {
-		row("t 2.4 s: the dying soldier still drawn", st.soldiers == 12, fmt("%u", st.soldiers));
-		row("t 2.4 s: the dying soldier is a ragdoll",
-				st.ragdolls == 1 && st.ragdolls_started == 1 && st.ragdoll_failures == 0,
+		row("t 2.4 s: the dying soldiers still drawn", st.soldiers == 12, fmt("%u", st.soldiers));
+		const GameCrowdCorpse front = crowd_.corpse_of(soldiers[kKills[0].victim].slot);
+		row("t 2.4 s: the soldier shot from the front is a ragdoll", front.in_world && st.ragdoll_failures == 0,
+				fmt("in the world %d, %u ragdolls, %llu started, %llu failed", int(front.in_world), st.ragdolls,
+						(unsigned long long)st.ragdolls_started, (unsigned long long)st.ragdoll_failures));
+	} else if (std::fabs(p_t - 3.2) < kStep * 0.5) {
+		for (const Kill &kill : kKills) {
+			const GameCrowdCorpse c = crowd_.corpse_of(soldiers[kill.victim].slot);
+			const bool clip = c.clip != anim::kNoCrowdDeathClip;
+			const bool sequence = c.start_age >= 0.0f && c.start_age == c.rise_age;
+			const bool first_frame = c.start_age <= float(kStep * 1.5);
+			const bool ok = clip ? sequence && c.start_weight < 1.0f && (first_frame || c.start_speed > 0.0f)
+								 : sequence && first_frame && c.start_weight == 1.0f;
+			row(fmt("t 3.2 s: %s: %s", kill.name,
+						clip ? "its death clip, blended into a ragdoll as the clip's RagdollBlend rises"
+							 : "no death clip (AQ-DT-1), all ragdoll on the first frame"),
+					c.active && ok,
+					fmt("clip %u, RagdollBlend rose at %.3f s, ragdoll from %.3f s at weight %.3f and %.2f m/s",
+							unsigned(c.clip), double(c.rise_age), double(c.start_age), double(c.start_weight),
+							double(c.start_speed)));
+		}
+		bool handed_off = false;
+		for (const Kill &kill : kKills) {
+			const GameCrowdCorpse c = crowd_.corpse_of(soldiers[kill.victim].slot);
+			handed_off = handed_off ||
+					(c.clip != anim::kNoCrowdDeathClip && c.rise_age > float(kStep * 1.5) &&
+							c.start_age == c.rise_age && c.start_speed > 0.0f);
+		}
+		row("t 3.2 s: a death clip played alone, then handed its motion to the ragdoll", handed_off,
+				handed_off ? "yes" : "no clip phase before the ragdoll");
+		row("t 3.2 s: five ragdolls, none failed",
+				st.ragdolls == 5 && st.ragdolls_started == 5 && st.ragdoll_failures == 0,
 				fmt("%u in the world, %llu started, %llu failed", st.ragdolls, (unsigned long long)st.ragdolls_started,
 						(unsigned long long)st.ragdoll_failures));
-	} else if (std::fabs(p_t - 4.8) < kStep * 0.5) {
-		row("t 4.8 s: the corpse is all ragdoll, lying on the ground",
-				st.ragdoll_weight == 1.0f && st.ragdoll_hips_height >= 0.0f && st.ragdoll_hips_height < 0.4f,
-				fmt("weight %.3f, hips %.3f m above the death position, %llu frozen", double(st.ragdoll_weight),
-						double(st.ragdoll_hips_height), (unsigned long long)st.ragdolls_frozen));
+	} else if (std::fabs(p_t - (kDeathAt + double(kCorpseSeconds) - 0.05)) < kStep * 0.5) {
+		for (const Kill &kill : kKills) {
+			const GameCrowdCorpse c = crowd_.corpse_of(soldiers[kill.victim].slot);
+			row(fmt("t %.2f s: %s: all ragdoll, lying, frozen", p_t, kill.name),
+					c.weight == 1.0f && c.hips_height >= 0.0f && c.hips_height < 0.4f && c.frozen,
+					fmt("weight %.3f, hips %.3f m above the death position, frozen at %.2f s", double(c.weight),
+							double(c.hips_height), double(c.frozen_age)));
+		}
 	} else if (std::fabs(p_t - 3.4) < kStep * 0.5) {
 		row("t 3.4 s: the holding M67 soldier draws the 3P throw-in", st.throwing == 1,
 				fmt("%u throwing", st.throwing));
 	} else if (std::fabs(p_t - 4.6) < kStep * 0.5) {
 		row("t 4.6 s: the thrown M67 plays the 3P release", st.throwing == 1, fmt("%u throwing", st.throwing));
-	} else if (std::fabs(p_t - 5.5) < kStep * 0.5) {
-		row("t 5.5 s: the dead soldier hidden after 3 s", st.soldiers == 11, fmt("%u", st.soldiers));
-		row("t 5.5 s: the hidden corpse's ragdoll removed", st.ragdolls == 0, fmt("%u", st.ragdolls));
-		row("t 5.5 s: 9 muzzles", st.muzzles == 9, fmt("%u", st.muzzles));
+	} else if (std::fabs(p_t - kHiddenAt) < kStep * 0.5) {
+		row(fmt("t %.1f s: the five dead soldiers hidden after %.0f s", p_t, double(kCorpseSeconds)), st.soldiers == 7,
+				fmt("%u", st.soldiers));
+		row(fmt("t %.1f s: the hidden corpses' ragdolls removed", p_t), st.ragdolls == 0, fmt("%u", st.ragdolls));
+		row(fmt("t %.1f s: 6 muzzles", p_t), st.muzzles == 6, fmt("%u", st.muzzles));
 	} else if (std::fabs(p_t - 8.0) < kStep * 0.5) {
 		row("t 8.0 s: the respawned soldier drawn", st.soldiers == 12, fmt("%u", st.soldiers));
 		row("t 8.0 s: 10 muzzles", st.muzzles == 10, fmt("%u", st.muzzles));
@@ -377,6 +435,7 @@ void Bf3TpCrowdCheck::_process(double p_delta) {
 			return;
 		}
 		std::string err;
+		crowd_.set_corpse_seconds(kCorpseSeconds);
 		if (!crowd_.build(this, &err)) {
 			log("build failed: " + err);
 			finish(1);
@@ -467,7 +526,7 @@ void Bf3TpCrowdCheck::_process(double p_delta) {
 	}
 	check_at(t_);
 	if (shots_) {
-		for (const double at : { 1.5, 2.25, 2.6, 3.4, 3.9, 4.3, 6.5 }) {
+		for (const double at : { 1.5, 2.25, 2.6, 3.4, 3.9, 4.3, 5.9, 6.5 }) {
 			if (pt1_run_mode()) {
 				break;
 			}

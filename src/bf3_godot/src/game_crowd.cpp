@@ -129,6 +129,7 @@ struct Bf3GameCrowd::Impl {
 		float copy_dt = 0.0f;
 		std::vector<anim::Xform> bodies, previous, joints;
 		std::vector<sim::RagdollBodyPose> poses;
+		GameCrowdCorpse seen;
 	};
 	std::vector<Corpse> corpses;
 	uint64_t ragdolls_started = 0, ragdolls_frozen = 0, ragdoll_failures = 0;
@@ -1182,6 +1183,27 @@ GameCrowdStats Bf3GameCrowd::stats() const {
 	return s;
 }
 
+GameCrowdCorpse Bf3GameCrowd::corpse_of(uint8_t p_slot) const {
+	const Impl &m = *impl_;
+	if (p_slot >= kSlotsPerTeam || !m.slots[p_slot].known || m.ragdoll_world == nullptr) {
+		return GameCrowdCorpse{};
+	}
+	const Impl::Slot &s = m.slots[p_slot];
+	const uint32_t index = uint32_t(s.team) * kSlotsPerTeam + p_slot + uint32_t(s.lane) * kCamLaneOffset;
+	if (index >= m.corpses.size()) {
+		return GameCrowdCorpse{};
+	}
+	const Impl::Corpse &c = m.corpses[index];
+	GameCrowdCorpse r = c.seen;
+	r.active = c.active;
+	r.in_world = c.in_world;
+	r.frozen = c.in_world && m.ragdoll_world->frozen(index);
+	r.clip = c.clip;
+	r.age = c.active ? float(c.age) : -1.0f;
+	r.weight = c.blend.weight();
+	return r;
+}
+
 void Bf3GameCrowd::enable_catalog(std::function<std::shared_ptr<core::Cache>()> p_cache) {
 	Impl &m = *impl_;
 	if (m.catalog_jobs != nullptr || !loaded() || m.shut_down) {
@@ -1343,6 +1365,9 @@ void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
 			}
 		}
 		c.blend.update(dt, target);
+		if (target > 0.0f && c.seen.rise_age < 0.0f) {
+			c.seen.rise_age = float(c.age);
+		}
 		if (c.blend.weight() > 0.0f && !c.in_world && c.copied) {
 			std::vector<sim::Vec3> linear(n, sim::Vec3{}), angular(n, sim::Vec3{});
 			for (size_t b = 0; b < n; ++b) {
@@ -1365,6 +1390,12 @@ void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
 			if (ragdoll_world->add(i, c.poses, linear, angular).ok()) {
 				c.in_world = true;
 				++ragdolls_started;
+				c.seen.start_age = float(c.age);
+				c.seen.start_weight = c.blend.weight();
+				c.seen.start_speed = 0.0f;
+				for (const sim::Vec3 &v : linear) {
+					c.seen.start_speed = std::max(c.seen.start_speed, std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z));
+				}
 			} else {
 				++ragdoll_failures;
 			}
@@ -1388,6 +1419,7 @@ void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
 				c.settle.update(dt, ragdoll_world->max_linear_speed(i), ragdoll_world->max_angular_speed(i))) {
 			ragdoll_world->freeze(i);
 			++ragdolls_frozen;
+			c.seen.frozen_age = float(c.age);
 		}
 		if (!ragdoll_world->pose(i, c.poses)) {
 			continue;
@@ -1398,8 +1430,8 @@ void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
 					anim::Xform{ anim::Quat{ p.rotation[0], p.rotation[1], p.rotation[2], p.rotation[3] }, p.position };
 		}
 		if (ragdoll_hips >= 0 && size_t(ragdoll_hips) < c.poses.size()) {
-			ragdoll_hips_height =
-					std::max(ragdoll_hips_height, c.poses[size_t(ragdoll_hips)].position.y - root_x[i].t.y);
+			c.seen.hips_height = c.poses[size_t(ragdoll_hips)].position.y - root_x[i].t.y;
+			ragdoll_hips_height = std::max(ragdoll_hips_height, c.seen.hips_height);
 		}
 		ragdoll_rig.joints_model(c.bodies, root_x[i], c.joints);
 		eval->set_ragdoll(i, c.joints, c.blend.weight());

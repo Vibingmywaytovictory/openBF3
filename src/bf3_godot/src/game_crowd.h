@@ -42,6 +42,21 @@ struct GameCrowdStats {
 	float ragdoll_weight = 0.0f;
 };
 
+struct GameCrowdCorpse {
+	bool active = false;
+	bool in_world = false;
+	bool frozen = false;
+	uint8_t clip = 0xFF;
+	float age = -1.0f;
+	float weight = 0.0f;
+	float rise_age = -1.0f;
+	float start_age = -1.0f;
+	float start_speed = -1.0f;
+	float start_weight = 0.0f;
+	float frozen_age = -1.0f;
+	float hips_height = -1.0f;
+};
+
 class Bf3GameCrowd {
 public:
 	Bf3GameCrowd();
@@ -69,6 +84,7 @@ public:
 	std::span<const fx::MuzzleSample> muzzles() const;
 	std::span<const uint8_t> foot_plants() const;
 	GameCrowdStats stats() const;
+	GameCrowdCorpse corpse_of(uint8_t p_slot) const;
 	bool vault_of(uint8_t p_slot, uint8_t &r_kind, float &r_seconds) const;
 	void shutdown();
 
