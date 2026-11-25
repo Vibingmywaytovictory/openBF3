@@ -1668,6 +1668,27 @@ TEST_SUITE("ui-hud-screen") {
 			return s;
 		};
 
+		const auto shown = [](const Screen &p_s, std::string_view p_path) {
+			std::vector<std::string> out;
+			for (const SwfNodeId c : p_s.at(p_path).children) {
+				const SwfSceneNode *n = p_s.scene->node(c);
+				if (n != nullptr && n->kind == SwfNodeKind::Sprite && !n->name.empty() && n->visible) {
+					out.push_back(n->name);
+				}
+			}
+			return out;
+		};
+		const auto static_art_shown = [&](const Screen &p_s) {
+			std::vector<std::vector<std::string>> out;
+			for (const std::unique_ptr<HudWidgetState> &w : p_s.hud->widgets()) {
+				if (w->class_name == "Widget.Hud.VehicleStaticArt") {
+					out.push_back(shown(p_s, w->path));
+				}
+			}
+			return out;
+		};
+		using Names = std::vector<std::string>;
+
 		Screen tank = open("ui/flow/screen/vehicle/defaulttankscreen");
 		const std::string td = "instance1.TurretDisplay_01.turretDisplay_mc";
 		CHECK(tank.clip(td + ".body_mc").rotation() == doctest::Approx(10.0f));
@@ -1687,8 +1708,8 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(tank.at(name + ".txtDisplay2").visible);
 		CHECK(tank.at(name + ".txtDisplay2").text == sid("ID_H_VEHICLE_RDY"));
 		const std::string cross = "instance1.VehicleCrosshair_01";
-		CHECK(tank.at(cross + ".AFPSDS_T").visible);
-		CHECK_FALSE(tank.at(cross + ".M242_HE").visible);
+		CHECK(shown(tank, cross) == Names{ "AFPSDS_T" });
+		CHECK(static_art_shown(tank) == std::vector<Names>{ Names{ "DefaultTank_AmmoLine" } });
 		CHECK(tank.at(cross + ".AFPSDS_T").frame == tank.label(cross + ".AFPSDS_T", "us_neutral"));
 		const std::string zoom = "instance1.VehicleZoomFlir_01.vehicle_zoom_flir_mc";
 		CHECK(tank.at(zoom + ".txt").text.empty());
@@ -1722,9 +1743,10 @@ TEST_SUITE("ui-hud-screen") {
 		const std::string gtd = "instance1.TurretDisplay_01.turretDisplay_mc";
 		CHECK(gunner.clip(gtd + ".body_mc").rotation() == doctest::Approx(45.0f));
 		CHECK(gunner.clip(gtd + ".turret_mc").rotation() == doctest::Approx(35.0f));
+		CHECK(static_art_shown(gunner) == std::vector<Names>{ Names{ "DefaultTankGunner_RangeBrackets" } });
 
 		Screen third = open("ui/flow/screen/vehicle/tank3pcrosshair");
-		CHECK(third.at(cross + ".Vehicle_3p").visible);
+		CHECK(shown(third, cross) == Names{ "Vehicle_3p" });
 		Screen dot = open("ui/flow/screen/weapon/crosshairdot");
 		Screen hits = open("ui/flow/screen/vehicle/vehiclesimplehitindicator");
 		row("vehicle_screens",

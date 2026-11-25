@@ -689,6 +689,11 @@ private:
 
 class VehicleStaticArtClass final : public VehicleWidget {
 public:
+	void construct(HudWidgetHost &r_host) override {
+		r_host.clip("DefaultTank_AmmoLine").set_visible(false);
+		r_host.clip("DefaultTankGunner_RangeBrackets").set_visible(false);
+	}
+
 	void on_clip_load(HudWidgetHost &r_host) override {
 		type_ = param_string(r_host, "m_type");
 		if (type_ == "undefined") {
@@ -828,9 +833,20 @@ const CrosshairKind *crosshair_kind(std::string_view p_type) {
 	return nullptr;
 }
 
+constexpr std::string_view kCrosshairFirstFrameHidden[] = { "hitIndicator", "ZoomBrackets", "Vehicle_3p",
+	"Vehicle_3p_grade", "M242_HE", "M240_762", "AFPSDS_T", "BGM_71", "FGM_148", "M2_50_BMG", "M1028", "GAU_12",
+	"FIM_92", "HeliDefaultCross", "HeliGunner", "HeliGunnerHellfire", "HeliAIM9", "jetDefaultCross", "F18AIM9", "MFD",
+	"MFDMissile", "SP_MFD", "SP_MFD_CAS", "SP_MFD_HARM", "SP_MFD_JDAM", "SOFLAM", "EOD", "Javelin", "MAV" };
+
 class VehicleCrosshairClass final : public VehicleWidget {
 public:
 	static constexpr double kShootBlinkSeconds = 1.0;
+
+	void construct(HudWidgetHost &r_host) override {
+		for (const std::string_view name : kCrosshairFirstFrameHidden) {
+			r_host.clip(name).set_visible(false);
+		}
+	}
 
 	void on_clip_load(HudWidgetHost &r_host) override {
 		team_ = std::string(team_frame(r_host)) + "_";
