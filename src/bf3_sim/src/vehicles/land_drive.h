@@ -14,6 +14,6 @@ void land_engine_update(VehicleWorld::Impl &r_world, VehicleSlot p_slot);
 
 VehicleDriverState land_driver_at_rest(const VehicleModel &p_model);
 
-JPH::SpringSettings land_spring(
-		const VehicleModel &p_model, const VehicleWheelModel &p_wheel, float p_speed, float p_compression);
+JPH::SpringSettings land_spring(const VehicleModel &p_model, const VehicleWheelModel &p_wheel, float p_speed,
+		float p_compression, float p_extension_speed);
 }

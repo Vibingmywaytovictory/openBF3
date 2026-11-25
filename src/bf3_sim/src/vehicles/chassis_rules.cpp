@@ -71,6 +71,13 @@ float damper_coefficient(float p_mass, uint32_t p_wheels, float p_damping, float
 	return p_damping * p_mass / float(std::max<uint32_t>(p_wheels, 1u)) * p_progressive / p_substep_dt;
 }
 
+float damper_clamped_coefficient(float p_coefficient, float p_spring_force, float p_extension_speed) {
+	if (!(p_spring_force > 0.0f) || !(p_extension_speed > 0.0f)) {
+		return p_coefficient;
+	}
+	return std::min(p_coefficient, kDamperClamp * p_spring_force / p_extension_speed);
+}
+
 float steer_sensitivity(std::span<const CurvePoint> p_points, float p_speed, bool p_inverted) {
 	const float sens = std::clamp(
 			steer_curve_at(p_points, std::fabs(p_speed) * kKmhPerMs), -kSteerSensitivityClamp, kSteerSensitivityClamp);

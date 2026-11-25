@@ -87,8 +87,8 @@ std::span<const vehicles::CurvePoint> steer_curve(const VehicleModel &p_model) {
 
 }
 
-JPH::SpringSettings land_spring(
-		const VehicleModel &p_model, const VehicleWheelModel &p_wheel, float p_speed, float p_compression) {
+JPH::SpringSettings land_spring(const VehicleModel &p_model, const VehicleWheelModel &p_wheel, float p_speed,
+		float p_compression, float p_extension_speed) {
 	const uint32_t substeps = vehicles::chassis_substeps(p_speed, true);
 	const float ratio = p_wheel.suspension_max > 0.0f ? p_compression / p_wheel.suspension_max : 0.0f;
 	const float progressive = vehicles::spring_progressive(
@@ -96,7 +96,8 @@ JPH::SpringSettings land_spring(
 	const float stiffness = vehicles::spring_substep_factor(substeps) * p_wheel.spring_constant * progressive;
 	const float damping = vehicles::damper_coefficient(p_model.mass, p_model.wheel_count, p_wheel.spring_damping,
 			progressive, 1.0f / (vehicles::kChassisTickHz * float(substeps)));
-	return JPH::SpringSettings(JPH::ESpringMode::StiffnessAndDamping, stiffness, damping);
+	return JPH::SpringSettings(JPH::ESpringMode::StiffnessAndDamping, stiffness,
+			vehicles::damper_clamped_coefficient(damping, stiffness * p_compression, p_extension_speed));
 }
 
 VehicleDriverState land_driver_at_rest(const VehicleModel &p_model) {
@@ -207,8 +208,13 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 		JPH::WheelSettingsWV &settings = *v.wheel_settings[i];
 		const bool grounded = wheel->HasContact();
 		grounded_wheels += grounded ? 1u : 0u;
-		settings.mSuspensionSpring =
-				land_spring(m, wm, speed, grounded ? wm.suspension_max - wheel->GetSuspensionLength() : 0.0f);
+		const float extension = grounded
+				? -(bi.GetPointVelocity(v.body, wheel->GetContactPosition()) -
+						  bi.GetPointVelocity(wheel->GetContactBodyID(), wheel->GetContactPosition()))
+						   .Dot(rotation * settings.mSuspensionDirection)
+				: 0.0f;
+		settings.mSuspensionSpring = land_spring(
+				m, wm, speed, grounded ? wm.suspension_max - wheel->GetSuspensionLength() : 0.0f, extension);
 		settings.mMaxSteerAngle = wm.steers != 0 ? steer_max : 0.0f;
 
 		float drive = 0.0f;

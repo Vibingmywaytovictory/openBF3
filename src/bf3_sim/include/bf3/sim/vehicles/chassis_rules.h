@@ -26,6 +26,7 @@ inline constexpr uint32_t kMaxChassisSubsteps = 3;
 inline constexpr float kHalf = 0.5f;
 inline constexpr float kChassisTickHz = 30.0f;
 inline constexpr float kProgressiveSetting = 1.0f;
+inline constexpr float kDamperClamp = 0.8f;
 
 using CurvePoint = std::array<float, 2>;
 
@@ -38,6 +39,8 @@ uint32_t chassis_substeps(float p_speed, bool p_wheeled);
 float spring_constant(float p_mass, uint32_t p_wheels, float p_stiffness, float p_length);
 
 float damper_coefficient(float p_mass, uint32_t p_wheels, float p_damping, float p_progressive, float p_substep_dt);
+
+float damper_clamped_coefficient(float p_coefficient, float p_spring_force, float p_extension_speed);
 
 float steer_sensitivity(std::span<const CurvePoint> p_points, float p_speed, bool p_inverted);
 

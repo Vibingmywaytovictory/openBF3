@@ -318,6 +318,14 @@ TEST_SUITE("sim-vehicle-rules-unit") {
 		CHECK(spring_constant(800.0f, 4, 0.62f, 0.35f) == doctest::Approx(14766.9f).epsilon(1e-4));
 		CHECK(spring_constant(5000.0f, 18, 0.5f, 0.4f) == doctest::Approx(13638.9f).epsilon(1e-4));
 		CHECK(damper_coefficient(800.0f, 4, 0.09f, 1.0f, 1.0f / 30.0f) * 0.5f == doctest::Approx(270.0f));
+		const float standing = damper_coefficient(800.0f, 4, 0.09f, 1.0f, 1.0f / 90.0f);
+		const float growler_load = 1.75f * spring_constant(800.0f, 4, 0.62f, 0.35f) * 0.1254f;
+		CHECK(standing == doctest::Approx(1620.0f));
+		CHECK(damper_clamped_coefficient(standing, growler_load, -2.0f) == standing);
+		CHECK(damper_clamped_coefficient(standing, growler_load, 1.0f) == standing);
+		CHECK(damper_clamped_coefficient(standing, growler_load, 2.0f) * 2.0f ==
+				doctest::Approx(0.8f * growler_load).epsilon(1e-5));
+		CHECK(damper_clamped_coefficient(standing, 0.0f, 2.0f) == standing);
 		CHECK(chassis_substeps(0.0f, true) == 3u);
 		CHECK(chassis_substeps(14.9f / 3.6f, true) == 3u);
 		CHECK(chassis_substeps(20.0f / 3.6f, true) == 2u);

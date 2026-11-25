@@ -451,7 +451,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 		wheel->mSuspensionMinLength = wm.suspension_min;
 		wheel->mSuspensionMaxLength = wm.suspension_max;
 		wheel->mSuspensionPreloadLength = 0.0f;
-		wheel->mSuspensionSpring = land_spring(m, wm, 0.0f, wm.rest_compression);
+		wheel->mSuspensionSpring = land_spring(m, wm, 0.0f, wm.rest_compression, 0.0f);
 		wheel->mRadius = wm.radius;
 		wheel->mWidth = wm.width;
 		wheel->mInertia = wm.inertia;
