@@ -141,9 +141,10 @@ add_test(NAME tools.export.res COMMAND ${CMAKE_COMMAND} -DKIND=res -DBF3DUMP=$<T
 add_test(NAME tools.export.ant COMMAND ${CMAKE_COMMAND} -DKIND=ant -DBF3DUMP=$<TARGET_FILE:bf3dump> -DCONSUMER=$<TARGET_FILE:test_ant>
     -DANTDUMP=$<TARGET_FILE:antdump> -P ${CMAKE_CURRENT_SOURCE_DIR}/bf3dump_export.cmake)
 set_tests_properties(tools.export.cache tools.export.res tools.export.ant PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
-openbf3_test(test_gameplay test_main.cpp gameplay_tests.cpp test_support.h)
+openbf3_test(test_gameplay test_main.cpp gameplay_tests.cpp death_body_tests.cpp test_support.h)
 target_link_libraries(test_gameplay PRIVATE bf3_core)
 add_test(NAME core.gameplay.unit COMMAND test_gameplay --test-suite=gameplay-unit)
+add_test(NAME core.death_body.unit COMMAND test_gameplay --test-suite=death-body-unit)
 add_test(NAME core.gameplay.weapons COMMAND test_gameplay --test-suite=gameplay)
 add_test(NAME core.gameplay.fuzz COMMAND test_gameplay --test-suite=gameplay-fuzz)
 set_tests_properties(core.gameplay.weapons core.gameplay.fuzz PROPERTIES SKIP_RETURN_CODE 77)
