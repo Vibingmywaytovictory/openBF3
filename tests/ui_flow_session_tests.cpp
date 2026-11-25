@@ -1,8 +1,8 @@
 #include <doctest/doctest.h>
 
+#include "bf3/core/ebx_db.h"
 #include "bf3/core/gameplay/death_timeline.h"
 #include "bf3/core/gameplay/soldier_camera.h"
-#include "bf3/core/ebx_db.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/eor_camera.h"
 #include "bf3/core/level/level.h"
@@ -921,6 +921,7 @@ TEST_SUITE("ui-flow-session") {
 		CHECK(sit(nullptr, 0, 0, 0, false).empty());
 		CHECK(sit(&bmp, 2, 0, 0, false) == Lines{ "defaulttankscreen" });
 		CHECK(sit(&bmp, 2, 1, 0, false) == Lines{ "defaulttankgunnerscreen" });
+		CHECK(sit(&bmp, 2, 2, 0, false) == Lines{ "crosshairdot" });
 		CHECK(sit(&growler, 3, 0, 0, false).empty());
 		CHECK(sit(&growler, 3, 1, 0, false) == Lines{ "crosshairdot" });
 		CHECK(sit(nullptr, 0, 0, 0, false).empty());

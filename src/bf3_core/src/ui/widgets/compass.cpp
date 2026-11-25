@@ -10,7 +10,8 @@ public:
 		type_ = param_string(r_host, "m_compassType");
 		mp_ = type_ == "multiplayerCompass";
 		const std::string team = hud_vehicle_russian(r_host.client()) ? "_ru" : "_us";
-		const std::string linkage = mp_ || type_ == "singlePlayerCompass" ? std::string("mc_singlePlayerCompass") : "mc_" + type_ + team;
+		const std::string linkage =
+				mp_ || type_ == "singlePlayerCompass" ? std::string("mc_singlePlayerCompass") : "mc_" + type_ + team;
 		heading_ = r_host.attach_movie(r_host.self(), linkage, type_, r_host.self().next_highest_depth());
 		heading_.set_x(0.0f);
 		heading_.set_y(0.0f);

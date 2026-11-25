@@ -918,6 +918,7 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 							"OnStart starts %zu (%s)",
 								unsigned(live), running, names.c_str()));
 			}
+			vehicle_screen_row(p_in, "tank_driver_1p", "/defaulttankscreen");
 			shoot(p_in, "tank_1p");
 			mapper.script_hold(InputMapper::WeaponAction::Ads, true);
 			shown_black_ = 0.0f;
