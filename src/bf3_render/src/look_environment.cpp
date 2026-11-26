@@ -895,6 +895,9 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 		f.view_distance = p_s.view_distance;
 		f.view_share = std::clamp(p_s.view_share, 0.0f, 1.0f);
 	}
+	f.wind = p_s.wind;
+	f.wind_direction = p_s.wind_direction;
+	f.wind_strength = p_s.wind_strength;
 	return f;
 }
 

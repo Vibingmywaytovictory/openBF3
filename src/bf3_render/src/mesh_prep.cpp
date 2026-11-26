@@ -83,7 +83,9 @@ core::Result<PreparedMesh> prepare_mesh(const core::res::LoadedMeshSet &p_mesh, 
 		if (d.parts && d.parts->size() == n) {
 			s.parts = *d.parts;
 		}
-		if (p_lane_binds != nullptr) {
+		const bool unbound = p_lane_binds != nullptr && d.subset < p_lane_binds->size() &&
+				(*p_lane_binds)[d.subset].empty() && !d.bone_indices;
+		if (p_lane_binds != nullptr && !unbound) {
 			if (d.subset >= p_lane_binds->size() || !d.bone_indices || d.bone_indices->size() != n) {
 				return core::make_error(where + ": subset " + std::to_string(d.subset) + " has no bone indices to skin");
 			}

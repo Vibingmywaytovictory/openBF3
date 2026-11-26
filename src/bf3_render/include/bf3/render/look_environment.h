@@ -134,6 +134,8 @@ struct LookFrame {
 	int32_t lut = -1;
 	float sun_shadow_distance = 0.0f;
 	float view_distance = 0.0f, view_share = 0.0f;
+	bool wind = false;
+	float wind_direction = 0.0f, wind_strength = 0.0f;
 };
 
 float look_area_weight(const LookArea &p_area, const LookVec3 &p_position);
