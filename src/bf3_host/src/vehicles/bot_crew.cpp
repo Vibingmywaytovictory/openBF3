@@ -416,7 +416,7 @@ bool BotCrew::command(tdm_bot::BotBody &r_body, const tdm_bot::BotFrame &p_frame
 		case ai::ChangeStep::Approach:
 		case ai::ChangeStep::Enter: {
 			tdm_bot::BotIntent i;
-			r_body.navigation.set_goal(sh, p_frame.tick, order.goal, 0.0f, true, kChangeRepathMetres);
+			r_body.navigation.approach(sh, p_frame.tick, order.goal, 0.0f, kChangeRepathMetres);
 			r_body.walk_facing(p_frame, i);
 			const bool aligned = r_body.turn(p_frame, i);
 			r_body.compose(p_frame, r_body.activity, i, aligned, r_cmd);

@@ -647,15 +647,15 @@ void BotBody::vehicle_move(const BotFrame &p_frame, BotIntent &r_intent) {
 			navigation.clear_goal();
 			r_intent.move_dx = (goal[0] - f.self.position[0]) / std::max(hd, 1e-3f);
 			r_intent.move_dz = (goal[2] - f.self.position[2]) / std::max(hd, 1e-3f);
-		} else if (navigation.set_goal(*shared, f.tick, goal, 0.5f, true, kSquadGoalMoveMetres)) {
+		} else if (navigation.approach(*shared, f.tick, goal, 0.5f, kSquadGoalMoveMetres)) {
 			walk(f, r_intent);
 		} else {
 			navigation.clear_goal();
 		}
 	} else if (vehicles.phase() == ExplosivePhase::BackOff) {
 		for (const float turn : { 0.0f, 0.8f, -0.8f, 1.6f, -1.6f }) {
-			if (navigation.set_goal(*shared, f.tick, vehicles.back_off_goal(f.self.position, turn), 2.0f, true,
-						kSquadGoalMoveMetres)) {
+			if (navigation.approach(
+						*shared, f.tick, vehicles.back_off_goal(f.self.position, turn), 2.0f, kSquadGoalMoveMetres)) {
 				walk_facing(f, r_intent);
 				return;
 			}
@@ -674,8 +674,8 @@ void BotBody::repair_move(const BotFrame &p_frame, BotIntent &r_intent) {
 	if (a.surface <= ai::assist_reach(reach, 0.0f)) {
 		return;
 	}
-	navigation.set_goal(*shared, f.tick, beside_hull_point(a, f.eye, f.self.position, 0.25f * reach), 0.5f, true,
-			kSquadGoalMoveMetres);
+	navigation.approach(
+			*shared, f.tick, beside_hull_point(a, f.eye, f.self.position, 0.25f * reach), 0.5f, kSquadGoalMoveMetres);
 	walk_facing(f, r_intent);
 }
 

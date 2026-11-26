@@ -58,6 +58,16 @@ void BotNavigation::new_life() {
 
 bool BotNavigation::set_goal(
 		TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, float p_arrive, bool p_force, float p_move_m) {
+	return goal_to(r_shared, p_tick, p_at, p_arrive, p_force, p_move_m, r_shared.walker.objective_share);
+}
+
+bool BotNavigation::approach(
+		TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, float p_arrive, float p_move_m) {
+	return goal_to(r_shared, p_tick, p_at, p_arrive, true, p_move_m, 1.0f);
+}
+
+bool BotNavigation::goal_to(TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, float p_arrive, bool p_force,
+		float p_move_m, float p_share) {
 	TdmShared &sh = r_shared;
 	if (sh.nav == nullptr || !finite(p_at)) {
 		return false;
@@ -71,7 +81,7 @@ bool BotNavigation::set_goal(
 	if (sim::nav_poly_component(nav.query->world(), nav.level->components, poly) != nav.level->main_component) {
 		return false;
 	}
-	if (have_goal_ && walker_.has_value() && horizontal(at, goal_pos_) < p_move_m) {
+	if (have_goal_ && walker_.has_value() && horizontal(at, goal_pos_) < p_move_m && goal_share_ == p_share) {
 		return true;
 	}
 	if (!p_force && have_goal_ && p_tick - goal_tick_ < kGoalResetTicks) {
@@ -87,7 +97,10 @@ bool BotNavigation::set_goal(
 	goal_pos_ = at;
 	goal_tick_ = p_tick;
 	++walker_resets_;
-	walker_.emplace(slot_, mix(seed_ ^ (uint64_t(walker_resets_) << 40)), sh.walker);
+	sim::bots::WalkerParams params = sh.walker;
+	params.objective_share = p_share;
+	goal_share_ = p_share;
+	walker_.emplace(slot_, mix(seed_ ^ (uint64_t(walker_resets_) << 40)), params);
 	sh.count(&TdmBotStats::walker_resets, uint64_t(1));
 	return true;
 }

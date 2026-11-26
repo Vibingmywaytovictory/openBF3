@@ -24,6 +24,7 @@ public:
 
 	bool set_goal(TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, float p_arrive, bool p_force,
 			float p_move_m = kGoalMoveMetres);
+	bool approach(TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, float p_arrive, float p_move_m);
 	void clear_goal();
 	void pick_roam_goal(TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, uint64_t &r_rng);
 
@@ -32,6 +33,8 @@ public:
 			sim::Pose &r_pose, bool &r_jump);
 
 private:
+	bool goal_to(TdmShared &r_shared, sim::Tick p_tick, const sim::Vec3 &p_at, float p_arrive, bool p_force,
+			float p_move_m, float p_share);
 	void check_island(TdmShared &r_shared, sim::Tick p_tick, const sim::SoldierState &p_state);
 	void check_wedge(TdmShared &r_shared, sim::Tick p_tick, const sim::SoldierState &p_state,
 			const sim::CollisionWorld &p_world);
@@ -45,6 +48,7 @@ private:
 	std::vector<sim::bots::BotGoal> goals_;
 	uint32_t walker_resets_ = 0;
 	bool have_goal_ = false;
+	float goal_share_ = 0.0f;
 	sim::Vec3 goal_pos_{};
 	sim::Tick goal_tick_ = 0;
 	sim::Tick roam_tick_ = 0;
