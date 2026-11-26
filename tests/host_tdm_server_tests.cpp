@@ -9346,9 +9346,142 @@ FullLock full_lock_from(const std::shared_ptr<const sim::StaticWorldShapes> &p_g
 	return out;
 }
 
+struct TankRoute {
+	uint16_t spawner = 0;
+	sim::Vec3 start{};
+	float clear = 0.0f;
+	float along_at_steer = 0.0f;
+	float kmh_at_steer = 0.0f;
+	float farthest = 0.0f;
+	float turn_deg = 0.0f;
+	float end_kmh = 0.0f;
+	float largest_tick_loss_kmh = 0.0f;
+	float loss_along = 0.0f;
+	std::string error;
+};
+
+float hull_heading(const std::array<float, 4> &p_q) {
+	return std::atan2(2.0f * (p_q[0] * p_q[2] + p_q[3] * p_q[1]), 1.0f - 2.0f * (p_q[0] * p_q[0] + p_q[1] * p_q[1]));
+}
+
+TankRoute drive_tank_route(const tdm::TdmLevel &p_level, const sim::CollisionWorld &p_world, uint16_t p_spawner) {
+	const host::LevelVehicles &lv = *p_level.shared->vehicles;
+	TankRoute out;
+	out.spawner = p_spawner;
+	sim::VehicleWorldOptions options;
+	options.max_vehicles = 1;
+	options.tuning = lv.tuning;
+	core::Result<std::unique_ptr<sim::VehicleWorld>> world =
+			sim::VehicleWorld::create(p_level.shared->static_world, options);
+	if (!world.ok() ||
+			!(*world)
+					->add_vehicle(0, lv.kinds[lv.spawners[p_spawner].kind].model, lv.spawners[p_spawner].placement)
+					.ok()) {
+		out.error = world.ok() ? std::string("add_vehicle failed") : world.error().message;
+		return out;
+	}
+	const sim::VehicleSlot slot = 0;
+	sim::VehicleCommand c;
+	const auto run = [&](float p_seconds, const std::function<void(const sim::VehicleState &)> &p_each) {
+		for (uint32_t t = 0; t < sim::seconds_to_ticks(p_seconds); ++t) {
+			if (!(*world)->step(std::span<const sim::VehicleSlot>(&slot, 1),
+								 std::span<const sim::VehicleCommand>(&c, 1))
+							.ok()) {
+				out.error = "step failed";
+				return false;
+			}
+			p_each((*world)->state(0));
+		}
+		return true;
+	};
+	const auto nothing = [](const sim::VehicleState &) {};
+	if (!run(5.0f, nothing)) {
+		return out;
+	}
+	c.flags = sim::vehicle_flags::kDriven;
+	if (!run(1.0f, nothing)) {
+		return out;
+	}
+	const sim::VehicleState rest = (*world)->state(0);
+	out.start = rest.body.com_position;
+	out.clear = tdm::clear_run(p_world, rest.body.com_position, rest.body.rotation, {}, 60.0f);
+	const float heading = hull_heading(rest.body.rotation);
+	const float fx = std::sin(heading), fz = std::cos(heading);
+	const auto along_of = [&](const sim::VehicleState &p_s) {
+		return (p_s.body.com_position[0] - out.start[0]) * fx + (p_s.body.com_position[2] - out.start[2]) * fz;
+	};
+	const auto track = [&](const sim::VehicleState &p_s) { out.farthest = std::max(out.farthest, along_of(p_s)); };
+	c.throttle = 127;
+	if (!run(3.0f, track)) {
+		return out;
+	}
+	const sim::VehicleState straight = (*world)->state(0);
+	out.along_at_steer = along_of(straight);
+	out.kmh_at_steer = speed_of(straight.body.linear_velocity) * 3.6f;
+	c.steer = 127;
+	float before = out.kmh_at_steer;
+	if (!run(2.0f, [&](const sim::VehicleState &p_s) {
+			track(p_s);
+			const float kmh = speed_of(p_s.body.linear_velocity) * 3.6f;
+			if (before - kmh > out.largest_tick_loss_kmh) {
+				out.largest_tick_loss_kmh = before - kmh;
+				out.loss_along = along_of(p_s);
+			}
+			before = kmh;
+		})) {
+		return out;
+	}
+	const sim::VehicleState turned = (*world)->state(0);
+	out.turn_deg =
+			std::remainder(hull_heading(turned.body.rotation) - hull_heading(straight.body.rotation), sim::kTwoPi) /
+			core::kDegToRadF;
+	out.end_kmh = speed_of(turned.body.linear_velocity) * 3.6f;
+	return out;
+}
+
 }
 
 TEST_SUITE("host-vehicles-handling") {
+	TEST_CASE(
+			"vehicles: MP_007 ConquestSmall0: godot.vehicle_drive's tank route headless: each M1A2 alone on the "
+			"level, 1 s manned, 3 s of throttle, then 2 s of throttle and full right steer; the first spawner's M1A2 "
+			"is stopped under throttle by what ends its clear run, the one with the longest clear run keeps its speed "
+			"and turns right more than 10 deg") {
+		std::unique_ptr<tdm::TdmLevel> level = tdm::load_tdm_level("MP_007", "ConquestSmall0", false);
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &lv = *level->shared->vehicles;
+		core::Result<std::unique_ptr<sim::CollisionWorld>> collision =
+				sim::CollisionWorld::create(level->shared->static_world);
+		REQUIRE(collision.ok());
+		std::vector<TankRoute> routes;
+		for (size_t i = 0; i < lv.spawners.size(); ++i) {
+			if (lv.kinds[lv.spawners[i].kind].blueprint == "vehicles/m1a2/m1abrams") {
+				routes.push_back(drive_tank_route(*level, **collision, uint16_t(i)));
+			}
+		}
+		REQUIRE(routes.size() >= 2u);
+		size_t roomiest = 0;
+		for (size_t r = 0; r < routes.size(); ++r) {
+			const TankRoute &t = routes[r];
+			REQUIRE_MESSAGE(t.error.empty(), t.error);
+			std::printf(
+					"host.vehicles.handling: MP_007 ConquestSmall0 M1A2 of spawner %u at (%.1f, %.1f, %.1f): %.0f m "
+					"clear ahead; %.1f m along and %.1f km/h after 3 s of throttle; farthest %.1f m; then %+.1f deg "
+					"and %.1f km/h after 2 s of throttle and right steer, largest speed loss in one tick %.1f km/h at "
+					"%.1f m along\n",
+					unsigned(t.spawner), double(t.start[0]), double(t.start[1]), double(t.start[2]), double(t.clear),
+					double(t.along_at_steer), double(t.kmh_at_steer), double(t.farthest), double(t.turn_deg),
+					double(t.end_kmh), double(t.largest_tick_loss_kmh), double(t.loss_along));
+			roomiest = t.clear > routes[roomiest].clear ? r : roomiest;
+		}
+		CHECK(routes.front().end_kmh < 0.5f * routes.front().kmh_at_steer);
+		CHECK(routes[roomiest].end_kmh > 0.5f * routes[roomiest].kmh_at_steer);
+		CHECK(routes[roomiest].turn_deg < -10.0f);
+		tdm::check_install_unchanged(*level);
+	}
+
 	TEST_CASE("vehicles: MP_007 ConquestLarge0: each land vehicle kind on flat ground, 0-60 km/h, speed at 6 s, top "
 			  "speed, braking from 60 km/h, turning circle and a full-lock turn from 30 km/h beside the data's top "
 			  "gear speed and RpmMax (report only)") {
