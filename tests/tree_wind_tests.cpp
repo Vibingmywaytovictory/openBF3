@@ -886,4 +886,69 @@ TEST_SUITE("render-trees") {
 		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}
+
+	TEST_CASE("render.trees: every MP_007 tree placement settles without wind as its upright rig turned into place") {
+		test::Mounted m;
+		if (!test::open_or_skip(m)) {
+			return;
+		}
+		const BeechLevel level = load_mp007_trees(m);
+		const render::LevelTrees &trees = level.trees;
+		REQUIRE(!trees.trees.empty());
+		std::vector<std::vector<core::Transform>> upright;
+		for (const std::shared_ptr<const TreeRig> &rig : trees.rigs) {
+			render::TreeSim sim(rig);
+			for (int k = 0; k < 800; ++k) {
+				sim.step(Vec3{});
+			}
+			upright.push_back(sim.bone_offsets());
+		}
+		std::vector<double> worst(trees.rigs.size(), 0.0), worst_tilt(trees.rigs.size(), 0.0),
+				worst_scale(trees.rigs.size(), 0.0);
+		double held = 0.0;
+		std::vector<double> bent(trees.rigs.size(), 0.0);
+		for (const render::TreePlacement &tree : trees.trees) {
+			const TreeRig &rig = *trees.rigs[tree.rig];
+			render::TreeSim sim(trees.rigs[tree.rig], render::tree_root_frame(tree.transform));
+			for (int k = 0; k < 800; ++k) {
+				sim.step(Vec3{});
+			}
+			const std::vector<core::Transform> poses = render::tree_bone_poses(sim, tree.transform);
+			for (size_t b = 1; b < rig.bones(); ++b) {
+				const double d = turn_degrees(upright[tree.rig][b].inverse().then_inner(poses[b]));
+				CHECK(std::isfinite(d));
+				if (d > worst[tree.rig]) {
+					worst[tree.rig] = d;
+					const Vec3 up = vec::normalize(tree.transform.up);
+					worst_tilt[tree.rig] =
+							std::acos(std::clamp(double(up.y), -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
+					worst_scale[tree.rig] = tree.transform.axis_scales().x;
+				}
+				const core::Transform &parent = sim.frames()[size_t(rig.parents[b])];
+				const Vec3 rest = vec::normalize(parent.transform_vector(rig.rest_directions[b]));
+				const Vec3 now = vec::normalize(sim.frames()[b].up);
+				const double off = std::atan2(double(vec::length(vec::cross(now, rest))), double(vec::dot(now, rest))) *
+						180.0 / 3.14159265358979323846;
+				if (rig.rigid[rig.tips[b]] != 0 && rig.tips[b] != b) {
+					held = std::max(held, off);
+				} else {
+					bent[tree.rig] = std::max(bent[tree.rig], off);
+				}
+			}
+		}
+		for (size_t r = 0; r < trees.rigs.size(); ++r) {
+			std::printf(
+					"render.trees MP_007 rig %zu placements settled 12 s without wind: largest bone pose difference "
+					"from the upright rig %.2f degrees (that tree tilted %.1f degrees, scale %.2f), largest bone "
+					"turn from its rest direction in its parent's frame %.2f degrees\n",
+					r, worst[r], worst_tilt[r], worst_scale[r], bent[r]);
+		}
+		std::printf("render.trees MP_007 %zu placements: short bones held to %.4f degrees on their rest direction in "
+					"their parent's "
+					"frame\n",
+				trees.trees.size(), held);
+		CHECK(held <= 0.01);
+		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
 }
