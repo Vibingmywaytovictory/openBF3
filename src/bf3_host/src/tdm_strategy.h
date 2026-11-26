@@ -71,6 +71,10 @@ public:
 	const ai::SquadOrders &orders() const { return *orders_; }
 	const ai::SquadManager &squads() const { return *squads_; }
 	const ai::SquadCommanderGame *commander() const { return command_.get(); }
+	const HostAiWorld *world() const { return world_.get(); }
+	const ai::Sai *sai(int p_side) const {
+		return p_side == 1 || p_side == 2 ? sai_[size_t(p_side - 1)].get() : nullptr;
+	}
 
 private:
 	TdmStrategy(GameServer &r_server, TdmShared &r_shared);

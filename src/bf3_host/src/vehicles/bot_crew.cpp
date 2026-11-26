@@ -1,14 +1,21 @@
 #include "bot_crew.h"
 
+#include "../bot_weapon_templates.h"
 #include "../tdm_bot_body.h"
 #include "../tdm_bot_shared.h"
+#include "../tdm_bot_weapons.h"
+#include "../tdm_bot_weapons_vehicles.h"
 #include "../tdm_strategy.h"
 #include "bf3/ai/main/ai_main.h"
 #include "bf3/ai/main/bot_manager.h"
+#include "bf3/ai/strategic/strategic_object.h"
 #include "bf3/host/ai_world.h"
 #include "bf3/host/gunplay.h"
+#include "bf3/host/kits.h"
+#include "bf3/host/level_vehicles.h"
 #include "bf3/host/server_view.h"
 #include "bf3/sim/nav_query.h"
+#include "bf3/sim/vehicles/vehicle_armament.h"
 #include "bf3/sim/vehicles/vehicle_input.h"
 #include "server_vehicles.h"
 
@@ -46,6 +53,140 @@ bool live_vehicle(const ServerVehicles &p_vehicles, int p_id) {
 			p_vehicles.vehicles()[size_t(p_id)].health.condition != sim::vehicles::VehicleCondition::Destroyed;
 }
 
+constexpr float kDegreesPerRadian = 180.0f / std::numbers::pi_v<float>;
+
+void seat_aim(const LevelVehicleKind &p_kind, uint8_t p_seat, ai::ChangeSeat &r_seat) {
+	if (p_kind.armament == nullptr) {
+		return;
+	}
+	for (const sim::vehicles::ArmamentTurret &turret : p_kind.armament->turrets) {
+		if (turret.seat != int(p_seat)) {
+			continue;
+		}
+		if (turret.aim == sim::vehicles::TurretAimAxis::Yaw) {
+			r_seat.aim_yaw_deg = std::atan2(turret.frame.forward[0], turret.frame.forward[2]) * kDegreesPerRadian;
+			if (turret.rule.constrained) {
+				r_seat.yaw_min_deg = turret.rule.min_degrees;
+				r_seat.yaw_max_deg = turret.rule.max_degrees;
+			}
+		} else if (turret.aim == sim::vehicles::TurretAimAxis::Pitch && turret.rule.constrained) {
+			r_seat.pitch_min_deg = turret.rule.min_degrees;
+			r_seat.pitch_max_deg = turret.rule.max_degrees;
+		}
+	}
+}
+
+ai::ChangeSensed sensed_row(const TdmShared &p_shared, const ServerVehicles &p_vehicles,
+		std::span<const ai::ChangeVehicle> p_scene, uint8_t p_slot, const sim::Vec3 &p_at) {
+	ai::ChangeSensed s;
+	s.position = p_at;
+	s.sided = p_shared.host.view->team(p_slot) != 0;
+	const std::optional<VehicleSeat> seat = p_vehicles.seat_of(p_slot);
+	if (seat && size_t(seat->vehicle) < p_scene.size()) {
+		const ai::ChangeVehicle &v = p_scene[size_t(seat->vehicle)];
+		s.strength_type = v.strength_type;
+		s.strengths = v.seat[std::min<size_t>(seat->seat, ai::kMaxChangeSeats - 1)].strengths;
+	} else {
+		s.strengths = change_soldier_strengths(p_shared, p_slot);
+	}
+	return s;
+}
+
+std::vector<ai::Vec3> neighbour_offsets(const TdmShared &p_shared, int p_side, uint32_t p_bot_id) {
+	std::vector<ai::Vec3> out;
+	const TdmStrategy *strategy = p_shared.strategy.get();
+	const ai::Sai *sai = strategy != nullptr ? strategy->sai(p_side) : nullptr;
+	const HostAiWorld *world = strategy != nullptr ? strategy->world() : nullptr;
+	if (sai == nullptr || world == nullptr) {
+		return out;
+	}
+	const int ordered = sai->bot_ordered_pos(int(p_bot_id));
+	if (ordered == -1 && sai->bot_current_pos(int(p_bot_id)) != -1) {
+		return out;
+	}
+	const ai::AIStrategicObject *object = world->strategic().strategic_object(ordered);
+	const auto *area = dynamic_cast<const ai::AIStrategicArea *>(object);
+	if (area == nullptr) {
+		return out;
+	}
+	const ai::Vec2 from = area->position(p_side);
+	for (const ai::AIStrategicObject *neighbour : area->neighbours()) {
+		if (neighbour->status(p_side) == ai::StrategicStatus::Owned) {
+			continue;
+		}
+		const ai::Vec2 to = neighbour->position(p_side);
+		out.push_back({ to.x - from.x, 0.0f, to.y - from.y });
+	}
+	return out;
+}
+
+std::vector<ai::ChangeSensed> change_known(const TdmShared &p_shared, const ServerVehicles &p_vehicles,
+		std::span<const ai::ChangeVehicle> p_scene, int p_side) {
+	std::vector<ai::ChangeSensed> out;
+	const HostAiWorld *world = p_shared.strategy != nullptr ? p_shared.strategy->world() : nullptr;
+	if (world == nullptr) {
+		return out;
+	}
+	const size_t slots = p_shared.host.view->states().size();
+	for (size_t slot = 0; slot < slots; ++slot) {
+		if (const ai::Vec3 *at = world->known_enemy(p_side, uint8_t(slot))) {
+			out.push_back(sensed_row(p_shared, p_vehicles, p_scene, uint8_t(slot), *at));
+		}
+	}
+	return out;
+}
+
+std::vector<ai::ChangeSensed> change_sensed(const TdmShared &p_shared, const ServerVehicles &p_vehicles,
+		std::span<const ai::ChangeVehicle> p_scene, const sim::bots::Perception &p_perception) {
+	std::vector<ai::ChangeSensed> out;
+	for (const sim::bots::PerceivedEnemy &e : p_perception.enemies()) {
+		out.push_back(sensed_row(p_shared, p_vehicles, p_scene, e.slot, e.last_position));
+	}
+	return out;
+}
+
+}
+
+float change_strength_scale(const TdmShared &p_shared) {
+	if (p_shared.host.gunplay == nullptr || p_shared.weapons == nullptr || !(p_shared.host.soldier_top_speed > 0.0f)) {
+		return 0.0f;
+	}
+	float sum = 0.0f;
+	int count = 0;
+	for (const auto &team : p_shared.host.gunplay->level().kits.loadouts) {
+		for (const KitLoadout &kit : team) {
+			if (kit.kit != uint8_t(KitRole::Assault)) {
+				continue;
+			}
+			sum += float(p_shared.weapons->of(kit.defs[kKitSlots[0]], 0).strength(ai::CombatStrengthType::Infantry));
+			++count;
+		}
+	}
+	return sum > 0.0f ? p_shared.host.soldier_top_speed * float(count) / sum : 0.0f;
+}
+
+ai::ChangeStrengths change_strengths(const TdmShared &p_shared, const ai::ChangeStrengths &p_per_minute) {
+	const float scale = change_strength_scale(p_shared);
+	ai::ChangeStrengths out{};
+	for (size_t i = 0; i < out.size(); ++i) {
+		out[i] = p_per_minute[i] * scale;
+	}
+	return out;
+}
+
+ai::ChangeStrengths change_soldier_strengths(const TdmShared &p_shared, uint8_t p_slot) {
+	ai::ChangeStrengths out{};
+	const tdm_bot::BotArms arms(p_shared.host.gunplay, p_slot);
+	for (uint8_t s = 0; s < sim::weapons::kMaxWeaponSlots; ++s) {
+		if (arms.def(s) == nullptr) {
+			continue;
+		}
+		const ai::WeaponTemplate &weapon = tdm_bot::slot_template(p_shared, arms, s);
+		for (size_t i = 0; i < ai::kChangeStrengthCount; ++i) {
+			out[i] = std::max(out[i], float(weapon.strengths[i]));
+		}
+	}
+	return change_strengths(p_shared, out);
 }
 
 float change_vehicle_max_speed(const sim::VehicleModel &p_model) {
@@ -82,11 +223,22 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 		const sim::VehicleState s = p_vehicles.world()->state(sim::VehicleSlot(i));
 		c.kind = ai::ChangeUnitKind::Ground;
 		c.side = v.team;
+		for (const uint8_t occupant : v.occupants) {
+			if (occupant != net::kNoVehicleOccupant) {
+				c.side = view.team(occupant);
+				break;
+			}
+		}
 		c.position = s.body.com_position;
 		c.up = sim::vehicles::hull_up_y(s.body.rotation);
+		const core::Transform hull = sim::vehicles::hull_transform(s.body.rotation, s.body.com_position);
+		c.right = hull.right;
+		c.hull_up = hull.up;
+		c.forward = hull.forward;
 		c.radius = std::sqrt(kind.box.half[0] * kind.box.half[0] + kind.box.half[1] * kind.box.half[1] +
 				kind.box.half[2] * kind.box.half[2]);
 		c.max_speed = change_vehicle_max_speed(*kind.model);
+		c.strength_type = int(vehicle_strength_type(kind));
 		const float full = sim::vehicles::full_vehicle_health(kind.damage);
 		c.health = full > 0.0f ? p_vehicles.health(i).value_or(0.0f) / full : 0.0f;
 		c.seats = uint8_t(std::min<size_t>(kind.seats, ai::kMaxChangeSeats));
@@ -102,6 +254,15 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 					i < p_shared.vehicle_bookings.size() ? p_shared.vehicle_bookings[i][k] : net::kNoVehicleOccupant;
 			seat.booked_by = booked != net::kNoVehicleOccupant ? int(booked) : -1;
 			seat.possessed_s = v.player_left[k] ? seconds(*v.player_left[k]) : ai::kNeverPossessedSeconds;
+			if (p_shared.weapons != nullptr) {
+				const SeatArms &arms = p_shared.weapons->seat(p_vehicles.level()->spawners[i].kind, k);
+				seat.armed = arms.armed;
+				seat.min_range = arms.min_range;
+				seat.max_range = arms.max_range;
+				seat.strengths = change_strengths(p_shared, arms.strengths);
+			}
+			seat_aim(kind, k, seat);
+			seat.exposed = kind.exposed[k];
 		}
 		if (!p_ground) {
 			continue;
@@ -141,6 +302,11 @@ ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehi
 		b.vehicle = seat->vehicle;
 		b.seat = seat->seat;
 	}
+	b.strengths = change_soldier_strengths(p_shared, p_slot);
+	if (const ai::Sai *sai = p_shared.strategy != nullptr ? p_shared.strategy->sai(b.side) : nullptr) {
+		b.enemy_strengths = change_strengths(p_shared, sai->enemy_strengths());
+		b.enemy_types = sai->enemy_counts();
+	}
 	return b;
 }
 
@@ -167,15 +333,21 @@ void BotCrew::book(TdmShared &r_shared, uint8_t p_slot, std::optional<ai::Change
 	}
 }
 
-ai::ChangeChoice BotCrew::evaluate(
-		TdmShared &r_shared, uint8_t p_slot, const sim::SoldierState &p_state, bool p_stuck) {
+ai::ChangeChoice BotCrew::evaluate(TdmShared &r_shared, uint8_t p_slot, uint32_t p_bot_id,
+		const sim::SoldierState &p_state, bool p_stuck, const sim::bots::Perception &p_perception) {
 	evaluated_.reset();
 	const ServerVehicles *const vehicles = r_shared.host.view->server_vehicles();
 	if (vehicles == nullptr || !vehicles->on()) {
 		return {};
 	}
 	const std::vector<ai::ChangeVehicle> scene = change_vehicles(r_shared, *vehicles, p_slot, true);
-	const ai::ChangeBot bot = change_bot(r_shared, *vehicles, p_slot, p_state, p_stuck);
+	const std::vector<ai::ChangeSensed> sensed = change_sensed(r_shared, *vehicles, scene, p_perception);
+	ai::ChangeBot bot = change_bot(r_shared, *vehicles, p_slot, p_state, p_stuck);
+	const std::vector<ai::ChangeSensed> known = change_known(r_shared, *vehicles, scene, bot.side);
+	const std::vector<ai::Vec3> neighbours = neighbour_offsets(r_shared, bot.side, p_bot_id);
+	bot.sensed = sensed;
+	bot.known = known;
+	bot.neighbour_offsets = neighbours;
 	const ai::ChangeChoice choice = ai::choose_change(bot, scene);
 	if (bot.vehicle < 0) {
 		r_shared.count(&TdmBotStats::vehicle_foot_decisions);

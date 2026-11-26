@@ -68,6 +68,7 @@ public:
 	const ai::InformationManager &information() const;
 	const ai::AIInformationGrid &grid(int p_side) const;
 	uint32_t information_of(int p_side, uint8_t p_slot) const;
+	const ai::Vec3 *known_enemy(int p_side, uint8_t p_slot) const;
 	const sim::bots::Perception *perception(uint8_t p_slot) const;
 	std::span<const uint8_t> bots() const;
 	ai::AIStrategicObjectManager &strategic();

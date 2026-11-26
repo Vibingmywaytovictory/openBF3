@@ -132,7 +132,8 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		if (state == nullptr) {
 			return {};
 		}
-		const ai::ChangeChoice c = crew.evaluate(*body.shared, body.slot, *state, bot->bot_stuck());
+		const ai::ChangeChoice c = crew.evaluate(
+				*body.shared, body.slot, bot->bot_id(), *state, bot->bot_stuck(), body.awareness.perception());
 		if (!c.change) {
 			return {};
 		}

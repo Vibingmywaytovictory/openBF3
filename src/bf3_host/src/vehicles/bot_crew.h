@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bf3/ai/vehicle/vehicle_change.h"
+#include "bf3/sim/bots/perception.h"
 #include "bf3/sim/command.h"
 #include "bf3/sim/soldier_state.h"
 #include "bf3/sim/vehicle_model.h"
@@ -27,11 +28,15 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehicles, uint8_t p_slot,
 		const sim::SoldierState &p_state, bool p_stuck);
 
+float change_strength_scale(const TdmShared &p_shared);
+ai::ChangeStrengths change_soldier_strengths(const TdmShared &p_shared, uint8_t p_slot);
+
 class BotCrew {
 public:
 	void new_life(TdmShared &r_shared, uint8_t p_slot);
 	void drop(TdmShared &r_shared, uint8_t p_slot) { book(r_shared, p_slot, std::nullopt); }
-	ai::ChangeChoice evaluate(TdmShared &r_shared, uint8_t p_slot, const sim::SoldierState &p_state, bool p_stuck);
+	ai::ChangeChoice evaluate(TdmShared &r_shared, uint8_t p_slot, uint32_t p_bot_id, const sim::SoldierState &p_state,
+			bool p_stuck, const sim::bots::Perception &p_perception);
 	void settle(TdmShared &r_shared, uint8_t p_slot, bool p_chosen, float p_chosen_urgency);
 	bool command(tdm_bot::BotBody &r_body, const tdm_bot::BotFrame &p_frame, sim::Command &r_cmd);
 	const std::optional<ai::ChangeTarget> &target() const { return target_; }

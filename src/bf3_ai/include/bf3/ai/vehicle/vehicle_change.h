@@ -16,6 +16,11 @@ inline constexpr double kNeverPossessedSeconds = -1000.0;
 inline constexpr float kUpsideDownUp = 0.01f;
 inline constexpr float kChangeMaxAltitude = 8.0f;
 inline constexpr float kGetOutUrgency = 10000.0f;
+inline constexpr size_t kChangeStrengthCount = 6;
+inline constexpr int kChangeInfantryStrength = 0;
+inline constexpr int kChangeLightArmourStrength = 1;
+
+using ChangeStrengths = std::array<float, kChangeStrengthCount>;
 
 enum class ChangeUnitKind : uint8_t { Soldier, Ground, Air, Naval };
 
@@ -25,8 +30,27 @@ struct ChangeSeat {
 	bool same_order = true;
 	int booked_by = -1;
 	double possessed_s = kNeverPossessedSeconds;
+	ChangeStrengths strengths{};
+	bool armed = false;
+	bool exposed = false;
+	float min_range = 0.0f;
+	float max_range = 0.0f;
+	float aim_yaw_deg = 0.0f;
+	float yaw_min_deg = -180.0f;
+	float yaw_max_deg = 180.0f;
+	float pitch_min_deg = -90.0f;
+	float pitch_max_deg = 90.0f;
 
 	bool operator==(const ChangeSeat &) const = default;
+};
+
+struct ChangeSensed {
+	Vec3 position{};
+	int strength_type = kChangeInfantryStrength;
+	ChangeStrengths strengths{};
+	bool sided = false;
+
+	bool operator==(const ChangeSensed &) const = default;
 };
 
 struct ChangeVehicle {
@@ -40,6 +64,10 @@ struct ChangeVehicle {
 	float altitude = 0.0f;
 	bool on_nav = true;
 	float nav_gap = 0.0f;
+	int strength_type = kChangeLightArmourStrength;
+	Vec3 right{ 1.0f, 0.0f, 0.0f };
+	Vec3 hull_up{ 0.0f, 1.0f, 0.0f };
+	Vec3 forward{ 0.0f, 0.0f, 1.0f };
 	uint8_t seats = 0;
 	std::array<ChangeSeat, kMaxChangeSeats> seat{};
 
@@ -58,6 +86,12 @@ struct ChangeBot {
 	bool stuck = false;
 	int vehicle = -1;
 	uint8_t seat = 0;
+	ChangeStrengths strengths{};
+	ChangeStrengths enemy_strengths{};
+	ChangeStrengths enemy_types{};
+	std::span<const ChangeSensed> sensed;
+	std::span<const ChangeSensed> known;
+	std::span<const Vec3> neighbour_offsets;
 };
 
 struct ChangeTarget {
@@ -80,6 +114,8 @@ struct ChangeChoice {
 
 float change_unit_urgency(
 		const ChangeBot &p_bot, std::span<const ChangeVehicle> p_vehicles, ChangeTarget p_unit, bool p_other);
+
+bool change_camera_valid(const ChangeVehicle &p_vehicle, uint8_t p_seat, const Vec3 &p_direction);
 
 float change_driver_modifier(const ChangeVehicle &p_vehicle, bool p_current, double p_now_s);
 

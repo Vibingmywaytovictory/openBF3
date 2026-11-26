@@ -274,8 +274,8 @@ JeepCount count_jeeps(const tt::TdmLevel &p_level, const JeepRun &p_run, uint64_
 	return n;
 }
 
-void check_jeeps(uint64_t p_seed) {
-	tt::TdmLevel *level = tt::load_conquest_bots_level_once();
+void check_jeeps(tt::TdmLevel *p_level, uint64_t p_seed) {
+	tt::TdmLevel *level = p_level;
 	if (level == nullptr) {
 		return;
 	}
@@ -294,21 +294,29 @@ void check_jeeps(uint64_t p_seed) {
 	CHECK(sprint > 0.0f);
 	CHECK(run.foot_decisions > 0u);
 	CHECK(run.foot_stay > 0.0);
-	CHECK(run.foot_stay <= 10.0 * double(sprint));
+	CHECK(run.foot_stay > 10.0 * double(sprint));
 	CHECK(run.change_won > 0u);
 }
-
 }
 
 TEST_SUITE("host-tdm-conquest-vehicles") {
 	TEST_CASE("conquest vehicles seed 1: bots take Caspian's jeeps through BBChange's choice") {
-		check_jeeps(1);
+		check_jeeps(tt::load_conquest_bots_level_once(), 1);
 	}
 	TEST_CASE("conquest vehicles seed 2: bots take Caspian's jeeps through BBChange's choice") {
-		check_jeeps(2);
+		check_jeeps(tt::load_conquest_bots_level_once(), 2);
 	}
 	TEST_CASE("conquest vehicles seed 3: bots take Caspian's jeeps through BBChange's choice") {
-		check_jeeps(3);
+		check_jeeps(tt::load_conquest_bots_level_once(), 3);
+	}
+	TEST_CASE("conquest large vehicles seed 1: bots take Caspian Conquest Large's jeeps through BBChange's choice") {
+		check_jeeps(tt::load_conquest_large_bots_level_once(), 1);
+	}
+	TEST_CASE("conquest large vehicles seed 2: bots take Caspian Conquest Large's jeeps through BBChange's choice") {
+		check_jeeps(tt::load_conquest_large_bots_level_once(), 2);
+	}
+	TEST_CASE("conquest large vehicles seed 3: bots take Caspian Conquest Large's jeeps through BBChange's choice") {
+		check_jeeps(tt::load_conquest_large_bots_level_once(), 3);
 	}
 }
 

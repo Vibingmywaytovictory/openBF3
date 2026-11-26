@@ -280,6 +280,125 @@ TEST_SUITE("ai-vehicle") {
 		CHECK(ai::change_plan_step(bot, vehicles, ai::ChangeTarget{ 0, 0 }).step == ai::ChangeStep::None);
 	}
 
+	TEST_CASE("a soldier's fire value joins his move value: 6 x his best strength with no enemy counts, 3 x count "
+			  "x strength less the enemy's strength against infantry with them, and a jeep is measured against it") {
+		ai::ChangeBot bot = fresh_bot();
+		bot.strengths = { 78.0f, 7.0f, 2.0f, 0.0f, 0.0f, 0.0f };
+		const std::vector<ai::ChangeVehicle> none;
+		const float raw = 6.0f * 78.0f;
+		CHECK(ai::change_unit_urgency(bot, none, ai::ChangeTarget{}, false) ==
+				doctest::Approx(kSoldierSpeed * 5.0f + raw));
+		const std::vector<ai::ChangeVehicle> vehicles{ jeep(20.0f) };
+		const ai::ChangeChoice stay = ai::choose_change(bot, vehicles);
+		CHECK(stay.current == doctest::Approx(2.0f * (kSoldierSpeed * 5.0f + raw)));
+		CHECK(stay.best == doctest::Approx(stay.current));
+		CHECK_FALSE(stay.change);
+		CHECK(stay.urgency == 0.0f);
+		ai::ChangeBot weak = fresh_bot();
+		weak.strengths = { 2.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		const float own = 2.0f * (kSoldierSpeed * 5.0f + 6.0f * 2.0f);
+		const ai::ChangeChoice take = ai::choose_change(weak, vehicles);
+		REQUIRE(take.change);
+		CHECK(take.target == ai::ChangeTarget{ 0, 0 });
+		CHECK(take.current == doctest::Approx(own));
+		CHECK(take.best == doctest::Approx(kJeepSpeed * 5.0f));
+		CHECK(take.urgency ==
+				doctest::Approx(ai::DecliningSlopeCurve::calculate(kJeepSpeed * 5.0f * 0.5f / own) * 4.0f));
+		bot.enemy_types = { 4.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		bot.enemy_strengths = { 50.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		CHECK(ai::change_unit_urgency(bot, none, ai::ChangeTarget{}, false) ==
+				doctest::Approx(kSoldierSpeed * 5.0f + 78.0f * 3.0f * 4.0f - 50.0f));
+	}
+
+	TEST_CASE("a sided sensed enemy the soldier is no weaker against is worth 4 x (s^2 - its strength against him); an "
+			  "unsided one is not, and an unarmed jeep stays at its move value") {
+		ai::ChangeBot bot = fresh_bot();
+		bot.strengths = { 78.0f, 7.0f, 2.0f, 0.0f, 0.0f, 0.0f };
+		std::vector<ai::ChangeSensed> sensed(1);
+		sensed[0].strengths = { 99.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		bot.sensed = sensed;
+		const std::vector<ai::ChangeVehicle> vehicles{ jeep(20.0f) };
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{}, false) ==
+				doctest::Approx(kSoldierSpeed * 5.0f + 6.0f * 78.0f));
+		sensed[0].sided = true;
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{}, false) ==
+				doctest::Approx(kSoldierSpeed * 5.0f + 4.0f * (78.0f * 78.0f - 99.0f)));
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 0 }, true) ==
+				doctest::Approx(kJeepSpeed * 5.0f));
+		sensed[0].strength_type = ai::kChangeLightArmourStrength;
+		sensed[0].strengths = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{}, false) ==
+				doctest::Approx(kSoldierSpeed * 5.0f + 4.0f * 7.0f * 7.0f));
+	}
+
+	TEST_CASE("an occupied gunner seat lends 0.9 of its strengths to an unarmed driver seat and 0.4 to an armed one; a "
+			  "gunner seat with no driven hull, nothing sensed and no known enemy in reach takes its raw value") {
+		const ai::ChangeBot bot = fresh_bot();
+		std::vector<ai::ChangeVehicle> vehicles{ jeep(20.0f) };
+		vehicles[0].seat[1].occupant = 9;
+		vehicles[0].seat[1].armed = true;
+		vehicles[0].seat[1].strengths = { 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 0 }, true) ==
+				doctest::Approx(kJeepSpeed * 5.0f + 0.9f * 100.0f * 6.0f));
+		vehicles[0].seat[0].armed = true;
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 0 }, true) ==
+				doctest::Approx(kJeepSpeed * 5.0f + 0.4f * 100.0f * 6.0f));
+		vehicles[0].seat[1].occupant = -1;
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 1 }, true) ==
+				doctest::Approx(0.4f * 0.0f + 6.0f * 100.0f));
+		vehicles[0].seat[1].armed = false;
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 1 }, true) == 0.0f);
+	}
+
+	TEST_CASE("an undriven armed seat with nothing sensed scores the side's known enemies within its reach of the bot "
+			  "and its range of the hull at s^2 less their strength against the hull, and a camera turned away from "
+			  "every sensed enemy leaves it nothing") {
+		ai::ChangeBot bot = fresh_bot();
+		std::vector<ai::ChangeVehicle> vehicles{ jeep(20.0f) };
+		ai::ChangeSeat &gunner = vehicles[0].seat[1];
+		gunner.armed = true;
+		gunner.max_range = 300.0f;
+		gunner.min_range = 0.0f;
+		gunner.strengths = { 100.0f, 10.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		std::vector<ai::ChangeSensed> known(2);
+		known[0].position = { 250.0f, 1.0f, 0.0f };
+		known[0].strengths = { 0.0f, 30.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		known[1].position = { 900.0f, 1.0f, 0.0f };
+		known[1].strengths = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		bot.known = known;
+		const float value = 100.0f * 100.0f - 30.0f;
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 1 }, true) == doctest::Approx(value));
+		known[0].position = { 310.0f, 1.0f, 0.0f };
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 1 }, true) == doctest::Approx(6.0f * 100.0f));
+		std::vector<ai::ChangeSensed> sensed(1);
+		sensed[0].sided = true;
+		sensed[0].position = { -100.0f, 1.0f, 0.0f };
+		bot.sensed = sensed;
+		gunner.yaw_min_deg = -30.0f;
+		gunner.yaw_max_deg = 30.0f;
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 1 }, true) == 0.0f);
+		sensed[0].position = { 20.0f, 1.0f, 100.0f };
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 1 }, true) ==
+				doctest::Approx(4.0f * 100.0f * 100.0f));
+	}
+
+	TEST_CASE(
+			"a seat's camera takes a direction within its yaw limits about its aim and its pitch limits off the hull") {
+		ai::ChangeVehicle v = jeep(0.0f);
+		ai::ChangeSeat &seat = v.seat[1];
+		seat.aim_yaw_deg = 180.0f;
+		seat.yaw_min_deg = -45.0f;
+		seat.yaw_max_deg = 45.0f;
+		seat.pitch_min_deg = -10.0f;
+		seat.pitch_max_deg = 20.0f;
+		CHECK(ai::change_camera_valid(v, 1, { 0.0f, 0.0f, -1.0f }));
+		CHECK_FALSE(ai::change_camera_valid(v, 1, { 0.0f, 0.0f, 1.0f }));
+		CHECK_FALSE(ai::change_camera_valid(v, 1, { 1.0f, 0.0f, 0.0f }));
+		CHECK(ai::change_camera_valid(v, 1, { 0.0f, 0.3f, -0.95393920f }));
+		CHECK_FALSE(ai::change_camera_valid(v, 1, { 0.0f, -0.5f, -0.8660254f }));
+		CHECK(ai::change_camera_valid(v, 2, { 1.0f, 0.0f, 0.0f }));
+	}
+
 	TEST_CASE("a config declares Change as behaviour 10 created by BBChange, and its modifier is the Change weight") {
 		ai::AiConfig with;
 		REQUIRE(ai::run_ai_script(change_script("Change", "BBChange"), "change.ai", with).ok());

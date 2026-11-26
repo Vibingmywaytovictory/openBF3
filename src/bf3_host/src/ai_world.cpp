@@ -455,6 +455,14 @@ uint32_t HostAiWorld::information_of(int p_side, uint8_t p_slot) const {
 	return own != ai::kNoHandle ? own : impl_->perceived[size_t(p_side - 1)][p_slot].information(p_side);
 }
 
+const ai::Vec3 *HostAiWorld::known_enemy(int p_side, uint8_t p_slot) const {
+	if (p_slot >= kMaxAiSlots || (p_side != 1 && p_side != 2)) {
+		return nullptr;
+	}
+	const SlotObject &proxy = impl_->perceived[size_t(p_side - 1)][p_slot];
+	return proxy.information(p_side) != ai::kNoHandle ? &proxy.position() : nullptr;
+}
+
 const sim::bots::Perception *HostAiWorld::perception(uint8_t p_slot) const {
 	return p_slot < kMaxAiSlots ? impl_->perceptions[p_slot].get() : nullptr;
 }
