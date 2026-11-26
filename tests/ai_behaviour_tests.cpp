@@ -660,4 +660,19 @@ TEST_SUITE("ai-behaviour") {
 			CHECK(std::all_of(set->second.begin(), set->second.end(), [](float p_m) { return p_m == 1.0f; }));
 		}
 	}
+
+	TEST_CASE(
+			"BBMedicAssist: a repair target's urgency is the body's repair urgency, the pin's DS(best score) x 10 for "
+			"a human's vehicle or x 2, and a patient's stays 1") {
+		const UCLinear unit(0.0f, 1.0f);
+		FakeBody body;
+		BBMedicAssist assist(unit, body);
+		assist.reset(nullptr);
+		CHECK(assist.calculate_urgency(nullptr, 1.0f) == 0.0f);
+		body.s.repair_target = true;
+		body.repair = 7.5f;
+		CHECK(assist.calculate_urgency(nullptr, 2.0f) == doctest::Approx(15.0f));
+		body.s.heal_target = true;
+		CHECK(assist.calculate_urgency(nullptr, 2.0f) == doctest::Approx(2.0f));
+	}
 }

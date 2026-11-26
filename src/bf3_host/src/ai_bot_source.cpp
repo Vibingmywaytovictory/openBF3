@@ -127,6 +127,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 	}
 
 	const ai::InfantrySenses &senses() const override { return sensed; }
+	float repair_urgency() const override { return body.vehicles.repair_urgency(); }
 
 	ai::ChangeSense change_sense() override {
 		if (state == nullptr) {

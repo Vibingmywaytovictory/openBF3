@@ -3,12 +3,14 @@
 #include "bf3/core/math.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
+#include "bf3/host/level_vehicles.h"
 #include "bf3/host/server_view.h"
 #include "bf3/sim/collision_world.h"
 #include "bf3/sim/static_world.h"
 #include "bf3/sim/weapons/gadgets.h"
 #include "bot_weapon_templates.h"
 #include "tdm_bot_support.h"
+#include "vehicles/server_vehicles.h"
 
 #include <algorithm>
 #include <cmath>
@@ -43,6 +45,16 @@ bool enemy_crew(const TdmShared &p_shared, const sim::vehicles::VehicleTarget &p
 		}
 	}
 	return false;
+}
+
+float target_basic_strength(const TdmShared &p_shared, uint32_t p_id) {
+	const ServerVehicles *vehicles = p_shared.host.view->server_vehicles();
+	const uint32_t spawner = p_id - sim::vehicles::kVehicleTargetIdBase;
+	if (vehicles == nullptr || p_shared.host.gunplay == nullptr || spawner >= vehicles->level()->spawners.size()) {
+		return 0.0f;
+	}
+	const LevelVehicles &lv = *vehicles->level();
+	return vehicle_basic_strength(lv.kinds[lv.spawners[spawner].kind], p_shared.host.gunplay->level().max_health);
 }
 
 const sim::vehicles::VehicleTarget *find_vehicle(const TdmShared &p_shared, uint32_t p_id) {
@@ -285,6 +297,7 @@ bool BotVehicleWeapons::sense_repair(TdmShared &r_shared, const BotArms &p_arms,
 	}
 	VehicleAim best;
 	float best_score = 0.0f;
+	bool best_human = false;
 	for (const sim::vehicles::VehicleTarget &v : vehicles) {
 		if ((v.target.team != 0 && v.target.team != team) || enemy_crew(sh, v, team)) {
 			continue;
@@ -307,9 +320,10 @@ bool BotVehicleWeapons::sense_repair(TdmShared &r_shared, const BotArms &p_arms,
 		if (tool < 0) {
 			continue;
 		}
-		const float score = ai::assist_score(1.0f, v.health, std::max(d, 1.0f));
+		const float score = ai::assist_score(target_basic_strength(sh, v.target.id), v.health, std::max(d, 1.0f));
 		if (score > best_score) {
 			best_score = score;
+			best_human = human;
 			best.id = v.target.id;
 			best.centre = v.target.bound_center;
 			best.weapon_slot = uint8_t(tool);
@@ -322,6 +336,7 @@ bool BotVehicleWeapons::sense_repair(TdmShared &r_shared, const BotArms &p_arms,
 	}
 	best.since = best.id == previous.id ? previous.since : p_check.tick;
 	repair_ = best;
+	repair_urgency_ = ai::assist_urgency(best_score, best_human);
 	return true;
 }
 

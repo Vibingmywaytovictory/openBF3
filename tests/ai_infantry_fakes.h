@@ -31,6 +31,8 @@ struct FakeBody final : InfantryBody {
 		++change_senses;
 		return change;
 	}
+	float repair = 1.0f;
+	float repair_urgency() const override { return repair; }
 	bool can_throw_grenade() const override { return throw_possible; }
 	bool throw_grenade() override {
 		++throws;

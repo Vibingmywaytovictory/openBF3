@@ -79,6 +79,7 @@ public:
 	const VehicleAim &enemy() const { return enemy_; }
 	std::optional<SeenVehicle> sensed_enemy(const TdmShared &p_shared) const;
 	const VehicleAim &repair() const { return repair_; }
+	float repair_urgency() const { return repair_urgency_; }
 	ExplosivePhase phase() const { return phase_; }
 
 	bool track(TdmShared &r_shared, const sim::Vec3 &p_eye, bool p_repair);
@@ -89,6 +90,7 @@ public:
 private:
 	VehicleAim enemy_;
 	VehicleAim repair_;
+	float repair_urgency_ = 0.0f;
 	sim::Tick seen_tick_ = 0;
 	ExplosivePhase phase_ = ExplosivePhase::Approach;
 	int32_t rounds_before_ = 0;

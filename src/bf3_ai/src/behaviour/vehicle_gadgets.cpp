@@ -13,6 +13,10 @@ float assist_score(float p_strength, float p_health, float p_distance) {
 	return p_strength / (DecliningSlopeCurve::calculate(1.0f - p_health) * p_distance);
 }
 
+float assist_urgency(float p_score, bool p_human) {
+	return DecliningSlopeCurve::calculate(p_score) * (p_human ? kAssistHumanUrgency : kAssistUrgency);
+}
+
 float assist_reach(float p_replenish_radius, float p_radii) {
 	return p_replenish_radius * 0.5f + p_radii;
 }

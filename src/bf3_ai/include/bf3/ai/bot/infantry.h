@@ -63,6 +63,7 @@ public:
 	virtual void update_sensing() = 0;
 	virtual const InfantrySenses &senses() const = 0;
 	virtual ChangeSense change_sense() { return {}; }
+	virtual float repair_urgency() const { return 1.0f; }
 
 	virtual bool can_throw_grenade() const = 0;
 	virtual bool throw_grenade() = 0;

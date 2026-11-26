@@ -78,6 +78,14 @@ TEST_SUITE("ai-gadgets") {
 		CHECK(assist_reach(1.8f, 0.6f) == doctest::Approx(1.5f));
 	}
 
+	TEST_CASE("assist_urgency: BBMedicAssist's urgency is DecliningSlopeCurve of the best score, x10 for a target a "
+			  "human is in and x2 otherwise") {
+		CHECK(assist_urgency(0.1f, true) == doctest::Approx(10.0f * DecliningSlopeCurve::calculate(0.1f)));
+		CHECK(assist_urgency(0.1f, false) == doctest::Approx(2.0f * DecliningSlopeCurve::calculate(0.1f)));
+		CHECK(assist_urgency(5.0f, true) == doctest::Approx(10.0f));
+		CHECK(assist_urgency(0.0f, true) == 0.0f);
+	}
+
 	TEST_CASE("placed_explosive_next: BBPFireInfantery's placed-explosive steps, walk up within reach, place, stay "
 			  "until the weapon is ready or empty, back off until 9 m clear, set off, and again once no charge lies") {
 		PlacedExplosiveCheck c;

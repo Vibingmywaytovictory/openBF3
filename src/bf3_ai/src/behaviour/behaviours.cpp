@@ -393,7 +393,7 @@ bool BBIdle::plan(BotPlan &r_script, bool) {
 float BBMedicAssist::situation() {
 	const InfantrySenses &s = body_.senses();
 	repair_ = !s.heal_target && s.repair_target;
-	return s.heal_target || s.repair_target ? 1.0f : 0.0f;
+	return s.heal_target ? 1.0f : repair_ ? body_.repair_urgency() : 0.0f;
 }
 
 bool BBMedicAssist::plan(BotPlan &r_script, bool) {
