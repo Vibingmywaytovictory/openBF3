@@ -4,6 +4,7 @@
 #include "bf3/core/level/world.h"
 #include "bf3/core/util/text.h"
 #include "bf3/render/look_environment.h"
+#include "bf3/render/mesh_cache.h"
 #include "bf3/render/tree_wind.h"
 #include "test_support.h"
 
@@ -721,6 +722,102 @@ TEST_SUITE("render-trees") {
 				CHECK(std::isfinite(t));
 			}
 		}
+		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
+		CHECK_MESSAGE(diff.clean(), diff.summary());
+	}
+
+	TEST_CASE("render.trees: a VegetationTree mesh's skin keeps every weighted lane of its vertices") {
+		test::Mounted m;
+		if (!test::open_or_skip(m)) {
+			return;
+		}
+		const BeechLevel level = load_mp007_trees(m);
+		REQUIRE(level.beech != nullptr);
+		const std::string name = "objects/vegetation/treebeech_m_02_cluster/treebeech_m_02_cluster_mesh";
+		core::Result<render::MeshHead> head = render::read_mesh_head(level.loaded->mount(), name);
+		REQUIRE(head.ok());
+		core::Result<core::res::LoadedMeshSet> raw = render::load_mesh_lods(level.loaded->mount(), *head, { 0 });
+		REQUIRE(raw.ok());
+		const core::res::MeshLod &lod = raw->mesh.lods[0];
+		std::vector<std::vector<int32_t>> palettes;
+		for (const core::res::MeshSubset &subset : lod.subsets) {
+			palettes.emplace_back(subset.bone_slots.begin(), subset.bone_slots.end());
+		}
+		std::vector<core::res::DecodedSubset> decoded;
+		REQUIRE(raw->decode(0, core::res::SubsetFilter::Drawn, decoded).ok());
+		render::MeshRequest request;
+		request.lane_binds = &palettes;
+		core::Result<render::PreparedMeshSet> prepared = render::prepare_mesh_set(*raw, request);
+		REQUIRE(prepared.ok());
+		REQUIRE(prepared->meshes.size() == 1);
+		const render::PreparedMesh &mesh = prepared->meshes.front();
+		REQUIRE(mesh.surfaces.size() == decoded.size());
+		const TreeRig &rig = *level.beech;
+		size_t vertices = 0, two_bones = 0, past_bones_per_vertex = 0, near_heaviest = 0, bark = 0;
+		for (size_t k = 0; k < decoded.size(); ++k) {
+			const core::res::DecodedSubset &d = decoded[k];
+			const render::PreparedSurface &s = mesh.surfaces[k];
+			REQUIRE(d.bone_indices);
+			REQUIRE(d.bone_weights);
+			REQUIRE(s.bones.size() == s.vertex_count() * 4);
+			const size_t per_vertex = lod.subsets[d.subset].bones_per_vertex;
+			for (size_t v = 0; v < s.vertex_count(); ++v) {
+				float raw_sum = 0.0f;
+				size_t raw_lanes = 0;
+				for (size_t l = 0; l < 4; ++l) {
+					const float w = (*d.bone_weights)[v][l];
+					raw_sum += w;
+					raw_lanes += w > 0.0f ? 1 : 0;
+					past_bones_per_vertex += w > 0.0f && l >= per_vertex ? 1 : 0;
+				}
+				REQUIRE(raw_sum > 0.0f);
+				size_t kept = 0, heaviest = 0;
+				for (size_t l = 0; l < 4; ++l) {
+					const float w = (*d.bone_weights)[v][l];
+					if (!(w > 0.0f)) {
+						continue;
+					}
+					const int32_t bone = palettes[d.subset][(*d.bone_indices)[v][l]];
+					bool found = false;
+					for (size_t q = 0; q < 4; ++q) {
+						found = found ||
+								(s.bones[v * 4 + q] == bone && std::fabs(s.weights[v * 4 + q] - w / raw_sum) < 1e-5f);
+					}
+					CHECK_MESSAGE(found, "subset " << d.subset << " vertex " << v << " lane " << l);
+					kept += found ? 1 : 0;
+					heaviest = w > (*d.bone_weights)[v][heaviest] ? l : heaviest;
+				}
+				two_bones += raw_lanes > 1 ? 1 : 0;
+				++vertices;
+				if (s.material_name == "Bark") {
+					const size_t b = size_t(palettes[d.subset][(*d.bone_indices)[v][heaviest]]);
+					REQUIRE(b < rig.bones());
+					const Vec3 x{ s.positions[v * 3], s.positions[v * 3 + 1], s.positions[v * 3 + 2] };
+					double best = 1e9;
+					size_t nearest = 0;
+					for (size_t c = 1; c < rig.bones(); ++c) {
+						const Vec3 a0 = rig.rest[c].trans, ab = vec::sub(rig.rest[rig.tips[c]].trans, a0);
+						const float len2 = vec::dot(ab, ab);
+						const float u =
+								len2 > 0.0f ? std::clamp(vec::dot(vec::sub(x, a0), ab) / len2, 0.0f, 1.0f) : 0.0f;
+						const double dist = vec::length(vec::sub(x, vec::add(a0, vec::scale(ab, u))));
+						if (dist < best) {
+							best = dist;
+							nearest = c;
+						}
+					}
+					near_heaviest += nearest == b ? 1 : 0;
+					++bark;
+				}
+			}
+		}
+		std::printf(
+				"render.trees treebeech_m_02_cluster lod 0: %zu vertices, %zu with two weighted lanes, %zu weighted "
+				"lanes past bones_per_vertex; %zu of %zu bark vertices' heaviest bone is the bone segment nearest "
+				"them\n",
+				vertices, two_bones, past_bones_per_vertex, near_heaviest, bark);
+		CHECK(two_bones > 0);
+		CHECK(past_bones_per_vertex > 0);
 		const core::SnapshotDiff diff = core::diff_snapshots(m.before, m.reader.snapshot());
 		CHECK_MESSAGE(diff.clean(), diff.summary());
 	}

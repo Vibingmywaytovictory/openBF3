@@ -94,7 +94,7 @@ core::Result<PreparedMesh> prepare_mesh(const core::res::LoadedMeshSet &p_mesh, 
 			s.weights.assign(n * 4, 0.0f);
 			for (size_t i = 0; i < n; ++i) {
 				float sum = 0.0f;
-				for (uint8_t l = 0; l < per_vertex; ++l) {
+				for (uint8_t l = 0; l < (weights ? 4 : per_vertex); ++l) {
 					const float w = weights ? (*d.bone_weights)[i][l] : (l == 0 ? 1.0f : 0.0f);
 					if (w <= 0.0f) {
 						continue;
