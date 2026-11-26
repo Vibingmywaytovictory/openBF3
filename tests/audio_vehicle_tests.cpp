@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -58,19 +59,19 @@ struct VehicleFixture {
 	std::vector<std::string> report;
 };
 
-VehicleFixture *vehicle_fixture() {
-	static std::unique_ptr<VehicleFixture> f;
-	static bool tried = false;
-	if (tried) {
-		return f.get();
+VehicleFixture *vehicle_fixture(const std::string &p_level) {
+	static std::map<std::string, std::unique_ptr<VehicleFixture>> fixtures;
+	const auto known = fixtures.find(p_level);
+	if (known != fixtures.end()) {
+		return known->second.get();
 	}
-	tried = true;
+	std::unique_ptr<VehicleFixture> &f = fixtures[p_level];
 	auto made = std::make_unique<VehicleFixture>();
 	if (!test::open_install(made->mount)) {
 		return nullptr;
 	}
 	core::Result<host::LevelDatabase> db =
-			host::open_level_database(made->mount.install, "MP_007", "ConquestSmall0", 0, nullptr);
+			host::open_level_database(made->mount.install, p_level, "ConquestSmall0", 0, nullptr);
 	REQUIRE_MESSAGE(db.ok(), (db.ok() ? std::string() : db.error().message));
 	made->db = std::make_unique<host::LevelDatabase>(std::move(*db));
 	core::Result<std::shared_ptr<const host::LevelVehicles>> level =
@@ -100,8 +101,8 @@ VehicleFixture *vehicle_fixture() {
 	return f.get();
 }
 
-VehicleFixture *need_install() {
-	VehicleFixture *f = vehicle_fixture();
+VehicleFixture *need_install(const std::string &p_level = "MP_007") {
+	VehicleFixture *f = vehicle_fixture(p_level);
 	if (f == nullptr) {
 		test::skip_install_case("no BF3 install found");
 	}
@@ -1218,8 +1219,13 @@ std::vector<Op> joined(std::vector<Op> p_a, const std::vector<Op> &p_b) {
 namespace {
 
 struct WeaponRig {
-	struct Starts final : ba::MixTap {
-		void on_block(const float *, uint32_t, uint64_t) override {}
+	struct Peak final : ba::MixTap {
+		float peak = 0.0f;
+		void on_block(const float *p, uint32_t n, uint64_t) override {
+			for (size_t i = 0; i < size_t(n) * 2; ++i) {
+				peak = std::max(peak, std::fabs(p[i]));
+			}
+		}
 	} tap;
 	ba::KitAudioSources kits;
 	std::shared_ptr<const ba::WeaponAudioTable> table;
@@ -1810,6 +1816,73 @@ TEST_SUITE("audio-vehicles-weapon-events") {
 			frame->vehicles[0].turret_angle[size_t(k.armament->weapons[w].frame_turret)] = 0.5f;
 			ba::vehicle_crews(*frame, f->level.get(), 3, crews);
 			CHECK(pose_of(crews).position.z != doctest::Approx(rest.position.z));
+		}
+	}
+
+	TEST_CASE("every vehicle weapon of MP_007's and MP_003's Conquest Small is heard through the router, fired by the "
+			  "local gunner in first person and by a remote enemy 20 m away: one Fire per pull and one ShotFired per "
+			  "round where its patch reads ShotFired") {
+		for (const char *level : { "MP_007", "MP_003" }) {
+			VehicleFixture *f = need_install(level);
+			if (f == nullptr) {
+				return;
+			}
+			WeaponRig rig(*f);
+			rig.router->set_own_slot(4);
+			rig.router->set_own_first_person(true);
+			uint32_t id = 1;
+			const auto quiet = [&] {
+				for (int i = 0; i < int(sim::kSimHz) * 60; ++i) {
+					rig.tap.peak = 0.0f;
+					rig.frame();
+					if (rig.tap.peak < ba::kAudibleStep) {
+						return true;
+					}
+				}
+				return false;
+			};
+			size_t heard = 0;
+			for (size_t w = 0; w < f->level->weapons.size(); ++w) {
+				const core::gameplay::WeaponDef &def = f->level->weapons[w];
+				const uint16_t d = uint16_t(3 + w);
+				const ba::WeaponAudioDef &sound = rig.table->defs[d];
+				REQUIRE_MESSAGE(sound.program, def.variant);
+				const bool reads_shots = std::any_of(sound.program->inputs.begin(), sound.program->inputs.end(),
+						[](const ca::SoundInput &in) { return in.event && in.name_hash == ba::kHashShotFired; });
+				const int rounds = def.fire.logic == core::gameplay::FireLogic::Automatic ? 5 : 1;
+				const int every = std::max(1, int(std::lround(sound.shot_interval_s * double(sim::kSimHz))));
+				for (const uint8_t slot : { uint8_t(4), uint8_t(9) }) {
+					REQUIRE(quiet());
+					rig.tap.peak = 0.0f;
+					const ba::WeaponAudioStats before = rig.router->stats();
+					for (int r = 0; r < rounds; ++r) {
+						const present::PresentEvent e = rig.shot(slot, d, id++);
+						rig.frame(std::span<const present::PresentEvent>(&e, 1));
+						for (int i = 1; i < every; ++i) {
+							rig.frame();
+						}
+					}
+					for (int i = 0; i < int(sim::kSimHz); ++i) {
+						rig.frame();
+					}
+					const ba::WeaponAudioStats &after = rig.router->stats();
+					std::printf("%s %s %s: %d rounds, Fire %llu, ShotFired %llu, peak %.4f\n", level,
+							def.variant.c_str(), slot == 4 ? "own 1P" : "remote", rounds,
+							(unsigned long long)(after.vehicle_fires - before.vehicle_fires),
+							(unsigned long long)(after.vehicle_shot_posts - before.vehicle_shot_posts),
+							double(rig.tap.peak));
+					CHECK_MESSAGE(after.vehicle_shots - before.vehicle_shots == uint64_t(rounds), def.variant);
+					CHECK_MESSAGE(after.vehicle_fires - before.vehicle_fires == 1u, def.variant);
+					CHECK_MESSAGE(after.vehicle_shot_posts - before.vehicle_shot_posts ==
+									(reads_shots ? uint64_t(rounds) : 0u),
+							def.variant);
+					CHECK_MESSAGE(after.unbound_defs == before.unbound_defs, def.variant);
+					CHECK_MESSAGE(rig.tap.peak > ba::kAudibleStep, def.variant);
+					heard += rig.tap.peak > ba::kAudibleStep ? 1u : 0u;
+				}
+			}
+			std::printf("%s: %zu of %zu vehicle weapon pulls heard\n", level, heard, 2 * f->level->weapons.size());
+			CHECK(heard == 2 * f->level->weapons.size());
 		}
 	}
 }
