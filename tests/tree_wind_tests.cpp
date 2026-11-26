@@ -217,16 +217,41 @@ TEST_SUITE("render-trees-unit") {
 		CHECK(forest.active() == 0);
 		CHECK_FALSE(forest.stepped(0));
 
+		CHECK(forest.posed(0));
+
 		render::TreeForest far({ chain_rig() }, { render::TreePlacement{ 0, {} } });
 		far.frame(0.1f, Vec3{ 251, 0, 0 }, wind);
 		CHECK(far.sim(0) == nullptr);
+		CHECK_FALSE(far.posed(0));
 		far.frame(0.1f, Vec3{ 249, 0, 0 }, wind);
 		REQUIRE(far.sim(0) != nullptr);
-		CHECK(far.steps() == 2);
+		CHECK(far.posed(0));
+		CHECK(far.steps() == 135);
 		far.frame(0.016f, Vec3{ 248, 0, 0 }, wind);
-		CHECK(far.steps() == 3);
-		far.frame(0.01f, Vec3{ 248, 0, 0 }, wind);
-		CHECK(far.steps() == 3);
+		CHECK(far.steps() == 136);
+		far.frame(0.005f, Vec3{ 248, 0, 0 }, wind);
+		CHECK(far.steps() == 136);
+
+		render::VegetationSystemSettings many_jobs;
+		many_jobs.job_count = 10;
+		const std::vector<render::TreePlacement> crowd(40, render::TreePlacement{ 0, {} });
+		render::TreeForest busy({ chain_rig() }, crowd, many_jobs);
+		busy.frame(0.015f, Vec3{ 251, 0, 0 }, wind);
+		busy.frame(0.015f, Vec3{ 249, 0, 0 }, wind);
+		size_t posed = 0, active = 0;
+		for (size_t t = 0; t < busy.trees(); ++t) {
+			posed += busy.posed(t) ? 1 : 0;
+			active += busy.sim(t) != nullptr ? 1 : 0;
+		}
+		CHECK(active == 40);
+		CHECK(posed == 32);
+		CHECK(busy.steps() == 32 * 134 + 8);
+		busy.frame(0.015f, Vec3{ 249, 0, 0 }, wind);
+		posed = 0;
+		for (size_t t = 0; t < busy.trees(); ++t) {
+			posed += busy.posed(t) ? 1 : 0;
+		}
+		CHECK(posed == 40);
 	}
 
 	TEST_CASE("render.trees.unit: a tree settles still without wind and keeps moving downwind with it") {

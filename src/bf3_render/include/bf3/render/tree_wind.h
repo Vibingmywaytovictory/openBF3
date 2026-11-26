@@ -35,6 +35,7 @@ inline constexpr float kTreeGroundFriction = 0.4f;
 inline constexpr float kTreeThreshold = 1e-6f;
 inline constexpr float kTreeDegenerateBone = 0.01f;
 inline constexpr size_t kTreeMaxChildren = 10;
+inline constexpr uint32_t kTreeJobsPerFrame = 8;
 inline constexpr core::Vec3 kTreeDefaultWindDirection{ 0.4f, 0.0f, 0.8434434f };
 inline constexpr float kTreeGustFrequencies[4] = { 4.585867f, 1.485746f, 9.654985f, 31.567549f };
 
@@ -162,6 +163,7 @@ public:
 	const TreePlacement &placement(size_t p_tree) const { return trees_[p_tree]; }
 	const TreeSim *sim(size_t p_tree) const { return states_[p_tree].sim.get(); }
 	bool stepped(size_t p_tree) const { return states_[p_tree].stepped_frame == frames_; }
+	bool posed(size_t p_tree) const { return states_[p_tree].posed; }
 	float clock() const { return clock_; }
 	uint64_t steps() const { return steps_; }
 	size_t active() const;
@@ -170,6 +172,8 @@ private:
 	struct State {
 		std::unique_ptr<TreeSim> sim;
 		float pending = 0.0f;
+		bool wants_pre_simulation = false;
+		bool posed = false;
 		uint64_t touched_frame = 0;
 		uint64_t stepped_frame = 0;
 	};

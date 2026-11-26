@@ -430,7 +430,8 @@ void TreeForest::frame(float p_dt, const Vec3 &p_camera, const TreeWind &p_wind)
 		return;
 	}
 	const uint32_t budget = (settings_.job_count + 1) * settings_.max_pre_sims_per_job;
-	uint32_t activated = 0;
+	const uint32_t pre_simulations = settings_.max_pre_sims_per_job * kTreeJobsPerFrame;
+	uint32_t activated = 0, pre_simulated = 0;
 	std::vector<uint32_t> due;
 	for (size_t t = 0; t < trees_.size(); ++t) {
 		State &s = states_[t];
@@ -440,6 +441,8 @@ void TreeForest::frame(float p_dt, const Vec3 &p_camera, const TreeWind &p_wind)
 			if (s.sim == nullptr && activated < budget) {
 				s.sim = std::make_unique<TreeSim>(rigs_[tree.rig], tree_root_frame(tree.transform));
 				s.pending = moved ? kTreePreSimulation : 0.0f;
+				s.wants_pre_simulation = !moved;
+				s.posed = moved;
 				++activated;
 			}
 			if (s.sim != nullptr) {
@@ -448,6 +451,12 @@ void TreeForest::frame(float p_dt, const Vec3 &p_camera, const TreeWind &p_wind)
 		}
 		if (s.sim == nullptr || frames_ - s.touched_frame > kTreeIdleFrames) {
 			continue;
+		}
+		if (s.wants_pre_simulation && pre_simulated < pre_simulations) {
+			s.pending += kTreePreSimulation;
+			s.wants_pre_simulation = false;
+			s.posed = true;
+			++pre_simulated;
 		}
 		s.pending += advance;
 		s.stepped_frame = frames_;
