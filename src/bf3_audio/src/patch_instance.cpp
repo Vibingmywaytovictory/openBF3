@@ -7,6 +7,7 @@
 #include "patch_state.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -729,6 +730,7 @@ void PatchInstance::process_block(BusBuffers &r_buses) {
 		while (ei < st.event_count && std::min(st.events[ei].frame, n - 1) <= pos) {
 			st.registers[st.events[ei].reg] = 1.0f;
 			st.any_event = true;
+			st.trace_event(first + pos, st.events[ei].reg);
 			++ei;
 		}
 		const uint32_t next = ei < st.event_count ? std::max(pos + 1, std::min(st.events[ei].frame, n - 1)) : n;
@@ -759,6 +761,7 @@ void PatchInstance::evaluate(double p_seconds) {
 	for (uint32_t i = 0; i < st.event_count; ++i) {
 		st.registers[st.events[i].reg] = 1.0f;
 		st.any_event = true;
+		st.trace_event(st.clock, st.events[i].reg);
 	}
 	st.event_count = 0;
 	st.evaluate_program(st.clock);
@@ -922,6 +925,33 @@ bool PatchInstance::stop_seen() const {
 
 void PatchInstance::set_sampler_trace(SamplerTrace *r_trace) {
 	state_->trace = r_trace;
+}
+
+void PatchInstance::set_graph_trace(GraphTrace *r_trace) {
+	state_->graph_trace = r_trace;
+}
+
+void PatchInstance::State::graph_entry(uint64_t p_frame, uint32_t p_id, GraphTraceKind p_kind) {
+	if (graph_trace == nullptr) {
+		return;
+	}
+	if (graph_trace->count >= graph_trace->entries.size()) {
+		++graph_trace->dropped;
+		return;
+	}
+	graph_trace->entries[graph_trace->count++] = GraphTraceEntry{ p_frame, p_id, p_kind };
+}
+
+void PatchInstance::State::trace_event(uint64_t p_frame, uint16_t p_register) {
+	if (graph_trace == nullptr) {
+		return;
+	}
+	for (const ca::SoundInput &in : program->inputs) {
+		if (in.event && in.reg == p_register) {
+			graph_entry(p_frame, in.name_hash, GraphTraceKind::Event);
+			return;
+		}
+	}
 }
 
 const ca::SoundProgram &PatchInstance::program() const {
@@ -1196,6 +1226,67 @@ float PatchInstance::State::hdr_send_gain(const detail::OutputState &p_o, float 
 	const float window_db = p_hdr_window_db + (hdr.top_db - top);
 	const float over = std::max(0.0f, level - (top + hdr.overshoot_db));
 	return db_to_gain(p_o.curve_gain_db + p_o.cone_db + window_db - over);
+}
+
+uint64_t release_cut_frames(const AudioTuning &p_tuning, uint32_t p_rate) {
+	return uint64_t(std::ceil(std::max(1.0, double(p_tuning.release_fade_ms) * 0.001 * double(p_rate)))) + 1;
+}
+
+std::vector<ReleaseOverrun> release_overruns(const ca::SoundProgram &p_program, const SamplerTrace &p_samplers,
+		const GraphTrace &p_graph, uint64_t p_cut_frames, ReleaseCounts *r_counts) {
+	std::vector<ReleaseOverrun> out;
+	const uint32_t samples = std::min<uint32_t>(p_samplers.count, uint32_t(p_samplers.entries.size()));
+	const uint32_t graphs = std::min<uint32_t>(p_graph.count, uint32_t(p_graph.entries.size()));
+	for (uint32_t g = 0; g < graphs; ++g) {
+		const GraphTraceEntry &r = p_graph.entries[g];
+		if (r.kind != GraphTraceKind::Release || r.id >= p_program.nodes.size()) {
+			continue;
+		}
+		const ca::SamplerLoop loop = ca::SamplerLoop(p_program.nodes[r.id].option);
+		if (loop != ca::SamplerLoop::None && loop != ca::SamplerLoop::Forward) {
+			continue;
+		}
+		const bool with_trigger =
+				std::any_of(p_graph.entries.begin(), p_graph.entries.begin() + graphs, [&](const GraphTraceEntry &t) {
+					return t.kind == GraphTraceKind::Trigger && t.id == r.id && t.frame == r.frame;
+				});
+		if (r_counts != nullptr) {
+			++(with_trigger ? r_counts->with_trigger : r_counts->checked);
+		}
+		if (with_trigger) {
+			continue;
+		}
+		uint64_t next_release = UINT64_MAX;
+		for (uint32_t h = g + 1; h < graphs; ++h) {
+			if (p_graph.entries[h].kind == GraphTraceKind::Release && p_graph.entries[h].id == r.id) {
+				next_release = p_graph.entries[h].frame;
+				break;
+			}
+		}
+		std::array<bool, 256> sounding{};
+		std::array<bool, 256> after{};
+		std::array<uint64_t, 256> ended;
+		ended.fill(UINT64_MAX);
+		for (uint32_t k = 0; k < samples; ++k) {
+			const SamplerTraceEntry &e = p_samplers.entries[k];
+			if (e.node != r.id || e.frame >= next_release) {
+				continue;
+			}
+			if (e.frame < r.frame) {
+				sounding[e.slot] = e.kind != SamplerTraceKind::End;
+			} else if (e.kind == SamplerTraceKind::End) {
+				ended[e.slot] = std::min(ended[e.slot], e.frame);
+			} else if (ended[e.slot] == UINT64_MAX) {
+				sounding[e.slot] = after[e.slot] = true;
+			}
+		}
+		for (size_t slot = 0; slot < sounding.size(); ++slot) {
+			if (sounding[slot] && (after[slot] || ended[slot] > r.frame + p_cut_frames)) {
+				out.push_back(ReleaseOverrun{ r.id, uint8_t(slot), r.frame, ended[slot], after[slot] });
+			}
+		}
+	}
+	return out;
 }
 
 }

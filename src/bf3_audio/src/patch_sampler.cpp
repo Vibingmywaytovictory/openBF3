@@ -344,6 +344,7 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 	const bool held_trigger = trigger && s.trigger_was_on;
 	s.trigger_was_on = on(read(port(n, cp::SmpTrigger)));
 	if (trigger && s.slots_count > 0) {
+		graph_entry(p_frame, s.node, GraphTraceKind::Trigger);
 		++stats.sampler_triggers;
 		stats.held_triggers += held_trigger ? 1u : 0u;
 		uint32_t wave_index = UINT32_MAX;
@@ -412,6 +413,7 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 	}
 	if (release && s.active && !s.released) {
 		s.released = true;
+		graph_entry(p_frame, s.node, GraphTraceKind::Release);
 		if (s.loop == ca::SamplerLoop::InstantRelease) {
 			s.instant_release = true;
 			cut_slots(s);

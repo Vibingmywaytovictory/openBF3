@@ -245,6 +245,7 @@ struct PatchInstance::State {
 	std::array<VoiceTap *, kMaxVoiceTaps> taps{};
 	uint32_t tap_count = 0;
 	SamplerTrace *trace = nullptr;
+	GraphTrace *graph_trace = nullptr;
 
 	PatchInstanceStats stats;
 	HdrVoiceWindow hdr;
@@ -296,6 +297,8 @@ struct PatchInstance::State {
 	}
 	void trace_entry(uint64_t p_frame, const detail::SamplerState &p_sampler, uint8_t p_slot, uint16_t p_segment,
 			SamplerTraceKind p_kind, float p_pitch, uint64_t p_prev_end);
+	void graph_entry(uint64_t p_frame, uint32_t p_id, GraphTraceKind p_kind);
+	void trace_event(uint64_t p_frame, uint16_t p_register);
 
 	void evaluate_program(uint64_t p_frame);
 

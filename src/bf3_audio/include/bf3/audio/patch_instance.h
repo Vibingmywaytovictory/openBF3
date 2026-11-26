@@ -65,6 +65,37 @@ struct SamplerTrace {
 	uint64_t dropped = 0;
 };
 
+enum class GraphTraceKind : uint8_t { Event, Trigger, Release };
+struct GraphTraceEntry {
+	uint64_t frame = 0;
+	uint32_t id = 0;
+	GraphTraceKind kind = GraphTraceKind::Event;
+};
+
+struct GraphTrace {
+	std::vector<GraphTraceEntry> entries;
+	uint32_t count = 0;
+	uint64_t dropped = 0;
+};
+
+struct ReleaseOverrun {
+	uint32_t node = 0;
+	uint8_t slot = 0;
+	uint64_t release_frame = 0;
+	uint64_t end_frame = UINT64_MAX;
+	bool started_after = false;
+};
+
+struct ReleaseCounts {
+	uint64_t checked = 0;
+	uint64_t with_trigger = 0;
+};
+
+uint64_t release_cut_frames(const AudioTuning &p_tuning, uint32_t p_rate);
+
+std::vector<ReleaseOverrun> release_overruns(const core::audio::SoundProgram &p_program, const SamplerTrace &p_samplers,
+		const GraphTrace &p_graph, uint64_t p_cut_frames, ReleaseCounts *r_counts = nullptr);
+
 struct SamplerSlotState {
 	bool playing = false;
 	core::audio::WaveId wave = core::audio::kNoWave;
@@ -157,6 +188,7 @@ public:
 	void add_voice_tap(std::span<const uint16_t> p_voices, VoiceTap *p_tap);
 	bool stop_seen() const;
 	void set_sampler_trace(SamplerTrace *r_trace);
+	void set_graph_trace(GraphTrace *r_trace);
 	const core::audio::SoundProgram &program() const;
 	const PatchInstanceStats &stats() const;
 	void set_hdr_window(const HdrVoiceWindow &p_window);
