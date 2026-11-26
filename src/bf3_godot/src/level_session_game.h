@@ -1,6 +1,7 @@
 #pragma once
 
 #include "audio_areas_check.h"
+#include "bot_vehicles_check.h"
 #include "catalog_weapons.h"
 #include "commo_rose_check.h"
 #include "conquest_hud_check.h"
@@ -289,6 +290,7 @@ struct Bf3LevelSession::Game : GameState {
 	std::unique_ptr<VehicleDriveRun> vehicle_drive;
 	std::unique_ptr<VaultRunCheck> vault_run;
 	std::unique_ptr<WaterRunCheck> water_run;
+	std::unique_ptr<BotVehiclesCheck> bot_vehicles;
 	std::unique_ptr<AudioAreasCheck> audio_areas;
 	std::unique_ptr<NetOverlayCheck> net_overlay_check;
 #endif

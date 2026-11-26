@@ -1453,6 +1453,8 @@ if(OPENBF3_BUILD_GODOT AND OPENBF3_BUILD_CHECKS AND CMAKE_VERSION VERSION_GREATE
     openbf3_cost(godot.minimap_modes.caspian_small 1 33)
     openbf3_cost(godot.minimap_modes.caspian_large 1 33)
     openbf3_godot_row(godot.caspian_world godot_caspian_world.cmake WINDOW TIMEOUT 240)
+    openbf3_godot_row(godot.bot_vehicles godot_bot_vehicles.cmake WINDOW TIMEOUT 360)
+    openbf3_cost(godot.bot_vehicles 1 60)
     openbf3_godot_row(godot.logic_effects godot_logic_effects.cmake WINDOW TIMEOUT 240 ARGS -DQUIT_AFTER=8 -DINJECT_AT=0)
     openbf3_godot_row(godot.fx_lights godot_fx_lights.cmake WINDOW TIMEOUT 300 ARGS -DQUIT_AFTER=45)
     openbf3_cost(godot.logic_effects 1 21)

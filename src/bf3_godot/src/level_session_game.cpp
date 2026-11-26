@@ -321,6 +321,9 @@ void Bf3LevelSession::game_parse_args() {
 	if (has_check_arg("water-run")) {
 		g.water_run = std::make_unique<WaterRunCheck>(user_arg_value("water-shots"));
 	}
+	if (has_check_arg("bot-vehicles")) {
+		g.bot_vehicles = std::make_unique<BotVehiclesCheck>(user_arg_value("bot-vehicles-shots"));
+	}
 	if (has_check_arg("net-overlay-check")) {
 		g.net_overlay_check = std::make_unique<NetOverlayCheck>(user_arg_value("net-overlay-shots"));
 	}
@@ -1694,6 +1697,17 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 			UtilityFunctions::print(
 					to_godot(std::string("WATER RUN: ") + (g.water_run->exit_code() == 0 ? "PASS" : "FAIL")));
 			finish(g.water_run->exit_code());
+			return true;
+		}
+	}
+	if (g.bot_vehicles != nullptr && !g.finished) {
+		BotVehiclesInputs in;
+		in.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		if (g.bot_vehicles->step(*this, in, p_delta)) {
+			g.finished = true;
+			UtilityFunctions::print(
+					to_godot(std::string("BOT VEHICLES: ") + (g.bot_vehicles->exit_code() == 0 ? "PASS" : "FAIL")));
+			finish(g.bot_vehicles->exit_code());
 			return true;
 		}
 	}
