@@ -7,7 +7,6 @@
 #include "look_bridge.h"
 #include "memory_report.h"
 #include "native_loading.h"
-#include "tree_bridge.h"
 
 #include "nav_overlay.h"
 
@@ -228,7 +227,6 @@ private:
 	godot::DirectionalLight3D *sun_ = nullptr;
 	godot::WorldEnvironment *environment_ = nullptr;
 	LookBridge look_;
-	TreeBridge trees_;
 	std::optional<MemoryReport> memory_report_;
 	godot::Ref<godot::CapsuleMesh> capsule_;
 	std::vector<godot::RID> other_instances_;

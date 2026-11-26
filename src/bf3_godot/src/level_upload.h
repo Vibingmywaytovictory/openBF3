@@ -123,9 +123,6 @@ public:
 		return p_instance < instance_visible_.size() && instance_visible_[p_instance] != 0;
 	}
 	godot::RID mesh_rid(uint32_t p_mesh) const;
-	godot::RID plan_instance(uint32_t p_instance) const {
-		return p_instance < plan_instances_.size() ? plan_instances_[p_instance] : godot::RID();
-	}
 	godot::RID material_rid(uint32_t p_material) const;
 	godot::RID texture_rid(uint32_t p_texture) const;
 	ScatterDrawStats scatter_stats() const;

@@ -259,8 +259,7 @@ core::CacheKeyInputs mesh_key_inputs(const std::vector<core::Sha1Digest> &p_sour
 	in.converter_version = p_converter_version;
 	in.engine = std::string(core::cache_engine_id());
 	in.format_version = kMeshBlobFormatVersion;
-	in.params = "lods=" + lods + ";filter=" + (p_request.filter == core::res::SubsetFilter::All ? "all" : "drawn") +
-			";binds=" + binds + (p_request.own_skeleton ? ";skeleton=own" : "");
+	in.params = "lods=" + lods + ";filter=" + (p_request.filter == core::res::SubsetFilter::All ? "all" : "drawn") + ";binds=" + binds;
 	return in;
 }
 
@@ -327,8 +326,8 @@ core::Result<core::res::LoadedMeshSet> load_mesh_lods(const core::LevelMount &p_
 }
 
 core::Result<PreparedMeshSet> prepare_mesh_set(const core::res::LoadedMeshSet &p_mesh, const MeshRequest &p_request) {
-	if (p_request.lane_binds != nullptr && (p_request.lods.size() != 1 || p_request.own_skeleton)) {
-		return core::make_error("mesh " + p_mesh.res.name + ": lane binds belong to one LOD and no own skeleton");
+	if (p_request.lane_binds != nullptr && p_request.lods.size() != 1) {
+		return core::make_error("mesh " + p_mesh.res.name + ": lane binds belong to one LOD");
 	}
 	PreparedMeshSet out;
 	out.name = p_mesh.res.name;
@@ -336,14 +335,7 @@ core::Result<PreparedMeshSet> prepare_mesh_set(const core::res::LoadedMeshSet &p
 		if (i > 0 && p_request.lods[i] <= p_request.lods[i - 1]) {
 			return core::make_error("mesh " + p_mesh.res.name + ": LODs not ascending");
 		}
-		std::vector<std::vector<int32_t>> own;
-		if (p_request.own_skeleton && p_request.lods[i] < p_mesh.mesh.lods.size()) {
-			for (const core::res::MeshSubset &subset : p_mesh.mesh.lods[p_request.lods[i]].subsets) {
-				own.emplace_back(subset.bone_slots.begin(), subset.bone_slots.end());
-			}
-		}
-		core::Result<PreparedMesh> m = prepare_mesh(
-				p_mesh, p_request.lods[i], p_request.filter, p_request.own_skeleton ? &own : p_request.lane_binds);
+		core::Result<PreparedMesh> m = prepare_mesh(p_mesh, p_request.lods[i], p_request.filter, p_request.lane_binds);
 		if (!m) {
 			return m.error();
 		}
@@ -383,9 +375,7 @@ core::Result<CachedMesh> load_mesh_cached(core::Cache *p_cache, const core::Leve
 		if (!decoded) {
 			return decoded.error();
 		}
-		if (decoded->lods != p_request.lods ||
-				(!decoded->meshes.empty() &&
-						decoded->meshes[0].skinned != (p_request.lane_binds != nullptr || p_request.own_skeleton))) {
+		if (decoded->lods != p_request.lods || (!decoded->meshes.empty() && decoded->meshes[0].skinned != (p_request.lane_binds != nullptr))) {
 			return core::make_error("mesh blob: holds other LODs than its key names");
 		}
 		out.mesh = std::move(*decoded);

@@ -39,8 +39,6 @@ public:
 
 	void build(godot::Node *p_parent, std::shared_ptr<const bf3::render::LevelScenePlan> p_plan);
 	bool built() const { return plan_ != nullptr; }
-	const std::shared_ptr<const bf3::render::LevelScenePlan> &plan() const { return plan_; }
-	const std::optional<bf3::render::LookFrame> &frame() const { return applied_; }
 
 	void update(const LevelUpload &p_upload, const godot::Vector3 &p_camera);
 	void cut();

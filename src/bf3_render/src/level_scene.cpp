@@ -992,16 +992,8 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 	plan.instances.reserve(p_census.instances.size());
 	for (size_t i = 0; i < p_census.instances.size(); ++i) {
 		const core::level::SceneInstance &inst = p_census.instances[i];
-		const std::optional<uint32_t> tree =
-				add_level_tree(plan.trees, p_world.objects[inst.object], inst.transform, inst.object);
-		plan.instances.push_back(SceneInstancePlan{ plan_mesh_of[inst.mesh], inst.transform, instance_shown[i] != 0,
-				instance_drivers[i], tree.value_or(kNoSceneTree) });
-		if (tree && plan_mesh_of[inst.mesh] != UINT32_MAX) {
-			plan.requests[plan.meshes[plan_mesh_of[inst.mesh]].request].request.own_skeleton = true;
-		}
-	}
-	for (const std::string &f : plan.trees.failures) {
-		plan.failures.emplace_back("tree rig", f);
+		plan.instances.push_back(SceneInstancePlan{
+				plan_mesh_of[inst.mesh], inst.transform, instance_shown[i] != 0, instance_drivers[i] });
 	}
 
 	if (p_options.include_terrain) {

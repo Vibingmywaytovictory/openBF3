@@ -179,8 +179,6 @@ void Bf3LevelSession::shutdown() {
 			rs->free_rid(r);
 		}
 		other_instances_.clear();
-		UtilityFunctions::print(to_godot(trees_.describe()));
-		trees_.free_all();
 		upload_.free_all();
 		nav_draw_.free_all();
 	}
@@ -1114,8 +1112,6 @@ void Bf3LevelSession::_process(double p_delta) {
 
 		const Camera3D *camera = get_viewport() != nullptr ? get_viewport()->get_camera_3d() : nullptr;
 		look_.update(upload_, camera != nullptr ? camera->get_global_position() : Vector3());
-		trees_.update(upload_, look_.plan(), look_.frame() ? &*look_.frame() : nullptr,
-				camera != nullptr ? camera->get_global_position() : Vector3(), p_delta);
 		if (drawn_diagonal_ > 0.0f) {
 			const float view_distance = look_.view_distance(drawn_diagonal_);
 			if (view_distance != view_distance_) {

@@ -409,8 +409,3 @@ target_sources(bf3_godot PRIVATE
     src/logic_placements.cpp
     src/logic_placements.h
 )
-
-target_sources(bf3_godot PRIVATE
-    src/tree_bridge.cpp
-    src/tree_bridge.h
-)
