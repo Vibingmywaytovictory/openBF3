@@ -1195,13 +1195,26 @@ TEST_SUITE("audio-patch") {
 		CHECK(inst->value(gs[2].s) == 1.0f);
 		CHECK(inst->value(gs[0].s) == 0.0f);
 
+		inst->set_parameter(1, 10);
+		inst->evaluate(0.0);
+		CHECK(inst->value(gs[1].s) == 1.0f);
+		CHECK(inst->value(gs[2].e) == 1.0f);
+		CHECK(inst->value(gs[0].s) == 0.0f);
+		CHECK(inst->value(gs[0].e) == 0.0f);
 		inst->set_parameter(1, 400);
 		inst->evaluate(0.0);
+		CHECK(inst->value(gs[1].e) == 1.0f);
+		CHECK(inst->value(gs[2].s) == 0.0f);
 		CHECK(inst->crossfader_group_amplitude(gate, 0) == 1.0f);
+		CHECK(inst->value(gate_start) == 0.0f);
 		inst->post_event(3, 0);
 		inst->evaluate(0.0);
 		CHECK(inst->value(gate_stop) == 1.0f);
-		CHECK(inst->value(gs[2].e) == 1.0f);
+		CHECK(inst->value(gs[1].e) == 0.0f);
+		CHECK(inst->value(gs[2].e) == 0.0f);
+		inst->set_parameter(1, 10);
+		inst->evaluate(0.0);
+		CHECK(inst->value(gs[1].s) == 0.0f);
 	}
 
 	TEST_CASE("Sampler: stepped steps on their frames on alternating slots, Delay latched, Release plays the tail") {

@@ -140,18 +140,26 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 					GroupState &gs = groups[child_index(n, g)];
 					gs.amplitude = finite_or_zero(amp);
 					write(port(e, cp::GroupAmplitude), gs.amplitude);
+					const float lower = g > 0 ? flt(child(n, g - 1), cp::GroupFadeBegin) : -1.0e7f;
+					const bool in_range = lower < control && control < flt(e, cp::GroupFadeEnd);
 					bool start_out = false, stop_out = false;
-					if (start && gs.amplitude > 0.0f) {
+					if (start && in_range) {
 						start_out = true;
 						gs.started = true;
+					} else if (!start && !lock && in_range != gs.in_range) {
+						start_out = in_range && s.pulse != 0;
+						stop_out = !in_range;
+						gs.started = start_out;
 					}
-					if (stop && (gs.amplitude > 0.0f || gs.started)) {
+					gs.in_range = in_range;
+					if (stop && gs.started) {
 						stop_out = true;
 						gs.started = false;
 					}
 					write(port(e, cp::GroupStart), start_out ? 1.0f : 0.0f);
 					write(port(e, cp::GroupStop), stop_out ? 1.0f : 0.0f);
 				}
+				s.pulse = stop ? 0 : (start ? 1 : s.pulse);
 				break;
 			}
 			case SoundNodeType::Adsr: {

@@ -1122,6 +1122,43 @@ TEST_SUITE("audio-vehicles-inputs") {
 		check_unchanged(*f);
 	}
 
+	TEST_CASE("R5-AU1 Rule 1: a Growler engine started with the listener 2 km away is heard once the listener comes to "
+			  "10 m, its unlocked distance crossfader groups starting as they come into range") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/growleritv/growleritv");
+		REQUIRE(kind.has_value());
+		const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
+		REQUIRE(spawner.has_value());
+		const auto heard = [&](float p_start_m) {
+			DriveRig rig(*f);
+			host::PresentedVehicle v = parked(*f->level, *spawner);
+			v.occupants[0] = 3;
+			ba::VehicleListenerView view;
+			view.own_slot = 7;
+			view.listener.position = core::vec::add(v.com_position, core::Vec3{ p_start_m, 0.0f, 0.0f });
+			for (int i = 0; i < 30; ++i) {
+				rig.frame(*f, v, view);
+			}
+			view.listener.position = core::vec::add(v.com_position, core::Vec3{ 10.0f, 0.0f, 0.0f });
+			for (int i = 0; i < 90; ++i) {
+				rig.frame(*f, v, view);
+			}
+			CHECK(rig.audio->stats().starts == 1);
+			float peak = 0.0f;
+			for (size_t s = size_t(ba::kMixRate) * 2; s < rig.tap.mix.size(); ++s) {
+				peak = std::max(peak, std::fabs(rig.tap.mix[s]));
+			}
+			std::printf("Growler idle started with the listener %.0f m away, then heard at 10 m: peak %.4f, %.1f dB\n",
+					double(p_start_m), double(peak), rig.rms(1.0, 1.5));
+			return peak;
+		};
+		CHECK(heard(10.0f) > ba::kAudibleStep);
+		CHECK(heard(2000.0f) > ba::kAudibleStep);
+	}
+
 	TEST_CASE("the M1A2 engine patch's DeltaGroup reads 0.4 the update SpringCompression steps from 0.2 to 0.6") {
 		VehicleFixture *f = need_install();
 		if (f == nullptr) {

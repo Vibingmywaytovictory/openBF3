@@ -50,6 +50,7 @@ struct GroupState {
 	float previous = 0.0f;
 	bool started = false;
 	bool primed = false;
+	bool in_range = false;
 };
 
 struct SlotPlay {
