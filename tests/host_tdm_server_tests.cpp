@@ -9113,7 +9113,8 @@ float hull_half_width(const sim::VehicleModel &p_model) {
 
 std::vector<DriveTry> drive_every_vehicle(const tdm::TdmLevel &p_level, const char *p_mode, uint64_t p_seed) {
 	const host::LevelVehicles &lv = *p_level.shared->vehicles;
-	std::unique_ptr<Match> m = start_match(p_level, false, p_seed, 0, 1);
+	std::unique_ptr<Match> m = start_match(p_level, false, p_seed, 0, 1,
+			[](host::GameServerConfig &r_config) { r_config.rules.conquest.deserting_allowed = true; });
 	tdm::ScriptedPeer &p = m->join("driver");
 	p.ready();
 	REQUIRE(wait_in_round(*m));
