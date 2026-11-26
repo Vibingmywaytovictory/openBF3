@@ -46,6 +46,12 @@ struct VehicleAim {
 	bool held() const { return id != 0; }
 };
 
+struct SeenVehicle {
+	sim::Vec3 centre{};
+	std::array<uint8_t, sim::vehicles::kMaxVehicleTargetCrew> crew{};
+	uint8_t crew_count = 0;
+};
+
 ai::WeaponType weapon_type(const Gunplay &p_gunplay, uint16_t p_def);
 const ai::WeaponTemplate &slot_template(const TdmShared &p_shared, const BotArms &p_arms, uint8_t p_slot);
 float weapon_range(const TdmShared &p_shared, const BotArms &p_arms, uint8_t p_slot);
@@ -71,6 +77,7 @@ public:
 	bool sense_repair(TdmShared &r_shared, const BotArms &p_arms, const VehicleCheck &p_check);
 
 	const VehicleAim &enemy() const { return enemy_; }
+	std::optional<SeenVehicle> sensed_enemy(const TdmShared &p_shared) const;
 	const VehicleAim &repair() const { return repair_; }
 	ExplosivePhase phase() const { return phase_; }
 

@@ -137,10 +137,22 @@ std::vector<ai::ChangeSensed> change_known(const TdmShared &p_shared, const Serv
 }
 
 std::vector<ai::ChangeSensed> change_sensed(const TdmShared &p_shared, const ServerVehicles &p_vehicles,
-		std::span<const ai::ChangeVehicle> p_scene, const sim::bots::Perception &p_perception) {
+		std::span<const ai::ChangeVehicle> p_scene, const sim::bots::Perception &p_perception,
+		const std::optional<tdm_bot::SeenVehicle> &p_vehicle) {
 	std::vector<ai::ChangeSensed> out;
 	for (const sim::bots::PerceivedEnemy &e : p_perception.enemies()) {
 		out.push_back(sensed_row(p_shared, p_vehicles, p_scene, e.slot, e.last_position));
+	}
+	if (!p_vehicle || p_vehicle->crew_count == 0) {
+		return out;
+	}
+	const std::span<const uint8_t> crew(p_vehicle->crew.data(), p_vehicle->crew_count);
+	const bool perceived = std::any_of(p_perception.enemies().begin(), p_perception.enemies().end(),
+			[&](const sim::bots::PerceivedEnemy &p_enemy) {
+				return std::find(crew.begin(), crew.end(), p_enemy.slot) != crew.end();
+			});
+	if (!perceived) {
+		out.push_back(sensed_row(p_shared, p_vehicles, p_scene, crew.front(), p_vehicle->centre));
 	}
 	return out;
 }
@@ -334,14 +346,15 @@ void BotCrew::book(TdmShared &r_shared, uint8_t p_slot, std::optional<ai::Change
 }
 
 ai::ChangeChoice BotCrew::evaluate(TdmShared &r_shared, uint8_t p_slot, uint32_t p_bot_id,
-		const sim::SoldierState &p_state, bool p_stuck, const sim::bots::Perception &p_perception) {
+		const sim::SoldierState &p_state, bool p_stuck, const sim::bots::Perception &p_perception,
+		const std::optional<tdm_bot::SeenVehicle> &p_vehicle) {
 	evaluated_.reset();
 	const ServerVehicles *const vehicles = r_shared.host.view->server_vehicles();
 	if (vehicles == nullptr || !vehicles->on()) {
 		return {};
 	}
 	const std::vector<ai::ChangeVehicle> scene = change_vehicles(r_shared, *vehicles, p_slot, true);
-	const std::vector<ai::ChangeSensed> sensed = change_sensed(r_shared, *vehicles, scene, p_perception);
+	const std::vector<ai::ChangeSensed> sensed = change_sensed(r_shared, *vehicles, scene, p_perception, p_vehicle);
 	ai::ChangeBot bot = change_bot(r_shared, *vehicles, p_slot, p_state, p_stuck);
 	const std::vector<ai::ChangeSensed> known = change_known(r_shared, *vehicles, scene, bot.side);
 	const std::vector<ai::Vec3> neighbours = neighbour_offsets(r_shared, bot.side, p_bot_id);

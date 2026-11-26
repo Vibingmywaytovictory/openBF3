@@ -178,6 +178,20 @@ void BotVehicleWeapons::new_life() {
 	detonate_at_ = 0;
 }
 
+std::optional<SeenVehicle> BotVehicleWeapons::sensed_enemy(const TdmShared &p_shared) const {
+	const sim::vehicles::VehicleTarget *v = enemy_.held() ? find_vehicle(p_shared, enemy_.id) : nullptr;
+	if (v == nullptr) {
+		return std::nullopt;
+	}
+	SeenVehicle s;
+	s.centre = v->target.bound_center;
+	s.crew_count = v->crew_count;
+	for (uint8_t k = 0; k < v->crew_count; ++k) {
+		s.crew[k] = uint8_t(v->crew[k]);
+	}
+	return s;
+}
+
 bool BotVehicleWeapons::sense(TdmShared &r_shared, const BotArms &p_arms, const VehicleCheck &p_check) {
 	TdmShared &sh = r_shared;
 	const Gunplay *g = sh.host.gunplay;
