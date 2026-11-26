@@ -883,8 +883,7 @@ TEST_SUITE("sim-vehicle-unit") {
 		std::vector<int32_t> gears{ before.driver.gearbox.gear };
 		bool reversed = false;
 		float slowest = forward_speed_of(before);
-		const float braking_from = forward_speed_of(before);
-		float later_forward = -INFINITY;
+		float first_tick_gain = 0.0f;
 		for (t = 0; t < 900 && forward_speed_of(before) > -2.0f; ++t) {
 			step1(*w, back);
 			const VehicleState after = w->state(0);
@@ -894,8 +893,10 @@ TEST_SUITE("sim-vehicle-unit") {
 				CHECK(g == gears[gears.size() - 2] - 1);
 			}
 			if (g > 0) {
-				if (t >= kSimHz / 2) {
-					later_forward = std::max(later_forward, forward_speed_of(after));
+				if (t == 0) {
+					first_tick_gain = forward_speed_of(after) - forward_speed_of(before);
+				} else {
+					CHECK(forward_speed_of(after) <= forward_speed_of(before) + 0.01f);
 				}
 				CHECK(after.driver.reversing == 0);
 			}
@@ -913,9 +914,11 @@ TEST_SUITE("sim-vehicle-unit") {
 		for (const int32_t g : gears) {
 			sequence += std::to_string(g) + " ";
 		}
-		std::printf("drive: the back pedal took gears %sand the jeep to %.2f m/s along its heading in %.2f s\n",
-				sequence.c_str(), double(forward_speed_of(before)), double(float(t) / 60.0f));
-		CHECK(later_forward < braking_from);
+		std::printf(
+				"drive: the back pedal took gears %sand the jeep to %.2f m/s along its heading in %.2f s; its first "
+				"tick, whose tyre forces come from the slips sampled before the brakes act, changed the speed by "
+				"%+.3f m/s\n",
+				sequence.c_str(), double(forward_speed_of(before)), double(float(t) / 60.0f), double(first_tick_gain));
 		CHECK(reversed);
 		CHECK(gears.back() == -1);
 		CHECK(std::find(gears.begin(), gears.end(), 0) != gears.end());
@@ -1724,6 +1727,48 @@ struct HandlingModels {
 	std::shared_ptr<const VehicleModel> m1a2, growler, t90, lav_ad, bmp2, lav25, buggy;
 };
 
+float driven_wheels_rpm(const VehicleModel &p_model, const VehicleState &p_state) {
+	const LandDriveModel &land = p_model.land;
+	const float ratio = land_gear_ratio(land, p_state.driver.gearbox.gear);
+	float sum = 0.0f;
+	uint32_t driven = 0;
+	for (size_t i = 0; i < p_model.wheel_count; ++i) {
+		if (p_model.wheels[i].driven != 0) {
+			sum += vehicles::wheel_rpm(std::span<const float>(&p_state.wheels[i].angular_velocity, 1), ratio,
+					p_model.wheels[i].diff_gear_ratio, land.transmission_efficiency);
+			++driven;
+		}
+	}
+	return std::min(driven > 0 ? sum / float(driven) : 0.0f, land.engine.rpm_max);
+}
+
+struct GovernedRun {
+	float top = 0.0f;
+	float last = 0.0f;
+	uint32_t over = 0;
+	uint32_t gaining_with_engine_caught_up = 0;
+};
+
+GovernedRun full_throttle_on_flat(const std::shared_ptr<const StaticWorldShapes> &p_flat,
+		const std::shared_ptr<const VehicleModel> &p_model, float p_governed) {
+	std::unique_ptr<VehicleWorld> run = world_at(p_flat, p_model, placed(0, 0, -300));
+	settle(*run);
+	GovernedRun out;
+	for (uint32_t t = 0; t < 30 * kSimHz; ++t) {
+		step1(*run, command(127, 0, 0));
+		const VehicleState s = run->state(0);
+		const float previous = out.last;
+		out.last = std::hypot(s.body.linear_velocity[0], s.body.linear_velocity[2]) * vehicles::kKmhPerMs;
+		out.top = std::max(out.top, out.last);
+		if (out.last > p_governed) {
+			++out.over;
+			const bool caught_up = s.driver.engine_rpm + 1.0f >= driven_wheels_rpm(*p_model, s);
+			out.gaining_with_engine_caught_up += caught_up && out.last > previous ? 1u : 0u;
+		}
+	}
+	return out;
+}
+
 HandlingModels *handling_models() {
 	static std::unique_ptr<HandlingModels> s_models;
 	static bool s_tried = false;
@@ -1905,28 +1950,64 @@ TEST_SUITE("sim-vehicle-handling") {
 				CHECK((tank->wheels[i].side == 0 ? term >= 0.0f : term <= 0.0f));
 			}
 			CHECK(turn < -10.0f * core::kDegToRadF);
-			if (tank->center_of_mass_handling_offset == Vec3{}) {
-				CHECK(drift < 1.5f);
+			std::shared_ptr<VehicleModel> levelled = std::make_shared<VehicleModel>(*tank);
+			float mount_difference = 0.0f;
+			for (size_t i = 0; i < levelled->wheel_count; ++i) {
+				VehicleWheelModel &left = levelled->wheels[i];
+				const VehicleWheelModel *right = nullptr;
+				for (size_t j = 0; j < levelled->wheel_count && left.side == 1; ++j) {
+					const VehicleWheelModel &o = levelled->wheels[j];
+					if (o.side == 0 &&
+							(right == nullptr ||
+									std::fabs(o.data_centre[2] - left.data_centre[2]) <
+											std::fabs(right->data_centre[2] - left.data_centre[2]))) {
+						right = &o;
+					}
+				}
+				if (right != nullptr) {
+					const float dy = right->data_centre[1] - left.data_centre[1];
+					mount_difference = std::max(mount_difference, std::fabs(dy));
+					left.data_centre[1] += dy;
+					left.attachment[1] += dy;
+				}
 			}
+			std::unique_ptr<VehicleWorld> twin = world_at(flat, levelled, placed(0, 0, -300));
+			settle(*twin);
+			const VehicleState twin_rest = twin->state(0);
+			for (uint32_t t = 0; t < 4 * kSimHz; ++t) {
+				step1(*twin, command(0, 0, 127));
+			}
+			const VehicleState twin_turned = twin->state(0);
+			const float levelled_drift = std::hypot(twin_turned.body.origin[0] - twin_rest.body.origin[0],
+					twin_turned.body.origin[2] - twin_rest.body.origin[2]);
+			std::printf("sim.vehicle.handling: %s pivot with each left wheel mounted at its right twin's height (the "
+						"data's mounts differ by up to %.3f m): drift %.2f m\n",
+					tank->blueprint.c_str(), double(mount_difference), double(levelled_drift));
+			CHECK(levelled_drift < 1.5f);
 		}
 
 		for (const std::shared_ptr<const VehicleModel> &model : { h->m1a2, h->t90 }) {
-			std::unique_ptr<VehicleWorld> run = world_at(flat, model, placed(0, 0, -300));
-			settle(*run);
-			float top = 0.0f, last = 0.0f;
-			for (uint32_t t = 0; t < 30 * kSimHz; ++t) {
-				step1(*run, command(127, 0, 0));
-				const Vec3 &v = run->state(0).body.linear_velocity;
-				last = std::hypot(v[0], v[2]) * vehicles::kKmhPerMs;
-				top = std::max(top, last);
-			}
 			const float governed = land_balance_speed_kmh(*model);
-			std::printf("sim.vehicle.handling: %s full throttle 30 s on flat ground: top %.1f km/h, %.1f km/h at 30 s, "
-						"drive meets TransmissionLoss and rolling resistance at %.1f km/h\n",
-					model->blueprint.c_str(), double(top), double(last), double(governed));
+			const GovernedRun run = full_throttle_on_flat(flat, model, governed);
+			std::printf(
+					"sim.vehicle.handling: %s full throttle 30 s on flat ground: top %.1f km/h, %.1f km/h at 30 s, "
+					"drive meets TransmissionLoss and rolling resistance at %.1f km/h; above it on %u ticks, gaining "
+					"speed on %u of them with the engine rpm caught up with its driven wheels'\n",
+					model->blueprint.c_str(), double(run.top), double(run.last), double(governed), run.over,
+					run.gaining_with_engine_caught_up);
 			CHECK(model->land.transmission_loss_points > 0);
-			CHECK(top > 5.0f);
-			CHECK(last <= governed);
+			CHECK(run.top > 5.0f);
+			CHECK(run.gaining_with_engine_caught_up == 0u);
+			CHECK(run.last <= governed);
+			std::shared_ptr<VehicleModel> no_lag = std::make_shared<VehicleModel>(*model);
+			no_lag->land.engine.internal_acceleration = float(kSimHz);
+			const GovernedRun prompt = full_throttle_on_flat(flat, no_lag, governed);
+			std::printf(
+					"sim.vehicle.handling: %s with InternalAccelerationFactor %.0f (the engine rpm reaches its target "
+					"in one tick): top %.1f km/h, %.1f km/h at 30 s\n",
+					model->blueprint.c_str(), double(no_lag->land.engine.internal_acceleration), double(prompt.top),
+					double(prompt.last));
+			CHECK(prompt.top <= governed);
 		}
 		const core::SnapshotDiff diff = core::diff_snapshots(h->before, h->reader->snapshot());
 		CHECK(diff.clean());
@@ -1980,21 +2061,17 @@ TEST_SUITE("sim-vehicle-handling") {
 					model->blueprint.c_str(), steering, double(lock));
 			CHECK((steering > 0) == (model == h->lav25));
 
-			std::unique_ptr<VehicleWorld> run = world_at(flat, model, placed(0, 0, -300));
-			settle(*run);
-			float top = 0.0f, last = 0.0f;
-			for (uint32_t t = 0; t < 30 * kSimHz; ++t) {
-				step1(*run, command(127, 0, 0));
-				const Vec3 &v = run->state(0).body.linear_velocity;
-				last = std::hypot(v[0], v[2]) * vehicles::kKmhPerMs;
-				top = std::max(top, last);
-			}
 			const float governed = land_balance_speed_kmh(*model);
-			std::printf("sim.vehicle.handling: %s full throttle 30 s on flat ground: top %.1f km/h, %.1f km/h at 30 s, "
-						"drive meets TransmissionLoss and rolling resistance at %.1f km/h\n",
-					model->blueprint.c_str(), double(top), double(last), double(governed));
-			CHECK(top > 5.0f);
-			CHECK(last <= governed);
+			const GovernedRun run = full_throttle_on_flat(flat, model, governed);
+			std::printf(
+					"sim.vehicle.handling: %s full throttle 30 s on flat ground: top %.1f km/h, %.1f km/h at 30 s, "
+					"drive meets TransmissionLoss and rolling resistance at %.1f km/h; above it on %u ticks, gaining "
+					"speed on %u of them with the engine rpm caught up with its driven wheels'\n",
+					model->blueprint.c_str(), double(run.top), double(run.last), double(governed), run.over,
+					run.gaining_with_engine_caught_up);
+			CHECK(run.top > 5.0f);
+			CHECK(run.gaining_with_engine_caught_up == 0u);
+			CHECK(run.last <= governed);
 		}
 	}
 

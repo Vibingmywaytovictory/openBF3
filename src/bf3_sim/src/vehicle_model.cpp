@@ -174,16 +174,6 @@ float land_balance_speed_kmh(const VehicleModel &p_model) {
 	const std::span<const float> rpm_points(land.rpm_points.data(), land.curve_points);
 	const std::span<const float> torque_points(land.torque_points.data(), land.curve_points);
 	const std::span<const vehicles::CurvePoint> loss(land.transmission_loss.data(), land.transmission_loss_points);
-	const auto torque_from = [&](float p_rpm) {
-		float most = std::max(vehicles::torque_curve_at(p_rpm, rpm_points, torque_points),
-				vehicles::torque_curve_at(land.engine.rpm_max, rpm_points, torque_points));
-		for (size_t i = 0; i < rpm_points.size(); ++i) {
-			if (rpm_points[i] >= p_rpm && rpm_points[i] <= land.engine.rpm_max) {
-				most = std::max(most, torque_points[i]);
-			}
-		}
-		return most * land.power_multiplier;
-	};
 	for (uint32_t step = 1; step < kBalanceSpeedSteps; ++step) {
 		const float kmh = float(step) * kBalanceSpeedStepKmh;
 		int32_t gear = land.forward_gears;
@@ -196,9 +186,10 @@ float land_balance_speed_kmh(const VehicleModel &p_model) {
 		const float ratio = land_gear_ratio(land, gear);
 		const float v = kmh / vehicles::kKmhPerMs;
 		const float spin = v / w->radius;
-		const float torque = torque_from(std::min(vehicles::wheel_rpm(std::span<const float>(&spin, 1), ratio,
-														  w->diff_gear_ratio, land.transmission_efficiency),
-				land.engine.rpm_max));
+		const float rpm = std::min(vehicles::wheel_rpm(std::span<const float>(&spin, 1), ratio, w->diff_gear_ratio,
+										   land.transmission_efficiency),
+				land.engine.rpm_max);
+		const float torque = vehicles::torque_curve_at(rpm, rpm_points, torque_points) * land.power_multiplier;
 		const float drive = w->track_steer != 0
 				? vehicles::track_forward_term(torque, ratio)
 				: vehicles::wheel_drive_torque(torque, ratio, w->diff_gear_ratio, land.transmission_efficiency, 1.0f);
