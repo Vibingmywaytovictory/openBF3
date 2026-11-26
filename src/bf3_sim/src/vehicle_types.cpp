@@ -52,10 +52,23 @@ bool visit_fields(State &p_state, const Visit &p_visit) {
 			!p_visit(std::string("driver.reversing"), &d.reversing, sizeof(d.reversing)) ||
 			!p_visit(std::string("driver.engine_rpm"), &d.engine_rpm, sizeof(d.engine_rpm)) ||
 			!p_visit(std::string("driver.gearbox"), &d.gearbox, sizeof(d.gearbox)) ||
-			!p_visit(std::string("driver.track_steer"), d.track_steer.data(), sizeof(d.track_steer))) {
+			!p_visit(std::string("driver.substep_clock"), &d.substep_clock, sizeof(d.substep_clock)) ||
+			!p_visit(std::string("driver.stuck_seconds"), &d.stuck_seconds, sizeof(d.stuck_seconds))) {
 		return false;
 	}
 	const size_t wheels = p_state.wheel_count < kMaxVehicleWheels ? p_state.wheel_count : kMaxVehicleWheels;
+	for (size_t i = 0; i < wheels; ++i) {
+		auto &t = d.tyres[i];
+		const std::string prefix = "driver.tyres[" + std::to_string(i) + "].";
+		if (!p_visit(prefix + "slip_ratio_sum", &t.slip_ratio_sum, sizeof(t.slip_ratio_sum)) ||
+				!p_visit(prefix + "slip_angle_sum", &t.slip_angle_sum, sizeof(t.slip_angle_sum)) ||
+				!p_visit(prefix + "track_steer", &t.track_steer, sizeof(t.track_steer)) ||
+				!p_visit(prefix + "slip_ratio_samples", &t.slip_ratio_samples, sizeof(t.slip_ratio_samples)) ||
+				!p_visit(prefix + "slip_angle_samples", &t.slip_angle_samples, sizeof(t.slip_angle_samples)) ||
+				!p_visit(prefix + "grip", &t.grip, sizeof(t.grip))) {
+			return false;
+		}
+	}
 	for (size_t i = 0; i < wheels; ++i) {
 		auto &w = p_state.wheels[i];
 		const std::string prefix = "wheels[" + std::to_string(i) + "].";

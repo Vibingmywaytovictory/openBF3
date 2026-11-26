@@ -8,6 +8,8 @@ namespace bf3::sim {
 
 void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCommand &p_command);
 
+void land_wheel_pass(VehicleWorld::Impl &r_world, VehicleSlot p_slot);
+
 void land_motion_damping(VehicleWorld::Impl &r_world, VehicleSlot p_slot);
 
 void land_engine_update(VehicleWorld::Impl &r_world, VehicleSlot p_slot);

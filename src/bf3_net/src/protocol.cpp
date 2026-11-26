@@ -4,6 +4,7 @@
 #include "bf3/net/bit_stream.h"
 #include "bf3/net/weapons_wire.h"
 #include "bf3/sim/vault.h"
+#include "bf3/sim/vehicles/tyre_rules.h"
 #include "bf3/sim/vehicles/vehicle_targets.h"
 #include "bit_archive.h"
 #include "ghost_delta.h"
@@ -2120,11 +2121,20 @@ template <class A, MaybeConst<VehicleWire> W> void serialize(A &r_a, W &r_w) {
 	r_a.bits(d.gearbox.reverse_direction, 1);
 	r_a.f32(d.gearbox.clutch);
 	r_a.f32(d.gearbox.timer);
-	uint8_t track_steered = d.track_steer[0] != 0.0f || d.track_steer[1] != 0.0f ? 1 : 0;
-	r_a.bits(track_steered, 1);
-	if (track_steered != 0) {
-		r_a.f32(d.track_steer[0]);
-		r_a.f32(d.track_steer[1]);
+	r_a.bits(d.substep_clock, 2);
+	r_a.f32(d.stuck_seconds);
+	for (size_t i = 0; i < r_w.state.wheel_count && i < sim::kMaxVehicleWheels && r_a.ok(); ++i) {
+		auto &t = d.tyres[i];
+		uint8_t rolling = t == sim::VehicleTyreState{} ? 0 : 1;
+		r_a.bits(rolling, 1);
+		if (rolling != 0) {
+			r_a.f32(t.slip_ratio_sum);
+			r_a.f32(t.slip_angle_sum);
+			r_a.f32(t.track_steer);
+			r_a.bits(t.slip_ratio_samples, 3);
+			r_a.bits(t.slip_angle_samples, 2);
+			r_a.bits(t.grip, 2);
+		}
 	}
 	r_a.bits(r_w.turret_count, 5);
 	r_a.check("vehicle turret count out of range", [&] { return r_w.turret_count <= kMaxVehicleTurrets; });
@@ -2147,7 +2157,7 @@ template <class A, MaybeConst<VehicleWire> W> void serialize(A &r_a, W &r_w) {
 	r_a.check("vehicle state not finite", [&] {
 		bool finite = std::isfinite(d.steer_filter) && std::isfinite(d.throttle_filter) &&
 				std::isfinite(d.brake_filter) && std::isfinite(d.engine_rpm) && std::isfinite(d.gearbox.clutch) &&
-				std::isfinite(d.gearbox.timer) && std::isfinite(d.track_steer[0]) && std::isfinite(d.track_steer[1]);
+				std::isfinite(d.gearbox.timer) && std::isfinite(d.stuck_seconds) && d.substep_clock < 3;
 		for (size_t i = 0; i < 3; ++i) {
 			finite = finite && std::isfinite(b.com_position[i]) && std::isfinite(b.linear_velocity[i]) &&
 					std::isfinite(b.angular_velocity[i]);
@@ -2157,8 +2167,13 @@ template <class A, MaybeConst<VehicleWire> W> void serialize(A &r_a, W &r_w) {
 		}
 		for (size_t i = 0; i < r_w.state.wheel_count && i < sim::kMaxVehicleWheels; ++i) {
 			const auto &w = r_w.state.wheels[i];
+			const auto &t = d.tyres[i];
 			finite = finite && std::isfinite(w.angular_velocity) && std::isfinite(w.angle) &&
-					std::isfinite(w.suspension_length) && std::isfinite(w.steer_angle);
+					std::isfinite(w.suspension_length) && std::isfinite(w.steer_angle) &&
+					std::isfinite(t.slip_ratio_sum) && std::isfinite(t.slip_angle_sum) &&
+					std::isfinite(t.track_steer) && t.slip_ratio_samples <= sim::vehicles::kSlipRatioSamples &&
+					t.slip_angle_samples <= sim::vehicles::kSlipAngleSamples &&
+					t.grip <= uint8_t(sim::vehicles::TyreGrip::Slide);
 		}
 		return finite;
 	});

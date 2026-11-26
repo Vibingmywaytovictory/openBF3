@@ -1,6 +1,7 @@
 #include "land_model.h"
 
 #include "bf3/core/util/finite.h"
+#include "bf3/sim/vehicles/tyre_rules.h"
 
 #include <cmath>
 #include <string>
@@ -163,6 +164,20 @@ core::Status build_land_drive(const core::gameplay::VehicleDriveDef &p_def, Land
 	return core::Status::success();
 }
 
+bool land_tyres_valid(const VehicleDriverState &p_driver) {
+	if (p_driver.substep_clock >= 3 || !std::isfinite(p_driver.stuck_seconds) || p_driver.stuck_seconds < 0.0f) {
+		return false;
+	}
+	for (const VehicleTyreState &t : p_driver.tyres) {
+		if (!std::isfinite(t.slip_ratio_sum) || !std::isfinite(t.slip_angle_sum) || !std::isfinite(t.track_steer) ||
+				t.slip_ratio_samples > vehicles::kSlipRatioSamples ||
+				t.slip_angle_samples > vehicles::kSlipAngleSamples || t.grip > uint8_t(vehicles::TyreGrip::Slide)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool land_driver_state_valid(const VehicleModel &p_model, const VehicleDriverState &p_driver) {
 	const vehicles::GearboxState &g = p_driver.gearbox;
 	const uint8_t phase = uint8_t(g.phase);
@@ -173,7 +188,7 @@ bool land_driver_state_valid(const VehicleModel &p_model, const VehicleDriverSta
 			g.gear >= -int32_t(p_model.land.reverse_gears) && g.gear <= int32_t(p_model.land.forward_gears) &&
 			g.pending >= -1 && g.pending <= 1 && g.reverse_direction <= 1 && std::isfinite(g.clutch) &&
 			g.clutch >= 0.0f && g.clutch <= 1.0f && std::isfinite(g.timer) && g.timer >= -1.0f && g.timer <= 60.0f &&
-			std::isfinite(p_driver.track_steer[0]) && std::isfinite(p_driver.track_steer[1]);
+			land_tyres_valid(p_driver);
 }
 
 }

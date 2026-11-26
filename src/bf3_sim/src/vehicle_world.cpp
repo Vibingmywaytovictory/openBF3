@@ -129,6 +129,16 @@ uint64_t snapshot_hash(const std::vector<uint8_t> &p_jolt, const std::vector<Veh
 		h = fnv_bytes(h, &d.reversing, sizeof(d.reversing));
 		h = fnv_bytes(h, &d.engine_rpm, sizeof(d.engine_rpm));
 		h = fnv_bytes(h, &d.gearbox, sizeof(d.gearbox));
+		h = fnv_bytes(h, &d.substep_clock, sizeof(d.substep_clock));
+		h = fnv_bytes(h, &d.stuck_seconds, sizeof(d.stuck_seconds));
+		for (const VehicleTyreState &t : d.tyres) {
+			h = fnv_bytes(h, &t.slip_ratio_sum, sizeof(t.slip_ratio_sum));
+			h = fnv_bytes(h, &t.slip_angle_sum, sizeof(t.slip_angle_sum));
+			h = fnv_bytes(h, &t.track_steer, sizeof(t.track_steer));
+			h = fnv_bytes(h, &t.slip_ratio_samples, sizeof(t.slip_ratio_samples));
+			h = fnv_bytes(h, &t.slip_angle_samples, sizeof(t.slip_angle_samples));
+			h = fnv_bytes(h, &t.grip, sizeof(t.grip));
+		}
 	}
 	return h;
 }
@@ -455,7 +465,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 		wheel->mRadius = wm.radius;
 		wheel->mWidth = wm.width;
 		wheel->mInertia = wm.inertia;
-		wheel->mAngularDamping = wm.angular_damping;
+		wheel->mAngularDamping = 0.0f;
 		wheel->mMaxSteerAngle = 0.0f;
 		wheel->mMaxBrakeTorque = 0.0f;
 		wheel->mMaxHandBrakeTorque = 0.0f;
@@ -488,20 +498,24 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	v.constraint->SetVehicleCollisionTester(v.tester);
 
 	const float ground = w.options.tuning.ground_friction;
-	v.tyre_load_scale.fill(1.0f);
-	const std::array<float, kMaxVehicleWheels> *load_scale = &v.tyre_load_scale;
-	v.constraint->SetCombineFriction([ground, load_scale](JPH::uint p_wheel, float &r_longitudinal, float &r_lateral,
+	v.jolt_grip = 1.0f;
+	const float *grip = &v.jolt_grip;
+	v.constraint->SetCombineFriction([ground, grip](JPH::uint, float &r_longitudinal, float &r_lateral,
 											 const JPH::Body &p_body, const JPH::SubShapeID &) {
-		const float load = (*load_scale)[p_wheel];
 		if (p_body.IsStatic()) {
-			r_longitudinal *= ground * load;
-			r_lateral *= ground * load;
+			r_longitudinal *= ground * *grip;
+			r_lateral *= ground * *grip;
 			return;
 		}
 		const float f = p_body.GetFriction();
-		r_longitudinal = JPH::Sqrt(r_longitudinal * f) * load;
-		r_lateral = JPH::Sqrt(r_lateral * f) * load;
+		r_longitudinal = JPH::Sqrt(r_longitudinal * f) * *grip;
+		r_lateral = JPH::Sqrt(r_lateral * f) * *grip;
 	});
+	VehicleWorld::Impl *world = &w;
+	v.constraint->SetPostStepCallback(
+			[world, p_slot](JPH::VehicleConstraint &, const JPH::PhysicsStepListenerContext &) {
+				land_wheel_pass(*world, p_slot);
+			});
 	bi.AddBody(created->GetID(), JPH::EActivation::Activate);
 	w.system->AddConstraint(v.constraint);
 	w.system->AddStepListener(v.constraint);

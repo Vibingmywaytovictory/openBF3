@@ -9,6 +9,8 @@ namespace bf3::sim {
 
 core::Status build_land_drive(const core::gameplay::VehicleDriveDef &p_def, LandDriveModel &r_land);
 
+bool land_tyres_valid(const VehicleDriverState &p_driver);
+
 bool land_driver_state_valid(const VehicleModel &p_model, const VehicleDriverState &p_driver);
 
 }

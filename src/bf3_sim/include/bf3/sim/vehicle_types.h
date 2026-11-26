@@ -104,16 +104,29 @@ struct VehicleControllerState {
 	bool operator==(const VehicleControllerState &) const = default;
 };
 
+struct VehicleTyreState {
+	float slip_ratio_sum = 0;
+	float slip_angle_sum = 0;
+	float track_steer = 0;
+	uint8_t slip_ratio_samples = 0;
+	uint8_t slip_angle_samples = 0;
+	uint8_t grip = 0;
+	uint8_t reserved = 0;
+
+	bool operator==(const VehicleTyreState &) const = default;
+};
+
 struct VehicleDriverState {
 	float steer_filter = 0;
 	float throttle_filter = 0;
 	float brake_filter = 0;
 	uint16_t stand_still_ticks = 0;
 	uint8_t reversing = 0;
-	uint8_t reserved = 0;
+	uint8_t substep_clock = 0;
 	float engine_rpm = 0;
 	vehicles::GearboxState gearbox;
-	std::array<float, 2> track_steer{};
+	float stuck_seconds = 0;
+	std::array<VehicleTyreState, kMaxVehicleWheels> tyres{};
 
 	bool operator==(const VehicleDriverState &) const = default;
 };

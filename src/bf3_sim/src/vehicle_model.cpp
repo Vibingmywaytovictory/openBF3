@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <tuple>
 #include <type_traits>
 
 namespace bf3::sim {
@@ -51,6 +52,7 @@ uint64_t digest_of(const VehicleModel &p_m) {
 	d.add(p_m.gravity_factor);
 	d.add(p_m.center_of_mass);
 	d.add(p_m.inertia_modifier);
+	d.add(p_m.center_of_mass_handling_offset);
 	d.add(p_m.friction);
 	d.add(p_m.restitution);
 	d.add(p_m.linear_damping);
@@ -71,13 +73,25 @@ uint64_t digest_of(const VehicleModel &p_m) {
 		d.add(w.data_centre);
 		for (const float f : { w.radius, w.width, w.suspension_min, w.suspension_max, w.spring_constant,
 					 w.spring_damping, w.progressive_start, w.progressive_exponent, w.rest_compression, w.inertia,
-					 w.mass, w.angular_damping, w.brake_factor, w.hand_brake_factor, w.diff_gear_ratio, w.rolling_base,
-					 w.rolling_velocity_kmh }) {
+					 w.mass, w.brake_factor, w.hand_brake_factor, w.diff_gear_ratio, w.rolling_base,
+					 w.rolling_velocity_kmh, w.fx_torque_multiplier, w.longitudinal_force_max, w.lateral_force_max,
+					 w.lattitude_brake_scale, w.constant_spring_force_friction_scale, w.slope_grip_min,
+					 w.slope_grip_max, w.grip.angular_velocity_min_deg, w.grip.side_slip_angle_max_deg,
+					 w.grip.wheel_velocity_x_min_deg, w.grip.slip_ratio_max, w.tyre.lateral_pos_k, w.tyre.lateral_neg_k,
+					 w.tyre.longitudinal_pos_k, w.tyre.longitudinal_neg_k }) {
 			d.add(f);
 		}
 		for (const uint8_t b : { w.steers, w.driven, w.axle, w.side, w.track_steer, w.rolling_resistance,
-					 w.engine_brake, w.low_speed_auto_brake }) {
+					 w.engine_brake, w.low_speed_auto_brake, uint8_t(w.grip.always_grip),
+					 uint8_t(w.tyre.allowed_to_spin), w.longitude_scale_points, w.lattitude_scale_points }) {
 			d.add(b);
+		}
+		d.add(w.slope_grip_exponent);
+		for (size_t k = 0; k < w.longitude_scale_points; ++k) {
+			d.add(w.longitude_scale[k]);
+		}
+		for (size_t k = 0; k < w.lattitude_scale_points; ++k) {
+			d.add(w.lattitude_scale[k]);
 		}
 	}
 	const LandDriveModel &l = p_m.land;
@@ -101,7 +115,7 @@ uint64_t digest_of(const VehicleModel &p_m) {
 	for (const float f : { l.gear_change_time, l.gear_down_speed_factor, l.clutch_speed_factor,
 				 l.opposite_dir_gear_change_max_speed, l.opposite_dir_gear_change_time, l.transmission_efficiency,
 				 l.backward_throttle_limit, l.engine.rpm_min, l.engine.rpm_max, l.engine.internal_acceleration,
-				 l.engine.internal_deceleration, l.power_multiplier, l.wheel_torque_scale }) {
+				 l.engine.internal_deceleration, l.power_multiplier }) {
 		d.add(f);
 	}
 	d.add(l.rpm_points);
@@ -161,6 +175,16 @@ float land_balance_speed_kmh(const VehicleModel &p_model) {
 	const std::span<const float> rpm_points(land.rpm_points.data(), land.curve_points);
 	const std::span<const float> torque_points(land.torque_points.data(), land.curve_points);
 	const std::span<const vehicles::CurvePoint> loss(land.transmission_loss.data(), land.transmission_loss_points);
+	const auto torque_from = [&](float p_rpm) {
+		float most = std::max(vehicles::torque_curve_at(p_rpm, rpm_points, torque_points),
+				vehicles::torque_curve_at(land.engine.rpm_max, rpm_points, torque_points));
+		for (size_t i = 0; i < rpm_points.size(); ++i) {
+			if (rpm_points[i] >= p_rpm && rpm_points[i] <= land.engine.rpm_max) {
+				most = std::max(most, torque_points[i]);
+			}
+		}
+		return most * land.power_multiplier;
+	};
 	for (uint32_t step = 1; step < kBalanceSpeedSteps; ++step) {
 		const float kmh = float(step) * kBalanceSpeedStepKmh;
 		int32_t gear = land.forward_gears;
@@ -173,10 +197,9 @@ float land_balance_speed_kmh(const VehicleModel &p_model) {
 		const float ratio = land_gear_ratio(land, gear);
 		const float v = kmh / vehicles::kKmhPerMs;
 		const float spin = v / w->radius;
-		const float rpm = std::min(vehicles::wheel_rpm(std::span<const float>(&spin, 1), ratio, w->diff_gear_ratio,
-										   land.transmission_efficiency),
-				land.engine.rpm_max);
-		const float torque = vehicles::torque_curve_at(rpm, rpm_points, torque_points) * land.power_multiplier;
+		const float torque = torque_from(std::min(vehicles::wheel_rpm(std::span<const float>(&spin, 1), ratio,
+														  w->diff_gear_ratio, land.transmission_efficiency),
+				land.engine.rpm_max));
 		const float drive = w->track_steer != 0
 				? vehicles::track_forward_term(torque, ratio)
 				: vehicles::wheel_drive_torque(torque, ratio, w->diff_gear_ratio, land.transmission_efficiency, 1.0f);
@@ -224,8 +247,15 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	}
 	m->center_of_mass = { ch.center_of_mass[0], ch.center_of_mass[1], ch.center_of_mass[2] };
 	m->inertia_modifier = { ch.inertia_modifier[0], ch.inertia_modifier[1], ch.inertia_modifier[2] };
-	if (!finite(m->center_of_mass) || !finite(m->inertia_modifier)) {
-		return fail("non-finite centre of mass or inertia modifier");
+	m->center_of_mass_handling_offset = { ch.center_of_mass_handling_offset[0], ch.center_of_mass_handling_offset[1],
+		ch.center_of_mass_handling_offset[2] };
+	if (!finite(m->center_of_mass) || !finite(m->inertia_modifier) || !finite(m->center_of_mass_handling_offset)) {
+		return fail("non-finite centre of mass, handling offset or inertia modifier");
+	}
+	for (const float f : m->center_of_mass_handling_offset) {
+		if (std::fabs(f) > 50.0f) {
+			return fail("centre of mass handling offset outside 50 m");
+		}
 	}
 	for (const float f : m->inertia_modifier) {
 		if (!(f > 0.01f && f < 100.0f)) {
@@ -324,11 +354,58 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		w.attachment = { w.data_centre[0], w.data_centre[1] + (c.spring_length - w.rest_compression),
 			w.data_centre[2] };
 		w.mass = c.mass;
-		w.inertia = c.inertia[0] > 0.0f && finite(c.inertia[0]) && c.inertia[0] < 1000.0f ? c.inertia[0] : 0.5f * c.mass * c.radius * c.radius;
-		if (!(w.inertia > 0.0f)) {
-			w.inertia = 1.0f;
+		if (c.rotation_direction_index < 0 || c.rotation_direction_index > 2) {
+			return fail("wheel " + std::to_string(k) + " rotation direction index outside 0..2");
 		}
-		w.angular_damping = p_tuning.wheel_angular_damping;
+		w.inertia = c.inertia[size_t(c.rotation_direction_index)];
+		if (!finite(w.inertia) || !(w.inertia > 0.0f && w.inertia < 1000.0f)) {
+			return fail("wheel " + std::to_string(k) + " inertia outside 0..1000");
+		}
+		if (c.friction_method != 0) {
+			return fail("wheel " + std::to_string(k) + " friction method " + std::to_string(c.friction_method) +
+					" (only method 0 is read)");
+		}
+		w.fx_torque_multiplier = c.fx_torque_radius_multiplier;
+		w.longitudinal_force_max = c.longitudinal_friction_force_max_factor;
+		w.lateral_force_max = c.lateral_friction_force_max_factor;
+		w.lattitude_brake_scale = c.wheel_friction_lattitude_brake_scale;
+		w.constant_spring_force_friction_scale = c.constant_spring_force_friction_scale;
+		w.slope_grip_min = c.slope_grip_min_angle;
+		w.slope_grip_max = c.slope_grip_max_angle;
+		w.slope_grip_exponent = c.slope_grip_exponent;
+		w.grip = { c.angular_velocity_min_slip_condition, c.side_slip_angle_max_slip_condition,
+			c.wheel_velocity_x_min_slip_condition, c.wheel_slip_ratio_max_slip_condition, c.always_grip };
+		w.tyre = { c.lateral_pos_k, c.lateral_neg_k, c.longitudinal_pos_k, c.longitudinal_neg_k, c.is_allowed_to_spin };
+		const float tyre_numbers[] = { w.fx_torque_multiplier, w.longitudinal_force_max, w.lateral_force_max,
+			w.lattitude_brake_scale, w.constant_spring_force_friction_scale, w.slope_grip_min, w.slope_grip_max,
+			w.grip.angular_velocity_min_deg, w.grip.side_slip_angle_max_deg, w.grip.wheel_velocity_x_min_deg,
+			w.grip.slip_ratio_max, w.tyre.lateral_pos_k, w.tyre.lateral_neg_k, w.tyre.longitudinal_pos_k,
+			w.tyre.longitudinal_neg_k };
+		for (const float f : tyre_numbers) {
+			if (!finite(f) || std::fabs(f) > 1e7f) {
+				return fail("wheel " + std::to_string(k) + " tyre data outside 1e7");
+			}
+		}
+		if (w.slope_grip_exponent > 64) {
+			return fail("wheel " + std::to_string(k) + " slope grip exponent above 64");
+		}
+		for (const auto &[source, target, count] :
+				{ std::tuple{ &c.longitude_friction_scale, &w.longitude_scale, &w.longitude_scale_points },
+						std::tuple{ &c.lattitude_friction_scale, &w.lattitude_scale, &w.lattitude_scale_points } }) {
+			if (source->size() > kMaxModelCurvePoints) {
+				return fail("wheel " + std::to_string(k) + " friction scale curve has " +
+						std::to_string(source->size()) + " points (at most " + std::to_string(kMaxModelCurvePoints) +
+						")");
+			}
+			for (size_t i = 0; i < source->size(); ++i) {
+				if (!finite((*source)[i][0]) || !finite((*source)[i][1]) ||
+						(i > 0 && !((*source)[i][0] > (*source)[i - 1][0]))) {
+					return fail("wheel " + std::to_string(k) + " friction scale points not finite and ascending");
+				}
+				(*target)[i] = (*source)[i];
+			}
+			*count = uint8_t(source->size());
+		}
 		w.track_steer = vehicles::track_steer_wheel(c.steering_type, c.driving_type) ? 1 : 0;
 		w.steers = c.steering_type != 0 ? 1 : 0;
 		w.driven = c.driving_type != 0 ? 1 : 0;
@@ -415,7 +492,6 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	if (!land.ok()) {
 		return fail(land.error().message);
 	}
-	m->land.wheel_torque_scale = p_tuning.wheel_torque_scale;
 	for (size_t k = 0; k < m->wheel_count; ++k) {
 		const core::gameplay::WheelConfigDef &c = p_def.wheel_configs[p_def.wheels[physics_wheels[k]].config];
 		if (m->wheels[k].driven == 0 || c.transmission_loss.empty()) {

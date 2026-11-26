@@ -20,18 +20,16 @@ const Key kKeys[] = {
 	{ "gravity", KeyKind::Float, 0.01f, 100.0f, BF3_VEHICLE_FIELD(gravity) },
 	{ "ground_friction", KeyKind::Float, 0.0f, 10.0f, BF3_VEHICLE_FIELD(ground_friction) },
 	{ "suspension_min_fraction", KeyKind::Float, 0.0f, 0.9f, BF3_VEHICLE_FIELD(suspension_min_fraction) },
-	{ "wheel_angular_damping", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(wheel_angular_damping) },
 	{ "longitudinal_grip", KeyKind::Float, 0.0f, 10.0f, BF3_VEHICLE_FIELD(longitudinal_grip) },
 	{ "lateral_grip", KeyKind::Float, 0.0f, 10.0f, BF3_VEHICLE_FIELD(lateral_grip) },
 	{ "tester", KeyKind::Choice, 0, 0, BF3_VEHICLE_FIELD(tester), kTesters },
 	{ "max_pitch_roll_degrees", KeyKind::Float, 1.0f, 180.0f, BF3_VEHICLE_FIELD(max_pitch_roll_degrees) },
-	{ "wheel_torque_scale", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(wheel_torque_scale) },
 	{ "stand_still_speed", KeyKind::Float, 0.0f, 100.0f, BF3_VEHICLE_FIELD(stand_still_speed) },
 	{ "collision_steps", KeyKind::U32, 1, 8, BF3_VEHICLE_FIELD(collision_steps) },
 	{ "velocity_steps", KeyKind::U32, 1, 128, BF3_VEHICLE_FIELD(velocity_steps) },
 	{ "position_steps", KeyKind::U32, 0, 128, BF3_VEHICLE_FIELD(position_steps) },
 };
-static_assert(std::size(kKeys) == 13);
+static_assert(std::size(kKeys) == 11);
 
 #undef BF3_VEHICLE_FIELD
 

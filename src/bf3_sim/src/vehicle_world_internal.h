@@ -95,6 +95,11 @@ struct VehicleWorld::Impl {
 	std::unique_ptr<JPH::PhysicsSystem> system;
 	std::vector<JPH::BodyID> statics;
 
+	struct LandTick {
+		float engine_torque = 0, gear_ratio = 0, throttle = 0, yaw = 0, brake = 0, hand_brake = 0;
+		bool hold = true;
+	};
+
 	struct Vehicle {
 		bool used = false;
 		std::shared_ptr<const VehicleModel> model;
@@ -103,7 +108,8 @@ struct VehicleWorld::Impl {
 		JPH::RefConst<JPH::VehicleCollisionTester> tester;
 		VehicleDriverState driver;
 		std::vector<JPH::WheelSettingsWV *> wheel_settings;
-		std::array<float, kMaxVehicleWheels> tyre_load_scale{};
+		float jolt_grip = 1;
+		LandTick tick;
 	};
 	std::vector<Vehicle> vehicles;
 	std::vector<VehicleContacts> contacts;

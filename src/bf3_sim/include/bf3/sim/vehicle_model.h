@@ -5,6 +5,7 @@
 #include "bf3/sim/vehicle_types.h"
 #include "bf3/sim/vehicles/chassis_rules.h"
 #include "bf3/sim/vehicles/land_rules.h"
+#include "bf3/sim/vehicles/tyre_rules.h"
 
 #include <array>
 #include <cstddef>
@@ -47,14 +48,12 @@ struct VehicleTuning {
 
 	float suspension_min_fraction = 0.1f;
 
-	float wheel_angular_damping = 0.2f;
 	float longitudinal_grip = 1.0f;
 	float lateral_grip = 1.0f;
 	WheelCollisionTester tester = WheelCollisionTester::Cylinder;
 
 	float max_pitch_roll_degrees = 180.0f;
 
-	float wheel_torque_scale = 10.0f;
 	float stand_still_speed = 0.5f;
 
 	uint32_t collision_steps = 1;
@@ -93,7 +92,6 @@ struct LandDriveModel {
 	std::array<float, kMaxModelCurvePoints> rpm_points{}, torque_points{};
 	uint8_t curve_points = 0;
 	float power_multiplier = 1;
-	float wheel_torque_scale = 1;
 	float track_forward_speed_limit = 0, track_turn_speed_limit = 0;
 	std::array<std::array<float, 2>, kMaxModelCurvePoints> transmission_loss{};
 	uint8_t transmission_loss_points = 0;
@@ -115,7 +113,6 @@ struct VehicleWheelModel {
 	float rest_compression = 0;
 	float inertia = 0;
 	float mass = 0;
-	float angular_damping = 0;
 	float brake_factor = 0, hand_brake_factor = 0;
 	float diff_gear_ratio = 0;
 	float rolling_base = 0, rolling_velocity_kmh = 0;
@@ -123,6 +120,16 @@ struct VehicleWheelModel {
 	uint8_t side = 0;
 	uint8_t track_steer = 0;
 	uint8_t rolling_resistance = 0, engine_brake = 0, low_speed_auto_brake = 0;
+	float fx_torque_multiplier = 1;
+	float longitudinal_force_max = 0, lateral_force_max = 0;
+	float lattitude_brake_scale = 1;
+	float constant_spring_force_friction_scale = 0;
+	float slope_grip_min = 0, slope_grip_max = 0;
+	int32_t slope_grip_exponent = 1;
+	vehicles::GripRule grip;
+	vehicles::TyreCurveRule tyre;
+	std::array<std::array<float, 2>, kMaxModelCurvePoints> longitude_scale{}, lattitude_scale{};
+	uint8_t longitude_scale_points = 0, lattitude_scale_points = 0;
 };
 
 struct VehicleModel {
@@ -132,6 +139,7 @@ struct VehicleModel {
 	float gravity_factor = 1;
 	Vec3 center_of_mass{};
 	Vec3 inertia_modifier{ 1, 1, 1 };
+	Vec3 center_of_mass_handling_offset{};
 	float friction = 0.5f, restitution = 0.4f;
 	float linear_damping = 0, angular_damping = 0;
 	std::vector<ChassisPiece> chassis;

@@ -2,6 +2,8 @@
 
 #include "bf3/sim/vehicles/chassis_rules.h"
 #include "bf3/sim/vehicles/land_rules.h"
+#include "bf3/sim/vehicles/land_wheel.h"
+#include "bf3/sim/vehicles/tyre_rules.h"
 #include "bf3/sim/vehicles/vehicle_input.h"
 #include "bf3/sim/vehicles/vehicle_spawning.h"
 
@@ -397,5 +399,334 @@ TEST_SUITE("sim-vehicle-rules-unit") {
 		const std::array<float, 2> airborne = anti_roll_loads(2000.0f, 0.0f, 10.0f);
 		CHECK(airborne[0] == doctest::Approx(12000.0f));
 		CHECK(airborne[1] == 0.0f);
+	}
+}
+
+namespace {
+
+constexpr float kM1a2Load = 5000.0f * 9.82f * 1.6f / 14.0f;
+constexpr float kGrowlerFrontLoad = 2782.0f;
+
+TyreCurveRule retail_tyre() {
+	return { 5.002381f, 0.053606f, 5.39649f, 0.176533f, false };
+}
+
+bf3::sim::VehicleModel m1a2_road_wheel() {
+	bf3::sim::VehicleModel m;
+	m.mass = 5000.0f;
+	m.wheel_count = 1;
+	m.wheel_list = 18;
+	bf3::sim::VehicleWheelModel &w = m.wheels[0];
+	w.radius = 0.4f;
+	w.width = 0.15f;
+	w.inertia = 2.0f;
+	w.mass = 35.0f;
+	w.diff_gear_ratio = 4.88f;
+	w.fx_torque_multiplier = 1.0f;
+	w.brake_factor = 0.125f;
+	w.hand_brake_factor = 25.0f;
+	w.rolling_base = 15.0f;
+	w.rolling_velocity_kmh = 150.0f;
+	w.rolling_resistance = 1;
+	w.engine_brake = 1;
+	w.low_speed_auto_brake = 1;
+	w.driven = 1;
+	w.track_steer = 1;
+	w.side = 1;
+	w.longitudinal_force_max = 10.0f;
+	w.lateral_force_max = 2.0f;
+	w.lattitude_brake_scale = 1.0f;
+	w.slope_grip_min = 40.0f;
+	w.slope_grip_max = 50.0f;
+	w.slope_grip_exponent = 1;
+	w.grip = { 2.85f, 13.75f, 50.0f, 0.125f, false };
+	w.tyre = retail_tyre();
+	bf3::sim::LandDriveModel &l = m.land;
+	const std::array<CurvePoint, 7> loss{ { { 0, 0 }, { 8, 7 }, { 32, 12 }, { 45, 35 }, { 50, 60 }, { 58, 100 },
+			{ 100, 100 } } };
+	for (size_t i = 0; i < loss.size(); ++i) {
+		l.transmission_loss[i] = loss[i];
+	}
+	l.transmission_loss_points = uint8_t(loss.size());
+	l.transmission_efficiency = 0.75f;
+	l.track_turn_speed_limit = 2.0f;
+	l.track_forward_speed_limit = 1.5f;
+	const std::array<CurvePoint, 5> inertia{ { { 0, 50 }, { 15, 50 }, { 22, 35 }, { 30, 18 }, { 50, 1 } } };
+	for (size_t i = 0; i < inertia.size(); ++i) {
+		l.steer_inertia[i] = inertia[i];
+	}
+	l.steer_inertia_points = uint8_t(inertia.size());
+	m.steer_sensitivity[0] = { 0.0f, 0.3f };
+	m.steer_sensitivity[1] = { 20.0f, 0.3f };
+	m.steer_sensitivity[2] = { 100.0f, 0.03f };
+	m.steer_points = 3;
+	return m;
+}
+
+bf3::sim::VehicleModel growler_front_wheel() {
+	bf3::sim::VehicleModel m;
+	m.mass = 800.0f;
+	m.wheel_count = 1;
+	m.wheel_list = 4;
+	bf3::sim::VehicleWheelModel &w = m.wheels[0];
+	w.radius = 0.4f;
+	w.width = 0.3f;
+	w.inertia = 2.5f;
+	w.mass = 12.0f;
+	w.diff_gear_ratio = 3.8f;
+	w.fx_torque_multiplier = 1.0f;
+	w.rolling_base = 15.0f;
+	w.rolling_velocity_kmh = 150.0f;
+	w.rolling_resistance = 1;
+	w.engine_brake = 1;
+	w.low_speed_auto_brake = 1;
+	w.driven = 1;
+	w.steers = 1;
+	w.longitudinal_force_max = 3.5f;
+	w.lateral_force_max = 5.0f;
+	w.lattitude_brake_scale = 1.0f;
+	w.slope_grip_min = 40.0f;
+	w.slope_grip_max = 90.0f;
+	w.slope_grip_exponent = 1;
+	w.grip = { 5700.0f, 5700.0f, 360.0f, 100.0f, false };
+	w.tyre = retail_tyre();
+	m.land.transmission_efficiency = 1.0f;
+	return m;
+}
+
+struct ReducedRun {
+	float drive = 0, resistance = 0, force = 0, spin = 0, slip_ratio = 0, hull = 0;
+};
+
+ReducedRun reduced_substep(const bf3::sim::VehicleModel &p_model, float p_load, uint32_t p_wheels,
+		float p_engine_torque, float p_gear_ratio, float p_yaw, float p_hull, bf3::sim::LandWheelState &r_state) {
+	bf3::sim::LandSubstep step;
+	step.dt = 1.0f / 90.0f;
+	step.engine_torque = p_engine_torque;
+	step.gear_ratio = p_gear_ratio;
+	step.throttle = p_engine_torque != 0.0f ? 1.0f : 0.0f;
+	step.yaw = p_yaw;
+	step.planar_speed = std::fabs(p_hull);
+	bf3::sim::LandWheelContact contact;
+	contact.grounded = true;
+	contact.load = p_load;
+	contact.longitudinal_speed = p_hull;
+	const bf3::sim::LandWheelDrive drive = bf3::sim::land_wheel_drive(p_model, 0, step, contact, r_state);
+	const bf3::sim::LandWheelForce force =
+			bf3::sim::land_wheel_apply(p_model, 0, step, contact, drive, bf3::sim::land_wheel_drives(drive), r_state);
+	ReducedRun out;
+	out.drive = drive.drive;
+	out.resistance = drive.resistance;
+	out.force = force.longitudinal;
+	out.spin = r_state.spin;
+	out.slip_ratio = slip_average_value(r_state.slip_ratio);
+	out.hull = p_hull + float(p_wheels) * force.longitudinal * step.dt / p_model.mass;
+	return out;
+}
+
+}
+
+TEST_SUITE("sim-vehicle-rules-unit") {
+	TEST_CASE("sim.vehicles.land_rules: FrictionMethod 0 (R6-G1-tyre vectors): load table, combined slip, blend, "
+			  "direction on the M1A2 road wheel and the Growler front wheel") {
+		const float m1a2 = tyre_load(kM1a2Load, 5000.0f, 0.0f, 1.0f, 10.0f, 1.0f);
+		CHECK(m1a2 == doctest::Approx(5611.4f).epsilon(1e-4));
+		CHECK(tyre_load(kM1a2Load, 5000.0f, 0.0f, 1.0f, 0.5f, 1.0f) == doctest::Approx(1402.9f).epsilon(1e-4));
+		CHECK(tyre_load(kM1a2Load, 5000.0f, 0.0f, 1.0f, 2.0f, 1.0f) == doctest::Approx(0.625f * 5611.4f).epsilon(1e-4));
+		CHECK(tyre_load(kM1a2Load, 5000.0f, 0.0f, 1.0f, 0.5f, 0.98f) == doctest::Approx(5611.4f).epsilon(1e-4));
+		const std::array<float, 4> p = tyre_peaks(1200.0f * m1a2 / 5000.0f);
+		CHECK(p[0] == doctest::Approx(0.36656f).epsilon(1e-4));
+		CHECK(p[1] == doctest::Approx(0.27887f).epsilon(1e-4));
+		CHECK(p[2] == doctest::Approx(1.02333f).epsilon(1e-4));
+		CHECK(p[3] == doctest::Approx(1.06180f).epsilon(1e-4));
+		const TyreCurveRule tyre = retail_tyre();
+		const float grip = 0.9f * 2.5f, slide = 0.9f * 1.875f;
+		const auto forces = [&](float p_kappa, float p_alpha, float p_mu, float p_load, float p_mass) {
+			return tyre_forces(tyre, p_kappa, p_alpha, p_load, p_mass, p_mu, p_mu, 10.0f, 0.0f);
+		};
+		TyreForces f = forces(0.1f, 0.0f, grip, m1a2, 5000.0f);
+		CHECK(f.longitudinal == doctest::Approx(8934.5f).epsilon(2e-4));
+		CHECK(f.lateral == 0.0f);
+		f = forces(0.0f, 0.1f, grip, m1a2, 5000.0f);
+		CHECK(f.longitudinal == 0.0f);
+		CHECK(f.lateral == doctest::Approx(9358.1f).epsilon(2e-4));
+		f = forces(0.2f, 0.1f, grip, m1a2, 5000.0f);
+		CHECK(f.longitudinal == doctest::Approx(10230.8f).epsilon(2e-4));
+		CHECK(f.lateral == doctest::Approx(5194.4f).epsilon(2e-4));
+		CHECK(forces(1.0f, 0.0f, grip, m1a2, 5000.0f).longitudinal == doctest::Approx(12478.6f).epsilon(2e-4));
+		f = forces(-0.1f, -0.05f, slide, m1a2, 5000.0f);
+		CHECK(f.longitudinal == doctest::Approx(-6229.7f).epsilon(2e-4));
+		CHECK(f.lateral == doctest::Approx(-3333.4f).epsilon(2e-4));
+
+		const std::array<float, 4> g = tyre_peaks(1200.0f * kGrowlerFrontLoad / 800.0f);
+		CHECK(g[0] == doctest::Approx(0.43680f).epsilon(1e-4));
+		CHECK(g[1] == doctest::Approx(0.32977f).epsilon(1e-4));
+		CHECK(g[2] == doctest::Approx(1.02836f).epsilon(1e-4));
+		CHECK(g[3] == doctest::Approx(1.07638f).epsilon(1e-4));
+		CHECK(forces(0.1f, 0.0f, grip, kGrowlerFrontLoad, 800.0f).longitudinal ==
+				doctest::Approx(4199.1f).epsilon(2e-4));
+		CHECK(forces(0.0f, 0.1f, grip, kGrowlerFrontLoad, 800.0f).lateral == doctest::Approx(4398.0f).epsilon(2e-4));
+		f = forces(0.2f, 0.1f, grip, kGrowlerFrontLoad, 800.0f);
+		CHECK(f.longitudinal == doctest::Approx(4943.9f).epsilon(2e-4));
+		CHECK(f.lateral == doctest::Approx(2535.0f).epsilon(2e-4));
+		f = forces(-0.1f, -0.05f, slide, kGrowlerFrontLoad, 800.0f);
+		CHECK(f.longitudinal == doctest::Approx(-2933.3f).epsilon(2e-4));
+		CHECK(f.lateral == doctest::Approx(-1591.0f).epsilon(2e-4));
+		CHECK(tyre_force_clamp(4199.1f, 3.5f, 800.0f) == doctest::Approx(2800.0f));
+		CHECK(tyre_force_clamp(-4199.1f, 3.5f, 800.0f) == doctest::Approx(-2800.0f));
+		CHECK(tyre_peaks(9600.0f)[0] == doctest::Approx(0.569186f + 100.0f * 0.0002f * 0.09402996f).epsilon(1e-5));
+	}
+
+	TEST_CASE("sim.vehicles.land_rules: slip inputs, the running average, the grip and slide states, friction scale "
+			  "curves and the lateral brake blend (R6-G1-tyre rules 1-3)") {
+		CHECK(slip_ratio_sample(1.0f, 0.4f, 0.0f) == doctest::Approx(0.04f));
+		CHECK(slip_ratio_sample(15.0f, 0.4f, 5.0f) == doctest::Approx(0.2f));
+		CHECK(slip_ratio_sample(1000.0f, 0.4f, 0.0f) == doctest::Approx(40.0f));
+		CHECK(slip_ratio_sample(9000.0f, 0.4f, 0.0f) == 200.0f);
+		CHECK(slip_angle_sample(1.0f, 1.0f) == doctest::Approx(0.0997f).epsilon(1e-3));
+		CHECK(slip_divisor(2.0f) == 10.0f);
+		CHECK(slip_divisor(-2.5f) == 2.5f);
+		SlipAverage a;
+		const float feed[] = { 1, 1, 1, 1, 1, 0 };
+		const float want[] = { 1, 1, 1, 1, 1, 0.8f };
+		for (size_t i = 0; i < 6; ++i) {
+			a = slip_average_push(a, feed[i], kSlipRatioSamples);
+			CHECK(slip_average_value(a) == doctest::Approx(want[i]));
+		}
+		CHECK(a.count == 5);
+		CHECK(slip_average_value(SlipAverage{}) == 0.0f);
+		CHECK(slip_average_push(a, std::nanf(""), kSlipRatioSamples).sum == a.sum);
+
+		const GripRule m1a2{ 2.85f, 13.75f, 50.0f, 0.125f, false };
+		CHECK(tyre_grip(m1a2, TyreGrip::Reset, kM1a2Load, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f).state == TyreGrip::Slide);
+		CHECK(tyre_grip(m1a2, TyreGrip::Reset, kM1a2Load, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f).friction ==
+				doctest::Approx(1.6875f));
+		CHECK(tyre_grip(m1a2, TyreGrip::Slide, kM1a2Load, 0.0f, 0.0f, 0.118f, 1.0f, 1.0f, 1.0f).state ==
+				TyreGrip::Grip);
+		CHECK(tyre_grip(m1a2, TyreGrip::Slide, kM1a2Load, 0.0f, 0.0f, 0.119f, 1.0f, 1.0f, 1.0f).state ==
+				TyreGrip::Slide);
+		const GripStep held = tyre_grip(m1a2, TyreGrip::Grip, kM1a2Load, 0.0f, 0.0f, 0.157f, 1.0f, 1.0f, 1.0f);
+		CHECK(held.state == TyreGrip::Grip);
+		CHECK(held.friction == doctest::Approx(2.25f));
+		CHECK(tyre_grip(m1a2, TyreGrip::Grip, kM1a2Load, 0.0f, 0.0f, 0.159f, 1.0f, 1.0f, 1.0f).state ==
+				TyreGrip::Slide);
+		CHECK(tyre_grip(m1a2, TyreGrip::Grip, kM1a2Load, 0.0f, 0.0f, 0.159f, 0.04f, 1.0f, 1.0f).state ==
+				TyreGrip::Grip);
+		CHECK(tyre_grip(m1a2, TyreGrip::Grip, kM1a2Load, 0.0f, 1.96f, 0.0f, 1.0f, 1.0f, 1.0f).state == TyreGrip::Grip);
+		CHECK(tyre_grip(m1a2, TyreGrip::Grip, kM1a2Load, 0.0f, 1.97f, 0.0f, 1.0f, 1.0f, 1.0f).state == TyreGrip::Slide);
+		const GripRule rear{ 2.85f, 13.75f, 0.18f, 0.125f, false };
+		CHECK(tyre_grip(rear, TyreGrip::Grip, 3699.0f, 0.0f, 0.0070f, 0.0f, 1.0f, 1.0f, 1.0f).state == TyreGrip::Grip);
+		CHECK(tyre_grip(rear, TyreGrip::Grip, 3699.0f, 0.0f, 0.0072f, 0.0f, 1.0f, 1.0f, 1.0f).state == TyreGrip::Slide);
+		const GripRule always{ 2.85f, 13.75f, 0.18f, 0.125f, true };
+		CHECK(tyre_grip(always, TyreGrip::Grip, 3699.0f, 1.0f, 5.0f, 5.0f, 1.0f, 1.0f, 1.0f).state == TyreGrip::Grip);
+
+		CHECK(friction_scale_at({}, 50.0f) == 1.0f);
+		const std::array<CurvePoint, 2> scale{ { { 10.0f, 1.0f }, { 50.0f, 0.5f } } };
+		CHECK(friction_scale_at(scale, 0.0f) == 1.0f);
+		CHECK(friction_scale_at(scale, 30.0f) == doctest::Approx(0.75f));
+		CHECK(friction_scale_at(scale, 90.0f) == 0.5f);
+		CHECK(tyre_lateral_brake_scale(1.0f, 3.5f, 0.4f) == doctest::Approx(0.4f));
+		CHECK(tyre_lateral_brake_scale(0.5f, 3.5f, 0.4f) == doctest::Approx(0.7f));
+		CHECK(tyre_lateral_brake_scale(1.0f, 2.9f, 0.4f) == 1.0f);
+		CHECK(spin_term_scale(1.0f) == doctest::Approx(1.4f));
+		CHECK(spin_term_scale(3.0f) == doctest::Approx(0.7f));
+		CHECK(spin_term_scale(5.0f) == 0.0f);
+		CHECK(stuck_seconds_step(1.0f, 63.0f, 0.6f, 0.5f) == doctest::Approx(1.5f));
+		CHECK(stuck_seconds_step(1.0f, 65.0f, 0.6f, 0.5f) == 0.0f);
+		CHECK(stuck_seconds_step(1.0f, 10.0f, 0.4f, 0.5f) == 0.0f);
+	}
+
+	TEST_CASE("sim.vehicles.land_rules: the apply step (R6-G1-apply): low-speed scaling, slope grip, the reaction "
+			  "torque over 16 x DiffGearRatio, the torque gate and the substep clock") {
+		CHECK(tyre_low_speed_scale(0.5f, 0.0f, 0.05f) == doctest::Approx(0.5f));
+		CHECK(tyre_low_speed_scale(0.5f, 1.0f, 0.05f) == 1.0f);
+		CHECK(tyre_low_speed_scale(0.5f, 0.0f, 0.2f) == 1.0f);
+		CHECK(tyre_low_speed_scale(1.5f, 0.0f, 0.0f) == 1.0f);
+		const float s45 = std::sin(45.0f * 3.14159265f / 180.0f);
+		CHECK(slope_grip_scale(s45, 40.0f, 50.0f, 1) == doctest::Approx(0.5f).epsilon(1e-4));
+		CHECK(slope_grip_scale(std::sin(0.8727f), 40.0f, 50.0f, 1) == doctest::Approx(0.0f).epsilon(1e-3));
+		CHECK(slope_grip_scale(s45, 40.0f, 90.0f, 1) == doctest::Approx(0.9f).epsilon(1e-4));
+		CHECK(slope_grip_scale(s45, 40.0f, 50.0f, 2) == doctest::Approx(0.25f).epsilon(1e-4));
+		CHECK(slope_grip_scale(s45, 40.0f, 50.0f, 0) == doctest::Approx(0.5f).epsilon(1e-4));
+		CHECK(slope_grip_scale(-s45, 40.0f, 50.0f, 1) == 1.0f);
+		CHECK(wheel_reaction_torque(1000.0f, 0.0f, 5000.0f, 18, 0.4f, 1.0f, 4.88f) ==
+				doctest::Approx(1000.0f * 0.00512f).epsilon(1e-3));
+		CHECK(wheel_reaction_torque(1000.0f, 0.0f, 800.0f, 4, 0.4f, 1.0f, 3.8f) ==
+				doctest::Approx(1000.0f * 0.00658f).epsilon(1e-3));
+		CHECK(wheel_reaction_torque(1000.0f, 0.0f, 800.0f, 4, 0.4f, 1.85f, 3.8f) ==
+				doctest::Approx(1000.0f * 0.01217f).epsilon(1e-3));
+		CHECK(wheel_reaction_torque(0.0f, -0.5f, 800.0f, 4, 0.4f, 1.0f, 3.8f) ==
+				doctest::Approx(-0.5f * 800.0f * 9.82f / 4.0f * 0.4f / (16.0f * 3.8f)).epsilon(1e-4));
+		CHECK(wheel_spin_gate(false, 0.0f) == false);
+		CHECK(wheel_spin_gate(true, 0.0f));
+		CHECK(wheel_spin_gate(false, 0.02f));
+		CHECK(wheel_spin_step(1.0f, 90.0f, 1.0f / 90.0f, 2.0f) == doctest::Approx(1.5f));
+
+		uint8_t clock = 0;
+		uint32_t slow = 0, fast = 0;
+		for (int t = 0; t < 6; ++t) {
+			slow += land_substeps_due(clock, 1.0f);
+		}
+		clock = 0;
+		for (int t = 0; t < 6; ++t) {
+			fast += land_substeps_due(clock, 10.0f);
+		}
+		CHECK(slow == 9);
+		CHECK(fast == 6);
+		CHECK(land_substep_seconds(1.0f) == doctest::Approx(1.0f / 90.0f));
+		CHECK(land_substep_seconds(10.0f) == doctest::Approx(1.0f / 60.0f));
+	}
+
+	TEST_CASE("sim.vehicles.land_rules: the shipped wheel step reproduces R6-G1-vectors A (M1A2 throttle 1, six "
+			  "substeps), B (pivot, first substeps) and C (Growler throttle, first substeps)") {
+		const bf3::sim::VehicleModel tank = m1a2_road_wheel();
+		bf3::sim::LandWheelState s;
+		float hull = 0.0f;
+		const float spin_a[] = { 0.431063f, 0.848946f, 1.25570f, 1.65284f, 2.04152f, 2.42173f };
+		const float force_a[] = { 0.0f, 374.718f, 676.237f, 923.392f, 1129.17f, 1335.28f };
+		const float hull_a[] = { 0.0f, 0.0116579f, 0.0326964f, 0.0614241f, 0.0965539f, 0.138096f };
+		for (size_t i = 0; i < 6; ++i) {
+			const ReducedRun r = reduced_substep(tank, kM1a2Load, 14, 627.0f, 1.5f, 0.0f, hull, s);
+			hull = r.hull;
+			CAPTURE(i);
+			CHECK(r.drive == doctest::Approx(77.5913f).epsilon(1e-5));
+			CHECK(r.force == doctest::Approx(force_a[i]).epsilon(1e-4));
+			CHECK(r.spin == doctest::Approx(spin_a[i]).epsilon(1e-4));
+			CHECK(hull == doctest::Approx(hull_a[i]).epsilon(1e-4));
+			if (i == 1) {
+				CHECK(r.resistance == doctest::Approx(-0.452616f).epsilon(1e-4));
+				CHECK(r.slip_ratio == doctest::Approx(0.0086213f).epsilon(1e-4));
+				CHECK(s.grip == TyreGrip::Grip);
+			}
+			if (i == 2) {
+				CHECK(r.resistance == doctest::Approx(-0.911794f).epsilon(1e-4));
+				CHECK(r.slip_ratio == doctest::Approx(0.0166782f).epsilon(1e-4));
+			}
+		}
+
+		bf3::sim::LandWheelState pivot;
+		const ReducedRun p0 = reduced_substep(tank, kM1a2Load, 14, 0.0f, 1.5f, 1.0f, 0.0f, pivot);
+		CHECK(pivot.track_steer == doctest::Approx(4.8f));
+		CHECK(p0.drive == doctest::Approx(4.8f));
+		CHECK(p0.spin == doctest::Approx(0.026667f).epsilon(1e-4));
+		CHECK(pivot.grip == TyreGrip::Slide);
+		const ReducedRun p1 = reduced_substep(tank, kM1a2Load, 14, 0.0f, 1.5f, 1.0f, 0.0f, pivot);
+		CHECK(pivot.track_steer == doctest::Approx(9.504f));
+		CHECK(p1.resistance == doctest::Approx(-0.0280f).epsilon(1e-2));
+		CHECK(p1.slip_ratio == doctest::Approx(0.000533f).epsilon(1e-3));
+		CHECK(pivot.grip == TyreGrip::Grip);
+		CHECK(p1.force == doctest::Approx(24.93f).epsilon(1e-3));
+
+		const bf3::sim::VehicleModel jeep = growler_front_wheel();
+		bf3::sim::LandWheelState c;
+		const ReducedRun c0 = reduced_substep(jeep, kGrowlerFrontLoad, 4, 250.0f, 6.0f, 0.0f, 0.0f, c);
+		CHECK(c0.drive == doctest::Approx(106.875f).epsilon(1e-5));
+		CHECK(c0.spin == doctest::Approx(0.475f).epsilon(1e-5));
+		CHECK(c0.force == 0.0f);
+		const ReducedRun c1 = reduced_substep(jeep, kGrowlerFrontLoad, 4, 250.0f, 6.0f, 0.0f, 0.0f, c);
+		CHECK(c1.resistance == doctest::Approx(-1.539f).epsilon(1e-3));
+		CHECK(c1.slip_ratio == doctest::Approx(0.0095f).epsilon(1e-4));
+		CHECK(c1.force == doctest::Approx(198.66f).epsilon(1e-3));
+		CHECK(c1.spin == doctest::Approx(0.937351f).epsilon(1e-4));
 	}
 }

@@ -69,13 +69,13 @@ struct StreamHashes {
 	uint64_t stats = 0;
 };
 
-constexpr StreamHashes kAlpha{ 0xe12510deb6b7d25cull, 0xa96ae7b6fa910b99ull, 0xa259d2534d06db41ull,
+constexpr StreamHashes kAlpha{ 0x34505faef1857e39ull, 0xa96ae7b6fa910b99ull, 0xa259d2534d06db41ull,
 	0xc747c4fcb7927a48ull, 0x2d8222e455cce123ull, 0x8d5b2f4828351c4cull };
-constexpr StreamHashes kBravo{ 0x57fbe4fa41083e2bull, 0xf00ac091a0ae83a2ull, 0x74e5e939479c86cfull,
+constexpr StreamHashes kBravo{ 0x4fb75bdfe957a068ull, 0xf00ac091a0ae83a2ull, 0x74e5e939479c86cfull,
 	0x165f9c74fb6d71cfull, 0x33ace5bd4656ed9eull, 0x298a553c3f2df3eaull };
-constexpr StreamHashes kCharlie{ 0xb17dd4851b9a1053ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull,
+constexpr StreamHashes kCharlie{ 0xea38d9b923cdf568ull, 0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull,
 	0x0d042d562bfe5336ull, 0x0d042d562bfe5336ull, 0xd4bbb61a31c1220aull };
-constexpr StreamHashes kDelta{ 0x08ab4037e424d08dull, 0x40ab0e0b2d925e99ull, 0xf272ee659e051d24ull,
+constexpr StreamHashes kDelta{ 0x31a52f5d4c96fe9eull, 0x40ab0e0b2d925e99ull, 0xf272ee659e051d24ull,
 	0x9d73df418acd8dacull, 0x1a19ab8ca4e37d79ull, 0xfeb81668a201e17aull };
 
 constexpr uint32_t kTdmTicks = 1500;
@@ -1318,7 +1318,11 @@ uint32_t drive_predicted(tt::TdmLevel &r_level, const char *p_blueprint, const c
 			for (const net::VehicleWire &w : states->vehicles) {
 				if (spawner && w.spawner == *spawner) {
 					server_at[states->server_tick] = w.state.body.com_position;
-					steered += w.state.driver.track_steer[0] != 0.0f || w.state.driver.track_steer[1] != 0.0f ? 1u : 0u;
+					const auto &tyres = w.state.driver.tyres;
+					steered += std::any_of(tyres.begin(), tyres.begin() + w.state.wheel_count,
+									   [](const sim::VehicleTyreState &p_t) { return p_t.track_steer != 0.0f; })
+							? 1u
+							: 0u;
 				}
 			}
 		}

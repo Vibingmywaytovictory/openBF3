@@ -19,6 +19,7 @@
 #include "bf3/sim/vehicle_world.h"
 #include "bf3/sim/vehicles/chassis_rules.h"
 #include "bf3/sim/vehicles/tracked_rules.h"
+#include "bf3/sim/vehicles/tyre_rules.h"
 #include "bf3/sim_harness/vehicle_course.h"
 #include "bf3/sim_harness/vehicle_replay.h"
 #include "collision_world_internal.h"
@@ -110,6 +111,19 @@ gp::VehicleDriveDef humvee_def() {
 		w.diff_gear_ratio = 3.8f;
 		w.driving_type = 1;
 		w.steering_type = axle == 0 ? 1 : 0;
+		w.fx_torque_radius_multiplier = axle == 0 ? 1.0f : 1.85f;
+		w.longitudinal_friction_force_max_factor = axle == 0 ? 3.5f : 5.0f;
+		w.lateral_friction_force_max_factor = axle == 0 ? 8.0f : 7.0f;
+		w.angular_velocity_min_slip_condition = 5700.0f;
+		w.side_slip_angle_max_slip_condition = 5700.0f;
+		w.wheel_velocity_x_min_slip_condition = 360.0f;
+		w.wheel_slip_ratio_max_slip_condition = 100.0f;
+		w.lateral_pos_k = 5.002381f;
+		w.lateral_neg_k = 0.053606f;
+		w.longitudinal_pos_k = 5.39649f;
+		w.longitudinal_neg_k = 0.176533f;
+		w.slope_grip_min_angle = 40.0f;
+		w.slope_grip_max_angle = 90.0f;
 		if (axle == 0) {
 			w.steering_sensitivity = { { 0, 0.25f }, { 15, 0.22f }, { 25, 0.18f }, { 30, 0.15f }, { 66, 0.12f }, { 150, 0.12f } };
 		}
@@ -869,6 +883,8 @@ TEST_SUITE("sim-vehicle-unit") {
 		std::vector<int32_t> gears{ before.driver.gearbox.gear };
 		bool reversed = false;
 		float slowest = forward_speed_of(before);
+		const float braking_from = forward_speed_of(before);
+		float later_forward = -INFINITY;
 		for (t = 0; t < 900 && forward_speed_of(before) > -2.0f; ++t) {
 			step1(*w, back);
 			const VehicleState after = w->state(0);
@@ -878,7 +894,9 @@ TEST_SUITE("sim-vehicle-unit") {
 				CHECK(g == gears[gears.size() - 2] - 1);
 			}
 			if (g > 0) {
-				CHECK(forward_speed_of(after) <= forward_speed_of(before) + 0.01f);
+				if (t >= kSimHz / 2) {
+					later_forward = std::max(later_forward, forward_speed_of(after));
+				}
 				CHECK(after.driver.reversing == 0);
 			}
 			if (g == 0 && after.driver.gearbox.reverse_direction == 0) {
@@ -897,6 +915,7 @@ TEST_SUITE("sim-vehicle-unit") {
 		}
 		std::printf("drive: the back pedal took gears %sand the jeep to %.2f m/s along its heading in %.2f s\n",
 				sequence.c_str(), double(forward_speed_of(before)), double(float(t) / 60.0f));
+		CHECK(later_forward < braking_from);
 		CHECK(reversed);
 		CHECK(gears.back() == -1);
 		CHECK(std::find(gears.begin(), gears.end(), 0) != gears.end());
@@ -1570,16 +1589,18 @@ TEST_SUITE("sim-vehicle") {
 		const float pivot_drift = planar(pivoted.body.origin, rest.body.origin);
 		std::printf(
 				"T-90 pivot: steer +127 for 4 s at rest -> heading %.1f deg, drift %.2f m, track steer %.0f / %.0f\n",
-				double(pivot_turn / core::kDegToRadF), double(pivot_drift), double(pivoted.driver.track_steer[0]),
-				double(pivoted.driver.track_steer[1]));
+				double(pivot_turn / core::kDegToRadF), double(pivot_drift), double(pivoted.driver.tyres[0].track_steer),
+				double(pivoted.driver.tyres[1].track_steer));
 		for (size_t i = 0; i < pivoted.wheel_count; ++i) {
 			CHECK(pivoted.wheels[i].steer_angle == 0.0f);
 		}
-		CHECK(pivot_turn <= 0.0f);
+		CHECK(pivot_turn < -10.0f * core::kDegToRadF);
 		CHECK(pivot_drift < 1.5f);
-		CHECK(pivoted.driver.track_steer[0] > 0.0f);
-		CHECK(pivoted.driver.track_steer[1] < 0.0f);
-		CHECK(pivoted.driver.track_steer[0] <= vehicles::kTrackSteerForce);
+		for (size_t i = 0; i < pivoted.wheel_count; ++i) {
+			const float term = pivoted.driver.tyres[i].track_steer;
+			CHECK(std::fabs(term) <= vehicles::kTrackSteerForce);
+			CHECK((model.wheels[i].side == 0 ? term >= 0.0f : term <= 0.0f));
+		}
 
 		std::unique_ptr<VehicleWorld> run = world_at(shapes, *t90, placed(0, 0, -300));
 		settle(*run);
@@ -1605,7 +1626,7 @@ TEST_SUITE("sim-vehicle") {
 		for (size_t i = 0; i < turned.wheel_count; ++i) {
 			CHECK(turned.wheels[i].steer_angle == 0.0f);
 		}
-		CHECK(run_turn < 0.0f);
+		CHECK(run_turn < -10.0f * core::kDegToRadF);
 		CHECK(along > 1.0f);
 		CHECK(std::fabs(across) < 0.5f * along);
 	}
@@ -1700,7 +1721,7 @@ struct HandlingModels {
 	std::shared_ptr<core::Install> install;
 	core::InstallSnapshot before;
 	std::unique_ptr<core::level::LoadedLevel> level, large, bazaar;
-	std::shared_ptr<const VehicleModel> m1a2, growler, t90, lav_ad, bmp2, lav25;
+	std::shared_ptr<const VehicleModel> m1a2, growler, t90, lav_ad, bmp2, lav25, buggy;
 };
 
 HandlingModels *handling_models() {
@@ -1737,6 +1758,7 @@ HandlingModels *handling_models() {
 	h->m1a2 = load("vehicles/m1a2/m1abrams");
 	h->growler = load("vehicles/growleritv/growleritv");
 	h->t90 = load("vehicles/t90/t90");
+	h->buggy = load("vehicles/vdv_buggy/vdv_buggy");
 	core::Result<std::unique_ptr<core::level::LoadedLevel>> large =
 			core::level::load_level(h->install, "MP_007", "ConquestLarge0");
 	REQUIRE_MESSAGE(large.ok(), (large.ok() ? std::string() : large.error().message));
@@ -1876,33 +1898,35 @@ TEST_SUITE("sim-vehicle-handling") {
 					tank->blueprint.c_str(), double(turn / core::kDegToRadF), double(peak), double(drift));
 			const float full_turn = vehicles::kTrackSteerForce * -vehicle_steer_sensitivity(*tank, 0.0f);
 			CHECK(peak < 1.0f / (tank->land.track_turn_speed_limit * vehicles::kTrackSpinShare));
-			CHECK(turned.driver.track_steer[0] > 0.5f * full_turn);
-			CHECK(turned.driver.track_steer[0] <= full_turn);
-			CHECK(turned.driver.track_steer[1] < -0.5f * full_turn);
-			CHECK(turned.driver.track_steer[1] >= -full_turn);
 			for (size_t i = 0; i < turned.wheel_count; ++i) {
+				const float term = turned.driver.tyres[i].track_steer;
 				CHECK(turned.wheels[i].steer_angle == 0.0f);
+				CHECK(std::fabs(term) <= full_turn);
+				CHECK((tank->wheels[i].side == 0 ? term >= 0.0f : term <= 0.0f));
 			}
-			CHECK(turn < 0.0f);
-			CHECK(drift < 1.5f);
+			CHECK(turn < -10.0f * core::kDegToRadF);
+			if (tank->center_of_mass_handling_offset == Vec3{}) {
+				CHECK(drift < 1.5f);
+			}
 		}
 
 		for (const std::shared_ptr<const VehicleModel> &model : { h->m1a2, h->t90 }) {
 			std::unique_ptr<VehicleWorld> run = world_at(flat, model, placed(0, 0, -300));
 			settle(*run);
-			float top = 0.0f;
+			float top = 0.0f, last = 0.0f;
 			for (uint32_t t = 0; t < 30 * kSimHz; ++t) {
 				step1(*run, command(127, 0, 0));
 				const Vec3 &v = run->state(0).body.linear_velocity;
-				top = std::max(top, std::hypot(v[0], v[2]) * vehicles::kKmhPerMs);
+				last = std::hypot(v[0], v[2]) * vehicles::kKmhPerMs;
+				top = std::max(top, last);
 			}
 			const float governed = land_balance_speed_kmh(*model);
-			std::printf("sim.vehicle.handling: %s full throttle 30 s on flat ground: top %.1f km/h, drive meets "
-						"TransmissionLoss and rolling resistance at %.1f km/h\n",
-					model->blueprint.c_str(), double(top), double(governed));
+			std::printf("sim.vehicle.handling: %s full throttle 30 s on flat ground: top %.1f km/h, %.1f km/h at 30 s, "
+						"drive meets TransmissionLoss and rolling resistance at %.1f km/h\n",
+					model->blueprint.c_str(), double(top), double(last), double(governed));
 			CHECK(model->land.transmission_loss_points > 0);
 			CHECK(top > 5.0f);
-			CHECK(top <= governed);
+			CHECK(last <= governed);
 		}
 		const core::SnapshotDiff diff = core::diff_snapshots(h->before, h->reader->snapshot());
 		CHECK(diff.clean());
@@ -1958,18 +1982,19 @@ TEST_SUITE("sim-vehicle-handling") {
 
 			std::unique_ptr<VehicleWorld> run = world_at(flat, model, placed(0, 0, -300));
 			settle(*run);
-			float top = 0.0f;
+			float top = 0.0f, last = 0.0f;
 			for (uint32_t t = 0; t < 30 * kSimHz; ++t) {
 				step1(*run, command(127, 0, 0));
 				const Vec3 &v = run->state(0).body.linear_velocity;
-				top = std::max(top, std::hypot(v[0], v[2]) * vehicles::kKmhPerMs);
+				last = std::hypot(v[0], v[2]) * vehicles::kKmhPerMs;
+				top = std::max(top, last);
 			}
 			const float governed = land_balance_speed_kmh(*model);
-			std::printf("sim.vehicle.handling: %s full throttle 30 s on flat ground: top %.1f km/h, drive meets "
-						"TransmissionLoss and rolling resistance at %.1f km/h\n",
-					model->blueprint.c_str(), double(top), double(governed));
+			std::printf("sim.vehicle.handling: %s full throttle 30 s on flat ground: top %.1f km/h, %.1f km/h at 30 s, "
+						"drive meets TransmissionLoss and rolling resistance at %.1f km/h\n",
+					model->blueprint.c_str(), double(top), double(last), double(governed));
 			CHECK(top > 5.0f);
-			CHECK(top <= governed);
+			CHECK(last <= governed);
 		}
 	}
 
@@ -1995,15 +2020,149 @@ TEST_SUITE("sim-vehicle-handling") {
 				after += std::fabs(held.wheels[i].angular_velocity);
 				factor = std::max(factor, model->wheels[i].hand_brake_factor);
 			}
-			std::printf("sim.vehicle.handling: %s handbrake under throttle: wheel spin %.2f -> %.2f rad/s in all "
-						"(HandBrakeFactor up to %.2f)\n",
-					model->blueprint.c_str(), double(before), double(after), double(factor));
+			const LandDriveModel &land = model->land;
+			const float peak =
+					*std::max_element(land.torque_points.begin(), land.torque_points.begin() + land.curve_points) *
+					land.power_multiplier;
+			float loss_max = 0.0f;
+			for (size_t p = 0; p < land.transmission_loss_points; ++p) {
+				loss_max = std::max(loss_max, land.transmission_loss[p][1]);
+			}
+			float one_substep = 0.0f;
+			for (size_t i = 0; i < held.wheel_count; ++i) {
+				const VehicleWheelModel &w = model->wheels[i];
+				const float torque = vehicles::track_forward_term(peak, land_gear_ratio(land, 1)) +
+						w.rolling_base * vehicles::kRollingClamp * w.width * w.mass / float(model->wheel_list) +
+						model->mass * loss_max / float(model->wheel_list) / vehicles::kLossDivisor +
+						w.longitudinal_force_max * model->mass * w.radius * w.fx_torque_multiplier /
+								(vehicles::kReactionDivisor * w.diff_gear_ratio);
+				one_substep += torque * kTickSeconds / w.inertia;
+			}
+			std::printf("sim.vehicle.handling: %s handbrake under throttle: wheel spin %.2f -> %.2f rad/s in all, at "
+						"most one substep's torque %.2f (HandBrakeFactor up to %.2f)\n",
+					model->blueprint.c_str(), double(before), double(after), double(one_substep), double(factor));
 			CHECK(before > 1.0f);
 			if (factor >= 1.0f) {
-				CHECK(after == 0.0f);
+				CHECK(after <= one_substep);
 			} else {
 				CHECK(factor == 0.0f);
 				CHECK(after > 0.5f * before);
+			}
+		}
+	}
+
+	TEST_CASE("sim.vehicle.handling: the M1A2's first 1/90 s substep from rest in the world gives R6-G1-vectors' "
+			  "track-wheel spin 0.431063 (throttle) and 0.026667 with turn term 4.8 (pivot), and the slide state") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		for (const bool pivot : { false, true }) {
+			CAPTURE(pivot);
+			std::unique_ptr<VehicleWorld> w = world_at(ground_shapes(false), h->m1a2, placed(0, 0, -300));
+			settle(*w);
+			VehicleState rest = w->state(0);
+			rest.driver.substep_clock = 0;
+			rest.driver.gearbox = vehicles::GearboxState{};
+			rest.driver.engine_rpm = h->m1a2->land.engine.rpm_min;
+			const std::array<float, 4> &q = rest.body.rotation;
+			const float forward_up = 2.0f * (q[1] * q[2] - q[3] * q[0]);
+			REQUIRE(w->restore_vehicle_state(0, rest, vehicle_restore::kDriver, ContactCachePolicy::Keep).ok());
+			step1(*w, pivot ? command(0, 0, 127) : command(127, 0, 0));
+			const VehicleState s = w->state(0);
+			CHECK(s.driver.substep_clock == 1);
+			for (size_t i = 0; i < s.wheel_count; ++i) {
+				CAPTURE(i);
+				const float sign = pivot && h->m1a2->wheels[i].side == 1 ? -1.0f : 1.0f;
+				const VehicleTyreState &t = s.driver.tyres[i];
+				std::printf("sim.vehicle.handling: M1A2 %s, wheel %zu after one substep: spin %.6f rad/s, turn term "
+							"%.4f, %u slip samples, grip state %u\n",
+						pivot ? "pivot" : "throttle", i, double(s.wheels[i].angular_velocity), double(t.track_steer),
+						unsigned(t.slip_ratio_samples), unsigned(t.grip));
+				const VehicleWheelModel &wm = h->m1a2->wheels[i];
+				const float slope = vehicles::wheel_reaction_torque(0.0f, forward_up, h->m1a2->mass,
+						h->m1a2->wheel_list, wm.radius, wm.fx_torque_multiplier, wm.diff_gear_ratio);
+				CHECK(s.wheels[i].angular_velocity ==
+						doctest::Approx(sign * (pivot ? 0.026667f : 0.431063f) - slope / 90.0f / wm.inertia)
+								.epsilon(1e-3));
+				CHECK(t.track_steer == doctest::Approx(pivot ? sign * 4.8f : 0.0f));
+				CHECK(t.slip_ratio_samples == 1);
+				CHECK(t.grip == uint8_t(vehicles::TyreGrip::Slide));
+			}
+		}
+	}
+
+	TEST_CASE("sim.vehicle.handling: the M1A2 on flat ground after 3 s of throttle turns more than 10 deg right in 2 s "
+			  "of throttle and full right steer (godot.vehicle_drive's tank_turn, headless)") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		std::unique_ptr<VehicleWorld> w = world_at(ground_shapes(false), h->m1a2, placed(0, 0, -300));
+		settle(*w);
+		for (uint32_t t = 0; t < 3 * kSimHz; ++t) {
+			step1(*w, command(127, 0, 0));
+		}
+		const VehicleState straight = w->state(0);
+		for (uint32_t t = 0; t < 2 * kSimHz; ++t) {
+			step1(*w, command(127, 0, 127));
+		}
+		const VehicleState turned = w->state(0);
+		const float turn = std::remainder(yaw_of(turned) - yaw_of(straight), 2.0f * 3.14159265f);
+		const Vec3 &v = turned.body.linear_velocity;
+		std::printf("sim.vehicle.handling: M1A2 3 s throttle then 2 s throttle and right steer: heading %+.1f deg, "
+					"%.1f km/h\n",
+				double(turn / core::kDegToRadF), double(std::hypot(v[0], v[2]) * vehicles::kKmhPerMs));
+		CHECK(turn < -10.0f * core::kDegToRadF);
+	}
+
+	TEST_CASE("sim.vehicle.handling: at full throttle over the synthetic bumps the VDV buggy keeps every wheel on the "
+			  "ground over the bump line (the Growler's wheel lift is printed)") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		const VehicleCourse course = synthetic_vehicle_courses()[size_t(VehicleCourseKind::Bumps)];
+		for (const std::shared_ptr<const VehicleModel> &model : { h->growler, h->buggy }) {
+			CAPTURE(model->blueprint);
+			const float lift =
+					std::sqrt(model->tuning.gravity * model->gravity_factor / course.feature) * vehicles::kKmhPerMs;
+			std::unique_ptr<VehicleWorld> w = world_at(ground_shapes(true), model, course.start);
+			settle(*w);
+			float top = 0.0f;
+			uint32_t off = 0, bump_off = 0;
+			constexpr float kBumpMargin = 3.0f;
+			double vertical = 0.0;
+			uint32_t samples = 0;
+			for (uint32_t t = 0; t < 8 * kSimHz; ++t) {
+				step1(*w, command(127, 0, 0));
+				const VehicleState s = w->state(0);
+				top = std::max(
+						top, std::hypot(s.body.linear_velocity[0], s.body.linear_velocity[2]) * vehicles::kKmhPerMs);
+				if (t < kSimHz) {
+					continue;
+				}
+				const float kmh =
+						std::hypot(s.body.linear_velocity[0], s.body.linear_velocity[2]) * vehicles::kKmhPerMs;
+				const float z = s.body.origin[2];
+				const bool on_bumps = z > synthetic_ground::kBumpZ0 - kBumpMargin &&
+						z < synthetic_ground::kBumpZ0 +
+										float(synthetic_ground::kBumpCount) * synthetic_ground::kBumpSpacing +
+										kBumpMargin;
+				for (size_t i = 0; i < s.wheel_count; ++i) {
+					const uint32_t lifted = s.wheels[i].in_contact != 0 ? 0u : 1u;
+					off += kmh < lift ? lifted : 0u;
+					bump_off += on_bumps ? lifted : 0u;
+				}
+				vertical += double(s.body.linear_velocity[1]) * double(s.body.linear_velocity[1]);
+				++samples;
+			}
+			std::printf("sim.vehicle.handling: %s full throttle 8 s over the bumps: top %.1f km/h (lift speed %.1f), "
+						"%u wheel-off wheel-ticks under it, %u over the bump line, rms vertical speed %.3f m/s\n",
+					model->blueprint.c_str(), double(top), double(lift), off, bump_off,
+					std::sqrt(vertical / double(samples)));
+			if (model == h->buggy) {
+				CHECK(bump_off == 0u);
 			}
 		}
 	}

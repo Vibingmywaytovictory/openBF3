@@ -27,7 +27,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 20;
+inline constexpr uint16_t kProtocolVersion = 21;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;

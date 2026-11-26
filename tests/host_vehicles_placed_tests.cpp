@@ -258,7 +258,7 @@ TEST_SUITE("host-vehicles-placed-unit") {
 			w.seat_count = uint8_t(net::kMaxVehicleSeats);
 			w.state.wheel_count = uint8_t(sim::kMaxVehicleWheels);
 			w.turret_count = uint8_t(net::kMaxVehicleTurrets);
-			w.state.driver.track_steer = { 1.0f, -1.0f };
+			w.state.driver.tyres.fill({ 1.0f, -1.0f, 1.0f, 5, 3, 2 });
 			host::pack_vehicle_wire(out, 5, std::move(w));
 		}
 		size_t carried = 0, largest = 0;
