@@ -9,6 +9,7 @@
 #include "bf3/ai/main/ai_main.h"
 #include "bf3/ai/main/bot_manager.h"
 #include "bf3/ai/strategic/strategic_object.h"
+#include "bf3/core/gameplay/kit_def.h"
 #include "bf3/host/ai_world.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
@@ -157,31 +158,44 @@ std::vector<ai::ChangeSensed> change_sensed(const TdmShared &p_shared, const Ser
 	return out;
 }
 
-}
-
-float change_strength_scale(const TdmShared &p_shared) {
-	if (p_shared.host.gunplay == nullptr || p_shared.weapons == nullptr || !(p_shared.host.soldier_top_speed > 0.0f)) {
-		return 0.0f;
-	}
+float counter_scale(const TdmShared &p_shared, KitRole p_kit, uint8_t p_slot, ai::CombatStrengthType p_type) {
 	float sum = 0.0f;
 	int count = 0;
 	for (const auto &team : p_shared.host.gunplay->level().kits.loadouts) {
 		for (const KitLoadout &kit : team) {
-			if (kit.kit != uint8_t(KitRole::Assault)) {
+			if (kit.kit != uint8_t(p_kit)) {
 				continue;
 			}
-			sum += float(p_shared.weapons->of(kit.defs[kKitSlots[0]], 0).strength(ai::CombatStrengthType::Infantry));
+			sum += float(p_shared.weapons->of(kit.defs[p_slot], 0).strength(p_type));
 			++count;
 		}
 	}
 	return sum > 0.0f ? p_shared.host.soldier_top_speed * float(count) / sum : 0.0f;
 }
 
+}
+
+ai::ChangeStrengths change_strength_scales(const TdmShared &p_shared) {
+	ai::ChangeStrengths out{};
+	if (p_shared.host.gunplay == nullptr || p_shared.weapons == nullptr || !(p_shared.host.soldier_top_speed > 0.0f)) {
+		return out;
+	}
+	const float infantry = counter_scale(p_shared, KitRole::Assault, kKitSlots[0], ai::CombatStrengthType::Infantry);
+	for (size_t i = 0; i < out.size(); ++i) {
+		const float armour = i == size_t(ai::CombatStrengthType::Infantry)
+				? 0.0f
+				: counter_scale(p_shared, KitRole::Engineer, uint8_t(core::gameplay::WeaponSlot::Gadget1),
+						  ai::CombatStrengthType(i));
+		out[i] = armour > 0.0f ? armour : infantry;
+	}
+	return out;
+}
+
 ai::ChangeStrengths change_strengths(const TdmShared &p_shared, const ai::ChangeStrengths &p_per_minute) {
-	const float scale = change_strength_scale(p_shared);
+	const ai::ChangeStrengths scale = change_strength_scales(p_shared);
 	ai::ChangeStrengths out{};
 	for (size_t i = 0; i < out.size(); ++i) {
-		out[i] = p_per_minute[i] * scale;
+		out[i] = p_per_minute[i] * scale[i];
 	}
 	return out;
 }

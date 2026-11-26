@@ -29,7 +29,7 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehicles, uint8_t p_slot,
 		const sim::SoldierState &p_state, bool p_stuck);
 
-float change_strength_scale(const TdmShared &p_shared);
+ai::ChangeStrengths change_strength_scales(const TdmShared &p_shared);
 ai::ChangeStrengths change_soldier_strengths(const TdmShared &p_shared, uint8_t p_slot);
 
 class BotCrew {
