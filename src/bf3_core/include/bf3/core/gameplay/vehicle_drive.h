@@ -61,6 +61,17 @@ struct WheelConfigDef {
 	float longitudinal_pos_k = 0, longitudinal_neg_k = 0;
 	float lateral_pos_k = 0, lateral_neg_k = 0;
 	float align_mom_scale = 0;
+	int32_t friction_method = 0;
+	bool is_allowed_to_spin = false, always_grip = false;
+	float constant_spring_force_friction_scale = 0;
+	float wheel_friction_lattitude_brake_scale = 1;
+	float angular_velocity_min_slip_condition = 0, side_slip_angle_max_slip_condition = 0;
+	float wheel_velocity_x_min_slip_condition = 0, wheel_slip_ratio_max_slip_condition = 0;
+	float fx_torque_radius_multiplier = 1;
+	float slope_grip_min_angle = 0, slope_grip_max_angle = 0;
+	int32_t slope_grip_exponent = 1;
+	int32_t rotation_direction_index = 0;
+	std::vector<std::array<float, 2>> longitude_friction_scale, lattitude_friction_scale;
 
 	float rolling_resistance_base_factor = 0;
 	float rolling_resistance_velocity_factor = 0;

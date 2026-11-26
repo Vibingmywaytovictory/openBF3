@@ -377,6 +377,35 @@ private:
 		w.lateral_pos_k = numbers_.f(c, "LateralPosK", 0);
 		w.lateral_neg_k = numbers_.f(c, "LateralNegK", 0);
 		w.align_mom_scale = numbers_.f(c, "AlignMomScale", 0);
+		w.friction_method = numbers_.i(c, "FrictionMethod", 0);
+		w.is_allowed_to_spin = numbers_.b(c, "IsAllowedToSpin", false);
+		w.always_grip = numbers_.b(c, "AlwaysGrip", false);
+		w.constant_spring_force_friction_scale = numbers_.f(c, "ConstantSpringForceFrictionScale", 0);
+		w.wheel_friction_lattitude_brake_scale = numbers_.f(c, "WheelFrictionLattitudeBrakeScale", 1);
+		w.angular_velocity_min_slip_condition = numbers_.f(c, "AngularVelocityMinSlipCondition", 0);
+		w.side_slip_angle_max_slip_condition = numbers_.f(c, "SideSlipAngleMaxSlipCondition", 0);
+		w.wheel_velocity_x_min_slip_condition = numbers_.f(c, "WheelVelocityXMinSlipCondition", 0);
+		w.wheel_slip_ratio_max_slip_condition = numbers_.f(c, "WheelSlipRatioMaxSlipCondition", 0);
+		w.fx_torque_radius_multiplier = numbers_.f(c, "FxTorqueRadiusMultiplier", 1);
+		w.slope_grip_min_angle = numbers_.f(c, "SlopeGripMinAngle", 0);
+		w.slope_grip_max_angle = numbers_.f(c, "SlopeGripMaxAngle", 0);
+		w.slope_grip_exponent = numbers_.i(c, "SlopeGripExponent", 1);
+		w.rotation_direction_index = numbers_.i(c, "RotationDirectionIndex", 0);
+		for (const auto &[field, curve] : { std::pair{ "LongitudeFrictionScale", &w.longitude_friction_scale },
+					 std::pair{ "LattitudeFrictionScale", &w.lattitude_friction_scale } }) {
+			if (const OptionalEbxArray points = array_of(budget_, c, field)) {
+				if (points->size() > kMaxDriveCurvePoints) {
+					numbers_.fail_message(std::string(field) + " has " + std::to_string(points->size()) +
+							" points (at most " + std::to_string(kMaxDriveCurvePoints) + ")");
+					continue;
+				}
+				for (const EbxValue e : *points) {
+					if (const std::optional<EbxStruct> s = e.as_struct()) {
+						curve->push_back({ numbers_.f(*s, "Velocity", 0), numbers_.f(*s, "FrictionScale", 0) });
+					}
+				}
+			}
+		}
 		w.rolling_resistance_base_factor = numbers_.f(c, "RollingResistanceBaseFactor", 0);
 		w.rolling_resistance_velocity_factor = numbers_.f(c, "RollingResistanceVelocityFactor", 0);
 		w.use_engine_brake = numbers_.b(c, "UseEngineBrake", false);
