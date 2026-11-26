@@ -2191,4 +2191,43 @@ TEST_SUITE("sim-vehicle-handling") {
 			CHECK(moved < 0.1f);
 		}
 	}
+
+	TEST_CASE("sim.vehicle.handling: a manned M1A2 and Growler, driven up a 12 deg slope and left idle, hold still "
+			  "once the "
+			  "stand-still brake's StandStillLowSpeedTimeLimit has run under 1 m/s") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		const VehicleCourse slope = synthetic_vehicle_courses()[size_t(VehicleCourseKind::SlopeIdle)];
+		for (const std::shared_ptr<const VehicleModel> &model : { h->m1a2, h->growler }) {
+			CAPTURE(model->blueprint);
+			std::unique_ptr<VehicleWorld> w = world_at(ground_shapes(true), model, slope.start);
+			settle(*w);
+			VehicleCommand climb = command(60, 0, 0);
+			climb.flags = vehicle_flags::kDriven;
+			for (uint32_t t = 0; t < kSimHz / 2; ++t) {
+				step1(*w, climb);
+			}
+			VehicleCommand idle = command(0, 0, 0);
+			idle.flags = vehicle_flags::kDriven;
+			const Vec3 released = w->state(0).body.origin;
+			const uint32_t locked = uint32_t(model->stand_still_ticks) + kSimHz;
+			for (uint32_t t = 0; t < locked; ++t) {
+				step1(*w, idle);
+			}
+			const Vec3 at = w->state(0).body.origin;
+			for (uint32_t t = 0; t < 2 * kSimHz; ++t) {
+				step1(*w, idle);
+			}
+			const Vec3 to = w->state(0).body.origin;
+			const float crept = std::hypot(at[0] - released[0], at[2] - released[2]);
+			const float moved = std::hypot(to[0] - at[0], to[2] - at[2]);
+			std::printf("sim.vehicle.handling: %s driven up the %.0f deg slope and left idle: %.2f m before the "
+						"stand-still brake, then %.2f m in 2 s\n",
+					model->blueprint.c_str(), double(slope.slope_degrees), double(crept), double(moved));
+			CHECK(model->stand_still_brake);
+			CHECK(moved < 0.1f);
+		}
+	}
 }

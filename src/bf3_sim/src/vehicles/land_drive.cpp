@@ -163,7 +163,7 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 	const bool held = idle && (p_command.flags & vehicle_flags::kDriven) == 0;
 	bool stand_still = false;
 	if (m.stand_still_brake && m.stand_still_ticks > 0) {
-		if (idle && speed < m.stand_still_speed) {
+		if (idle && speed < vehicles::kLowSpeedForceSpeed) {
 			d.stand_still_ticks = uint16_t(std::min<uint32_t>(d.stand_still_ticks + 1u, m.stand_still_ticks));
 		} else {
 			d.stand_still_ticks = 0;
