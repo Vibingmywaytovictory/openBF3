@@ -1158,8 +1158,61 @@ TEST_SUITE("audio-vehicles-inputs") {
 		CHECK(before == 0.0f);
 		CHECK(step == doctest::Approx(0.4f));
 	}
-}
 
+	TEST_CASE("the M1A2 engine patch's body impact: a SpringCompression step from 0.2 to 0.6 is heard at 10 m through "
+			  "Delta, Condition, the locked MultiCrossfader, EventGate and the impact samplers") {
+		VehicleFixture *f = need_install();
+		if (f == nullptr) {
+			return;
+		}
+		const std::optional<uint16_t> kind = kind_of(*f->level, "vehicles/m1a2/m1abrams");
+		REQUIRE(kind.has_value());
+		const std::optional<uint16_t> spawner = spawner_of(*f->level, *kind);
+		REQUIRE(spawner.has_value());
+		const sim::VehicleModel &model = *f->level->kinds[*kind].model;
+		const auto compress = [&](host::PresentedVehicle &r_v, float p_compression) {
+			for (size_t i = 0; i < model.wheel_count; ++i) {
+				r_v.suspension_length[i] = model.wheels[i].suspension_max * (1.0f - p_compression);
+			}
+		};
+		for (const float speed : { 0.0f, 10.0f }) {
+			CAPTURE(speed);
+			DriveRig still(*f), bumped(*f);
+			host::PresentedVehicle v = parked(*f->level, *spawner);
+			v.occupants[0] = 3;
+			drive(v, model, speed, speed > 0.0f ? 1.0f : 0.0f);
+			ba::VehicleListenerView view;
+			view.own_slot = 7;
+			view.listener.position = core::vec::add(v.com_position, core::Vec3{ 10.0f, 0.0f, 0.0f });
+			compress(v, 0.2f);
+			constexpr int kSettle = 60, kAfter = 30;
+			for (int i = 0; i < kSettle; ++i) {
+				still.frame(*f, v, view);
+				bumped.frame(*f, v, view);
+			}
+			host::PresentedVehicle bump = v;
+			compress(bump, 0.6f);
+			for (int i = 0; i < kAfter; ++i) {
+				still.frame(*f, v, view);
+				bumped.frame(*f, bump, view);
+			}
+			REQUIRE(still.tap.mix.size() == bumped.tap.mix.size());
+			const size_t step_at = size_t(kSettle) * kFrames * 2;
+			float before = 0.0f, after = 0.0f, engine = 0.0f;
+			for (size_t s = 0; s < still.tap.mix.size(); ++s) {
+				const float d = std::fabs(bumped.tap.mix[s] - still.tap.mix[s]);
+				(s < step_at ? before : after) = std::max(s < step_at ? before : after, d);
+				engine = std::max(engine, std::fabs(still.tap.mix[s]));
+			}
+			std::printf("M1A2 at %.0f m/s heard at 10 m: the 0.2 -> 0.6 SpringCompression step adds a peak of %.4f in "
+						"0.5 s (engine alone peaks at %.4f)\n",
+					double(speed), double(after), double(engine));
+			CHECK(before == 0.0f);
+			CHECK(after > ba::kAudibleStep);
+		}
+		check_unchanged(*f);
+	}
+}
 namespace {
 
 using Op = ba::WeaponSoundOp;
