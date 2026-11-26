@@ -34,6 +34,8 @@ elseif(PHASE STREQUAL "flyby")
     set(extra --audio-ingame-seconds=40)
 elseif(PHASE STREQUAL "breath")
     set(bots 7)
+elseif(PHASE STREQUAL "casing")
+    set(extra --kit=0)
 endif()
 godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 420
     ARGS --path "${PROJECT_DIR}" res://scenes/metro_tdm.tscn -- --bots=${bots} --preround=0 "--audio-ingame-check=${out}"

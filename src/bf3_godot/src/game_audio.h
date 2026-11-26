@@ -7,6 +7,7 @@
 #include "bf3/audio/haptics_feed.h"
 #include "bf3/audio/impact_audio.h"
 #include "bf3/audio/mixer_core.h"
+#include "bf3/audio/patch_instance.h"
 #include "bf3/audio/weapon_audio.h"
 #include "bf3/client_audio/area_beds.h"
 #include "bf3/client_audio/area_feed.h"
@@ -81,6 +82,9 @@ public:
 	void forward_cuts(bool p_on);
 	void take_cuts(std::vector<audio::MixerCutEvent> &r_out);
 	void trace_weapon_starts(bool p_on);
+	void trace_own_weapon(uint8_t p_own_slot);
+	std::vector<audio::ReleaseOverrun> own_weapon_overruns(
+			std::string_view p_patch, uint64_t &r_instances, uint64_t &r_releases) const;
 	void take_weapon_starts(std::vector<audio::WeaponSoundStart> &r_out);
 	void drain_events();
 	const audio::SoundCategoryTable &sound_categories() const;

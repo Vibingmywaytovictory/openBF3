@@ -50,7 +50,9 @@ struct AudioIngameAim {
 inline constexpr std::array<AudioIngameAim, 10> kAudioIngameAims{ { { 0, -70 }, { 0, -35 }, { 0, -5 }, { 90, -5 },
 		{ 180, -5 }, { 270, -5 }, { 45, -20 }, { 135, -50 }, { 225, 15 }, { 315, -10 } } };
 
-enum class AudioIngamePhase : uint8_t { Mix, Pool, Steps, Flyby, Breath };
+enum class AudioIngamePhase : uint8_t { Mix, Pool, Steps, Flyby, Breath, Casing };
+
+inline constexpr std::string_view kAudioIngameCasingPatch = "sound/weapons/handheld/g3/weapon_assaultrifle_g3_02";
 
 enum class AudioIngameLeg : uint8_t { Stand, Walk, Sprint };
 inline constexpr size_t kAudioIngameLegs = 3;
@@ -205,6 +207,7 @@ private:
 	void tally_steps(double p_now_s, Bf3GameAudio &r_audio, const AudioIngameIo &p_io);
 	void tally_breath(double p_now_s, Bf3GameAudio &r_audio, const AudioIngameIo &p_io);
 	void analyse_breath(Bf3GameAudio &r_audio);
+	void analyse_casing(Bf3GameAudio &r_audio);
 	void finish(Bf3GameAudio &r_audio);
 	void row(const std::string &p_name, bool p_pass, const std::string &p_detail);
 	void mix_row(const std::string &p_name, bool p_pass, const std::string &p_detail);

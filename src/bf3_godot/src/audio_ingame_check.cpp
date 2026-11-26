@@ -155,6 +155,10 @@ bool parse_audio_ingame_phase(std::string_view p_text, AudioIngamePhase &r_phase
 		r_phase = AudioIngamePhase::Breath;
 		return true;
 	}
+	if (p_text == "casing") {
+		r_phase = AudioIngamePhase::Casing;
+		return true;
+	}
 	return false;
 }
 
@@ -497,6 +501,11 @@ void AudioIngameCheck::script(double p_now_s, const AudioIngameIo &p_io) {
 			primary_name_ = p_io.pick_primary(step_patches_);
 			primary_picked_ = !primary_name_.empty();
 		}
+		if (kind_ == AudioIngamePhase::Casing && !primary_picked_ && p_io.pick_primary) {
+			const std::array<std::string, 1> casing{ std::string(kAudioIngameCasingPatch) };
+			primary_name_ = p_io.pick_primary(casing);
+			primary_picked_ = !primary_name_.empty();
+		}
 		deaths_ += was_alive_ ? 1u : 0u;
 		was_alive_ = false;
 		if (p_io.move) {
@@ -656,6 +665,9 @@ bool AudioIngameCheck::frame(double p_now_s, Bf3GameAudio &r_audio, const AudioI
 		case Phase::Settle:
 			script(p_now_s, p_io);
 			if (p_now_s - spawn_s_ >= kAudioIngameSettleSeconds) {
+				if (kind_ == AudioIngamePhase::Casing) {
+					r_audio.trace_own_weapon(p_io.own_slot);
+				}
 				begin(p_now_s, r_audio);
 				phase_ = Phase::Record;
 			}
@@ -1043,6 +1055,9 @@ void AudioIngameCheck::analyse(Bf3GameAudio &r_audio) {
 	if (kind_ == AudioIngamePhase::Breath) {
 		analyse_breath(r_audio);
 	}
+	if (kind_ == AudioIngamePhase::Casing) {
+		analyse_casing(r_audio);
+	}
 
 	if (!out_dir_.empty()) {
 		const core::PathGuard &guard = r_audio.write_guard();
@@ -1229,6 +1244,28 @@ void AudioIngameCheck::analyse_mix(Bf3GameAudio &r_audio) {
 							 lufs, seconds_,
 							 medians[size_t(ba::SoundCategory::OwnGun)] - medians[size_t(ba::SoundCategory::BotGun)]) +
 			cats);
+}
+
+void AudioIngameCheck::analyse_casing(Bf3GameAudio &r_audio) {
+	uint64_t instances = 0, releases = 0;
+	const std::vector<ba::ReleaseOverrun> overruns =
+			r_audio.own_weapon_overruns(kAudioIngameCasingPatch, instances, releases);
+	std::string detail;
+	for (const ba::ReleaseOverrun &o : overruns) {
+		detail += core::fmt("; sampler %u slot %u released at frame %llu %s", o.node, unsigned(o.slot),
+				(unsigned long long)o.release_frame,
+				o.started_after ? "starts a segment after it"
+						: o.end_frame == UINT64_MAX
+						? "sounds on"
+						: core::fmt("sounds %llu frames past it", (unsigned long long)(o.end_frame - o.release_frame))
+								  .c_str());
+	}
+	row("the own primary is the G3A3", primary_picked_, primary_picked_ ? primary_name_ : std::string("not picked"));
+	row("the G3A3's LtNone and LtForward samplers stop at their release (R5-AU2 A6)",
+			instances >= 3 && releases >= 3 && overruns.empty(),
+			core::fmt("%llu own G3A3 instances traced, %llu releases checked, %zu overruns",
+					(unsigned long long)instances, (unsigned long long)releases, overruns.size()) +
+					detail);
 }
 
 void AudioIngameCheck::analyse_pool(Bf3GameAudio &r_audio) {

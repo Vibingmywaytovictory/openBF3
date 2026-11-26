@@ -92,6 +92,36 @@ void capture_end(Impl &r_m);
 template <class Impl> void drain_mixer_events(Impl &r_m, const Bf3GameAudio &p_audio);
 template <class Impl> void print_sound_fates(Impl &r_m, bool p_always);
 
+namespace {
+
+constexpr size_t kOwnWeaponTraces = 64;
+constexpr size_t kOwnWeaponTraceEntries = 4096;
+
+struct OwnWeaponTrace {
+	const ca::SoundProgram *program = nullptr;
+	ba::SamplerTrace samplers;
+	ba::GraphTrace graph;
+};
+
+struct OwnWeaponTraces final : ba::WeaponAudioObserver {
+	uint8_t own_slot = 0xFF;
+	std::vector<std::unique_ptr<OwnWeaponTrace>> traced;
+	void on_driver_instance(uint8_t p_slot, uint64_t, uint64_t, ba::PatchInstance &r_instance) override {
+		if (p_slot != own_slot || traced.size() >= kOwnWeaponTraces) {
+			return;
+		}
+		OwnWeaponTrace &t = *traced.emplace_back(std::make_unique<OwnWeaponTrace>());
+		t.program = &r_instance.program();
+		t.samplers.entries.resize(kOwnWeaponTraceEntries);
+		t.graph.entries.resize(kOwnWeaponTraceEntries);
+		r_instance.set_sampler_trace(&t.samplers);
+		r_instance.set_graph_trace(&t.graph);
+	}
+	void on_trigger_up(uint8_t, uint64_t, uint64_t) override {}
+};
+
+}
+
 struct Bf3GameAudio::Impl {
 
 	const host::LevelDatabase *db = nullptr;
@@ -108,6 +138,7 @@ struct Bf3GameAudio::Impl {
 
 	ba::AudioTuning tuning;
 	ba::GameMixerSizes sizes;
+	std::unique_ptr<OwnWeaponTraces> own_traces;
 	std::shared_ptr<ba::MixerCore> mixer;
 	std::unique_ptr<ba::OneShotPool> pool;
 	std::unique_ptr<ba::SimMixerClock> clock;
@@ -501,6 +532,49 @@ void Bf3GameAudio::trace_weapon_starts(bool p_on) {
 	if (impl_->router) {
 		impl_->router->set_trace(p_on);
 	}
+}
+
+void Bf3GameAudio::trace_own_weapon(uint8_t p_own_slot) {
+	Impl &m = *impl_;
+	if (!m.router) {
+		return;
+	}
+	if (!m.own_traces) {
+		m.own_traces = std::make_unique<OwnWeaponTraces>();
+	}
+	m.own_traces->own_slot = p_own_slot;
+	m.router->set_observer(m.own_traces.get());
+}
+
+std::vector<audio::ReleaseOverrun> Bf3GameAudio::own_weapon_overruns(
+		std::string_view p_patch, uint64_t &r_instances, uint64_t &r_releases) const {
+	const Impl &m = *impl_;
+	std::vector<audio::ReleaseOverrun> out;
+	r_instances = r_releases = 0;
+	if (!m.own_traces || !m.table) {
+		return out;
+	}
+	const ca::SoundProgram *program = nullptr;
+	for (const ba::WeaponAudioDef &d : m.table->defs) {
+		if (d.patch == p_patch && d.program) {
+			program = d.program.get();
+		}
+	}
+	const uint64_t cut = ba::release_cut_frames(m.tuning, ba::kMixRate);
+	AudioServer::get_singleton()->lock();
+	for (const std::unique_ptr<OwnWeaponTrace> &t : m.own_traces->traced) {
+		if (program == nullptr || t->program != program) {
+			continue;
+		}
+		++r_instances;
+		ba::ReleaseCounts counts;
+		const std::vector<ba::ReleaseOverrun> o =
+				ba::release_overruns(*t->program, t->samplers, t->graph, cut, &counts);
+		r_releases += counts.checked;
+		out.insert(out.end(), o.begin(), o.end());
+	}
+	AudioServer::get_singleton()->unlock();
+	return out;
 }
 
 void Bf3GameAudio::take_weapon_starts(std::vector<audio::WeaponSoundStart> &r_out) {
