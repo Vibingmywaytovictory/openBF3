@@ -111,7 +111,7 @@ struct SamplerState {
 	bool finished_pulse = false;
 	float amplitude = 0.0f, amplitude_prev = 0.0f;
 	float pitch = 1.0f;
-	bool instant_release = false;
+	bool cut = false;
 	bool trigger_was_on = false;
 	uint8_t trace_slot = 0;
 };

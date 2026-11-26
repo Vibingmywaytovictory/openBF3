@@ -252,7 +252,7 @@ namespace {
 
 NextSegment next_segment(const SamplerState &s, uint32_t p_slot, uint16_t p_segment) {
 	const int32_t seg = p_segment, fl = s.first_loop, ll = s.last_loop, count = s.segments;
-	if (s.instant_release) {
+	if (s.cut) {
 		return {};
 	}
 	if (s.loop == ca::SamplerLoop::None || fl < 0) {
@@ -383,7 +383,7 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 			s.delay_seconds = std::clamp(read(port(n, cp::SmpDelay)), 0.0f, 10.0f);
 			s.stepped = s.step_connected && on(read(port(n, cp::SmpEnableStep)));
 			s.released = false;
-			s.instant_release = false;
+			s.cut = false;
 			cut_slots(s);
 			if (s.segments > 0) {
 				const uint32_t slot = 0;
@@ -414,10 +414,13 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 	if (release && s.active && !s.released) {
 		s.released = true;
 		graph_entry(p_frame, s.node, GraphTraceKind::Release);
-		if (s.loop == ca::SamplerLoop::InstantRelease) {
-			s.instant_release = true;
+		const bool cut_on_release = s.loop == ca::SamplerLoop::None || s.loop == ca::SamplerLoop::Forward;
+		if (s.loop == ca::SamplerLoop::InstantRelease || (cut_on_release && !trigger)) {
+			s.cut = true;
 			cut_slots(s);
-			const int32_t tails = s.last_loop >= 0 ? int32_t(s.segments) - (s.last_loop + 1) : 0;
+			const int32_t tails = s.loop == ca::SamplerLoop::InstantRelease && s.last_loop >= 0
+					? int32_t(s.segments) - (s.last_loop + 1)
+					: 0;
 			if (s.slots_count >= 2 && tails > 0) {
 				const int32_t pick =
 						std::min(tails - 1, int32_t(uniform01(seed, s.node | 0x40000000u, s.draws++) * double(tails)));

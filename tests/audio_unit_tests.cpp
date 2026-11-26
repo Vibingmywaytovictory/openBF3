@@ -1701,9 +1701,10 @@ TEST_SUITE("audio-patch") {
 		CHECK(inst->finished());
 	}
 
-	TEST_CASE("Sampler: Release without a tail ends with the playing segment; LtNone stops after its segment") {
+	TEST_CASE("Sampler: an LtRelease release without a tail ends with the playing segment; an LtNone or LtForward "
+			  "release cuts its voice at once (R5-AU2 A6)") {
 		const TestWave w = make_wave(3, 1000, 1, 2);
-		for (SamplerLoop loop : { SamplerLoop::Release, SamplerLoop::None }) {
+		for (SamplerLoop loop : { SamplerLoop::Release, SamplerLoop::None, SamplerLoop::Forward }) {
 			Builder b;
 			const uint16_t trig = b.input(1, true), rel = b.input(3, true);
 			b.p.waves.push_back(SoundWaveRef{ w.partition, "test_wave" });
@@ -1728,7 +1729,12 @@ TEST_SUITE("audio-patch") {
 			CHECK(e[1].segment == 1);
 			CHECK(e[1].frame == 1000);
 			CHECK(e[2].kind == SamplerTraceKind::End);
-			CHECK(e[2].frame == 2000);
+			if (loop == SamplerLoop::Release) {
+				CHECK(e[2].frame == 2000);
+			} else {
+				CHECK(e[2].frame > 1124);
+				CHECK(e[2].frame <= 1124 + ba::release_cut_frames(ba::AudioTuning{}, ba::kMixRate));
+			}
 			CHECK(inst->finished());
 		}
 	}
