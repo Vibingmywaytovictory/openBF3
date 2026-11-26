@@ -5,8 +5,10 @@
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/level_vehicles.h"
+#include "bf3/sim/vehicles/vehicle_armament.h"
 #include "bf3/sim/vehicles/vehicle_damage.h"
 #include "bf3/sim/weapons/surface_materials.h"
+#include "vehicles/vehicle_gunnery.h"
 
 #include <algorithm>
 #include <array>
@@ -280,6 +282,73 @@ core::Result<WeaponTemplates> derive_weapon_templates(const GunplayLevel &p_gunp
 	return out;
 }
 
+core::Result<VehicleSeatArms> derive_seat_arms(const GunplayLevel &p_gunplay, const LevelVehicles &p_vehicles) {
+	core::Result<TemplateSource> made = template_source(p_gunplay, &p_vehicles);
+	if (!made) {
+		return made.error();
+	}
+	TemplateSource source = std::move(*made);
+	VehicleSeatArms out(p_vehicles.kinds.size());
+	if (p_vehicles.weapons.empty()) {
+		for (size_t k = 0; k < p_vehicles.kinds.size(); ++k) {
+			out[k].resize(p_vehicles.kinds[k].seats);
+		}
+		return out;
+	}
+	core::Result<std::shared_ptr<const sw::WeaponTable>> table =
+			make_vehicle_weapon_table(p_vehicles, p_gunplay.materials, sw::Mechanics{});
+	if (!table) {
+		return core::error_at("seat weapons", table.error());
+	}
+	source.table = *table;
+	source.vehicle_damage = VehicleDamageSource{};
+	source.vehicle_damage.configure(*source.table, p_vehicles.weapons);
+	for (size_t k = 0; k < p_vehicles.kinds.size(); ++k) {
+		const LevelVehicleKind &kind = p_vehicles.kinds[k];
+		std::vector<SeatArms> &seats = out[k];
+		seats.resize(kind.seats);
+		if (kind.armament == nullptr) {
+			continue;
+		}
+		const std::vector<sim::vehicles::ArmamentWeapon> &weapons = kind.armament->weapons;
+		for (size_t w = 0; w < weapons.size() && w < kind.weapon_defs.size(); ++w) {
+			const uint16_t def = kind.weapon_defs[w];
+			const size_t seat = size_t(weapons[w].seat);
+			if (def == kNoVehicleWeapon || def >= source.table->defs.size() || seat >= seats.size() ||
+					!sim::vehicles::weapon_in_stance(weapons[w], 0)) {
+				continue;
+			}
+			const sw::WeaponSimDef &weapon = source.table->defs[def];
+			if (weapon.projectile.kind == core::gameplay::ProjectileKind::None || !(rounds_per_second(weapon) > 0.0f)) {
+				continue;
+			}
+			const float reach = weapon_reach(weapon, false);
+			std::array<float, ai::kCombatStrengthTypeCount> strengths{};
+			for (size_t c = 0; c < ai::kCombatStrengthTypeCount; ++c) {
+				strengths[c] = float(
+						std::lround(class_mean(source, ai::CombatStrengthType(c), kills_per_minute, def, weapon)));
+			}
+			if (std::all_of(strengths.begin(), strengths.end(), [](float p_s) { return p_s <= 0.0f; })) {
+				continue;
+			}
+			SeatArms &arms = seats[seat];
+			const float arming = weapon.projectile.explosion.present
+					? std::min(std::max(float(sw::units_to_seconds(weapon.projectile.time_to_arm)) *
+											   weapon.projectile.muzzle_speed,
+									   weapon.projectile.explosion.radius),
+							  reach)
+					: 0.0f;
+			arms.min_range = arms.armed ? std::min(arms.min_range, arming) : arming;
+			arms.max_range = std::max(arms.max_range, reach);
+			arms.armed = true;
+			for (size_t c = 0; c < ai::kCombatStrengthTypeCount; ++c) {
+				arms.strengths[c] = std::max(arms.strengths[c], strengths[c]);
+			}
+		}
+	}
+	return out;
+}
+
 std::string format_weapon_templates(const WeaponTemplates &p_templates) {
 	std::string out;
 	for (const auto &[name, w] : p_templates) {
@@ -388,7 +457,19 @@ core::Result<std::shared_ptr<const BotWeaponTemplates>> BotWeaponTemplates::crea
 			}
 		}
 	}
+	if (p_vehicles != nullptr && p_gunplay.materials != nullptr) {
+		core::Result<VehicleSeatArms> seats = derive_seat_arms(p_gunplay, *p_vehicles);
+		if (!seats) {
+			return seats.error();
+		}
+		out->seats_ = std::move(*seats);
+	}
 	return std::shared_ptr<const BotWeaponTemplates>(std::move(out));
+}
+
+const SeatArms &BotWeaponTemplates::seat(uint16_t p_kind, uint8_t p_seat) const {
+	static const SeatArms kNone;
+	return p_kind < seats_.size() && p_seat < seats_[p_kind].size() ? seats_[p_kind][p_seat] : kNone;
 }
 
 const ai::WeaponTemplate &BotWeaponTemplates::of(uint16_t p_def, uint8_t p_variant) const {

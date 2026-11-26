@@ -8,6 +8,7 @@
 #include "bf3/sim/weapons/weapon_sim_def.h"
 #include "vehicles/vehicle_hits.h"
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -49,6 +50,17 @@ struct TemplateSource {
 	float primary_magazines = 0.0f;
 };
 
+struct SeatArms {
+	std::array<float, ai::kCombatStrengthTypeCount> strengths{};
+	float min_range = 0.0f;
+	float max_range = 0.0f;
+	bool armed = false;
+
+	bool operator==(const SeatArms &) const = default;
+};
+
+using VehicleSeatArms = std::vector<std::vector<SeatArms>>;
+
 struct CachedWeaponTemplates {
 	WeaponTemplates templates;
 	core::CacheOutcome outcome = core::CacheOutcome::Uncached;
@@ -65,6 +77,7 @@ float weapon_reach(const sim::weapons::WeaponSimDef &p_weapon, bool p_gadget);
 ai::WeaponTemplate derive_weapon_template(
 		const TemplateSource &p_source, uint16_t p_def, const sim::weapons::WeaponSimDef &p_weapon);
 core::Result<WeaponTemplates> derive_weapon_templates(const GunplayLevel &p_gunplay, const LevelVehicles *p_vehicles);
+core::Result<VehicleSeatArms> derive_seat_arms(const GunplayLevel &p_gunplay, const LevelVehicles &p_vehicles);
 std::string format_weapon_templates(const WeaponTemplates &p_templates);
 core::Result<WeaponTemplates> read_weapon_templates(std::string_view p_text, std::string_view p_name);
 core::Result<CachedWeaponTemplates> cached_weapon_templates(core::Cache *p_cache, const core::Sha256Digest &p_install,
@@ -78,11 +91,13 @@ public:
 
 	const ai::WeaponTemplate &of(uint16_t p_def, uint8_t p_variant) const;
 	ai::CombatStrengthType vehicle_type(uint8_t p_property) const;
+	const SeatArms &seat(uint16_t p_kind, uint8_t p_seat) const;
 
 private:
 	WeaponTemplates owned_;
 	std::vector<std::vector<const ai::WeaponTemplate *>> defs_;
 	std::vector<std::pair<uint8_t, ai::CombatStrengthType>> vehicle_types_;
+	VehicleSeatArms seats_;
 };
 
 bool fires_at(const GunplayLevel &p_gunplay, uint16_t p_def, const ai::WeaponTemplate &p_template, bool p_vehicle);

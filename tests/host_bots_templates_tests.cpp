@@ -184,6 +184,58 @@ TEST_SUITE("host-bots-templates") {
 		std::filesystem::remove_all(root, ec);
 	}
 
+	TEST_CASE("weapon templates: MP_007 ConquestSmall0: each vehicle seat's battle strengths are the most of its "
+			  "stance-0 weapons' kills per minute per strength type, as AIObjectArmament::init takes its weapons' "
+			  "templates; the jeeps' drivers are unarmed and their gunners armed, the tanks' drivers armed") {
+		tt::TdmLevel *level = tt::load_conquest_bots_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::LevelVehicles &vehicles = *level->shared->vehicles;
+		core::Result<host::VehicleSeatArms> arms = host::derive_seat_arms(*level->shared->gunplay, vehicles);
+		REQUIRE_MESSAGE(arms.ok(), (arms.ok() ? std::string() : arms.error().message));
+		REQUIRE(arms->size() == vehicles.kinds.size());
+		const size_t infantry = size_t(ai::CombatStrengthType::Infantry);
+		const size_t heavy = size_t(ai::CombatStrengthType::HeavyArmour);
+		size_t jeeps = 0, tanks = 0;
+		for (size_t k = 0; k < vehicles.kinds.size(); ++k) {
+			const host::LevelVehicleKind &kind = vehicles.kinds[k];
+			const std::vector<host::SeatArms> &seats = (*arms)[k];
+			REQUIRE(seats.size() == kind.seats);
+			for (size_t s = 0; s < seats.size(); ++s) {
+				const host::SeatArms &a = seats[s];
+				std::printf("weapon templates: %s seat %zu: %s, strengths %.0f %.0f %.0f %.0f %.0f %.0f, range "
+							"%.1f..%.1f m\n",
+						kind.blueprint.c_str(), s, a.armed ? "armed" : "unarmed", double(a.strengths[0]),
+						double(a.strengths[1]), double(a.strengths[2]), double(a.strengths[3]), double(a.strengths[4]),
+						double(a.strengths[5]), double(a.min_range), double(a.max_range));
+				CHECK(a.armed == (a.max_range > 0.0f));
+				for (size_t w = 0;
+						kind.armament != nullptr && w < kind.armament->weapons.size() && w < kind.weapon_defs.size();
+						++w) {
+					const uint16_t def = kind.weapon_defs[w];
+					if (size_t(kind.armament->weapons[w].seat) == s && def < vehicles.weapons.size()) {
+						std::printf("weapon templates: %s seat %zu weapon %s\n", kind.blueprint.c_str(), s,
+								vehicles.weapons[def].variant.c_str());
+					}
+				}
+			}
+			if (host::land_jeep(*kind.model)) {
+				++jeeps;
+				CHECK_FALSE(seats[0].armed);
+				CHECK(std::any_of(seats.begin(), seats.end(),
+						[&](const host::SeatArms &p_a) { return p_a.armed && p_a.strengths[infantry] > 0.0f; }));
+			}
+			if (host::land_tracked(*kind.model)) {
+				++tanks;
+				CHECK(seats[0].armed);
+				CHECK(seats[0].strengths[heavy] > 0.0f);
+			}
+		}
+		CHECK(jeeps == 2u);
+		CHECK(tanks == 2u);
+	}
+
 	TEST_CASE("weapon templates: MP_007 ConquestSmall0: a hit on a vehicle is rated as the server damages it, "
 			  "through VehicleDamageSource under the weapon's def, variants included") {
 		tt::TdmLevel *level = tt::load_conquest_bots_level_once();
