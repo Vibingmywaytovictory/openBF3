@@ -95,6 +95,17 @@ float Transform::determinant() const {
 	return vec::dot(right, vec::cross(up, forward));
 }
 
+Transform Transform::inverse() const {
+	const Vec3 c0 = vec::cross(up, forward), c1 = vec::cross(forward, right), c2 = vec::cross(right, up);
+	const float inv = 1.0f / vec::dot(right, c0);
+	Transform out;
+	out.right = { c0.x * inv, c1.x * inv, c2.x * inv };
+	out.up = { c0.y * inv, c1.y * inv, c2.y * inv };
+	out.forward = { c0.z * inv, c1.z * inv, c2.z * inv };
+	out.trans = vec::scale(out.transform_vector(trans), -1.0f);
+	return out;
+}
+
 std::array<float, 4> Transform::transform_plane(const std::array<float, 4> &p_plane) const {
 	const Vec3 n{ p_plane[0], p_plane[1], p_plane[2] };
 	const float len2 = vec::dot(n, n);

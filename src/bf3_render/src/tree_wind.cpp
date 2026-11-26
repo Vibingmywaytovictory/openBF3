@@ -27,92 +27,193 @@ core::Result<float> field_number(const EbxInstance &p_tree, std::string_view p_f
 	return *f;
 }
 
-Vec3 rotated(const Vec3 &p_v, const Vec3 &p_from, const Vec3 &p_to) {
-	const Vec3 k = vec::cross(p_from, p_to);
-	const float c = vec::dot(p_from, p_to);
-	if (c < -1.0f + kTreeThreshold) {
-		const Vec3 side = std::fabs(p_from.x) < 0.9f ? Vec3{ 1.0f, 0.0f, 0.0f } : Vec3{ 0.0f, 1.0f, 0.0f };
-		const Vec3 axis = vec::normalize(vec::cross(p_from, side));
-		return vec::sub(vec::scale(axis, 2.0f * vec::dot(axis, p_v)), p_v);
+core::Result<std::vector<Vec3>> field_translations(const EbxInstance &p_tree) {
+	const std::optional<EbxValue> v = p_tree.get("BasePoseTranslations");
+	const core::OptionalEbxArray items = v ? v->as_array() : core::OptionalEbxArray();
+	if (!items || items->empty()) {
+		return core::make_error("VegetationTreeEntityData.BasePoseTranslations is missing or empty");
 	}
-	return vec::add(vec::add(vec::scale(p_v, c), vec::cross(k, p_v)), vec::scale(k, vec::dot(k, p_v) / (1.0f + c)));
+	std::vector<Vec3> out;
+	for (size_t i = 0; i < items->size(); ++i) {
+		const std::optional<EbxValue> item = items->get(i);
+		const std::optional<Vec3> t = item ? item->as_vec3() : std::nullopt;
+		if (!t || !core::finite(t->x) || !core::finite(t->y) || !core::finite(t->z)) {
+			return core::make_error(
+					"VegetationTreeEntityData.BasePoseTranslations[" + std::to_string(i) + "] is not a finite Vec3");
+		}
+		out.push_back(*t);
+	}
+	return out;
 }
 
-Vec3 direction_or(const Vec3 &p_from, const Vec3 &p_to, const Vec3 &p_fallback) {
-	const Vec3 d = vec::sub(p_to, p_from);
-	const float len = vec::length(d);
-	return len > kTreeThreshold ? vec::scale(d, 1.0f / len) : p_fallback;
+struct RigBuilder {
+	TreeRig &rig;
+	const TreeRigData &data;
+	std::vector<uint8_t> short_tip;
+
+	void visit(uint32_t p_parent, float p_height) {
+		const Transform &parent = rig.rest_frames[p_parent];
+		const Transform parent_inverse = rig.rest_frames_inverse[p_parent];
+		float running = p_height;
+		for (const uint32_t c : rig.children[p_parent]) {
+			const uint32_t t = rig.children[c].size() == 1 ? rig.children[c][0] : c;
+			const Vec3 base = rig.rest[c].trans;
+			const Vec3 reach = vec::sub(rig.rest[t].trans, base);
+			const float reach_length = vec::length(reach);
+			rig.tips[c] = t;
+			rig.length[c] = vec::length(data.translations[t]);
+			const bool fork = rig.children[p_parent].size() > 1;
+			if (fork) {
+				rig.rigid[c] = 1;
+			}
+			if (rig.children[c].size() == 1 && rig.length[c] < data.joint_threshold) {
+				rig.rigid[t] = 1;
+				short_tip[t] = 1;
+			}
+			const Vec3 y = reach_length > kTreeDegenerateBone ? vec::scale(reach, 1.0f / reach_length) : parent.up;
+			const Vec3 x = vec::normalize(vec::cross(y, parent.forward));
+			const Vec3 z = vec::normalize(vec::cross(x, y));
+			rig.rest_frames[c] = Transform{ x, y, z, base };
+			rig.rest_frames_inverse[c] = rig.rest_frames[c].inverse();
+			rig.offsets[c] = parent_inverse.transform_point(base);
+			rig.rest_directions[c] = parent_inverse.transform_vector(y);
+			rig.sides[c] = parent_inverse.transform_vector(z);
+			if (c <= rig.stem_bones) {
+				rig.stem[c] = 1;
+				rig.stiffness[c] = data.stem_stiffness *
+						(1.0f - (1.0f - data.stem_stiffness_spread) * float(c) / float(rig.stem_bones));
+				rig.wind[c] = data.wind_stem;
+			} else if (p_parent <= rig.stem_bones) {
+				rig.stiffness[c] = data.branch_stiffness;
+				rig.wind[c] = data.wind_branch;
+			} else {
+				rig.stiffness[c] = data.branch_stiffness_l2;
+				rig.wind[c] = data.wind_branch_l2;
+			}
+			rig.height[c] = running;
+			float out = std::max(0.0f, vec::dot(parent.up, y)) * reach_length + p_height;
+			if (fork && short_tip[c] == 0 && p_parent <= rig.stem_bones) {
+				out = 0.0f;
+			}
+			running = out;
+			visit(c, out);
+		}
+	}
+};
 }
 
+core::Result<TreeRig> build_tree_rig(const TreeRigData &p_data) {
+	const size_t n = p_data.translations.size();
+	if (n == 0 || p_data.parents.size() != n || p_data.locals.size() != n) {
+		return core::make_error(
+				"VegetationTreeEntityData: Hierarchy, BasePoseTransforms and BasePoseTranslations differ in count");
+	}
+	if (p_data.stem_bones < 1) {
+		return core::make_error("VegetationTreeEntityData.StemBoneCount is not a positive count");
+	}
+	TreeRig rig;
+	rig.stem_bones = p_data.stem_bones;
+	rig.ground = p_data.ground;
+	rig.children.resize(n);
+	rig.tips.assign(n, 0);
+	rig.rest_frames.assign(n, Transform{});
+	rig.rest_frames_inverse.assign(n, Transform{});
+	rig.offsets.assign(n, Vec3{});
+	rig.rest_directions.assign(n, Vec3{ 0.0f, 1.0f, 0.0f });
+	rig.sides.assign(n, Vec3{ 0.0f, 0.0f, 1.0f });
+	rig.stiffness.assign(n, p_data.stem_stiffness);
+	rig.wind.assign(n, p_data.wind_stem);
+	rig.height.assign(n, 0.0f);
+	rig.length.assign(n, 0.0f);
+	rig.stem.assign(n, 0);
+	rig.rigid.assign(n, 0);
+	rig.descendants.resize(n);
+	rig.stem[0] = 1;
+	for (size_t i = 0; i < n; ++i) {
+		const int32_t parent = p_data.parents[i];
+		if (i == 0 ? parent != -1 : (parent < 0 || parent >= int32_t(i))) {
+			return core::make_error("VegetationTreeEntityData.Hierarchy[" + std::to_string(i) +
+					"] is not an earlier bone (the root's is not -1)");
+		}
+		rig.parents.push_back(parent);
+		rig.rest.push_back(i == 0 ? Transform{} : rig.rest[size_t(parent)].then_inner(p_data.locals[i]));
+		if (i > 0 && rig.children[size_t(parent)].size() < kTreeMaxChildren) {
+			rig.children[size_t(parent)].push_back(uint32_t(i));
+		}
+	}
+	RigBuilder builder{ rig, p_data, std::vector<uint8_t>(n, 0) };
+	builder.visit(0, 0.0f);
+	for (size_t i = 0; i < n; ++i) {
+		if (!(rig.stiffness[i] > 0.0f)) {
+			return core::make_error("VegetationTreeEntityData: bone " + std::to_string(i) + " has stiffness " +
+					std::to_string(rig.stiffness[i]));
+		}
+		for (int32_t a = rig.parents[i]; a >= 0; a = rig.parents[size_t(a)]) {
+			rig.descendants[size_t(a)].push_back(uint32_t(i));
+			if (a == 1 && i >= 2) {
+				rig.driven.push_back(uint32_t(i));
+			}
+		}
+	}
+	return rig;
 }
 
 core::Result<TreeRig> read_tree_rig(const EbxInstance &p_tree) {
+	TreeRigData data;
+	core::Result<std::vector<Vec3>> translations = field_translations(p_tree);
+	if (!translations) {
+		return translations.error();
+	}
+	data.translations = std::move(*translations);
 	const std::optional<EbxValue> hierarchy = p_tree.get("Hierarchy");
 	const std::optional<EbxValue> poses = p_tree.get("BasePoseTransforms");
 	const core::OptionalEbxArray parents = hierarchy ? hierarchy->as_array() : core::OptionalEbxArray();
 	const core::OptionalEbxArray locals = poses ? poses->as_array() : core::OptionalEbxArray();
-	if (!parents || !locals || parents->empty() || parents->size() != locals->size()) {
-		return core::make_error("VegetationTreeEntityData: Hierarchy and BasePoseTransforms differ or are empty");
+	if (!parents || !locals) {
+		return core::make_error("VegetationTreeEntityData: Hierarchy or BasePoseTransforms is missing");
 	}
-	const std::optional<EbxValue> stem_count = p_tree.get("StemBoneCount");
-	const std::optional<int64_t> stem_bones = stem_count ? stem_count->as_i64() : std::nullopt;
-	if (!stem_bones || *stem_bones < 1) {
-		return core::make_error("VegetationTreeEntityData.StemBoneCount is not a positive count");
-	}
-	constexpr std::string_view kFields[7] = { "StemStiffness", "StemStiffnessSpread", "BranchStiffness",
-		"BranchStiffnessL2", "WindStem", "WindBranch", "WindBranchL2" };
-	float values[7] = {};
-	for (size_t f = 0; f < 7; ++f) {
-		core::Result<float> v = field_number(p_tree, kFields[f]);
-		if (!v) {
-			return v.error();
-		}
-		values[f] = *v;
-	}
-	const float stem_stiffness = values[0], stem_spread = values[1], branch_stiffness = values[2],
-				branch_stiffness_l2 = values[3], wind_stem = values[4], wind_branch = values[5],
-				wind_branch_l2 = values[6];
-
-	TreeRig rig;
-	rig.stem_bones = uint32_t(*stem_bones);
-	const size_t n = parents->size();
-	for (size_t i = 0; i < n; ++i) {
+	for (size_t i = 0; i < parents->size(); ++i) {
 		const std::optional<EbxValue> p = parents->get(i);
 		const std::optional<int64_t> parent = p ? p->as_i64() : std::nullopt;
-		if (!parent || (i == 0 ? *parent != -1 : (*parent < 0 || *parent >= int64_t(i)))) {
-			return core::make_error("VegetationTreeEntityData.Hierarchy[" + std::to_string(i) +
-					"] is not an earlier bone (the root's is not -1)");
+		if (!parent || *parent < -1 || *parent > int64_t(INT32_MAX)) {
+			return core::make_error(
+					"VegetationTreeEntityData.Hierarchy[" + std::to_string(i) + "] is not a bone index");
 		}
+		data.parents.push_back(int32_t(*parent));
+	}
+	for (size_t i = 0; i < locals->size(); ++i) {
 		const std::optional<EbxValue> l = locals->get(i);
 		const std::optional<std::array<Vec3, 4>> rows = l ? l->as_transform() : std::nullopt;
 		if (!rows) {
 			return core::make_error(
 					"VegetationTreeEntityData.BasePoseTransforms[" + std::to_string(i) + "] is not a LinearTransform");
 		}
-		const Transform local = Transform::from_axes({ (*rows)[0], (*rows)[1], (*rows)[2] }, (*rows)[3]);
-		rig.parents.push_back(int32_t(*parent));
-		rig.rest.push_back(i == 0 ? local : rig.rest[size_t(*parent)].then_inner(local));
-		rig.length.push_back(i == 0 ? 0.0f : vec::length(local.trans));
-		rig.height.push_back(rig.rest.back().trans.y);
-		const float node = float(i + 1);
-		const bool stem = i + 1 <= rig.stem_bones;
-		rig.stem.push_back(stem ? 1 : 0);
-		if (stem) {
-			rig.stiffness.push_back(stem_stiffness * (1.0f - (1.0f - stem_spread) * node / float(rig.stem_bones)));
-			rig.wind.push_back(wind_stem);
-		} else if (uint64_t(*parent) + 1 <= rig.stem_bones) {
-			rig.stiffness.push_back(branch_stiffness);
-			rig.wind.push_back(wind_branch);
-		} else {
-			rig.stiffness.push_back(branch_stiffness_l2);
-			rig.wind.push_back(wind_branch_l2);
-		}
-		if (!(rig.stiffness.back() > 0.0f)) {
-			return core::make_error("VegetationTreeEntityData: bone " + std::to_string(i) + " has stiffness " +
-					std::to_string(rig.stiffness.back()));
-		}
+		data.locals.push_back(Transform::from_axes({ (*rows)[0], (*rows)[1], (*rows)[2] }, (*rows)[3]));
 	}
-	return rig;
+	const std::optional<EbxValue> stem_count = p_tree.get("StemBoneCount");
+	const std::optional<int64_t> stem_bones = stem_count ? stem_count->as_i64() : std::nullopt;
+	if (!stem_bones || *stem_bones < 1 || *stem_bones > int64_t(UINT32_MAX)) {
+		return core::make_error("VegetationTreeEntityData.StemBoneCount is not a positive count");
+	}
+	data.stem_bones = uint32_t(*stem_bones);
+	struct Field {
+		std::string_view name;
+		float TreeRigData::*value;
+	};
+	constexpr Field kFields[9] = { { "StemStiffness", &TreeRigData::stem_stiffness },
+		{ "StemStiffnessSpread", &TreeRigData::stem_stiffness_spread },
+		{ "BranchStiffness", &TreeRigData::branch_stiffness },
+		{ "BranchStiffnessL2", &TreeRigData::branch_stiffness_l2 }, { "WindStem", &TreeRigData::wind_stem },
+		{ "WindBranch", &TreeRigData::wind_branch }, { "WindBranchL2", &TreeRigData::wind_branch_l2 },
+		{ "BreakableJointThreshold", &TreeRigData::joint_threshold }, { "ColiPlaneDepth", &TreeRigData::ground } };
+	for (const Field &f : kFields) {
+		core::Result<float> v = field_number(p_tree, f.name);
+		if (!v) {
+			return v.error();
+		}
+		data.*f.value = *v;
+	}
+	return build_tree_rig(data);
 }
 
 TreeWind tree_wind(const VegetationSystemSettings &p_settings, const std::optional<LevelWind> &p_level) {
@@ -146,105 +247,134 @@ Vec3 tree_gust(const TreeWind &p_wind, const Vec3 &p_tree_position, float p_cloc
 }
 
 Vec3 tree_local_force(const core::level::LevelTransform &p_tree, const Vec3 &p_force) {
-	return { vec::dot(vec::normalize(p_tree.right), p_force), vec::dot(vec::normalize(p_tree.up), p_force),
-		vec::dot(vec::normalize(p_tree.forward), p_force) };
+	const float scale = p_tree.axis_scales().x;
+	return scale > 0.0f ? vec::scale(p_force, 1.0f / scale) : p_force;
 }
 
-TreeSim::TreeSim(std::shared_ptr<const TreeRig> p_rig) : rig_(std::move(p_rig)) {
+Transform tree_root_frame(const core::level::LevelTransform &p_tree) {
+	return Transform{ vec::scale(p_tree.right, p_tree.scale), vec::scale(p_tree.up, p_tree.scale),
+		vec::scale(p_tree.forward, p_tree.scale), Vec3{} };
+}
+
+TreeSim::TreeSim(std::shared_ptr<const TreeRig> p_rig, const Transform &p_root) : rig_(std::move(p_rig)) {
 	const size_t n = rig_->bones();
 	positions_.reserve(n);
 	for (const Transform &t : rig_->rest) {
 		positions_.push_back(t.trans);
 	}
 	velocities_.assign(n, Vec3{});
-	subtrees_.resize(n);
-	for (size_t j = 0; j < n; ++j) {
-		for (int32_t a = int32_t(j); a >= 0; a = rig_->parents[size_t(a)]) {
-			subtrees_[size_t(a)].push_back(uint32_t(j));
-		}
+	frames_ = rig_->rest_frames;
+	if (n > 0) {
+		frames_[0] = Transform{ p_root.right, p_root.up, p_root.forward, Vec3{} };
 	}
 }
 
-void TreeSim::rebuild() {
-	for (size_t i = 1; i < positions_.size(); ++i) {
-		const Vec3 &pivot = positions_[size_t(rig_->parents[i])];
-		const Vec3 rest_dir =
-				direction_or(rig_->rest[size_t(rig_->parents[i])].trans, rig_->rest[i].trans, Vec3{ 0.0f, 1.0f, 0.0f });
-		positions_[i] = vec::add(pivot, vec::scale(direction_or(pivot, positions_[i], rest_dir), rig_->length[i]));
+void TreeSim::hold_above_ground(uint32_t p_node) {
+	if (rig_->stem[p_node] != 0 || positions_[p_node].y >= rig_->ground) {
+		return;
 	}
+	Vec3 &v = velocities_[p_node];
+	v = { v.x * kTreeGroundFriction, 0.0f, v.z * kTreeGroundFriction };
+	positions_[p_node].y = rig_->ground;
 }
 
-void TreeSim::restore() {
+void TreeSim::restore(uint32_t p_bone, const Vec3 &p_direction, const Transform &p_parent) {
 	const TreeRig &r = *rig_;
-	for (size_t i = 1; i < positions_.size(); ++i) {
-		const size_t p = size_t(r.parents[i]);
-		const Vec3 bone = vec::sub(positions_[i], positions_[p]);
-		const Vec3 rest_bone = vec::sub(r.rest[i].trans, r.rest[p].trans);
-		if (vec::length(bone) <= kTreeThreshold || vec::length(rest_bone) <= kTreeThreshold) {
-			continue;
-		}
-		const Vec3 a = vec::normalize(bone), rest = vec::normalize(rest_bone);
-		const float c = std::fabs(vec::dot(a, rest));
-		const float bend = 1.0f - c * c;
-		if (bend <= kTreeThreshold) {
-			continue;
-		}
-		const Vec3 toward = vec::sub(rest, vec::scale(a, vec::dot(a, rest)));
-		if (vec::length(toward) <= kTreeThreshold) {
-			continue;
-		}
-		const Vec3 tangent = vec::normalize(toward);
-		const float f = kTreeStep * bend * kTreeRestoring * r.length[i] * r.stiffness[i];
-		const Vec3 pivot = positions_[p];
-		for (const uint32_t j : subtrees_[i]) {
-			const float lever = vec::dot(vec::sub(positions_[j], pivot), a);
-			const Vec3 d = vec::scale(tangent, lever * f * r.stiffness[j]);
-			velocities_[j] = vec::add(velocities_[j], d);
-			positions_[j] = vec::add(positions_[j], vec::scale(d, kTreeStep));
-		}
+	const Vec3 rest = vec::normalize(p_parent.transform_vector(r.rest_directions[p_bone]));
+	const float c = std::fabs(vec::dot(p_direction, rest));
+	const float bend = 1.0f - c * c;
+	if (!(bend > kTreeThreshold)) {
+		return;
 	}
-	for (size_t i = 1; i < positions_.size(); ++i) {
-		if (r.stem[i] == 0 && positions_[i].y < 0.0f) {
-			positions_[i].y = 0.0f;
-			velocities_[i] = { velocities_[i].x * kTreeGroundFriction, 0.0f, velocities_[i].z * kTreeGroundFriction };
+	const Vec3 axis = vec::cross(p_direction, rest);
+	if (vec::length(axis) < kTreeThreshold) {
+		return;
+	}
+	const Vec3 toward = vec::cross(axis, p_direction);
+	if (vec::length(toward) < kTreeThreshold) {
+		return;
+	}
+	const Vec3 n = vec::normalize(toward);
+	const float f = kTreeStep * bend * kTreeRestoring * r.length[p_bone] * r.stiffness[p_bone];
+	const Vec3 base = frames_[p_bone].trans;
+	for (const uint32_t j : r.descendants[p_bone]) {
+		const float lever = vec::dot(vec::sub(frames_[j].trans, base), p_direction);
+		const Vec3 d = vec::scale(n, lever * f * r.stiffness[j]);
+		velocities_[j] = vec::add(velocities_[j], d);
+		positions_[j] = vec::add(positions_[j], vec::scale(d, kTreeRestoringStep));
+		hold_above_ground(j);
+	}
+}
+
+void TreeSim::rebuild(uint32_t p_parent) {
+	const TreeRig &r = *rig_;
+	const Transform parent = frames_[p_parent];
+	const bool fork = r.children[p_parent].size() > 1;
+	for (const uint32_t c : r.children[p_parent]) {
+		const uint32_t t = r.tips[c];
+		hold_above_ground(t);
+		const Vec3 reach = vec::sub(positions_[t], positions_[c]);
+		const float reach_length = vec::length(reach);
+		Vec3 a = reach_length > kTreeDegenerateBone ? vec::scale(reach, 1.0f / reach_length) : parent.up;
+		if (r.rigid[t] != 0) {
+			a = parent.transform_vector(r.rest_directions[c]);
+			positions_[t] = vec::add(positions_[c], vec::scale(a, r.length[c]));
+		} else if (r.children[c].size() == 1) {
+			positions_[t] = vec::add(positions_[c], vec::scale(a, r.length[c]));
 		}
+		if (fork || r.rigid[c] != 0) {
+			positions_[c] = parent.transform_point(r.offsets[c]);
+		}
+		if (r.rigid[t] == 0) {
+			restore(c, a, parent);
+		}
+		const Vec3 side = parent.transform_vector(r.sides[c]);
+		const Vec3 x = vec::normalize(vec::cross(a, side));
+		frames_[c] = Transform{ x, a, vec::normalize(vec::cross(x, a)), positions_[c] };
+		rebuild(c);
 	}
 }
 
 void TreeSim::step(const Vec3 &p_local_force) {
 	const TreeRig &r = *rig_;
-	for (size_t i = 1; i < positions_.size(); ++i) {
-		const float weight = (r.height[i] + 1.0f) * 0.5f * r.wind[i] / r.stiffness[i];
-		velocities_[i] = vec::add(velocities_[i], vec::scale(p_local_force, weight));
+	for (const uint32_t j : r.driven) {
+		const float weight = (r.height[j] + 1.0f) * 0.5f * r.wind[j] / r.stiffness[j];
+		velocities_[j] = vec::add(velocities_[j], vec::scale(p_local_force, weight));
 	}
-	for (size_t i = 1; i < positions_.size(); ++i) {
-		Vec3 v = velocities_[i];
-		if (i + 1 > 2) {
+	for (const uint32_t j : r.driven) {
+		if (r.rigid[j] != 0) {
+			continue;
+		}
+		Vec3 v = velocities_[j];
+		if (j > 2) {
 			v.y -= kTreeGravity;
 		}
-		positions_[i] = vec::add(positions_[i], vec::scale(v, kTreeStep));
-		velocities_[i] = vec::scale(v, 1.0f / (kTreeStep + kTreeDampingBase));
+		positions_[j] = vec::add(positions_[j], vec::scale(v, kTreeStep));
+		velocities_[j] = vec::scale(v, 1.0f / (kTreeStep + kTreeDampingBase));
 	}
-	rebuild();
-	restore();
-	rebuild();
+	if (!positions_.empty()) {
+		rebuild(0);
+	}
 }
 
 std::vector<Transform> TreeSim::bone_offsets() const {
-	const TreeRig &r = *rig_;
-	std::vector<Transform> out(positions_.size());
-	for (size_t i = 0; i < positions_.size(); ++i) {
-		Vec3 from{ 0.0f, 1.0f, 0.0f }, to = from;
-		if (i > 0) {
-			const size_t p = size_t(r.parents[i]);
-			from = direction_or(r.rest[p].trans, r.rest[i].trans, from);
-			to = direction_or(positions_[p], positions_[i], from);
-		}
-		Transform &t = out[i];
-		t.right = rotated({ 1.0f, 0.0f, 0.0f }, from, to);
-		t.up = rotated({ 0.0f, 1.0f, 0.0f }, from, to);
-		t.forward = rotated({ 0.0f, 0.0f, 1.0f }, from, to);
-		t.trans = vec::sub(positions_[i], t.transform_vector(r.rest[i].trans));
+	std::vector<Transform> out(frames_.size());
+	for (size_t i = 1; i < frames_.size(); ++i) {
+		out[i] = frames_[i].then_inner(rig_->rest_frames_inverse[i]);
+	}
+	return out;
+}
+
+std::vector<Transform> tree_bone_poses(const TreeSim &p_sim, const core::level::LevelTransform &p_tree) {
+	const float scale = p_tree.axis_scales().x;
+	const Transform tree{ Vec3{ scale, 0.0f, 0.0f }, Vec3{ 0.0f, scale, 0.0f }, Vec3{ 0.0f, 0.0f, scale },
+		p_tree.trans };
+	const Transform instance{ vec::scale(p_tree.right, p_tree.scale), vec::scale(p_tree.up, p_tree.scale),
+		vec::scale(p_tree.forward, p_tree.scale), p_tree.trans };
+	const Transform back = instance.inverse().then_inner(tree);
+	std::vector<Transform> out = p_sim.bone_offsets();
+	for (Transform &t : out) {
+		t = back.then_inner(t);
 	}
 	return out;
 }
@@ -308,7 +438,7 @@ void TreeForest::frame(float p_dt, const Vec3 &p_camera, const TreeWind &p_wind)
 		if (vec::length(vec::sub(tree.transform.trans, p_camera)) <= settings_.max_active_distance &&
 				tree.rig < rigs_.size() && rigs_[tree.rig] != nullptr) {
 			if (s.sim == nullptr && activated < budget) {
-				s.sim = std::make_unique<TreeSim>(rigs_[tree.rig]);
+				s.sim = std::make_unique<TreeSim>(rigs_[tree.rig], tree_root_frame(tree.transform));
 				s.pending = moved ? kTreePreSimulation : 0.0f;
 				++activated;
 			}

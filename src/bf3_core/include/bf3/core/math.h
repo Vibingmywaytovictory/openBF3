@@ -92,6 +92,7 @@ struct Transform {
 
 	Transform then_inner(const Transform &p_inner) const;
 	float determinant() const;
+	Transform inverse() const;
 
 	std::array<float, 4> transform_plane(const std::array<float, 4> &p_plane) const;
 
