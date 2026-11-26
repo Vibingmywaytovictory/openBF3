@@ -103,6 +103,8 @@ private:
 	void shoot(const VehicleDriveInputs &p_in, const char *p_name);
 	void hud_row(const VehicleDriveInputs &p_in, uint8_t p_seat);
 	void vehicle_screen_row(const VehicleDriveInputs &p_in, const std::string &p_name, std::string_view p_expected);
+	void sample_seat_weapon(const VehicleDriveInputs &p_in, const bf3::host::PresentationFrame &p_frame);
+	void seat_weapon_row(const std::string &p_name, float p_heat_per_bullet, bool p_one_per_reload, bool p_magazine);
 	void turret_rows(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in);
 	void track_fade(const VehicleDriveInputs &p_in);
 	bool after_exit(InputMapper &r_mapper, const VehicleDriveInputs &p_in);
@@ -114,6 +116,13 @@ private:
 	uint8_t gun_seat_ = 0;
 	uint64_t gun_before_ = 0;
 	VehicleWeaponSounds sounds_before_;
+	uint32_t seat_weapon_frames_ = 0;
+	float seat_weapon_heat_peak_ = 0.0f;
+	bool seat_weapon_reloaded_ = false;
+	int32_t seat_weapon_ammo_min_ = 0;
+	int32_t seat_weapon_ammo_max_ = 0;
+	float wire_heat_peak_ = 0.0f;
+	int32_t wire_ammo_min_ = 0;
 	float regular_fov_ = 0.0f;
 	float turn_ = 0.0f;
 	float shown_black_ = 0.0f;

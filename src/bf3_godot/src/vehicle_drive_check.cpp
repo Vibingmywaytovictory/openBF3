@@ -170,6 +170,41 @@ void VehicleDriveRun::vehicle_screen_row(
 					p_expected.empty() ? "none" : std::string(p_expected).c_str()));
 }
 
+void VehicleDriveRun::sample_seat_weapon(const VehicleDriveInputs &p_in, const host::PresentationFrame &p_frame) {
+	if (p_in.hud == nullptr) {
+		return;
+	}
+	const core::ui::HudVehicle &v = p_in.hud->model().vehicle;
+	if (!v.seat_weapon) {
+		return;
+	}
+	++seat_weapon_frames_;
+	seat_weapon_heat_peak_ = std::max(seat_weapon_heat_peak_, v.seat_weapon_heat);
+	seat_weapon_reloaded_ = seat_weapon_reloaded_ || v.seat_weapon_reloading;
+	seat_weapon_ammo_min_ = std::min(seat_weapon_ammo_min_, v.seat_weapon_ammo);
+	seat_weapon_ammo_max_ = std::max(seat_weapon_ammo_max_, v.seat_weapon_ammo);
+	if (p_frame.own_seat_weapon) {
+		const net::OwnSeatWeapon &w = *p_frame.own_seat_weapon;
+		wire_heat_peak_ = std::max(wire_heat_peak_, net::seat_weapon_heat_of(w.heat));
+		wire_ammo_min_ = std::min(wire_ammo_min_, int32_t(w.magazine));
+	}
+}
+
+void VehicleDriveRun::seat_weapon_row(
+		const std::string &p_name, float p_heat_per_bullet, bool p_one_per_reload, bool p_magazine) {
+	const bool heats = p_heat_per_bullet > 0.0f;
+	const bool fed = seat_weapon_frames_ > 0 && seat_weapon_heat_peak_ == wire_heat_peak_ &&
+			seat_weapon_ammo_min_ == wire_ammo_min_;
+	const bool shown = (!heats || seat_weapon_heat_peak_ > 0.0f) && (!p_one_per_reload || seat_weapon_reloaded_) &&
+			(!p_magazine || seat_weapon_ammo_min_ < seat_weapon_ammo_max_);
+	row(p_name + "_weapon_hud", fed && shown,
+			fmt("%u frames of the HUD's seat weapon: heat peak %.3f (the snapshots' %.3f, HeatPerBullet %.4f), "
+				"reloading %s, magazine %d..%d (the snapshots' least %d)",
+					seat_weapon_frames_, double(seat_weapon_heat_peak_), double(wire_heat_peak_),
+					double(p_heat_per_bullet), seat_weapon_reloaded_ ? "seen" : "not seen", seat_weapon_ammo_min_,
+					seat_weapon_ammo_max_, wire_ammo_min_));
+}
+
 void VehicleDriveRun::turret_rows(Bf3LevelSession &r_session, const VehicleDriveInputs &p_in) {
 	const host::LevelVehicles &lv = *p_in.vehicles->level();
 	const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[spawner_].kind];
@@ -385,10 +420,19 @@ bool VehicleDriveRun::guns(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			}
 			gun_before_ = f.stats.vehicle_shots;
 			sounds_before_ = p_in.weapon_sounds;
+			seat_weapon_frames_ = 0;
+			seat_weapon_heat_peak_ = 0.0f;
+			seat_weapon_reloaded_ = false;
+			seat_weapon_ammo_min_ = INT32_MAX;
+			seat_weapon_ammo_max_ = -1;
+			wire_heat_peak_ = 0.0f;
+			wire_ammo_min_ = INT32_MAX;
+			sample_seat_weapon(p_in, f);
 			mapper.script_hold(InputMapper::WeaponAction::Fire, true);
 			enter(Phase::GunFired);
 			return false;
 		case Phase::GunFired: {
+			sample_seat_weapon(p_in, f);
 			if (t_ < kGunHold) {
 				return false;
 			}
@@ -441,6 +485,8 @@ bool VehicleDriveRun::guns(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			vehicle_screen_row(p_in, row_name,
 					gun_seat_ == 0 ? (first_person ? "/defaulttankscreen" : "/tank3pcrosshair")
 								   : (first_person ? "/defaulttankgunnerscreen" : ""));
+			seat_weapon_row(row_name, def != nullptr ? def->fire.heat_per_bullet : 0.0f, one_per_reload,
+					def != nullptr && def->fire.magazine_capacity > 0);
 			shoot(p_in, (row_name + "_3p").c_str());
 			if (gun_seat_ != 0) {
 				phase_ = Phase::Done;
