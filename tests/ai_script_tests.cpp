@@ -46,8 +46,8 @@ std::string message(const core::Status &p_status) {
 
 TEST_SUITE("ai-script") {
 	TEST_CASE("the shipped .ai files: no level has its own file, every shipped level loads the common scripts and "
-			  "its derived strategic areas, and they give the shipped settings and the Default set's behaviour "
-			  "weights on the Memory curve") {
+			  "its derived strategic areas, and they give the shipped settings and, through Infantry's vehicle mods "
+			  "over the all-ones basic weights, the Default set's behaviour weights on the Memory curve") {
 		const std::vector<std::string_view> levels = core::level::shipped_level_ids();
 		REQUIRE(levels.size() == 29u);
 		CHECK_FALSE(std::filesystem::exists(kShipped / "Levels"));
@@ -61,7 +61,8 @@ TEST_SUITE("ai-script") {
 			expected.vehicles = { "Infantry" };
 			expected.sides = 2;
 			expected.behaviour_count = int32_t(kInfantryBehaviourCount);
-			expected.basic_bot_weights = config->behaviour_modifiers.at("Default");
+			expected.basic_bot_weights = config->behaviour_modifiers.at("Unit");
+			expected.vehicle_mods = { config->behaviour_modifiers.at("Default") };
 			CHECK(config->settings == expected);
 			CHECK(config->strategic_areas.size() == 2u);
 			BehaviourTuning tuning;
@@ -73,7 +74,8 @@ TEST_SUITE("ai-script") {
 			const UrgeCurveDef &memory = config->urge_curves.at("Memory");
 			REQUIRE(memory.kind == UrgeCurveDef::Kind::Linear);
 			for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
-				want.curves[i] = { expected.basic_bot_weights[i], memory.values[0], memory.values[1] };
+				want.curves[i] = { expected.basic_bot_weights[i] * expected.vehicle_mods[0][i], memory.values[0],
+					memory.values[1] };
 			}
 			CHECK(tuning == want);
 			CHECK(config->weapon_templates.empty());
@@ -98,6 +100,7 @@ TEST_SUITE("ai-script") {
 		root.level("XP9_Own",
 				own_script +
 						"aiSettings.setBasicBotWeights Own\n"
+						"aiSettings.setVehicleMods Infantry Unit\n"
 						"aiSettings.setVehicleBehaviour Infantry Idle BBIdle BBPIdle 0 Rising Own\n");
 		root.file(level_strategic_areas_script(root.dir, "XP9_Own"),
 				"aiStrategicArea.createFromControlPoint Own 0 12\naiStrategicArea.setActive Own\n"
@@ -458,6 +461,8 @@ TEST_SUITE("ai-script") {
 																		<< shipped.substr(end + 1);
 		const core::Result<AiConfig> zero = load_level_ai_config(root.dir, "XP9_Missing", kTwoAreas);
 		REQUIRE_MESSAGE(zero.ok(), (zero.ok() ? std::string() : zero.error().message));
-		CHECK(zero->settings.basic_bot_weights.at(size_t(InfantryBehaviour::Resupply)) == 0.0f);
+		BehaviourTuning zero_tuning;
+		REQUIRE(apply_behaviour_weights(*zero, zero_tuning).ok());
+		CHECK(zero_tuning.curves[size_t(InfantryBehaviour::Resupply)].weight == 0.0f);
 	}
 }

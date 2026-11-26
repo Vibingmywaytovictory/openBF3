@@ -33,6 +33,7 @@ struct AiSettings {
 	std::string man_down_equipment;
 	std::vector<std::string> vehicles;
 	std::vector<float> basic_bot_weights;
+	std::vector<std::vector<float>> vehicle_mods;
 	std::array<std::vector<float>, 2> standard_personality;
 
 	static constexpr std::array<float, 6> kArmourClassValues = { 1.0f, 3.0f, 8.0f, 15.0f, 10.0f, 12.0f };
@@ -44,6 +45,7 @@ struct AiSettings {
 	int vehicle(std::string_view p_name) const;
 	void set_vehicle(const std::string &p_name);
 	const float *personality(int p_side) const;
+	const float *mods_of(int p_vehicle) const;
 
 	bool operator==(const AiSettings &) const = default;
 };

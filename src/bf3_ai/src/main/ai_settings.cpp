@@ -34,4 +34,10 @@ const float *AiSettings::personality(int p_side) const {
 	return weights.empty() ? nullptr : weights.data();
 }
 
+const float *AiSettings::mods_of(int p_vehicle) const {
+	if (p_vehicle < 0 || size_t(p_vehicle) >= vehicle_mods.size() || vehicle_mods[size_t(p_vehicle)].empty()) {
+		return nullptr;
+	}
+	return vehicle_mods[size_t(p_vehicle)].data();
+}
 }

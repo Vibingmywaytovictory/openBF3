@@ -28,6 +28,7 @@ struct UrgeCurveDef {
 };
 
 struct VehicleBehaviour {
+	int vehicle = -1;
 	int behaviour = -1;
 	std::string create_function;
 	int mode = 0;

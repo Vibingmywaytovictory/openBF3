@@ -91,6 +91,21 @@ const std::vector<float> *modifier_set(const AiConfig &p_config, std::string_vie
 	return find_named(p_config.behaviour_modifiers, p_name);
 }
 
+core::Status complete_set(const AiConfig &p_config, std::string_view p_name) {
+	if (modifier_set(p_config, p_name) == nullptr) {
+		return no_modifiers(p_name);
+	}
+	const std::vector<bool> &given = *find_named(p_config.given_modifiers, p_name);
+	for (size_t i = 0; i < given.size(); ++i) {
+		if (!given[i]) {
+			return core::make_error("'" + core::shown_text(p_name) + "' gives " +
+					(i < p_config.behaviours.size() ? p_config.behaviours[i] : std::to_string(i)) +
+					" no modifier (aiSettings.setBehaviourModifier)");
+		}
+	}
+	return core::Status::success();
+}
+
 core::Status curve(Args p_args, UrgeCurveDef::Kind p_kind, AiConfig &r_config) {
 	UrgeCurveDef def;
 	def.kind = p_kind;
@@ -350,19 +365,21 @@ const Command kCommands[] = {
 			} },
 	{ "aiSettings.setBasicBotWeights", 1, 1,
 			[](Args a, AiConfig &c) -> core::Status {
-				const std::vector<float> *set = modifier_set(c, a[0]);
-				if (set == nullptr) {
-					return no_modifiers(a[0]);
+				BF3_TRY(complete_set(c, a[0]));
+				c.settings.basic_bot_weights = *modifier_set(c, a[0]);
+				return core::Status::success();
+			} },
+	{ "aiSettings.setVehicleMods", 2, 2,
+			[](Args a, AiConfig &c) -> core::Status {
+				const int vehicle = c.settings.vehicle(a[0]);
+				if (vehicle < 0) {
+					return no_vehicle(a[0]);
 				}
-				const std::vector<bool> &given = *find_named(c.given_modifiers, a[0]);
-				for (size_t i = 0; i < given.size(); ++i) {
-					if (!given[i]) {
-						return core::make_error("'" + core::shown_text(a[0]) + "' gives " +
-								(i < c.behaviours.size() ? c.behaviours[i] : std::to_string(i)) +
-								" no modifier (aiSettings.setBehaviourModifier)");
-					}
+				BF3_TRY(complete_set(c, a[1]));
+				if (c.settings.vehicle_mods.size() <= size_t(vehicle)) {
+					c.settings.vehicle_mods.resize(size_t(vehicle) + 1);
 				}
-				c.settings.basic_bot_weights = *set;
+				c.settings.vehicle_mods[size_t(vehicle)] = *modifier_set(c, a[1]);
 				return core::Status::success();
 			} },
 	{ "aiSettings.setStandardPersonality", 2, 2,
@@ -378,10 +395,11 @@ const Command kCommands[] = {
 			} },
 	{ "aiSettings.setVehicleBehaviour", 7, 7,
 			[](Args a, AiConfig &c) -> core::Status {
-				if (c.settings.vehicle(a[0]) < 0) {
+				VehicleBehaviour b;
+				b.vehicle = c.settings.vehicle(a[0]);
+				if (b.vehicle < 0) {
 					return no_vehicle(a[0]);
 				}
-				VehicleBehaviour b;
 				b.behaviour = c.behaviour_id(a[1]);
 				if (b.behaviour < 0) {
 					return no_behaviour(a[1]);
@@ -397,8 +415,10 @@ const Command kCommands[] = {
 				b.create_function = std::string(a[2]);
 				b.urge_curve = std::string(a[5]);
 				b.modifiers = std::string(a[6]);
-				const auto same = std::find_if(c.vehicle_behaviours.begin(), c.vehicle_behaviours.end(),
-						[&](const VehicleBehaviour &p_b) { return p_b.behaviour == b.behaviour; });
+				const auto same = std::find_if(
+						c.vehicle_behaviours.begin(), c.vehicle_behaviours.end(), [&](const VehicleBehaviour &p_b) {
+							return p_b.vehicle == b.vehicle && p_b.behaviour == b.behaviour;
+						});
 				if (same != c.vehicle_behaviours.end()) {
 					*same = std::move(b);
 				} else {
@@ -841,7 +861,7 @@ core::Status apply_behaviour_weights(const AiConfig &p_config, BehaviourTuning &
 			return core::make_error("ai config: behaviour " + std::to_string(i) + " is not " + std::string(name));
 		}
 		const auto bound = std::find_if(p_config.vehicle_behaviours.begin(), p_config.vehicle_behaviours.end(),
-				[&](const VehicleBehaviour &p_b) { return p_b.behaviour == int(i); });
+				[&](const VehicleBehaviour &p_b) { return p_b.vehicle == infantry && p_b.behaviour == int(i); });
 		if (bound == p_config.vehicle_behaviours.end()) {
 			return core::make_error(
 					"ai config: Infantry has no " + std::string(name) + " (aiSettings.setVehicleBehaviour)");
@@ -853,7 +873,8 @@ core::Status apply_behaviour_weights(const AiConfig &p_config, BehaviourTuning &
 		}
 		const UrgeCurveDef &curve = *find_named(p_config.urge_curves, bound->urge_curve);
 		BehaviourCurve &out = tuning.curves[i];
-		out.weight = p_config.settings.basic_bot_weights[i];
+		const float *mods = p_config.settings.mods_of(infantry);
+		out.weight = p_config.settings.basic_bot_weights[i] * (mods != nullptr ? mods[i] : 1.0f);
 		if (curve.kind == UrgeCurveDef::Kind::Linear) {
 			out.slope = curve.values[0];
 			out.offset = curve.values[1];

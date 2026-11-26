@@ -476,7 +476,8 @@ TEST_SUITE("host-tdm-bots-unit") {
 				c);
 		REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
 		CHECK(c.behaviours == bf3::test::shipped_behaviour_tuning());
-		CHECK(c.behaviours.curves[0].weight == c.ai.basic_bot_weights[0]);
+		REQUIRE(c.ai.mods_of(c.ai.vehicle("Infantry")) != nullptr);
+		CHECK(c.behaviours.curves[0].weight == c.ai.basic_bot_weights[0] * c.ai.mods_of(c.ai.vehicle("Infantry"))[0]);
 		CHECK(c.ai.bot_skill == 0.75f);
 		CHECK(c.ai.sides == 2u);
 		CHECK(c.ai.vehicle("Infantry") == 0);

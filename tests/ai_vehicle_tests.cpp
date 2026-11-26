@@ -416,6 +416,38 @@ TEST_SUITE("ai-vehicle") {
 		CHECK_FALSE(ai::apply_behaviour_weights(miscreated, untouched).ok());
 	}
 
+	TEST_CASE("aiSettings.setVehicleMods gives a vehicle class its weight set, which multiplies Infantry's basic "
+			  "weights; a class's own setVehicleBehaviour leaves Infantry's binding; unknown or incomplete fails") {
+		const std::string base = change_script("Change", "BBChange") +
+				"aiSettings.setVehicle Car\n"
+				"aiSettings.createBehaviourModifiers Halves\n";
+		std::string halves = base;
+		for (size_t i = 0; i < ai::kBotBehaviourCount; ++i) {
+			const std::string name = i < ai::kInfantryBehaviourCount
+					? std::string(ai::infantry_behaviour_kind(ai::InfantryBehaviour(i)).substr(2))
+					: std::string("Change");
+			halves += "aiSettings.setBehaviourModifier " + name + " 0.5\n";
+		}
+		ai::AiConfig mods;
+		REQUIRE(ai::run_ai_script(halves +
+						"aiSettings.setVehicleMods Infantry Halves\n"
+						"aiSettings.setVehicleBehaviour Car Change BBChange BBPChange 0 Memory Default\n"
+						"aiSettings.setVehicleBehaviour Car Idle BBMoveTo BBPIdle 0 Memory Default\n",
+				"mods.ai", mods)
+						.ok());
+		REQUIRE(mods.settings.mods_of(mods.settings.vehicle("Infantry")) != nullptr);
+		CHECK(mods.settings.mods_of(mods.settings.vehicle("Car")) == nullptr);
+		CHECK(mods.vehicle_behaviours.size() == ai::kBotBehaviourCount + 2u);
+		ai::BehaviourTuning tuning;
+		REQUIRE(ai::apply_behaviour_weights(mods, tuning).ok());
+		CHECK(tuning.curves[size_t(ai::InfantryBehaviour::Revive)].weight == doctest::Approx(0.5f));
+		CHECK(tuning.curves[size_t(ai::InfantryBehaviour::Change)].weight == doctest::Approx(0.75f));
+		ai::AiConfig unknown;
+		CHECK_FALSE(ai::run_ai_script(halves + "aiSettings.setVehicleMods Tank Halves\n", "tank.ai", unknown).ok());
+		CHECK_FALSE(ai::run_ai_script(base + "aiSettings.setVehicleMods Car Halves\n", "partial.ai", unknown).ok());
+		CHECK_FALSE(ai::run_ai_script(halves + "aiSettings.setVehicleMods Car None\n", "none.ai", unknown).ok());
+	}
+
 	TEST_CASE("BotMain merges BBChange only when the tuning declares Change; it wins on its weighted urgency") {
 		ai::test::FakeBody body;
 		ai::BehaviourTuning tuning = unit_tuning();
