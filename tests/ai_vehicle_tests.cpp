@@ -308,6 +308,7 @@ TEST_SUITE("ai-vehicle") {
 			decide(ten);
 			CHECK(body.change_senses == 0);
 			CHECK(ten.behaviour() != ai::InfantryBehaviour::Change);
+			CHECK(ten.weighted_urgency(ai::InfantryBehaviour::Change) == 0.0f);
 		}
 		tuning.change = true;
 		tuning.curves[size_t(ai::InfantryBehaviour::Change)].weight = 0.5f;

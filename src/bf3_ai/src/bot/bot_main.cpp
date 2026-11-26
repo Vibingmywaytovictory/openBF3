@@ -275,7 +275,7 @@ InfantryBehaviour BotMain::behaviour() const {
 }
 
 float BotMain::weighted_urgency(InfantryBehaviour p_behaviour) const {
-	return behaviours_[size_t(p_behaviour)]->urgency_value();
+	return size_t(p_behaviour) < behaviour_count_ ? behaviours_[size_t(p_behaviour)]->urgency_value() : 0.0f;
 }
 
 }
