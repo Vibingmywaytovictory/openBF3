@@ -76,6 +76,19 @@ void BotMain::calculate_mods() {
 	}
 }
 
+bool BotMain::set_equipment(EquipmentClass p_class) {
+	if (p_class == equipment_) {
+		return false;
+	}
+	equipment_ = p_class;
+	for (size_t i = 0; i < behaviour_count_; ++i) {
+		basic_weights_[i] = p_class == EquipmentClass::Infantry ? tuning_.curves[i].weight
+																: tuning_.class_weights[size_t(p_class)][i];
+	}
+	calculate_mods();
+	return true;
+}
+
 bool BotMain::receive_order(const BotOrder &p_order) {
 	if (!taking_orders_) {
 		return false;

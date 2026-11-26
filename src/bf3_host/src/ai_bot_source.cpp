@@ -351,6 +351,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 			release();
 		}
 		bot->set_side(view().team(body.slot));
+		if (bot->set_equipment(seat_equipment(*body.shared, body.slot))) {
+			body.shared->count(&TdmBotStats::vehicle_class_switches);
+		}
 		if (!p_playing) {
 			release();
 			return { &s, true };

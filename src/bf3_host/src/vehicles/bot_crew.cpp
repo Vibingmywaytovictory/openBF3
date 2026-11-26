@@ -191,6 +191,16 @@ ai::ChangeStrengths change_strength_scales(const TdmShared &p_shared) {
 	return out;
 }
 
+ai::EquipmentClass seat_equipment(const TdmShared &p_shared, uint8_t p_slot) {
+	const ServerVehicles *vehicles = p_shared.host.view->server_vehicles();
+	const std::optional<VehicleSeat> seat = vehicles != nullptr ? vehicles->seat_of(p_slot) : std::nullopt;
+	if (!seat) {
+		return ai::EquipmentClass::Infantry;
+	}
+	const LevelVehicleKind &kind = vehicles->level()->kinds[vehicles->level()->spawners[seat->vehicle].kind];
+	return kind.model != nullptr && land_tracked(*kind.model) ? ai::EquipmentClass::Tank : ai::EquipmentClass::Car;
+}
+
 ai::ChangeStrengths change_strengths(const TdmShared &p_shared, const ai::ChangeStrengths &p_per_minute) {
 	const ai::ChangeStrengths scale = change_strength_scales(p_shared);
 	ai::ChangeStrengths out{};

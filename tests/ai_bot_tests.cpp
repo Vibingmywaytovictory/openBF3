@@ -412,6 +412,27 @@ TEST_SUITE("ai-bot") {
 		CHECK(r.decide() == InfantryBehaviour::Random);
 	}
 
+	TEST_CASE("equipment classes: a seated bot weighs its behaviours by its class's weights, as BF2's updateBot puts "
+			  "getVehicleMods on an equipment change, and by Infantry's again on foot") {
+		Rig r;
+		r.bot.update_bot(true, true);
+		r.body.s.navigable = true;
+		r.body.s.blind_fire = true;
+		CHECK(r.decide() == InfantryBehaviour::FireInfantery);
+		std::array<float, kBotBehaviourCount> &tank = r.tuning.class_weights[size_t(EquipmentClass::Tank)];
+		tank = r.tuning.class_weights[size_t(EquipmentClass::Infantry)];
+		tank[size_t(InfantryBehaviour::FireInfantery)] = 0.0f;
+		tank[size_t(InfantryBehaviour::Random)] = 10.0f;
+		CHECK_FALSE(r.bot.set_equipment(EquipmentClass::Infantry));
+		CHECK(r.bot.set_equipment(EquipmentClass::Tank));
+		CHECK_FALSE(r.bot.set_equipment(EquipmentClass::Tank));
+		CHECK(r.bot.equipment() == EquipmentClass::Tank);
+		CHECK(r.decide() == InfantryBehaviour::Random);
+		CHECK(r.bot.weighted_urgency(InfantryBehaviour::Random) == doctest::Approx(10.0f));
+		CHECK(r.bot.set_equipment(EquipmentClass::Infantry));
+		CHECK(r.decide() == InfantryBehaviour::FireInfantery);
+	}
+
 	TEST_CASE("bb.* tuning: the defaults round-trip, out-of-range and unknown keys refused, the weights and curves "
 			  "being the .ai scripts', weights reorder the choice") {
 		const BehaviourTuning def;

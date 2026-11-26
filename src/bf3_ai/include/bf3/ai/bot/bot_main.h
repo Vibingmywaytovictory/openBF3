@@ -116,6 +116,8 @@ public:
 	void set_taking_orders(bool p_taking) { taking_orders_ = p_taking; }
 	bool is_taking_orders() const { return taking_orders_; }
 	void calculate_mods();
+	bool set_equipment(EquipmentClass p_class);
+	EquipmentClass equipment() const { return equipment_; }
 	bool plan_lock() const { return plan_lock_; }
 	void set_plan_lock(bool p_lock) { plan_lock_ = p_lock; }
 	void set_lod_level(BotLodLevel p_level) { lod_level_ = p_level; }
@@ -153,6 +155,7 @@ private:
 	std::array<std::unique_ptr<UCLinear>, kBotBehaviourCount> curves_;
 	std::array<std::unique_ptr<BotBehaviour>, kBotBehaviourCount> behaviours_;
 	std::array<float, kBotBehaviourCount> basic_weights_{};
+	EquipmentClass equipment_ = EquipmentClass::Infantry;
 	std::array<float, kBotBehaviourCount> personality_{};
 	const float *current_orders_ = nullptr;
 	std::array<float, kBotBehaviourCount> behaviour_urgencies_{};

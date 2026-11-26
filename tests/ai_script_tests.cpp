@@ -76,6 +76,9 @@ TEST_SUITE("ai-script") {
 			for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
 				want.curves[i] = { expected.basic_bot_weights[i] * expected.vehicle_mods[0][i], memory.values[0],
 					memory.values[1] };
+				for (size_t k = 0; k < kEquipmentClassCount; ++k) {
+					want.class_weights[k][i] = want.curves[i].weight;
+				}
 			}
 			CHECK(tuning == want);
 			CHECK(config->weapon_templates.empty());

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../tdm_bot_weapons_vehicles.h"
+#include "bf3/ai/behaviour/behaviours.h"
 #include "bf3/ai/vehicle/vehicle_change.h"
 #include "bf3/sim/bots/perception.h"
 #include "bf3/sim/command.h"
@@ -30,6 +31,7 @@ ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehi
 		const sim::SoldierState &p_state, bool p_stuck);
 
 ai::ChangeStrengths change_strength_scales(const TdmShared &p_shared);
+ai::EquipmentClass seat_equipment(const TdmShared &p_shared, uint8_t p_slot);
 ai::ChangeStrengths change_soldier_strengths(const TdmShared &p_shared, uint8_t p_slot);
 
 class BotCrew {

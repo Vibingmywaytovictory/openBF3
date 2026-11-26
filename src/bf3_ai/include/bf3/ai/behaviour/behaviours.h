@@ -34,6 +34,11 @@ inline constexpr size_t kInfantryBehaviourCount = 10;
 inline constexpr size_t kBotBehaviourCount = 11;
 std::string_view infantry_behaviour_kind(InfantryBehaviour p_behaviour);
 
+enum class EquipmentClass : uint8_t { Infantry, Tank, Car };
+inline constexpr size_t kEquipmentClassCount = 3;
+inline constexpr std::array<std::string_view, kEquipmentClassCount> kEquipmentClassNames = { "Infantry", "Tank",
+	"Car" };
+
 struct BehaviourCurve {
 	float weight = 0.0f;
 	float slope = 0.0f;
@@ -44,6 +49,7 @@ struct BehaviourCurve {
 
 struct BehaviourTuning {
 	std::array<BehaviourCurve, kBotBehaviourCount> curves{};
+	std::array<std::array<float, kBotBehaviourCount>, kEquipmentClassCount> class_weights{};
 	bool change = false;
 	float squad_far_m = 15.0f;
 	float squad_arrive_m = 3.0f;
