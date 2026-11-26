@@ -25,7 +25,8 @@ void GameAudioDriver::step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, 
 	r_router.set_own_slot(p_in.own_slot);
 	r_router.set_own_first_person(p_in.own_first_person);
 	if (p_in.frame != nullptr && p_in.frame->own_weapons_valid) {
-		r_router.set_own_trigger((p_in.frame->own_weapons_curr.timers[0].flags & sw::slot_flags::kTriggerDown) != 0);
+		const net::WeaponTimersWire &active = p_in.frame->own_weapons_curr.timers[0];
+		r_router.set_own_trigger((active.flags & sw::slot_flags::kTriggerDown) != 0 || active.burst_left > 0);
 	}
 	r_router.set_listener(p_in.listener);
 	if (r_impacts != nullptr) {

@@ -4,6 +4,7 @@
 #include "bf3/audio/mixer_core.h"
 #include "bf3/audio/patch_instance.h"
 #include "bf3/audio/weapon_audio.h"
+#include "bf3/audio/weapon_foley.h"
 #include "bf3/audio/weapon_sound.h"
 #include "bf3/client_audio/game_audio_frame.h"
 #include "bf3/client_audio/kit_audio.h"
@@ -12,9 +13,13 @@
 #include "bf3/core/gameplay/weapon_def.h"
 #include "bf3/core/install_snapshot.h"
 #include "bf3/core/level/level.h"
+#include "bf3/host/client_session.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/kits.h"
+#include "bf3/net/weapons_wire.h"
+#include "bf3/sim/weapons/mechanics.h"
 #include "bf3/sim/weapons/sim_time.h"
+#include "bf3/sim/weapons/weapon_input.h"
 #include "bf3/sim/weapons/weapon_sim.h"
 
 #include <doctest/doctest.h>
@@ -34,7 +39,9 @@ namespace ca = bf3::core::audio;
 namespace cp = bf3::core::audio::port;
 namespace gp = bf3::core::gameplay;
 namespace host = bf3::host;
+namespace net = bf3::net;
 namespace present = bf3::present;
+namespace sim = bf3::sim;
 namespace sw = bf3::sim::weapons;
 
 namespace {
@@ -436,6 +443,403 @@ TEST_SUITE("audio-casings") {
 						" AreaType ", area);
 			}
 		}
+		check_casing_unchanged(*f);
+	}
+}
+
+namespace {
+
+constexpr uint32_t kFireStopped = 1920007028u;
+
+struct TracedInstance {
+	const ca::SoundProgram *program = nullptr;
+	ba::SamplerTrace samplers;
+	ba::GraphTrace graph;
+};
+
+struct GraphRecorder final : ba::WeaponAudioObserver {
+	std::deque<TracedInstance> instances;
+	void watch(ba::PatchInstance &r_instance) {
+		TracedInstance &t = instances.emplace_back();
+		t.program = &r_instance.program();
+		t.samplers.entries.resize(4096);
+		t.graph.entries.resize(4096);
+		r_instance.set_sampler_trace(&t.samplers);
+		r_instance.set_graph_trace(&t.graph);
+	}
+	void on_driver_instance(uint8_t, uint64_t, uint64_t, ba::PatchInstance &r_instance) override { watch(r_instance); }
+	void on_trigger_up(uint8_t, uint64_t, uint64_t) override {}
+	void on_foley(const ba::FoleyCue &, ba::PatchInstance *r_instance) override {
+		if (r_instance != nullptr) {
+			watch(*r_instance);
+		}
+	}
+	void on_one_shot(ba::PatchInstance &r_instance) override { watch(r_instance); }
+};
+
+struct ModePulls {
+	uint8_t mode = 0;
+	gp::FireLogic logic = gp::FireLogic::Single;
+	std::vector<uint64_t> first_shot_frames;
+	std::vector<uint32_t> shots;
+};
+
+struct SessionLog {
+	std::vector<ModePulls> modes;
+	std::deque<TracedInstance> instances;
+	std::vector<std::string> faults;
+	uint64_t accessory_sounds = 0;
+};
+
+std::vector<gp::FireLogic> fire_modes(const gp::FireFunction &p_fire) {
+	std::vector<gp::FireLogic> out{ p_fire.logic };
+	out.insert(out.end(), p_fire.extra_modes.begin(), p_fire.extra_modes.end());
+	return out;
+}
+
+SessionLog play_session(const CasingFixture &p_f, const sw::WeaponTable &p_sim, uint16_t p_def, uint32_t p_accessory) {
+	const ba::AudioTuning tuning;
+	const ba::GameMixerSizes sizes = ba::game_mixer_sizes(tuning);
+	ba::MixerCore mixer(ba::game_mixer_config(tuning, sizes, 8192));
+	ba::OneShotPool pool(sizes.one_shots);
+	ba::SimMixerClockConfig cc;
+	cc.bias_frames = 2048;
+	ba::SimMixerClock clock(mixer, cc);
+	ba::WeaponAudioRouter router(mixer, p_f.assets.table, p_f.assets.bank, tuning, pool);
+	GraphRecorder rec;
+	router.set_observer(&rec);
+	ba::GameAudioDriver driver;
+	std::unique_ptr<host::PresentationFrame> frame = std::make_unique<host::PresentationFrame>();
+	frame->gear[0].def = p_def;
+	frame->gear[0].accessories[0] = p_accessory;
+	SessionLog log;
+	const gp::WeaponDef &w = p_f.level->defs[p_def];
+	const std::vector<gp::FireLogic> modes = fire_modes(w.fire);
+	const bool bolt = std::find(modes.begin(), modes.end(), gp::FireLogic::SingleWithBoltAction) != modes.end();
+	const sim::Tick spawn = 100;
+	const std::array<uint16_t, 1> loadout{ p_def };
+	sw::SoldierWeaponsState st;
+	const Status spawned = sw::spawn_soldier_weapons(st, p_sim, loadout, 0, spawn);
+	if (!spawned.ok()) {
+		log.faults.push_back("spawn: " + spawned.error().message);
+		return log;
+	}
+	const sim::Tick second = sim::Tick(sim::kSimHz);
+	const sim::Tick gap = bolt ? 3 * second : second + second / 5;
+	struct Press {
+		sim::Tick from = 0;
+		sim::Tick until = 0;
+		size_t mode = 0;
+	};
+	std::vector<Press> presses;
+	sim::Tick at = spawn + 2 * second;
+	for (size_t m = 0; m < modes.size(); ++m) {
+		for (int k = 0; k < 3; ++k) {
+			presses.push_back(Press{ at, at + 1, m });
+			at += gap;
+		}
+		presses.push_back(Press{ at, at + second, m });
+		at += 4 * second;
+		log.modes.push_back(ModePulls{ uint8_t(m), modes[m], {}, {} });
+	}
+	const sim::Tick end = at + second;
+	std::vector<float> buffer(size_t(kFramesPerTick) * 2);
+	sw::WeaponTickOutput out;
+	size_t press = 0;
+	size_t counted = SIZE_MAX;
+	for (sim::Tick t = spawn + 1; t <= end; ++t) {
+		while (press + 1 < presses.size() && t >= presses[press + 1].from) {
+			++press;
+		}
+		const bool down = t >= presses[press].from && t < presses[press].until;
+		const size_t mode = presses[press].mode;
+		sw::WeaponInput in;
+		in.fire = down;
+		in.fire_mode_counter = uint8_t(mode & 3u);
+		sim::Command c;
+		c.tick = t;
+		c.sequence = t;
+		c.buttons = sw::with_weapon_input(0, in);
+		sw::WeaponContext ctx;
+		ctx.eye_start = { 0.0f, 1.6f, 0.0f };
+		ctx.eye_end = ctx.eye_start;
+		sw::step_soldier_weapons(p_sim, st, c, ctx, 7, out);
+		if (down && st.current().mode != mode) {
+			log.faults.push_back("mode " + std::to_string(mode) + " not reached at tick " + std::to_string(t));
+		}
+		present::PresentClock now;
+		now.predicted_valid = now.render_valid = true;
+		now.predicted = sw::tick_end(t);
+		now.render = now.predicted - 6 * kTick;
+		clock.set_now(now);
+		std::vector<present::PresentEvent> ev;
+		for (uint8_t k = 0; k < out.shot_count; ++k) {
+			const sw::ShotEvent &shot = out.shots[k];
+			present::PresentEvent e;
+			e.kind = present::PresentKind::OwnShot;
+			e.timeline = present::PresentTimeline::Predicted;
+			e.slot = 0;
+			e.id = shot.shot_index;
+			e.def = shot.def;
+			e.aux = shot.weapon_slot;
+			e.time = shot.time;
+			e.extra = shot.pellets;
+			ev.push_back(e);
+			ModePulls &mp = log.modes[presses[press].mode];
+			if (counted != press) {
+				mp.first_shot_frames.push_back(clock.frame_of(shot.time, present::PresentTimeline::Predicted));
+				mp.shots.push_back(0);
+				counted = press;
+			}
+			++mp.shots.back();
+		}
+		for (uint8_t k = 0; k < out.timed_count; ++k) {
+			const sw::TimedWeaponEvent &tw = out.timed[k];
+			present::PresentEvent e;
+			e.kind = present::PresentKind::OwnTimed;
+			e.timeline = present::PresentTimeline::Predicted;
+			e.slot = 0;
+			e.aux = tw.weapon_slot;
+			e.def = st.slots[tw.weapon_slot < sw::kMaxWeaponSlots ? tw.weapon_slot : 0].def;
+			e.id = tw.event;
+			e.time = tw.time;
+			ev.push_back(e);
+		}
+		frame->own_weapons_valid = true;
+		frame->own_weapons_prev = frame->own_weapons_curr;
+		frame->own_weapons_curr = net::weapons_wire_view(st, t);
+		ba::GameAudioInputs gin;
+		gin.frame = frame.get();
+		gin.events = ev;
+		gin.own_slot = 0;
+		gin.own_first_person = true;
+		gin.sound_variants = p_f.assets.kits.variants;
+		driver.step(router, nullptr, clock, gin);
+		mixer.mix(buffer.data(), kFramesPerTick);
+	}
+	log.accessory_sounds = router.stats().accessory_sounds;
+	log.instances = std::move(rec.instances);
+	return log;
+}
+
+std::string event_name(uint32_t p_hash) {
+	switch (p_hash) {
+		case ba::kHashFire:
+			return "Fire";
+		case ba::kHashStep:
+			return "ShotFired";
+		case kFireStopped:
+			return "FireStopped";
+		case ba::kHashReload:
+			return "Reload";
+		case ba::kHashBolt:
+			return "Bolt";
+		case ba::kHashAction:
+			return "Action";
+		default:
+			return std::to_string(p_hash);
+	}
+}
+
+struct PullEvents {
+	std::string label;
+	std::vector<std::pair<uint32_t, uint32_t>> runs;
+};
+
+std::vector<PullEvents> pull_events(const SessionLog &p_log, const ca::SoundProgram &p_program) {
+	std::vector<std::pair<uint64_t, uint32_t>> events;
+	for (const TracedInstance &t : p_log.instances) {
+		if (t.program != &p_program) {
+			continue;
+		}
+		for (uint32_t k = 0; k < std::min<uint32_t>(t.graph.count, uint32_t(t.graph.entries.size())); ++k) {
+			const ba::GraphTraceEntry &e = t.graph.entries[k];
+			if (e.kind == ba::GraphTraceKind::Event) {
+				events.emplace_back(e.frame, e.id);
+			}
+		}
+	}
+	std::stable_sort(events.begin(), events.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+	std::vector<uint64_t> starts;
+	std::vector<PullEvents> out;
+	for (const ModePulls &m : p_log.modes) {
+		for (size_t k = 0; k < m.first_shot_frames.size(); ++k) {
+			starts.push_back(m.first_shot_frames[k]);
+			PullEvents &p = out.emplace_back();
+			p.label = std::string(m.logic == gp::FireLogic::Automatic	? "auto"
+									  : m.logic == gp::FireLogic::Burst ? "burst"
+																		: "single") +
+					(k + 1 == m.first_shot_frames.size() ? " hold, " : " tap, ") + std::to_string(m.shots[k]) +
+					" shots:";
+		}
+	}
+	for (size_t i = 0; i < starts.size(); ++i) {
+		const uint64_t from = starts[i] > ba::kBlockFrames ? starts[i] - ba::kBlockFrames : 0;
+		const uint64_t to = i + 1 < starts.size() ? starts[i + 1] - ba::kBlockFrames : UINT64_MAX;
+		for (const auto &[frame, hash] : events) {
+			if (frame < from || frame >= to) {
+				continue;
+			}
+			std::vector<std::pair<uint32_t, uint32_t>> &runs = out[i].runs;
+			if (runs.empty() || runs.back().first != hash) {
+				runs.emplace_back(hash, 0);
+			}
+			++runs.back().second;
+		}
+	}
+	return out;
+}
+
+std::string shape_text(const PullEvents &p_pull) {
+	std::string s;
+	for (const auto &[hash, count] : p_pull.runs) {
+		s += " " + event_name(hash) + (count > 1 ? " x" + std::to_string(count) : std::string());
+	}
+	return s;
+}
+
+}
+
+TEST_SUITE("audio-weapon-voices") {
+	TEST_CASE(
+			"weapon voices: every primary and sidearm sound of Metro TDM's catalog, fired by the weapon sim in each of "
+			"its fire modes through the client audio driver, posts the AK-74M's events per pull and cuts each LtNone "
+			"and LtForward sampler at its Release (R5-AU2 A6)") {
+		CasingFixture *f = need_casing_install();
+		if (f == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &level = *f->level;
+		const ba::WeaponAudioTable &table = *f->assets.table;
+		Result<std::shared_ptr<const sw::WeaponTable>> sim =
+				host::make_match_table(level, sw::Mechanics{}, false, true);
+		REQUIRE_MESSAGE(sim.ok(), (sim.ok() ? std::string() : sim.error().message));
+		struct Sound {
+			uint16_t def = 0;
+			uint32_t accessory = 0;
+		};
+		std::map<uint16_t, Sound> sounds;
+		for (const auto &team : level.loadouts.kits) {
+			for (const host::LoadoutKit &k : team) {
+				for (const gp::WeaponSlot slot : { gp::WeaponSlot::Primary, gp::WeaponSlot::Sidearm }) {
+					for (const host::LoadoutItem &item : k.slots[size_t(slot)]) {
+						if (item.def < level.defs.size()) {
+							sounds[item.def] = Sound{ item.def, 0 };
+						}
+					}
+				}
+			}
+		}
+		for (const ba::KitAudioVariant &v : f->assets.kits.variants) {
+			if (sounds.count(v.def) != 0) {
+				sounds[v.source] = Sound{ v.def, v.accessory };
+			}
+		}
+		const uint64_t cut = ba::release_cut_frames(ba::AudioTuning{}, ba::kMixRate);
+		std::vector<std::string> wrong;
+		std::map<std::string, std::vector<PullEvents>> logs;
+		size_t driven = 0;
+		uint64_t releases = 0, with_trigger = 0;
+		std::map<std::string, uint64_t> released;
+		for (const auto &[sound, s] : sounds) {
+			REQUIRE(sound < table.defs.size());
+			const ba::WeaponAudioDef &a = table.defs[sound];
+			if (a.form != ba::WeaponAudioForm::Driver || !a.program) {
+				continue;
+			}
+			const gp::WeaponDef &w = level.defs[s.def];
+			const SessionLog log = play_session(*f, **sim, s.def, s.accessory);
+			++driven;
+			std::vector<std::string> faults = log.faults;
+			ba::ReleaseCounts counts;
+			if (sound != s.def && log.accessory_sounds == 0) {
+				faults.push_back("the accessory sound never played");
+			}
+			for (const ModePulls &m : log.modes) {
+				if (m.first_shot_frames.size() != 4) {
+					faults.push_back("mode " + std::to_string(m.mode) + " fired " +
+							std::to_string(m.first_shot_frames.size()) + " of 4 pulls");
+				}
+			}
+			for (const TracedInstance &t : log.instances) {
+				CHECK(t.samplers.dropped == 0);
+				CHECK(t.graph.dropped == 0);
+				for (const ba::ReleaseOverrun &o :
+						ba::release_overruns(*t.program, t.samplers, t.graph, cut, &counts)) {
+					faults.push_back(t.program->name + ": sampler " + std::to_string(o.node) + " slot " +
+							std::to_string(o.slot) +
+							(o.started_after ? std::string(" starts a segment after its release")
+											: o.end_frame == UINT64_MAX
+											? std::string(" sounds on past its release")
+											: " sounds " + std::to_string(o.end_frame - o.release_frame) +
+													" frames past its release"));
+				}
+			}
+			releases += counts.checked;
+			with_trigger += counts.with_trigger;
+			released[a.patch] += counts.checked;
+			const std::vector<PullEvents> pulls = pull_events(log, *a.program);
+			const uint32_t stop = a.binding.stop_event;
+			const bool distinct_stop =
+					stop != 0 && stop != a.binding.start_event && stop != a.binding.step_event.value_or(0);
+			for (const PullEvents &p : pulls) {
+				const bool starts = !p.runs.empty() && p.runs.front().first == a.binding.start_event;
+				const auto driver_event = [&](uint32_t p_hash) {
+					return p_hash == a.binding.start_event || p_hash == a.binding.step_event.value_or(0) ||
+							p_hash == a.binding.shot_event.value_or(0);
+				};
+				const auto stop_at =
+						std::find_if(p.runs.begin(), p.runs.end(), [&](const auto &r) { return r.first == stop; });
+				const bool stops_once = !distinct_stop ||
+						(stop_at != p.runs.end() && stop_at->second == 1 &&
+								std::none_of(stop_at + 1, p.runs.end(),
+										[&](const auto &r) { return r.first == stop || driver_event(r.first); }));
+				if (!starts || !stops_once) {
+					faults.push_back("events " + p.label + shape_text(p));
+				}
+			}
+			logs[w.variant + " [" + a.patch + "]"] = pulls;
+			if (!faults.empty()) {
+				std::string line = w.variant + " [" + a.patch + "]:";
+				for (const std::string &x : faults) {
+					line += "\n    " + x;
+				}
+				wrong.push_back(line);
+			}
+		}
+		const auto pulls_of = [&](const char *p_variant, const char *p_patch) {
+			const auto it = logs.find(std::string(p_variant) + " [" + p_patch + "]");
+			REQUIRE_MESSAGE(it != logs.end(), p_variant);
+			return it->second;
+		};
+		const std::vector<PullEvents> ak =
+				pulls_of("weapons/ak74m/u_ak74m", "sound/weapons/handheld/ak74/weapon_assaultrifle_ak74_02");
+		const std::vector<PullEvents> g3 =
+				pulls_of("weapons/g3a3/u_g3a3", "sound/weapons/handheld/g3/weapon_assaultrifle_g3_02");
+		std::string both;
+		REQUIRE(ak.size() == g3.size());
+		for (size_t k = 0; k < ak.size(); ++k) {
+			both += "\n  AK-74M " + ak[k].label + shape_text(ak[k]) + "\n  G3A3   " + g3[k].label + shape_text(g3[k]);
+			std::vector<uint32_t> ka, kg;
+			for (const auto &r : ak[k].runs) {
+				ka.push_back(r.first);
+			}
+			for (const auto &r : g3[k].runs) {
+				kg.push_back(r.first);
+			}
+			CHECK_MESSAGE(ka == kg, "pull ", k, ": AK-74M", shape_text(ak[k]), ", G3A3", shape_text(g3[k]));
+		}
+		MESSAGE("events per pull:", both);
+		CHECK(released["sound/weapons/handheld/g3/weapon_assaultrifle_g3_02"] >= 8);
+		std::string all;
+		for (const std::string &l : wrong) {
+			all += "\n  " + l;
+		}
+		CHECK_MESSAGE(wrong.empty(), wrong.size(), " weapon sounds play wrong:", all);
+		MESSAGE("weapon sounds ", sounds.size(), ", driven ", driven, ", LtNone and LtForward sampler releases ",
+				releases, " checked, ", with_trigger,
+				" in the update of their own Trigger (not in the notes, left as they play)");
+		CHECK(driven >= 150);
 		check_casing_unchanged(*f);
 	}
 }
