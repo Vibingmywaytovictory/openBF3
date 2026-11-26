@@ -248,6 +248,7 @@ std::optional<GunplayRefusal> ClientGunplay::match_info(const net::MatchInfo &p_
 	projectiles_ = std::move(*p);
 	projectiles_->set_guidance(&guidance_);
 	own_lock_.reset();
+	own_seat_weapon_.reset();
 	on_ = true;
 	return std::nullopt;
 }
@@ -291,6 +292,7 @@ void ClientGunplay::snapshot(const net::Snapshot &p_snapshot, bool p_newer) {
 		}
 		wire_tick_ = p_snapshot.server_tick;
 		own_lock_ = p_snapshot.own_lock;
+		own_seat_weapon_ = p_snapshot.own_seat_weapon;
 	}
 }
 
@@ -708,6 +710,7 @@ void ClientGunplay::publish(PresentationFrame &r_frame, std::span<const net::Oth
 	r_frame.own_team = team_;
 	r_frame.own_weapons_valid = false;
 	r_frame.own_lock = own_lock_.value_or(net::OwnLock{});
+	r_frame.own_seat_weapon = own_seat_weapon_;
 	r_frame.own_suppression = on_ && inputs_ != nullptr && r_frame.valid
 			? sim::weapons::suppression_scale(inputs_->suppression, suppression_, r_frame.tick)
 			: 0.0f;

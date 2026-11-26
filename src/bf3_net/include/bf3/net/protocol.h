@@ -27,7 +27,7 @@
 
 namespace bf3::net {
 
-inline constexpr uint16_t kProtocolVersion = 19;
+inline constexpr uint16_t kProtocolVersion = 20;
 inline constexpr uint8_t kChannelUnreliable = 0;
 inline constexpr uint8_t kChannelReliable = 1;
 inline constexpr uint8_t kChannelBulk = 2;
@@ -385,6 +385,21 @@ struct OwnLock {
 uint16_t lock_wire(uint32_t p_lock_target);
 uint32_t lock_target_of(uint16_t p_wire);
 
+inline constexpr uint8_t kMaxSeatWeaponWire = 15;
+inline constexpr uint8_t kSeatWeaponHeatFull = 255;
+
+struct OwnSeatWeapon {
+	uint8_t weapon = 0;
+	uint16_t magazine = 0;
+	uint8_t heat = 0;
+	bool reloading = false;
+
+	bool operator==(const OwnSeatWeapon &) const = default;
+};
+
+uint8_t seat_weapon_heat_wire(float p_heat);
+float seat_weapon_heat_of(uint8_t p_wire);
+
 struct Snapshot {
 	uint16_t seq = 0;
 	sim::Tick server_tick = 0;
@@ -401,6 +416,7 @@ struct Snapshot {
 	std::vector<uint8_t> removed;
 	std::optional<OwnSuppression> own_suppression;
 	std::optional<OwnLock> own_lock;
+	std::optional<OwnSeatWeapon> own_seat_weapon;
 };
 
 inline constexpr uint8_t kMaxBaselineBack = 31;

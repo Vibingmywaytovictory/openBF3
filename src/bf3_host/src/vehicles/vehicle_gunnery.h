@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -73,6 +74,8 @@ public:
 	std::span<const sim::weapons::DamageEvent> vehicle_damage() const { return vehicle_damage_; }
 	const VehicleGunneryStats &stats() const { return stats_; }
 	std::span<const sim::weapons::ShotEvent> interval_shots() const { return interval_shots_; }
+	std::optional<net::OwnSeatWeapon> seat_weapon(
+			size_t p_vehicle, const LevelVehicleKind &p_kind, uint8_t p_seat, uint8_t p_occupant) const;
 	void end_snapshot_interval() { interval_shots_.clear(); }
 
 private:

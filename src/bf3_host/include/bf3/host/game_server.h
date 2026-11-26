@@ -239,6 +239,7 @@ public:
 	TdmRules *rules();
 	std::optional<float> vehicle_health(uint16_t p_spawner) const;
 	std::optional<sim::VehicleState> vehicle_state(uint16_t p_spawner) const;
+	std::optional<net::OwnSeatWeapon> own_seat_weapon(uint8_t p_slot) const;
 
 	bool set_squad_order(uint8_t p_team, uint8_t p_squad, const SquadOrderState &p_order);
 

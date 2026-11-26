@@ -141,6 +141,7 @@ public:
 	std::optional<VehicleSeat> seat_of(size_t p_slot) const;
 	bool seated(size_t p_slot) const { return seat_of(p_slot).has_value(); }
 	std::optional<sim::Vec3> seat_position(size_t p_slot) const;
+	std::optional<net::OwnSeatWeapon> own_seat_weapon(size_t p_slot) const;
 	std::optional<sim::Vec3> exit_position(size_t p_slot, const sim::SoldierMotor &p_motor) const;
 
 	void configure_scope(size_t p_viewers, bool p_scoped);

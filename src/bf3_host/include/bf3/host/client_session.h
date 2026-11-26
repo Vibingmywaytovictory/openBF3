@@ -326,6 +326,7 @@ struct PresentationFrame {
 	std::array<net::DeployableWire, kMaxPresentedDeployables> deployables{};
 	float own_suppression = 0.0f;
 	net::OwnLock own_lock;
+	std::optional<net::OwnSeatWeapon> own_seat_weapon;
 	std::array<net::SpotRow, net::kMaxSlots> spots = kNoSpots;
 	ReceivedOrder own_order;
 	bool conquest_valid = false;

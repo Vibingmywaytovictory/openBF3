@@ -811,6 +811,15 @@ core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed, cons
 	return s;
 }
 
+std::optional<net::OwnSeatWeapon> ServerVehicles::own_seat_weapon(size_t p_slot) const {
+	const std::optional<VehicleSeat> seat = seat_of(p_slot);
+	if (!seat || level_ == nullptr || seat->vehicle >= level_->spawners.size()) {
+		return std::nullopt;
+	}
+	const LevelVehicleKind &kind = level_->kinds[level_->spawners[seat->vehicle].kind];
+	return gunnery_.seat_weapon(seat->vehicle, kind, seat->seat, uint8_t(p_slot));
+}
+
 std::optional<sim::Vec3> ServerVehicles::seat_position(size_t p_slot) const {
 	const std::optional<VehicleSeat> seat = seat_of(p_slot);
 	if (!seat) {

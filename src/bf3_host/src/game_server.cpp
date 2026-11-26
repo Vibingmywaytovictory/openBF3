@@ -1145,6 +1145,10 @@ std::optional<sim::VehicleState> GameServer::vehicle_state(uint16_t p_spawner) c
 	return v.world()->state(sim::VehicleSlot(p_spawner));
 }
 
+std::optional<net::OwnSeatWeapon> GameServer::own_seat_weapon(uint8_t p_slot) const {
+	return impl_->vehicles.own_seat_weapon(p_slot);
+}
+
 TdmRules *GameServer::rules() {
 	return impl_->match.rules();
 }

@@ -1098,6 +1098,12 @@ template <class A, MaybeConst<Snapshot> M> void serialize(A &r_a, M &r_m, Snapsh
 			r_a.bits(r_lock.locked, 1);
 			r_a.check("own lock locked on no target", [&] { return !r_lock.locked || r_lock.target != kNoLockWire; });
 		});
+		r_a.optional(r_m.own_seat_weapon, [&](auto &r_seat) {
+			r_a.bits(r_seat.weapon, 4);
+			r_a.bits(r_seat.magazine, 16);
+			r_a.bits(r_seat.heat, 8);
+			r_a.bits(r_seat.reloading, 1);
+		});
 	});
 	r_ctx.list.cap = kMaxSlots;
 	r_ctx.list.allow_removed = true;
@@ -2529,6 +2535,21 @@ uint16_t lock_wire(uint32_t p_lock_target) {
 
 uint32_t lock_target_of(uint16_t p_wire) {
 	return p_wire == kNoLockWire ? sw::kNoLockTarget : sim::vehicles::kVehicleTargetIdBase + p_wire;
+}
+
+uint8_t seat_weapon_heat_wire(float p_heat) {
+	if (!(p_heat > 0.0f)) {
+		return 0;
+	}
+	if (!(p_heat < 1.0f)) {
+		return kSeatWeaponHeatFull;
+	}
+	const float scaled = std::round(p_heat * float(kSeatWeaponHeatFull));
+	return uint8_t(std::clamp(scaled, 1.0f, float(kSeatWeaponHeatFull - 1)));
+}
+
+float seat_weapon_heat_of(uint8_t p_wire) {
+	return float(p_wire) / float(kSeatWeaponHeatFull);
 }
 
 ShotQuantization shot_frame_of(const sim::Vec3 &p_min, const sim::Vec3 &p_max, float p_margin) {

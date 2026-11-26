@@ -202,6 +202,35 @@ VehicleBlastHits VehicleGunnery::explode(const sw::ExplosionSimDef &p_explosion,
 	return hits;
 }
 
+std::optional<net::OwnSeatWeapon> VehicleGunnery::seat_weapon(
+		size_t p_vehicle, const LevelVehicleKind &p_kind, uint8_t p_seat, uint8_t p_occupant) const {
+	if (!on() || p_vehicle >= mounts_.size() || p_kind.armament == nullptr) {
+		return std::nullopt;
+	}
+	const sim::vehicles::VehicleArmament &a = *p_kind.armament;
+	const size_t weapons = std::min({ a.weapons.size(), p_kind.weapon_defs.size(), sim::vehicles::kMaxArmamentWeapons,
+			size_t(net::kMaxSeatWeaponWire) + 1u });
+	for (size_t w = 0; w < weapons; ++w) {
+		const sim::vehicles::ArmamentWeapon &weapon = a.weapons[w];
+		if (weapon.seat != int8_t(p_seat) || p_kind.weapon_defs[w] == kNoVehicleWeapon ||
+				!sim::vehicles::weapon_in_stance(weapon, 0)) {
+			continue;
+		}
+		const Mount &mount = mounts_[p_vehicle][w];
+		if (mount.occupant != p_occupant) {
+			return std::nullopt;
+		}
+		const sw::WeaponSlotState &slot = mount.state.current();
+		net::OwnSeatWeapon out;
+		out.weapon = uint8_t(w);
+		out.magazine = uint16_t(std::clamp<int32_t>(slot.magazine, 0, UINT16_MAX));
+		out.heat = net::seat_weapon_heat_wire(mount.heat.heat);
+		out.reloading = slot.phase == sw::WeaponPhase::Reloading || slot.phase == sw::WeaponPhase::ReloadShell;
+		return out;
+	}
+	return std::nullopt;
+}
+
 std::span<const sw::Projectile> VehicleGunnery::live() const {
 	return projectiles_ != nullptr ? projectiles_->live() : std::span<const sw::Projectile>();
 }

@@ -97,6 +97,9 @@ void SnapshotWriter::send(sim::Tick p_tick, uint64_t p_now_ns, GameServerTickTim
 			snap.own = own.state;
 		}
 		combat_.fill_snapshot(i, snap);
+		if (snap.own && vehicles_ != nullptr) {
+			snap.own_seat_weapon = vehicles_->own_seat_weapon(i);
+		}
 
 		const int64_t budget = ghosts_.open_interval(i, outbox_.sent_bytes(s.peer));
 		std::vector<GhostCandidate> &cands = candidates_;

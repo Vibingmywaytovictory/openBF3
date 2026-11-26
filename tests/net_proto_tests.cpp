@@ -112,7 +112,7 @@ bool same_snapshot(const net::Snapshot &p_a, const net::Snapshot &p_b) {
 			p_a.sequence_echo != p_b.sequence_echo || p_a.echo_hold_100us != p_b.echo_hold_100us ||
 			p_a.own_events != p_b.own_events || p_a.own != p_b.own || p_a.others.size() != p_b.others.size() ||
 			p_a.own_weapons != p_b.own_weapons || p_a.own_suppression != p_b.own_suppression ||
-			p_a.own_lock != p_b.own_lock) {
+			p_a.own_lock != p_b.own_lock || p_a.own_seat_weapon != p_b.own_seat_weapon) {
 		return false;
 	}
 	for (size_t i = 0; i < p_a.others.size(); ++i) {
@@ -2153,12 +2153,12 @@ void append_v2_samples(std::vector<std::pair<std::string, std::vector<uint8_t>>>
 
 TEST_SUITE("net-proto") {
 	TEST_CASE("proto v2: version, message types and the bounds") {
-		CHECK(net::kProtocolVersion == 19);
+		CHECK(net::kProtocolVersion == 20);
 		for (const uint8_t t : { uint8_t(3), uint8_t(4), uint8_t(23), uint8_t(24) }) {
 			CHECK(net::peek_type(std::span<const uint8_t>(&t, 1)).has_value());
 		}
-		CHECK(net::Hello{}.protocol == 19);
-		CHECK(net::MatchInfo{}.protocol == 19);
+		CHECK(net::Hello{}.protocol == 20);
+		CHECK(net::MatchInfo{}.protocol == 20);
 	}
 
 	TEST_CASE("proto v2: MatchInfo, Spawned, KitSelect and the new Debug kinds round trip; out-of-range values are refused") {
@@ -2525,7 +2525,7 @@ TEST_SUITE("net-proto") {
 				rest.others.size(), " others, fnv1a ", fnv1a(tail));
 		CHECK(once.size() == 1184);
 		CHECK(keep == 38);
-		CHECK(fnv1a(once) == 0xd4cd6e2d7c862247ull);
+		CHECK(fnv1a(once) == 0x330240b303b45e8dull);
 		CHECK(tail.size() == 575);
 		CHECK(fnv1a(tail) == 0x401da85ae723d67aull);
 	}
@@ -4397,7 +4397,7 @@ TEST_SUITE("net-proto") {
 		const std::vector<uint8_t> bytes = net::encode_kick(kick);
 		const std::optional<std::string> v3 = decode_kick_v3(bytes);
 		REQUIRE(v3.has_value());
-		CHECK(*v3 == "protocol 3 (server 19)");
+		CHECK(*v3 == "protocol 3 (server 20)");
 		auto v4 = net::decode_kick(bytes);
 		REQUIRE(v4);
 		CHECK(v4->code == net::KickReason::Protocol);
@@ -4787,11 +4787,11 @@ TEST_SUITE("net-proto") {
 		}
 		CHECK(types.size() == 38);
 		static constexpr GoldenPin kPins[] = {
-			{ "Snapshot", 368, 0xeb55dbf460561219ull, 0 },
+			{ "Snapshot", 369, 0x7552907de01a2699ull, 0 },
 			{ "Snapshot (no own)", 20, 0xa85c8a910ea8826bull, 0 },
 			{ "CommandPacket", 58, 0x0561e87f8ae9a655ull, 0 },
-			{ "Hello", 20, 0x9d3bf33f62512e25ull, 0 },
-			{ "MatchInfo", 126, 0x0d18f9e421c2fdeeull, 0 },
+			{ "Hello", 20, 0xf5322f2a6c331644ull, 0 },
+			{ "MatchInfo", 126, 0xdedd66986abc898bull, 0 },
 			{ "Ready", 34, 0x50302cdf0f51bcb5ull, 0 },
 			{ "Spawned", 98, 0xededd38e508ae170ull, 0 },
 			{ "Loading", 11, 0x6d0d37720d72edd7ull, 0 },
@@ -4799,14 +4799,14 @@ TEST_SUITE("net-proto") {
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
 			{ "Debug", 30, 0x3f09a8f270a73a7dull, 0 },
 			{ "DebugReport", 492, 0x74b3a36917721e73ull, 0 },
-			{ "Snapshot (v2 own weapons)", 631, 0x3433516b98cc2caaull, 0 },
+			{ "Snapshot (v2 own weapons)", 631, 0x4d60691070b20830ull, 0 },
 			{ "SnapshotOthers", 121, 0x49f12d8715464b47ull, 0 },
 			{ "ShotEvents", 193, 0xfd648defe9b16c03ull, 0 },
 			{ "CombatEvents", 130, 0x1ffbc0de51c30cacull, 0 },
 			{ "KitSelect", 3, 0xa9266a18e1c669aaull, 0 },
 			{ "Debug (SpawnTarget)", 30, 0xbf53c23636c9b9efull, 0 },
 			{ "DebugReport (v2)", 916, 0xe73adddf5cc1ab3dull, 0 },
-			{ "MatchInfo (v2)", 94, 0x73daff7d6d416e64ull, 0 },
+			{ "MatchInfo (v2)", 94, 0x2a1e51e152b99e59ull, 0 },
 			{ "Spawned (v2)", 98, 0xdda4f57b21059febull, 0 },
 			{ "MatchState", 42, 0x6e8a7b2bfcb229a0ull, 0 },
 			{ "PlayerList (full)", 217, 0x8ad8a19f7b621f12ull, 0 },
@@ -4815,7 +4815,7 @@ TEST_SUITE("net-proto") {
 			{ "SuicideRequest", 1, 0xaf63d14c8601d9dbull, 0 },
 			{ "LoadoutRequest", 54, 0xbff00e287a388828ull, 0 },
 			{ "CombatEvents (v3)", 147, 0xed2b28bba617ccd0ull, 0 },
-			{ "MatchInfo (v3)", 94, 0x3812a32a5b9227d8ull, 0 },
+			{ "MatchInfo (v3)", 94, 0x97fcfd67ab380bc5ull, 0 },
 			{ "Spawned (v3 revived)", 98, 0x8b014185e7467390ull, 0 },
 			{ "SoldierGear", 20, 0xfa6162cd1bdf3cf3ull, 0 },
 			{ "Mismatch", 2, 0x07c26e07b48c3c08ull, 0 },
@@ -4827,7 +4827,7 @@ TEST_SUITE("net-proto") {
 			{ "LogicDelta", 13, 0xb406185960cdf447ull, 0 },
 			{ "SquadRequest", 4, 0x339b5db77a00fa9bull, 0 },
 			{ "SquadOrder", 18, 0x786f0a82bee37cb8ull, 0 },
-			{ "MatchInfo (v4)", 157, 0x2f86f25a8682aee4ull, 0 },
+			{ "MatchInfo (v4)", 157, 0x1bf29596710c7effull, 0 },
 			{ "Ready (v4 digests)", 82, 0x52d9ba4d4bfcaf1eull, 0 },
 			{ "Kick (v4 reason)", 25, 0xc256cbdc95a2f23cull, 0 },
 			{ "PlayerList (v4 squads)", 89, 0x1f220dc607e2158aull, 0 },
@@ -4874,7 +4874,7 @@ TEST_SUITE("net-proto") {
 		CHECK(bad([](net::Deployables &r) { r.removed[0] = 0; }));
 		CHECK(bad([](net::Deployables &r) { r.removed.assign(net::kMaxDeployablesPerMessage + 1, 4); }));
 		CHECK(net::peek_type(net::encode_deployables(m)) == net::MessageType::Deployables);
-		CHECK(net::kProtocolVersion == 19);
+		CHECK(net::kProtocolVersion == 20);
 	}
 
 	TEST_CASE("proto v9: spot and order requests, spot states and order notices round-trip and refuse what is out of "
@@ -4927,7 +4927,7 @@ TEST_SUITE("net-proto") {
 		CHECK_FALSE(net::decode_order_notice(net::encode_order_notice({ cm::OrderType::Count, 1 })).ok());
 		CHECK(net::peek_type(net::encode_order_notice({ cm::OrderType::RequestAmmo, 1 })) ==
 				net::MessageType::OrderNotice);
-		CHECK(net::kProtocolVersion == 19);
+		CHECK(net::kProtocolVersion == 20);
 	}
 
 	TEST_CASE("proto v11: ConquestState carries tickets, bleed, every capture point, the own return tick and the "
@@ -4975,12 +4975,12 @@ TEST_SUITE("net-proto") {
 		CHECK_FALSE(net::spawn_choice_is_flag(uint8_t(net::kSpawnChoiceFlag + net::kMaxConquestPoints)));
 		CHECK_FALSE(net::spawn_choice_is_flag(net::kSpawnChoiceBeacon));
 		CHECK_FALSE(net::spawn_choice_is_flag(4));
-		CHECK(net::kProtocolVersion == 19);
+		CHECK(net::kProtocolVersion == 20);
 	}
 
 	TEST_CASE("proto: golden bytes of the encoders' clamp, cut and drop paths") {
 		static constexpr GoldenPin kPins[] = {
-			{ "Hello (name cut inside a code point)", 43, 0x962db88d863fa80bull, 0 },
+			{ "Hello (name cut inside a code point)", 43, 0x5e992ea5639c2644ull, 0 },
 			{ "Kick (reason cut at 2048 bytes)", 2051, 0x028412f145ceb5d9ull, 0 },
 			{ "Loading (permille above 1000)", 11, 0xd2694e25edbe818full, 0 },
 			{ "Bye", 1, 0xaf63cb4c8601cfa9ull, 0 },
@@ -4992,7 +4992,7 @@ TEST_SUITE("net-proto") {
 			{ "PlayerList (full drops removed)", 27, 0x47ea6ae9e75df6d4ull, 1 },
 			{ "CommandPacket (clamped, chain cut at a gap)", 57, 0x54a8e4154ecc6c70ull, 0 },
 			{ "CommandPacket (no commands)", 0, 0xcbf29ce484222325ull, 0 },
-			{ "Snapshot (others over the datagram)", 1197, 0x877fd929f0a21e28ull, 27 },
+			{ "Snapshot (others over the datagram)", 1198, 0x0a6475cb4ae77c5full, 27 },
 			{ "SnapshotOthers (others over the datagram)", 1181, 0xc0a4e295841b916cull, 78 },
 			{ "ShotEvents (dropped, clamped, one datagram)", 1193, 0x173f84791923a152ull, 83 },
 			{ "CombatEvents (budget, clamps)", 5546, 0x01933bb9071abfe1ull, 61 },
@@ -5400,6 +5400,41 @@ TEST_SUITE("net-proto") {
 		auto f = net::decode_snapshot(net::encode_snapshot(s));
 		REQUIRE(f);
 		CHECK_FALSE(f->own_suppression);
+	}
+
+	TEST_CASE("proto v20: the own seat weapon travels with the own state as armament index, magazine, heat and reload "
+			  "bit; heat keeps 0 at 0, 1 at 1 and any heat between off both ends") {
+		Rng rng(2020);
+		net::Snapshot s = sample_snapshot(rng, 2);
+		REQUIRE(s.own);
+		const size_t without = net::encode_snapshot(s).size();
+		s.own_seat_weapon = net::OwnSeatWeapon{ 13, 1234, 200, true };
+		const std::vector<uint8_t> bytes = net::encode_snapshot(s);
+		auto d = net::decode_snapshot(bytes);
+		REQUIRE(d);
+		CHECK(same_snapshot(*d, s));
+		REQUIRE(d->own_seat_weapon);
+		CHECK(*d->own_seat_weapon == net::OwnSeatWeapon{ 13, 1234, 200, true });
+		CHECK(bytes.size() <= without + 4);
+		s.own.reset();
+		s.own_weapons.reset();
+		s.own_seat_weapon = net::OwnSeatWeapon{};
+		auto e = net::decode_snapshot(net::encode_snapshot(s));
+		REQUIRE(e);
+		CHECK_FALSE(e->own_seat_weapon);
+
+		CHECK(net::seat_weapon_heat_wire(0.0f) == 0);
+		CHECK(net::seat_weapon_heat_wire(-1.0f) == 0);
+		CHECK(net::seat_weapon_heat_wire(std::numeric_limits<float>::quiet_NaN()) == 0);
+		CHECK(net::seat_weapon_heat_wire(1e-6f) == 1);
+		CHECK(net::seat_weapon_heat_wire(0.5f) == 128);
+		CHECK(net::seat_weapon_heat_wire(0.99999f) == 254);
+		CHECK(net::seat_weapon_heat_wire(1.0f) == net::kSeatWeaponHeatFull);
+		CHECK(net::seat_weapon_heat_wire(3.0f) == net::kSeatWeaponHeatFull);
+		CHECK(net::seat_weapon_heat_of(0) == 0.0f);
+		CHECK(net::seat_weapon_heat_of(net::kSeatWeaponHeatFull) == 1.0f);
+		CHECK(net::seat_weapon_heat_of(1) > 0.0f);
+		CHECK(net::seat_weapon_heat_of(254) < 1.0f);
 	}
 
 	TEST_CASE("proto v15: the own lock travels with the own state as a vehicle spawner, amount and locked bit; a lock "

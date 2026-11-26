@@ -157,6 +157,7 @@ private:
 	sim::Tick wire_tick_ = 0;
 	sim::weapons::SuppressionState suppression_;
 	std::optional<net::OwnLock> own_lock_;
+	std::optional<net::OwnSeatWeapon> own_seat_weapon_;
 	LockGuidance guidance_;
 	std::vector<sim::weapons::LockCandidate> lock_candidates_;
 	uint64_t lock_stripped_fire_ = 0;
