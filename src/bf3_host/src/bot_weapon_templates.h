@@ -69,6 +69,7 @@ struct CachedWeaponTemplates {
 const sim::weapons::GadgetDef *gadget_def(const GunplayLevel &p_gunplay, uint16_t p_def);
 ai::WeaponType weapon_type_of(const GunplayLevel &p_gunplay, uint16_t p_defib_def, uint16_t p_def);
 ai::CombatStrengthType vehicle_strength_type(const LevelVehicleKind &p_kind);
+float vehicle_basic_strength(const LevelVehicleKind &p_kind, float p_soldier_health);
 core::Result<TemplateSource> template_source(const GunplayLevel &p_gunplay, const LevelVehicles *p_vehicles);
 float hit_damage(const TemplateSource &p_source, uint16_t p_def, const sim::weapons::WeaponSimDef &p_weapon,
 		const StrengthTarget &p_target);

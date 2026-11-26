@@ -115,6 +115,10 @@ ai::WeaponType weapon_type_of(const GunplayLevel &p_gunplay, uint16_t p_defib_de
 	return ai::WeaponType::Default;
 }
 
+float vehicle_basic_strength(const LevelVehicleKind &p_kind, float p_soldier_health) {
+	return p_soldier_health > 0.0f ? sim::vehicles::full_vehicle_health(p_kind.damage) / p_soldier_health : 0.0f;
+}
+
 ai::CombatStrengthType vehicle_strength_type(const LevelVehicleKind &p_kind) {
 	return p_kind.model != nullptr && land_tracked(*p_kind.model) ? ai::CombatStrengthType::HeavyArmour
 																  : ai::CombatStrengthType::LightArmour;

@@ -231,6 +231,9 @@ float change_unit_urgency(
 	}
 	float urgency = move_urgency(p_bot, vehicle, p_unit, current, p_other) +
 			fire_strength(p_bot, p_vehicles, vehicle, p_unit, current, p_other);
+	if (0.01f < urgency) {
+		urgency = (vehicle != nullptr ? vehicle->seat[p_unit.seat].basic : p_bot.basic) * 4.0f + urgency;
+	}
 	const float health = vehicle != nullptr ? vehicle->health : p_bot.health;
 	float bail = p_bot.bail_value;
 	if (vehicle != nullptr && p_unit.seat == 0 && p_unit == current) {

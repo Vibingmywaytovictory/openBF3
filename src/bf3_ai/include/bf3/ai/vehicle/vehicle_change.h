@@ -19,6 +19,7 @@ inline constexpr float kGetOutUrgency = 10000.0f;
 inline constexpr size_t kChangeStrengthCount = 6;
 inline constexpr int kChangeInfantryStrength = 0;
 inline constexpr int kChangeLightArmourStrength = 1;
+inline constexpr float kSoldierBasicStrength = 1.0f;
 
 using ChangeStrengths = std::array<float, kChangeStrengthCount>;
 
@@ -31,6 +32,7 @@ struct ChangeSeat {
 	int booked_by = -1;
 	double possessed_s = kNeverPossessedSeconds;
 	ChangeStrengths strengths{};
+	float basic = 0.0f;
 	bool armed = false;
 	bool exposed = false;
 	float min_range = 0.0f;
@@ -87,6 +89,7 @@ struct ChangeBot {
 	int vehicle = -1;
 	uint8_t seat = 0;
 	ChangeStrengths strengths{};
+	float basic = 0.0f;
 	ChangeStrengths enemy_strengths{};
 	ChangeStrengths enemy_types{};
 	std::span<const ChangeSensed> sensed;

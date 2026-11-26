@@ -254,8 +254,12 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 		const float full = sim::vehicles::full_vehicle_health(kind.damage);
 		c.health = full > 0.0f ? p_vehicles.health(i).value_or(0.0f) / full : 0.0f;
 		c.seats = uint8_t(std::min<size_t>(kind.seats, ai::kMaxChangeSeats));
+		const float basic = p_shared.host.gunplay != nullptr
+				? vehicle_basic_strength(kind, p_shared.host.gunplay->level().max_health)
+				: 0.0f;
 		for (uint8_t k = 0; k < c.seats; ++k) {
 			ai::ChangeSeat &seat = c.seat[k];
+			seat.basic = basic;
 			const uint8_t occupant = v.occupants[k];
 			if (occupant != net::kNoVehicleOccupant) {
 				seat.occupant = occupant;
@@ -315,6 +319,7 @@ ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehi
 		b.seat = seat->seat;
 	}
 	b.strengths = change_soldier_strengths(p_shared, p_slot);
+	b.basic = ai::kSoldierBasicStrength;
 	if (const ai::Sai *sai = p_shared.strategy != nullptr ? p_shared.strategy->sai(b.side) : nullptr) {
 		b.enemy_strengths = change_strengths(p_shared, sai->enemy_strengths());
 		b.enemy_types = sai->enemy_counts();

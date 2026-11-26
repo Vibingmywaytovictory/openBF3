@@ -482,4 +482,28 @@ TEST_SUITE("ai-vehicle") {
 		CHECK(bot.behaviour() != ai::InfantryBehaviour::Change);
 		CHECK(bot.weighted_urgency(ai::InfantryBehaviour::Change) == 0.0f);
 	}
+
+	TEST_CASE("change_unit_urgency adds four times the unit's basic strength to a value above 0.01, as "
+			  "calculateVehicleUrgency adds 4 x the information's strength") {
+		ai::ChangeBot bot;
+		bot.player_id = 1;
+		bot.side = 1;
+		bot.max_speed = 6.5f;
+		bot.now_s = 100.0;
+		ai::ChangeVehicle jeep;
+		jeep.side = 1;
+		jeep.max_speed = 20.0f;
+		jeep.seats = 1;
+		std::vector<ai::ChangeVehicle> vehicles{ jeep };
+		const float foot = ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{}, false);
+		const float seat = ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 0 }, true);
+		CHECK(foot == doctest::Approx(6.5f * 5.0f));
+		CHECK(seat == doctest::Approx(20.0f * 5.0f));
+		bot.basic = ai::kSoldierBasicStrength;
+		vehicles[0].seat[0].basic = 5.0f;
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{}, false) == doctest::Approx(foot + 4.0f));
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 0 }, true) == doctest::Approx(seat + 20.0f));
+		bot.max_speed = 0.0f;
+		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{}, false) == 0.0f);
+	}
 }
