@@ -310,7 +310,7 @@ struct HoldLog final : host::TdmBotObserver {
 	void urgencies(sim::Tick, uint8_t p_bot, const ai::BotMain &p_bot_main) override {
 		if (p_bot < kSlots) {
 			const auto &move_to =
-					static_cast<const ai::BBMoveTo &>(p_bot_main.behaviour_of(ai::InfantryBehaviour::MoveTo));
+					static_cast<const ai::BBMoveTo &>(*p_bot_main.behaviour_of(ai::InfantryBehaviour::MoveTo));
 			holding[p_bot] = p_bot_main.behaviour() == ai::InfantryBehaviour::MoveTo && move_to.holding();
 		}
 	}

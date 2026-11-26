@@ -309,11 +309,13 @@ TEST_SUITE("ai-vehicle") {
 			CHECK(body.change_senses == 0);
 			CHECK(ten.behaviour() != ai::InfantryBehaviour::Change);
 			CHECK(ten.weighted_urgency(ai::InfantryBehaviour::Change) == 0.0f);
+			CHECK(ten.behaviour_of(ai::InfantryBehaviour::Change) == nullptr);
 		}
 		tuning.change = true;
 		tuning.curves[size_t(ai::InfantryBehaviour::Change)].weight = 0.5f;
 		ai::BotMain bot{ 0, 3, 1, body, tuning };
 		CHECK(bot.behaviour_count() == ai::kBotBehaviourCount);
+		CHECK(bot.behaviour_of(ai::InfantryBehaviour::Change) != nullptr);
 		bot.update_bot(true, true);
 		decide(bot);
 		CHECK(body.change_senses == 1);

@@ -127,7 +127,9 @@ public:
 	size_t behaviour_count() const { return behaviour_count_; }
 	float weighted_urgency(InfantryBehaviour p_behaviour) const;
 	float behaviour_urgency(InfantryBehaviour p_behaviour) const { return behaviour_urgencies_[size_t(p_behaviour)]; }
-	const BotBehaviour &behaviour_of(InfantryBehaviour p_behaviour) const { return *behaviours_[size_t(p_behaviour)]; }
+	const BotBehaviour *behaviour_of(InfantryBehaviour p_behaviour) const {
+		return size_t(p_behaviour) < behaviour_count_ ? behaviours_[size_t(p_behaviour)].get() : nullptr;
+	}
 	float chosen_urgency() const { return chosen_urgency_; }
 	const SquadGoal &squad_goal() const { return squad_goal_; }
 	const BotMemory &memory() const { return memory_; }

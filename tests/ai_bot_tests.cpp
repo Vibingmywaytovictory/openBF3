@@ -254,7 +254,7 @@ TEST_SUITE("ai-bot") {
 		r.body.recovered = true;
 		r.body.s.low_health = false;
 		CHECK(r.decide() == InfantryBehaviour::Random);
-		CHECK(static_cast<const BBTakeCoverInfantry &>(r.bot.behaviour_of(InfantryBehaviour::TakeCoverInfantry))
+		CHECK(static_cast<const BBTakeCoverInfantry &>(*r.bot.behaviour_of(InfantryBehaviour::TakeCoverInfantry))
 						.phase() == BBTakeCoverInfantry::Phase::None);
 		r.body.recovered = false;
 		r.body.s.shot_at = true;
