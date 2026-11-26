@@ -140,6 +140,7 @@ struct HudFeedInput {
 	std::span<const PresentedVehicle> vehicles;
 	const LevelVehicles *level_vehicles = nullptr;
 	uint32_t vehicle_camera = 0;
+	std::optional<net::OwnSeatWeapon> seat_weapon;
 };
 
 struct HudFeedState {

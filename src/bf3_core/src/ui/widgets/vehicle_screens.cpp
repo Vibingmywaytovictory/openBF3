@@ -19,6 +19,10 @@ constexpr int32_t kSecondaryWeaponPitchKey = int32_t(0x310e0db3u);
 constexpr int32_t kActiveWeaponNameKey = int32_t(0x39ec2f25u);
 constexpr int32_t kInVehicleKey = int32_t(0x2202a853u);
 constexpr int32_t kShortNameKey = int32_t(0x0cb77979u);
+constexpr std::string_view kWeaponCompCategory = "ui/uicomponents/uiweaponcomp";
+constexpr int32_t kActiveWeaponIsReloadingKey = int32_t(0x8a21ce13u);
+constexpr int32_t kHeatKey = int32_t(0xf35e738eu);
+constexpr int32_t kAmmoKey = int32_t(0x8d4b17b6u);
 constexpr float kWeaponPitchOffset = 90.0f;
 
 std::string fixed(double p_value, int p_precision) {
@@ -995,8 +999,31 @@ private:
 
 }
 
+namespace {
+
+std::optional<As2Value> hud_seat_weapon_source(const HudVehicle &p_vehicle, int32_t p_key) {
+	if (!p_vehicle.in_vehicle || !p_vehicle.seat_weapon) {
+		return std::nullopt;
+	}
+	switch (p_key) {
+		case kActiveWeaponIsReloadingKey:
+			return As2Value::of(p_vehicle.seat_weapon_reloading);
+		case kHeatKey:
+			return As2Value::of(double(p_vehicle.seat_weapon_heat));
+		case kAmmoKey:
+			return As2Value::of(p_vehicle.seat_weapon_ammo);
+		default:
+			return std::nullopt;
+	}
+}
+
+}
+
 std::optional<As2Value> hud_vehicle_source(
 		const HudModel &p_model, const HudClientState &p_client, const HudDataSource &p_source) {
+	if (p_source.category == kWeaponCompCategory) {
+		return hud_seat_weapon_source(p_model.vehicle, p_source.key);
+	}
 	if (p_source.category != kVehicleCompCategory) {
 		return std::nullopt;
 	}

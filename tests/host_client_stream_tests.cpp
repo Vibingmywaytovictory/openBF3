@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "bf3/core/math.h"
+#include "bf3/core/ui/hud_widgets.h"
 #include "bf3/core/util/elapsed.h"
 #include "bf3/core/util/percentile.h"
 #include "bf3/host/bot_fill.h"
@@ -10,6 +11,7 @@
 #include "bf3/host/gadgets.h"
 #include "bf3/host/game_server.h"
 #include "bf3/host/gunplay.h"
+#include "bf3/host/hud_feed.h"
 #include "bf3/host/kits.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/host/tdm_brain.h"
@@ -2188,6 +2190,202 @@ TEST_SUITE("host-vehicles-heat") {
 		CHECK(*resumed == *model_resume);
 		CHECK(shot_ticks.back().first > *model_resume);
 		m.close();
+	}
+}
+
+namespace {
+
+struct SeatHudRun {
+	std::string weapon;
+	float heat_per_bullet = 0.0f;
+	int32_t capacity = 0;
+	uint64_t shots = 0;
+	uint32_t compared = 0;
+	uint32_t wire_mismatches = 0;
+	uint32_t binding_mismatches = 0;
+	uint32_t heat_rises = 0;
+	uint32_t heat_falls = 0;
+	uint32_t locked = 0;
+	uint32_t reloading = 0;
+	int32_t magazine_max = -1;
+	int32_t magazine_min = INT32_MAX;
+	uint8_t peak_heat = 0;
+	std::string first_mismatch;
+};
+
+SeatHudRun seat_hud_run(tt::TdmLevel &r_level, uint64_t p_seed, std::string_view p_blueprint, uint8_t p_seat,
+		uint32_t p_hold, uint32_t p_after) {
+	SeatHudRun run;
+	const host::LevelVehicles &lv = *r_level.shared->vehicles;
+	VehicleMatch m(r_level, p_seed);
+	StreamClient &c = m.add("seated", 1u, "lat=20,seed=6");
+	m.ticks(sim::seconds_to_ticks(tt::latest_initial_delay(lv)) + 300u);
+	REQUIRE(VehicleMatch::alive(c));
+	const host::PresentedVehicle *parked = m.parked(*c.frame, p_blueprint);
+	REQUIRE(parked != nullptr);
+	const uint16_t spawner = parked->spawner;
+	const host::LevelVehicleKind &kind = lv.kinds[lv.spawners[spawner].kind];
+	REQUIRE(kind.armament != nullptr);
+	for (size_t w = 0; w < kind.armament->weapons.size() && w < kind.weapon_defs.size(); ++w) {
+		const sim::vehicles::ArmamentWeapon &a = kind.armament->weapons[w];
+		if (a.seat == int8_t(p_seat) && sim::vehicles::weapon_in_stance(a, 0) &&
+				kind.weapon_defs[w] < lv.weapons.size()) {
+			const core::gameplay::WeaponDef &def = lv.weapons[kind.weapon_defs[w]];
+			run.weapon = def.variant;
+			run.heat_per_bullet = def.fire.heat_per_bullet;
+			run.capacity = def.fire.magazine_capacity;
+			break;
+		}
+	}
+	REQUIRE_FALSE(run.weapon.empty());
+	const std::optional<sim::Vec3> beside = m.beside(parked->com_position, kind.entry_radius);
+	REQUIRE(beside.has_value());
+	net::DebugRequest teleport;
+	teleport.kind = net::DebugKind::Teleport;
+	teleport.id = 1;
+	teleport.position = *beside;
+	c.loop.send_debug(teleport);
+	const uint8_t slot = c.frame->stats.slot;
+	m.ticks(30);
+	REQUIRE(m.board(c, spawner, slot));
+	const auto in_seat = [&] {
+		const host::PresentedVehicle *v = VehicleMatch::vehicle(*c.frame, spawner);
+		return v != nullptr && v->occupants[p_seat] == slot;
+	};
+	for (uint32_t waited = 0; waited < 240 && !in_seat(); ++waited) {
+		c.input.held_buttons = (waited / 8u) % 2u == 0u ? sim::vehicles::with_seat_request(0, p_seat) : 0u;
+		m.tick();
+	}
+	c.input.held_buttons = 0;
+	REQUIRE(in_seat());
+	c.input.pitch = 0.2f;
+	m.ticks(60);
+
+	std::map<sim::Tick, std::optional<net::OwnSeatWeapon>> server;
+	auto model = std::make_unique<core::ui::HudModel>();
+	const core::ui::HudClientState client;
+	const auto bound = [&](uint32_t p_key) {
+		core::ui::HudDataSource source;
+		source.category = "ui/uicomponents/uiweaponcomp";
+		source.key = int32_t(p_key);
+		return core::ui::hud_vehicle_source(*model, client, source);
+	};
+	std::optional<uint8_t> last_heat;
+	const uint64_t shots_before = m.server.stats().vehicle_shots;
+	for (uint32_t t = 0; t < p_hold + p_after; ++t) {
+		c.input.held_buttons = t < p_hold ? sim::buttons::kFire : 0u;
+		m.tick();
+		server[m.server.current_tick()] = m.server.own_seat_weapon(slot);
+		const host::PresentationFrame &f = *c.frame;
+		const auto at = server.find(f.newest_tick);
+		if (!f.own_seat_weapon || at == server.end()) {
+			continue;
+		}
+		++run.compared;
+		const net::OwnSeatWeapon &w = *f.own_seat_weapon;
+		if (at->second != f.own_seat_weapon) {
+			if (run.wire_mismatches++ == 0) {
+				run.first_mismatch = "tick " + std::to_string(f.newest_tick) + ": client heat " +
+						std::to_string(w.heat) + " magazine " + std::to_string(w.magazine) + " reloading " +
+						std::to_string(w.reloading) + ", server " +
+						(at->second ? std::to_string(at->second->heat) + " / " + std::to_string(at->second->magazine) +
+												" / " + std::to_string(at->second->reloading)
+									: std::string("none"));
+			}
+		}
+		host::HudFeedInput in;
+		in.alive = true;
+		in.own_slot = slot;
+		in.vehicles = std::span<const host::PresentedVehicle>(f.vehicles.data(), f.vehicle_count);
+		in.level_vehicles = &lv;
+		in.seat_weapon = f.own_seat_weapon;
+		model->vehicle = host::hud_vehicle(in);
+		if (!at->second ||
+				bound(0xf35e738eu) != core::ui::As2Value::of(double(net::seat_weapon_heat_of(at->second->heat))) ||
+				bound(0x8a21ce13u) != core::ui::As2Value::of(at->second->reloading) ||
+				bound(0x8d4b17b6u) != core::ui::As2Value::of(int32_t(at->second->magazine))) {
+			++run.binding_mismatches;
+		}
+		if (last_heat && w.heat > *last_heat) {
+			++run.heat_rises;
+		}
+		if (last_heat && w.heat < *last_heat) {
+			++run.heat_falls;
+		}
+		last_heat = w.heat;
+		run.peak_heat = std::max(run.peak_heat, w.heat);
+		run.locked += w.heat == net::kSeatWeaponHeatFull ? 1u : 0u;
+		run.reloading += w.reloading ? 1u : 0u;
+		run.magazine_max = std::max<int32_t>(run.magazine_max, w.magazine);
+		run.magazine_min = std::min<int32_t>(run.magazine_min, w.magazine);
+	}
+	run.shots = m.server.stats().vehicle_shots - shots_before;
+	std::printf("host.vehicles.hud: %s seat %u weapon %s (HeatPerBullet %.4f, MagazineCapacity %d): %llu shots; %u "
+				"snapshots compared, %u wire and %u binding mismatches against the server; heat rose %u and fell %u "
+				"times, peak %u / 255, %u snapshots at the overheat lock; %u reloading; magazine %d..%d%s%s\n",
+			std::string(p_blueprint).c_str(), unsigned(p_seat), run.weapon.c_str(), double(run.heat_per_bullet),
+			run.capacity, (unsigned long long)run.shots, run.compared, run.wire_mismatches, run.binding_mismatches,
+			run.heat_rises, run.heat_falls, unsigned(run.peak_heat), run.locked, run.reloading, run.magazine_min,
+			run.magazine_max, run.first_mismatch.empty() ? "" : "; first mismatch ", run.first_mismatch.c_str());
+	m.close();
+	return run;
+}
+
+}
+
+TEST_SUITE("host-vehicles-hud") {
+	TEST_CASE("vehicles: the M1A2's gunner and driver seats on MP_007 ConquestSmall0 publish their seat weapon's "
+			  "heat, overheat lock, reload and magazine to the HUD bindings as the server holds them (R5-UI2 D)") {
+		tt::TdmLevel *level = tt::load_conquest_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const SeatHudRun gunner = seat_hud_run(*level, 71, "vehicles/m1a2/m1abrams", 1, 360, 240);
+		CHECK(gunner.heat_per_bullet > 0.0f);
+		CHECK(gunner.shots >= 2u);
+		CHECK(gunner.compared >= 100u);
+		CHECK(gunner.wire_mismatches == 0u);
+		CHECK(gunner.binding_mismatches == 0u);
+		CHECK(gunner.heat_rises >= 2u);
+		CHECK(gunner.peak_heat == net::kSeatWeaponHeatFull);
+		CHECK(gunner.locked >= 1u);
+		CHECK(gunner.heat_falls >= 1u);
+
+		const SeatHudRun driver = seat_hud_run(*level, 72, "vehicles/m1a2/m1abrams", 0, 6, 240);
+		CHECK(driver.shots >= 1u);
+		CHECK(driver.compared >= 100u);
+		CHECK(driver.wire_mismatches == 0u);
+		CHECK(driver.binding_mismatches == 0u);
+		CHECK(driver.reloading >= 1u);
+		CHECK(driver.magazine_max >= 1);
+		CHECK(driver.magazine_min < driver.magazine_max);
+	}
+
+	TEST_CASE("vehicles: the BMP-2's main gun and gunner seats on MP_003 ConquestSmall0 publish their seat weapon's "
+			  "heat, overheat lock, reload and magazine to the HUD bindings as the server holds them (R5-UI2 D)") {
+		std::unique_ptr<tt::TdmLevel> level = tt::load_tdm_level("MP_003", "ConquestSmall0", false);
+		if (level == nullptr) {
+			return;
+		}
+		const SeatHudRun main_gun = seat_hud_run(*level, 73, "vehicles/bmp2/bmp2", 0, 360, 240);
+		CHECK(main_gun.shots >= 2u);
+		CHECK(main_gun.compared >= 100u);
+		CHECK(main_gun.wire_mismatches == 0u);
+		CHECK(main_gun.binding_mismatches == 0u);
+		CHECK(main_gun.magazine_min < main_gun.magazine_max);
+		CHECK(main_gun.reloading >= 1u);
+
+		const SeatHudRun gunner = seat_hud_run(*level, 74, "vehicles/bmp2/bmp2", 1, 360, 240);
+		CHECK(gunner.heat_per_bullet > 0.0f);
+		CHECK(gunner.shots >= 2u);
+		CHECK(gunner.compared >= 100u);
+		CHECK(gunner.wire_mismatches == 0u);
+		CHECK(gunner.binding_mismatches == 0u);
+		CHECK(gunner.heat_rises >= 2u);
+		CHECK(gunner.peak_heat == net::kSeatWeaponHeatFull);
+		CHECK(gunner.locked >= 1u);
+		CHECK(gunner.heat_falls >= 1u);
+		tt::check_install_unchanged(*level);
 	}
 }
 

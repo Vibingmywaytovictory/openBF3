@@ -906,6 +906,7 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 		in.vehicles = std::span<const host::PresentedVehicle>(f.vehicles.data(), f.vehicle_count);
 		in.level_vehicles = level != nullptr ? level->vehicles.get() : nullptr;
 		in.vehicle_camera = r_game.vehicle_camera;
+		in.seat_weapon = f.own_seat_weapon;
 		host::fill_hud_tdm(in, r_game.events, r_game.hud_static, m.tdm_state, r_game.hud_model);
 		VehicleHudStepInput vin;
 		vin.vehicles = in.vehicles;

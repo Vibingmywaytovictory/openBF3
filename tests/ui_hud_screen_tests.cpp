@@ -1722,6 +1722,44 @@ TEST_SUITE("ui-hud-screen") {
 		tank.hud->refresh(m);
 		CHECK(tank.at(warn).frame == tank.label(warn, "start"));
 
+		const std::string holder = "instance1.VehicleWeaponName_01.textHolder";
+		const auto weapon_state = [&](Screen &r_s) {
+			r_s.hud->refresh(m);
+			const std::string label = r_s.at(holder).frame == r_s.label(holder, "greenBlink") ? "greenBlink"
+					: r_s.at(holder).frame == r_s.label(holder, "blink")					  ? "blink"
+					: r_s.at(holder).frame == r_s.label(holder, "start")					  ? "start"
+																							  : "other";
+			return label + " " + r_s.at(name + ".txtDisplay2").text;
+		};
+		const auto seat_source = [&](int32_t p_key) {
+			HudDataSource source;
+			source.category = "ui/uicomponents/uiweaponcomp";
+			source.key = p_key;
+			return hud_vehicle_source(m, client, source);
+		};
+		const std::string rdy = sid("ID_H_VEHICLE_RDY");
+		const std::string wait = sid("ID_H_VEHICLE_WAIT");
+		CHECK_FALSE(seat_source(int32_t(0xf35e738eu)).has_value());
+		v.seat_weapon = true;
+		v.seat_weapon_ammo = 37;
+		v.seat_weapon_heat = 0.5f;
+		CHECK(seat_source(int32_t(0x8d4b17b6u)) == As2Value::of(int32_t(37)));
+		CHECK(seat_source(int32_t(0xf35e738eu)) == As2Value::of(0.5));
+		CHECK(seat_source(int32_t(0x8a21ce13u)) == As2Value::of(false));
+		CHECK_FALSE(seat_source(int32_t(0x721fa625u)).has_value());
+		CHECK(weapon_state(tank) == "greenBlink " + rdy);
+		v.seat_weapon_heat = 1.0f;
+		CHECK(weapon_state(tank) == "blink " + wait);
+		v.seat_weapon_heat = 0.0f;
+		CHECK(weapon_state(tank) == "start " + rdy);
+		v.seat_weapon_reloading = true;
+		CHECK(seat_source(int32_t(0x8a21ce13u)) == As2Value::of(true));
+		CHECK(weapon_state(tank) == "blink " + wait);
+		v.seat_weapon_reloading = false;
+		CHECK(weapon_state(tank) == "start " + rdy);
+		v.seat_weapon = false;
+		tank.hud->refresh(m);
+
 		HudClientState russian = client;
 		russian.vehicle_name = "BMP2";
 		Screen bmp = open_screen_in(**caspian, *r, "ui/flow/screen/vehicle/defaulttankscreen", russian);
@@ -1744,6 +1782,18 @@ TEST_SUITE("ui-hud-screen") {
 		CHECK(gunner.clip(gtd + ".body_mc").rotation() == doctest::Approx(45.0f));
 		CHECK(gunner.clip(gtd + ".turret_mc").rotation() == doctest::Approx(35.0f));
 		CHECK(static_art_shown(gunner) == std::vector<Names>{ Names{ "DefaultTankGunner_RangeBrackets" } });
+		v.seat_weapon = true;
+		v.seat_weapon_heat = 1.0f;
+		CHECK(weapon_state(gunner) == "blink " + wait);
+		v.seat_weapon_heat = 0.25f;
+		CHECK(weapon_state(gunner) == "greenBlink " + rdy);
+		v.seat_weapon_heat = 0.0f;
+		v.seat_weapon_reloading = true;
+		CHECK(weapon_state(gunner) == "blink " + wait);
+		v.seat_weapon_reloading = false;
+		CHECK(weapon_state(gunner) == "start " + rdy);
+		v.seat_weapon = false;
+		gunner.hud->refresh(m);
 
 		Screen third = open("ui/flow/screen/vehicle/tank3pcrosshair");
 		CHECK(shown(third, cross) == Names{ "Vehicle_3p" });

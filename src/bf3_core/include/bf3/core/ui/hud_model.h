@@ -294,6 +294,10 @@ struct HudVehicle {
 	std::optional<float> primary_pitch_deg;
 	std::optional<float> secondary_pitch_deg;
 	uint32_t weapon_item = 0;
+	bool seat_weapon = false;
+	int32_t seat_weapon_ammo = 0;
+	float seat_weapon_heat = 0.0f;
+	bool seat_weapon_reloading = false;
 };
 
 struct HudTickets {

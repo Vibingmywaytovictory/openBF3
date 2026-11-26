@@ -101,6 +101,21 @@ void fill_vehicle_views(const HudFeedInput &p_input, const PresentedVehicle &p_v
 		*slot = pitch_deg(world.forward) - hull_pitch;
 	}
 }
+
+void fill_seat_weapon(
+		const HudFeedInput &p_input, const LevelVehicleKind &p_kind, size_t p_seat, ui::HudVehicle &r_out) {
+	if (!p_input.seat_weapon || p_kind.armament == nullptr) {
+		return;
+	}
+	const net::OwnSeatWeapon &w = *p_input.seat_weapon;
+	if (w.weapon >= p_kind.armament->weapons.size() || p_kind.armament->weapons[w.weapon].seat != int(p_seat)) {
+		return;
+	}
+	r_out.seat_weapon = true;
+	r_out.seat_weapon_ammo = w.magazine;
+	r_out.seat_weapon_heat = net::seat_weapon_heat_of(w.heat);
+	r_out.seat_weapon_reloading = w.reloading;
+}
 }
 
 ui::HudVehicle hud_vehicle(const HudFeedInput &p_input) {
@@ -130,6 +145,7 @@ ui::HudVehicle hud_vehicle(const HudFeedInput &p_input) {
 		const size_t n = std::min(kind.name_sid.size(), out.short_name.size() - 1);
 		std::copy_n(kind.name_sid.begin(), n, out.short_name.begin());
 		fill_vehicle_views(p_input, *vehicle, kind, seat->seat, out);
+		fill_seat_weapon(p_input, kind, seat->seat, out);
 	}
 	const net::PlayerRow *own = row_of(p_input.players, p_input.own_slot);
 	const uint8_t own_squad = own != nullptr ? own->squad : uint8_t(0);
