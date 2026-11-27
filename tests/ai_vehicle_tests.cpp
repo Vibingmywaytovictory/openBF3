@@ -172,6 +172,28 @@ TEST_SUITE("ai-vehicle") {
 		CHECK(ai::choose_change(bot, vehicles).get_out);
 	}
 
+	TEST_CASE("an idle flag-taking squad member weighs the seats of an unarmed vehicle it sits in x5, its own "
+			  "seat's current urgency unscaled, as BBChange's seat loop does with SquadMember::isTakingFlag") {
+		std::vector<ai::ChangeVehicle> vehicles{ jeep(0.0f) };
+		vehicles[0].seat[0].occupant = 9;
+		vehicles[0].seat[0].occupant_bot = true;
+		ai::ChangeBot bot = fresh_bot();
+		bot.now_s = 200.0;
+		bot.vehicle = 0;
+		bot.seat = 1;
+		bot.position = vehicles[0].position;
+		vehicles[0].seat[1].occupant = bot.player_id;
+		const ai::ChangeChoice plain = ai::choose_change(bot, vehicles);
+		CHECK_FALSE(plain.change);
+		bot.idle_taking_flag = true;
+		const ai::ChangeChoice taking = ai::choose_change(bot, vehicles);
+		CHECK_FALSE(taking.change);
+		CHECK(taking.current == doctest::Approx(plain.current));
+		CHECK(taking.best == doctest::Approx(5.0f * plain.best));
+		vehicles[0].seat[0].armed = true;
+		CHECK(ai::choose_change(bot, vehicles).best == doctest::Approx(plain.best));
+	}
+
 	TEST_CASE("a manned jeep offers its free seats by its driver's order, against staying on foot") {
 		std::vector<ai::ChangeVehicle> vehicles{ jeep(20.0f) };
 		vehicles[0].seat[0].occupant = 9;

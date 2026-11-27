@@ -134,7 +134,8 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 			return {};
 		}
 		const ai::ChangeChoice c = crew.evaluate(*body.shared, body.slot, bot->bot_id(), *state, bot->bot_stuck(),
-				body.awareness.perception(), body.vehicles.sensed_enemy(*body.shared));
+				bot->behaviour() == ai::InfantryBehaviour::Idle, body.awareness.perception(),
+				body.vehicles.sensed_enemy(*body.shared));
 		if (!c.change) {
 			return {};
 		}

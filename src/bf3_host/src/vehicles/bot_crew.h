@@ -28,7 +28,7 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 		const TdmShared &p_shared, const ServerVehicles &p_vehicles, uint8_t p_slot, bool p_ground);
 
 ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehicles, uint8_t p_slot,
-		const sim::SoldierState &p_state, bool p_stuck);
+		const sim::SoldierState &p_state, bool p_stuck, bool p_idle);
 
 ai::ChangeStrengths change_strength_scales(const TdmShared &p_shared);
 ai::EquipmentClass seat_equipment(const TdmShared &p_shared, uint8_t p_slot);
@@ -39,7 +39,7 @@ public:
 	void new_life(TdmShared &r_shared, uint8_t p_slot);
 	void drop(TdmShared &r_shared, uint8_t p_slot) { book(r_shared, p_slot, std::nullopt); }
 	ai::ChangeChoice evaluate(TdmShared &r_shared, uint8_t p_slot, uint32_t p_bot_id, const sim::SoldierState &p_state,
-			bool p_stuck, const sim::bots::Perception &p_perception,
+			bool p_stuck, bool p_idle, const sim::bots::Perception &p_perception,
 			const std::optional<tdm_bot::SeenVehicle> &p_vehicle);
 	void settle(TdmShared &r_shared, uint8_t p_slot, bool p_chosen, float p_chosen_urgency);
 	bool command(tdm_bot::BotBody &r_body, const tdm_bot::BotFrame &p_frame, sim::Command &r_cmd);

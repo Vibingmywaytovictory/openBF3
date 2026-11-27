@@ -641,6 +641,31 @@ TEST_SUITE("ai-squad") {
 		CHECK_FALSE(near->is_close_to_non_owned_target());
 	}
 
+	TEST_CASE("SquadMember::isTakingFlag: a live member on its squad's non-owned area's control point, within the "
+			  "radius squared plus 5") {
+		World world;
+		SquadCoordinator squad(world.services(), 0, 0);
+		join_bots(world, squad, { 1, 2 }, { 0.0f, 0.0f, 0.0f });
+		int index = 0;
+		CHECK_FALSE(squad.squad_member(2, index)->is_taking_flag());
+		Area area;
+		squad.assign_squad(&area, { 50.0f, 0.0f, 50.0f }, SquadOrder::Attack, SquadMissionStatus::Accepted);
+		world.players[2]->body.where = { 60.0f, 0.0f, 51.0f };
+		squad.update(++world.tick);
+		const SquadMember *member = squad.squad_member(2, index);
+		CHECK(distance_sq({ 60.0f, 0.0f, 51.0f }, { 50.0f, 0.0f, 50.0f }) < 10.0f * 10.0f + 5.0f);
+		CHECK(member->is_taking_flag());
+		CHECK_FALSE(squad.squad_member(1, index)->is_taking_flag());
+		world.players[2]->body.where = { 60.0f, 0.0f, 53.0f };
+		squad.update(++world.tick);
+		CHECK_FALSE(member->is_taking_flag());
+		world.players[2]->body.where = { 50.0f, 0.0f, 50.0f };
+		squad.update(++world.tick);
+		CHECK(member->is_taking_flag());
+		area.owner_status = 0;
+		CHECK_FALSE(member->is_taking_flag());
+	}
+
 	TEST_CASE("SquadCoordinator: orders, fire records, repair requests and strategic strength") {
 		World world;
 		InformationManager information;

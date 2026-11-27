@@ -75,6 +75,20 @@ bool SquadMember::is_close_to_non_owned_target() const {
 	return formation_distance_sq_ > distance_sq(squad_->squad_goto_position(), position_);
 }
 
+bool SquadMember::is_taking_flag() const {
+	const SquadArea *const area = squad_->squad_strategic_area_assignment();
+	Vec3 at{};
+	if (!position(at) || area == nullptr || area->status(side_ + 1) == 0) {
+		return false;
+	}
+	Vec3 point{};
+	float radius = 0.0f;
+	if (!area->control_point(point, radius)) {
+		return false;
+	}
+	return player_->is_alive() && !player_->is_man_down() && distance_sq(at, point) < radius * radius + 5.0f;
+}
+
 bool SquadMember::is_allowed_in_formation() const {
 	if (!player_->is_alive() || player_->is_man_down()) {
 		return false;

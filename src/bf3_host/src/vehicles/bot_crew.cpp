@@ -323,7 +323,7 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 }
 
 ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehicles, uint8_t p_slot,
-		const sim::SoldierState &p_state, bool p_stuck) {
+		const sim::SoldierState &p_state, bool p_stuck, bool p_idle) {
 	const ServerView &view = *p_shared.host.view;
 	ai::ChangeBot b;
 	b.player_id = p_slot;
@@ -340,6 +340,7 @@ ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehi
 	b.stuck = p_stuck;
 	const ai::SquadMember *member = p_shared.strategy != nullptr ? p_shared.strategy->squad_member(p_slot) : nullptr;
 	b.close_to_non_owned_target = member != nullptr && member->is_close_to_non_owned_target();
+	b.idle_taking_flag = p_idle && member != nullptr && member->is_taking_flag();
 	if (const std::optional<VehicleSeat> seat = p_vehicles.seat_of(p_slot)) {
 		b.vehicle = seat->vehicle;
 		b.seat = seat->seat;
@@ -377,7 +378,7 @@ void BotCrew::book(TdmShared &r_shared, uint8_t p_slot, std::optional<ai::Change
 }
 
 ai::ChangeChoice BotCrew::evaluate(TdmShared &r_shared, uint8_t p_slot, uint32_t p_bot_id,
-		const sim::SoldierState &p_state, bool p_stuck, const sim::bots::Perception &p_perception,
+		const sim::SoldierState &p_state, bool p_stuck, bool p_idle, const sim::bots::Perception &p_perception,
 		const std::optional<tdm_bot::SeenVehicle> &p_vehicle) {
 	evaluated_.reset();
 	const ServerVehicles *const vehicles = r_shared.host.view->server_vehicles();
@@ -386,7 +387,7 @@ ai::ChangeChoice BotCrew::evaluate(TdmShared &r_shared, uint8_t p_slot, uint32_t
 	}
 	const std::vector<ai::ChangeVehicle> scene = change_vehicles(r_shared, *vehicles, p_slot, true);
 	const std::vector<ai::ChangeSensed> sensed = change_sensed(r_shared, *vehicles, scene, p_perception, p_vehicle);
-	ai::ChangeBot bot = change_bot(r_shared, *vehicles, p_slot, p_state, p_stuck);
+	ai::ChangeBot bot = change_bot(r_shared, *vehicles, p_slot, p_state, p_stuck, p_idle);
 	const std::vector<ai::ChangeSensed> known = change_known(r_shared, *vehicles, scene, bot.side);
 	const std::vector<ai::Vec3> neighbours = neighbour_offsets(r_shared, bot.side, p_bot_id);
 	bot.sensed = sensed;
@@ -441,7 +442,7 @@ bool BotCrew::command(tdm_bot::BotBody &r_body, const tdm_bot::BotFrame &p_frame
 		book(sh, r_body.slot, std::nullopt);
 		return seated;
 	}
-	const ai::ChangeBot bot = change_bot(sh, *vehicles, r_body.slot, p_frame.self, false);
+	const ai::ChangeBot bot = change_bot(sh, *vehicles, r_body.slot, p_frame.self, false, false);
 	const ai::ChangeOrder order = ai::change_plan_step(bot, scene, *target_);
 	switch (order.step) {
 		case ai::ChangeStep::None:
