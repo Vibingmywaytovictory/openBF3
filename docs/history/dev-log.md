@@ -3680,3 +3680,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Comments, bf3_godot: 62 INFERRED, 20 SOURCE, 91 STAND-IN, 31 WHY on 82 files; Comment lines only: no code line is added, removed or changed.
 * Comments, bf3-opensource/config: 7 INFERRED, 20 SOURCE, 50 STAND-IN, 8 WHY on 8 files; The config files' prose comments are rewritten in the tagged form and hygiene.rules now checks bf3-opensource/config/*.cfg; no key line changed.
 * Comments from architecture.md: the rows' inferences and stand-ins that no comment carried yet (21 INFERRED, 1 SOURCE, 10 STAND-IN on 27 files) now sit beside their code; comment lines only.
+* Docs: architecture.md rows cut back to a map (area, files, entry points); their facts are now comments beside the code, shown by the code, or moved out of the repo (measurements, decisions, history); 290 KB to 51 KB, 219 to 177 lines.
