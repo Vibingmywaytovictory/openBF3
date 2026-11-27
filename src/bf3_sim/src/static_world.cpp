@@ -289,6 +289,8 @@ core::Result<StaticWorldShapes::Impl::Tile> cook_static_tile(StaticTileInput p_i
 				}
 				idx[c] = it->second;
 			}
+			// INFERRED: the soup's triangles go in as stored, their front faces counter-clockwise as Jolt expects.
+			// Settle: a research/ format fact on the winding of Havok's level triangles.
 			triangles.push_back(JPH::IndexedTriangle(idx[0], idx[1], idx[2], 0, triangle_tags[i]));
 		}
 		if (triangles.empty()) {

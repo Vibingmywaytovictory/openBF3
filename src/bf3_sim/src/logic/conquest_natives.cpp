@@ -127,6 +127,7 @@ struct ConquestNatives::State {
 		}
 	}
 
+	// SOURCE: notes M-CQ6 (a team's CTCaptureEnablable points are capturable only while the team holds no area value).
 	void set_enablable(uint8_t p_team, bool p_on) {
 		for (Point &p : points) {
 			if (p.data->params.type == CapturableType::CaptureEnablable && p.state.team == p_team) {
@@ -147,6 +148,8 @@ struct ConquestNatives::State {
 		return core::Status::success();
 	}
 
+	// SOURCE: notes M-CQ1 checker (every enabled point enables its spawners at level spawn end), M-CQ2 5 and M-CQ6
+	// (the first update counts the area and sets the CTCaptureEnablable points).
 	core::Status start(LogicRuntime &r_runtime) {
 		started = true;
 		for (const Point &p : points) {
@@ -264,10 +267,12 @@ core::Status ConquestNatives::effect(const LogicEffect &p_effect, LogicRuntime &
 			return core::Status::success();
 		}
 		if (!property && port == kStartRound) {
+			// SOURCE: notes M-CQ2 3 (no ticket loss before StartRound and a first respawn).
 			c.state.round_started = true;
 		} else if (property && port == kInitialTicketCount &&
 				value_number(p_effect.value) == double(c.data->params.initial_ticket_count)) {
 		} else if (!property && port == kReset) {
+			// SOURCE: notes M-CQ2 2 (Reset restores the counter; ResetCapturePointsOnReset resets the team's own points).
 			c.state = reset_ticket_counter(c.data->params, s.options.game_mode_counter_modifier);
 			if (c.data->params.reset_capture_points_on_reset) {
 				for (State::Point &p : s.points) {
@@ -290,6 +295,7 @@ core::Status ConquestNatives::effect(const LogicEffect &p_effect, LogicRuntime &
 			return core::Status::success();
 		}
 		if (!property && port == kEnableCapture) {
+			// SOURCE: notes M-CQ1 checker (the EnableCapture, DisableCapture and DisableSpawners events).
 			p.state.enabled = true;
 		} else if (!property && port == kDisableCapture) {
 			p.state.enabled = false;
@@ -331,6 +337,7 @@ core::Status ConquestNatives::step(
 		}
 		std::array<uint32_t, kConquestTeams> inside{};
 		for (const ConquestPlayerSample &pl : p_players) {
+			// SOURCE: notes M-CQ1 1 (each alive player of a team counts once).
 			if (pl.alive && pl.team != 0 && pl.team < kConquestTeams &&
 					capture_point_contains(p.data->params, pl.position)) {
 				++inside[pl.team];
@@ -411,6 +418,8 @@ core::Status ConquestNatives::step(
 			cp.team = pl.team;
 			cp.alive = pl.alive;
 			cp.ai = pl.ai;
+			// STAND-IN: one position per player against the area's own outline in x and z; notes M-CQ5 2's vehicle-and-soldier
+			// test and linked further areas are not built. Settle: M-CQ5 2.
 			cp.inside = polygon_contains(a.data->polygon, pl.position[0], pl.position[2]);
 			players.push_back(cp);
 		}
@@ -434,6 +443,7 @@ void ConquestNatives::respawned(uint8_t p_slot, uint8_t p_team) {
 
 void ConquestNatives::killed(uint8_t p_team) {
 	for (State::Counter &c : state_->counters) {
+		// STAND-IN: no kill sets notes M-CQ2 4's skip flag, whose meaning the notes leave open. Settle: that flag's meaning.
 		ticket_killed(c.data->params, c.state, p_team, false);
 	}
 }

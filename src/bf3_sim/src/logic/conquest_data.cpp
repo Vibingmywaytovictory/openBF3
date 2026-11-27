@@ -184,17 +184,23 @@ core::Result<std::shared_ptr<const ConquestParams>> read_conquest_params(
 			p.capture_radius = float(r.number("CaptureRadius", 0.0));
 			p.upper_sphere = r.boolean("IsCapturedInUpperSphere", false);
 			p.area_value = float(r.number("AreaValue", 0.0));
+			// STAND-IN: AreaValues is not read, so a point with UseAreaValuesPerTeam is worth 0 (notes M-CQ2 5).
+			// Settle: read AreaValues.
 			if (r.boolean("UseAreaValuesPerTeam", false)) {
 				out->notes.push_back("conquest: capture point node " + std::to_string(*node) +
 						" sets UseAreaValuesPerTeam; AreaValues are not read (0)");
 				p.area_values_per_team = true;
 			}
+			// SOURCE: notes M-CQ1 (the Conquest flag prefab's TimeToGetControl and TimeToLoseControl 20, ReturnMultiplier 1.0,
+			// MinNrToTakeControl 1, MaxCaptureMultiplier 4, StartAtBottom true), those fields' fallbacks below.
 			p.time_to_get_control = int32_t(std::clamp<int64_t>(r.integer("TimeToGetControl", 20), 1, 3600));
 			p.time_to_lose_control = int32_t(std::clamp<int64_t>(r.integer("TimeToLoseControl", 20), 1, 3600));
 			p.return_multiplier = float(r.number("ReturnMultiplier", 1.0));
 			p.only_takeable_by_team = r.team("OnlyTakeableByTeam");
 			p.min_nr_to_take_control = int32_t(std::clamp<int64_t>(r.integer("MinNrToTakeControl", 1), 0, 256));
 			p.max_capture_multiplier = int32_t(std::clamp<int64_t>(r.integer("MaxCaptureMultiplier", 4), 0, 256));
+			// STAND-IN: the AddedMultiplierPerPlayer 0, SeesawCapturing false and IntruderWarning false fallbacks are not the
+			// prefab's 0.34, true and true (notes M-CQ1). Settle: CapturePointEntityData's default values.
 			p.added_multiplier_per_player = float(r.number("AddedMultiplierPerPlayer", 0.0));
 			p.seesaw = r.boolean("SeesawCapturing", false);
 			p.start_at_bottom = r.boolean("StartAtBottom", true);
@@ -249,7 +255,10 @@ core::Result<std::shared_ptr<const ConquestParams>> read_conquest_params(
 			ConquestAreaData d;
 			d.node = *node;
 			d.params.team = r.team("Team");
+			// STAND-IN: an IsTeamSpecific fallback of false, where notes M-CQ5's MP_007 triggers hold true.
+			// Settle: CombatAreaTriggerEntityData's default value.
 			d.params.team_specific = r.boolean("IsTeamSpecific", false);
+			// SOURCE: notes M-CQ5 (MP_007 CQS: IsAiAllowedOutside true, TimeToReturn 10), the fallbacks below.
 			d.params.ai_allowed_outside = r.boolean("IsAiAllowedOutside", true);
 			d.params.time_to_return = int32_t(std::clamp<int64_t>(r.integer("TimeToReturn", 10), 0, 3600));
 			out->areas.push_back(std::move(d));

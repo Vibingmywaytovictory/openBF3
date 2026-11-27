@@ -80,6 +80,7 @@ struct RoundNatives::State {
 	struct Counter {
 		uint32_t node = 0;
 		uint8_t team = 0;
+		// SOURCE: notes M-OT2 TDM data (MaxKillCount 100, EnemyWeight 1.0), the fallbacks below.
 		int32_t max_kill_count = 100;
 		double enemy_weight = 1.0;
 		bool ignore_ai = false;
@@ -244,6 +245,8 @@ core::Result<RoundNatives> RoundNatives::create(std::shared_ptr<const gp::LogicG
 	}
 	const gp::LogicGraph &g = *p_graph;
 	state->enabled.assign(g.nodes().size(), false);
+	// STAND-IN: a KillCounter the params do not name counts for team 1, the next one for team 2, in node order, in place
+	// of its TeamId. Settle: read TeamId.
 	uint8_t next_counter_team = 1;
 	for (uint32_t i = 0; i < g.nodes().size(); ++i) {
 		const T type = g.nodes()[i].type;
@@ -298,10 +301,12 @@ core::Result<RoundNatives> RoundNatives::create(std::shared_ptr<const gp::LogicG
 	RoundNativeParams &p = state->params;
 	p.round_min_players = std::clamp(p.round_min_players, 0, 256);
 	p.round_max_players = std::clamp(p.round_max_players, 0, 256);
+	// STAND-IN: an invalid RoundRestartCountdown falls back to 10 s. Settle: refuse the level's invalid value.
 	if (!std::isfinite(p.round_restart_countdown_s) || p.round_restart_countdown_s < 0.0f) {
 		p.round_restart_countdown_s = 10.0f;
 	}
 	p.round_restart_countdown_s = std::min(p.round_restart_countdown_s, 3600.0f);
+	// SOURCE: notes M-OT2 TDM data (PlayerKilledDelay 5.0 s), the fallback for an invalid one.
 	if (!std::isfinite(p.player_killed_delay_s) || p.player_killed_delay_s < 0.0f) {
 		p.player_killed_delay_s = 5.0f;
 	}
@@ -374,6 +379,8 @@ core::Status RoundNatives::apply(Tick p_tick, std::span<const LogicEffect> p_eff
 				}
 				s.note(e.node, NativeTimelineEntry::What::RoundOver, 0);
 				break;
+			// INFERRED: TeamWins ends the round only on a RoundOver armed by RoundStarted, the lowest node winning a tick's
+			// tie. Settle: a note on RoundOverEntityData.
 			case M::TeamWins:
 				for (const State::Over &o : s.overs) {
 					if (o.node == e.node && o.armed && s.winner == 0 && s.phase == RoundPhase::InRound && o.team != 0 &&
@@ -389,6 +396,7 @@ core::Status RoundNatives::apply(Tick p_tick, std::span<const LogicEffect> p_eff
 				s.unspawn_flag = true;
 				s.note(e.node, NativeTimelineEntry::What::Input, e.port);
 				break;
+			// STAND-IN: AutoTeam's PlayerEnter and DisableAllowedToSpawnOn change nothing. Settle: a note on AutoTeam.
 			case M::PlayerEnter:
 			case M::DisableAllowedToSpawnOn:
 
@@ -522,6 +530,8 @@ core::Status RoundNatives::player_died(uint8_t p_slot, uint8_t p_team, int p_kil
 		BF3_TRY(r_runtime.force_event(h, kOnPlayerDied, LogicContext{ int32_t(p_slot), p_team }));
 	}
 
+	// STAND-IN: a suicide adds nothing and a team-0 victim counts as an enemy, where notes M-OT2 3 weigh them by
+	// TeamKillWeight and NeutralTeamWeight. Settle: M-OT2 3.
 	if (s.phase == RoundPhase::InRound && p_killer >= 0 && p_killer != int(p_slot) && (p_killer_team == 1 || p_killer_team == 2)) {
 		const bool enemy = p_killer_team != p_team;
 		const bool killer_bot = p_killer < int(kSlots) && s.bot[size_t(p_killer)];
@@ -555,6 +565,7 @@ core::Status RoundNatives::kill_undone(uint8_t p_killer_team, LogicRuntime &r_ru
 	if (s.phase != RoundPhase::InRound) {
 		return core::Status::success();
 	}
+	// STAND-IN: the take-back applies at the kill limit too, where notes M-OT2 2 freeze the counter. Settle: M-OT2 2.
 	for (State::Counter &c : s.counters) {
 		if (c.team == p_killer_team) {
 			c.kills = std::max(0.0, c.kills - c.enemy_weight);
@@ -598,6 +609,8 @@ core::Status RoundNatives::conquest_step(
 	if (!s.conquest) {
 		return core::Status::success();
 	}
+	// INFERRED: the conquest rules step every 60 Hz tick with its dt; notes M-CQ1 infer a 30 Hz tick. Settle: the
+	// server's tick rate.
 	return s.conquest->step(p_tick, 1.0f / float(kSimHz), p_players, r_runtime);
 }
 
@@ -632,6 +645,7 @@ int RoundNatives::kill_limit() const {
 	if (s.config.kill_limit_override > 0) {
 		return s.config.kill_limit_override;
 	}
+	// SOURCE: notes M-OT2 TDM data (MaxKillCount 100).
 	return s.counters.empty() ? 100 : s.counters.front().max_kill_count;
 }
 

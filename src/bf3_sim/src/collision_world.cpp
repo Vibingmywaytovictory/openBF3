@@ -264,6 +264,8 @@ bool CollisionWorld::ray(const Vec3 &p_origin, const Vec3 &p_delta, uint32_t p_m
 	}
 	const JPH::RRayCast cast(JPH::RVec3(to_jolt(p_origin)), delta);
 	JPH::RayCastSettings settings;
+	// INFERRED: Havok's level collision is two-sided, so every query of this file (rays, sweeps, overlaps) hits back
+	// faces. Settle: a note on the sidedness of Havok's level meshes.
 	settings.SetBackFaceMode(JPH::EBackFaceMode::CollideWithBackFaces);
 	JPH::ClosestHitCollisionCollector<JPH::CastRayCollector> collector;
 	w.system->GetNarrowPhaseQueryNoLock().CastRay(cast, settings, collector, w.broadphase_filter(p_mask), w.object_filter(p_mask), w.body_filter,
@@ -389,6 +391,7 @@ bool CollisionWorld::overlap_box(const Vec3 &p_center, const Vec3 &p_half, float
 	if (half.ReduceMin() <= 0.0f) {
 		return false;
 	}
+	// STAND-IN: Jolt's default convex radius (5 cm) rounds the box's edges. Settle: a note on Havok's box queries.
 	const JPH::RefConst<JPH::Shape> shape = new JPH::BoxShape(half, std::min(JPH::cDefaultConvexRadius, 0.5f * half.ReduceMin()));
 	const JPH::RMat44 transform = JPH::RMat44::sRotationTranslation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), p_yaw), JPH::RVec3(to_jolt(p_center)));
 	JPH::CollideShapeSettings settings;

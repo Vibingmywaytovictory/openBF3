@@ -84,6 +84,7 @@ Graph poly_graph(const NavWorld::Impl &w, std::vector<uint32_t> *r_parent) {
 			uint32_t at = start[gi];
 			for (unsigned int l = tile->polys[pi].firstLink; l != DT_NULL_LINK; l = tile->links[l].next) {
 				uint32_t h = w.global(NavPolyRef(tile->links[l].ref));
+				// WHY: vault links are left out, as the default query's include flags leave out kVault (nav_query.h).
 				h = h != UINT32_MAX && (vault[gi] != 0 || vault[h] != 0) ? UINT32_MAX : h;
 				edges[at++] = h == UINT32_MAX ? gi : h;
 				if (h != UINT32_MAX && r_parent != nullptr) {

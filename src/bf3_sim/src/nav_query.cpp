@@ -327,6 +327,8 @@ bool NavCorridor::move_position(NavQuery &p_query, const Vec3 &p_position) {
 
 	const float *p = m.corridor.getPos();
 	const float dx = p[0] - p_position[0], dz = p[2] - p_position[2];
+	// STAND-IN: a bot more than kNavCorridorSlack across or 2.5 m up or down from its corridor position is off its path.
+	// Settle: the bot path gates on each level.
 	return dx * dx + dz * dz <= kNavCorridorSlack * kNavCorridorSlack && std::fabs(p[1] - p_position[1]) <= 2.5f;
 }
 

@@ -85,6 +85,8 @@ struct GapFill {
 	int top = 0;
 };
 
+// STAND-IN: empty column runs up to floor(2 r sin(max slope) / cs) cells between two walkable spans within the climb
+// get a floor, for cracks the capsule rests across. Settle: the bot path gates on each level.
 core::Status bridge_floor_gaps(rcContext &r_context, rcHeightfield &r_hf, int p_climb, int p_height, int p_max_gap) {
 	if (p_max_gap < 1) {
 		return core::Status::success();
@@ -171,6 +173,8 @@ int narrowest_run(
 	return narrowest;
 }
 
+// STAND-IN: where fewer than 2 ceil(r / cs) + 1 cells are free across, a gap at least ceil(2 r / cs) cells wide keeps
+// the erosion of the radius rounded down and grows into the areas it joins. Settle: the bot path gates on each level.
 core::Status erode_with_passages(rcContext &r_context, rcCompactHeightfield &r_chf, const NavCells &p_cells) {
 	if (p_cells.passage_radius >= p_cells.walkable_radius) {
 		return rcErodeWalkableArea(&r_context, p_cells.walkable_radius, r_chf)
@@ -284,6 +288,8 @@ template <class Visit> void visit_edge_samples(const rcPolyMesh &p_mesh, float p
 	}
 }
 
+// STAND-IN: a drop link from a boundary edge sample over the first ledge within drop_reach to walkable floor below,
+// clear of a capsule swept out and down. Settle: a note on how BF3 bots take drops.
 void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf, const std::vector<uint8_t> &p_areas,
 		const NavParams &p_params, const NavCells &p_cells, const CollisionWorld *p_world, NavTileBake &r_bake,
 		std::vector<DropLink> &r_links) {

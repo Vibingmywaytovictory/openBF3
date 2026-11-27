@@ -78,6 +78,8 @@ struct StaticTileInfo {
 	core::Sha256Digest content{};
 };
 
+// STAND-IN: the terrain collides as a Jolt height field of 16-bit samples in 4-sample blocks in place of Havok's
+// terrain shape. Settle: a note on BF3's terrain physics shape.
 inline constexpr uint32_t kStaticTerrainBits = 16;
 inline constexpr uint32_t kStaticTerrainBlock = 4;
 inline constexpr uint32_t kStaticTerrainBodyLayer = 3;
@@ -85,6 +87,8 @@ inline constexpr size_t kMaxStaticTerrains = 8;
 inline constexpr const char *kStaticTerrainCacheKind = "jolt-terrain";
 inline constexpr uint32_t kStaticTerrainFormatVersion = 1;
 
+// STAND-IN: a terrain hit reads as dirt (surface 6) with the terrain flag; the TerrainMaterialTreeAsset is not read.
+// Settle: read the terrain materials.
 inline constexpr SurfaceTag static_terrain_tag() { return SurfaceTag{ 0, 6, 0, 4, 0 }; }
 
 struct StaticTerrainView {
@@ -196,6 +200,8 @@ core::Result<std::shared_ptr<const StaticWorldShapes>> build_static_world_terrai
 struct StaticWorldLoadOptions {
 	StaticWorldBuildOptions build;
 	unsigned soup_threads = 0;
+	// STAND-IN: terrain collision is the coarsest terrain level with samples at most 2 m apart, as the soup's default.
+	// Settle: a note on the resolution BF3's terrain physics uses.
 	float terrain_spacing = 2.0f;
 	core::level::SoupProgress *soup_progress = nullptr;
 

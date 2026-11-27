@@ -245,6 +245,7 @@ core::Status LogicNativeStubs::apply(Tick p_tick, std::span<const LogicEffect> p
 			case M::Disable:
 				s.set_enabled(e.node, false);
 				break;
+			// STAND-IN: Spawn answers OnSpawned at once and spawns nothing. Settle: build the spawners.
 			case M::Spawn:
 				++st.spawn_requests;
 				s.note(e.node, NativeTimelineEntry::What::Spawned, 1);
@@ -320,7 +321,8 @@ core::Status LogicNativeStubs::capture(uint32_t p_capture_point, uint8_t p_team,
 		}
 		const std::optional<LogicValue> team = g.param(e.target, team_field);
 		const bool own = team && team->i == p_team;
-		// INFERRED: the capture point's own character spawners follow the owner from the next tick. Settle: notes M-CQ3/4.
+		// STAND-IN: the stub opens the point's own character spawners of the owner's Team a tick after an owner change,
+		// not by notes M-CQ3 1's LockedTeam rule at the pole's top and bottom. Settle: M-CQ3 1.
 		s.pending.push_back({ s.tick + 1, e.target, own });
 	}
 	return core::Status::success();

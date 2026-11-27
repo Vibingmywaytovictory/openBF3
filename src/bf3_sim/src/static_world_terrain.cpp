@@ -167,6 +167,8 @@ void soup_cell(const StaticTerrainView &p_view, const core::res::Transform &p_fr
 	const Vec3 b = point(1, 0);
 	const Vec3 c = point(0, 1);
 	const Vec3 d = point(1, 1);
+	// INFERRED: each cell splits on its (x, z) to (x + 1, z + 1) diagonal, as the soup's terrain cells do.
+	// Settle: a research/ format fact on the terrain physics triangulation.
 	const std::array<std::array<Vec3, 3>, 2> pair = { { { a, d, b }, { a, c, d } } };
 	for (size_t k = 0; k < 2; ++k) {
 		r_out.v[k] = face_up(pair[k]);
@@ -306,6 +308,8 @@ core::Result<StaticWorldShapes::Impl::Terrain> cook_static_terrain(const StaticT
 
 	BF3_TRY(budget.charge(cells_x * cells_z));
 	const bool fast = std::min(sx, sz) * frame.scale >= kFastStep;
+	// WHY: Jolt drops only a triangle holding a no-collision sample, the soup the whole cell with a hole corner; marking
+	// such a cell's first sample keeps the field inside the soup, and the patch mesh adds back the triangles it loses.
 	std::vector<std::array<uint32_t, 2>> marked;
 	CellPair pair;
 	for (size_t z = 0; z < cells_z; ++z) {

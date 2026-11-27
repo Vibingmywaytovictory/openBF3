@@ -115,6 +115,8 @@ bool PhysicsWorld::init(const WorldConfig &p_config) {
 
 	JPH::BodyInterface &bi = w.system->GetBodyInterface();
 
+	// STAND-IN: a hand-placed demo scene (a 60 m ground box, falling 1 m boxes and spheres), not a BF3 level.
+	// Settle: remove it once nothing reports its bodies.
 	JPH::BodyCreationSettings ground(new JPH::BoxShape(JPH::Vec3(30.0f, 0.5f, 30.0f)), JPH::RVec3(0.0f, -0.5f, 0.0f), JPH::Quat::sIdentity(),
 			JPH::EMotionType::Static, Layers::kNonMoving);
 	w.ground = bi.CreateAndAddBody(ground, JPH::EActivation::DontActivate);

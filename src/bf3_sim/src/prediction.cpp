@@ -192,6 +192,8 @@ WeaponPredictionEntry WeaponLane::step(const WeaponPredictionEntry &p_from, cons
 	} else {
 		weapons::WeaponContext context = weapons::make_weapon_context(motor_, p_before, p_after, p_command,
 				weapons::suppression_scale(suppression_def_, suppression_, p_command.tick));
+		// WHY: the client strips the fire button while its server-sent lock is off, so the lane steps a lock-only weapon
+		// as locked.
 		context.locked = true;
 		weapons::step_weapons_with_rules(*table_, out.state, p_command, context, match_seed_, p_from.spawn_tick, output);
 		++stats_.steps;

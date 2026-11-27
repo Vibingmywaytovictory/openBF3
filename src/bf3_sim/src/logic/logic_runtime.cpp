@@ -399,6 +399,8 @@ struct LogicRuntime::State {
 		return nullptr;
 	}
 
+	// INFERRED: an unlinked or unpublished property input reads the node's own field, else false or 0. Settle: a note
+	// on logic property inputs.
 	LogicValue in(uint32_t p_node, int32_t p_port) const {
 		for (const PortValue &pv : inputs[p_node]) {
 			if (pv.port == p_port) {
@@ -532,6 +534,8 @@ struct LogicRuntime::State {
 		} else {
 			outputs[p_node].push_back({ p_port, p_value });
 		}
+		// INFERRED: a changed output goes to each edge in order, queued with its value so a later change in the same drain
+		// cannot overtake it, or at once with immediate_properties. Settle: a note on same-tick property propagation.
 		for (const LogicEdge &e : port_range(graph->properties_from(p_node), p_port)) {
 			Item it;
 			it.source = p_node;
@@ -570,6 +574,7 @@ struct LogicRuntime::State {
 			return;
 		}
 		LogicEffect e;
+		// INFERRED: a delivery into a native entity takes effect on the next tick. Settle: a note on native entity timing.
 		e.apply_tick = tick + 1;
 		e.node = p_item.target;
 		e.port = p_item.target_port;
@@ -694,6 +699,7 @@ struct LogicRuntime::State {
 			return;
 		}
 		st.done = st.done || run_once;
+		// INFERRED: Out carries the context (player, team) of the In that armed it. Settle: a note on Delay.
 		arm(p_node, logic_delay_ticks(delay_seconds(p_node), options.hz), TimerWhat::Out, 0, p_context);
 	}
 
@@ -710,12 +716,15 @@ struct LogicRuntime::State {
 		}
 	}
 
+	// STAND-IN: a Sequence plays only its timed events: PropertyTracks are not sampled and an event past SequenceLength
+	// still fires. Settle: a note on SequenceEntityData.
 	void sequence_start(uint32_t p_node, const LogicContext &p_context) {
 		cancel(p_node);
 		NodeState &st = nodes[p_node];
 		st.flag = true;
 		st.start = tick;
 		fire(p_node, port::kOnStarted, p_context);
+		// INFERRED: Events[].Time and SequenceLength are milliseconds. Settle: a note on SequenceEntityData.
 		const size_t events = std::min<size_t>(param_count(p_node, port::kTime), gp::kMaxParamElements);
 		for (size_t k = 0; k < events && !fault; ++k) {
 			const std::optional<LogicValue> time = param(p_node, port::kTime, static_cast<uint16_t>(k));
@@ -917,6 +926,8 @@ struct LogicRuntime::State {
 		return floats ? v_float(f) : v_int(i);
 	}
 
+	// INFERRED: the primitives' event rules below are read from their field and port names, not from a note.
+	// Settle: notes on the logic primitives.
 	void on_event(uint32_t p_node, int32_t p_port, const LogicContext &p_context) {
 		NodeState &st = nodes[p_node];
 		switch (node(p_node).type) {
@@ -1096,6 +1107,7 @@ struct LogicRuntime::State {
 					sequence_start(p_node, p_context);
 				} else if (p_port == port::kStop) {
 					sequence_stop(p_node, true, p_context);
+				// STAND-IN: Pause stops silently like Reset and keeps no position. Settle: a note on Sequence's Pause.
 				} else if (p_port == port::kReset || p_port == port::kPause) {
 					sequence_stop(p_node, false, p_context);
 				} else {
@@ -1225,6 +1237,7 @@ struct LogicRuntime::State {
 					unhandled_port(p_node, p_port, true);
 				}
 				return;
+			// STAND-IN: an event into a primitive type with no case here is counted and dropped. Settle: build those types.
 			default:
 				unhandled_port(p_node, p_port, true);
 				return;
@@ -1305,6 +1318,8 @@ struct LogicRuntime::State {
 		}
 	}
 
+	// INFERRED: the primitives' property rules below are read from their field and port names, not from a note.
+	// Settle: notes on the logic primitives.
 	void on_property(uint32_t p_node, int32_t p_port, const LogicValue &p_value) {
 		NodeState &st = nodes[p_node];
 		const T type = node(p_node).type;
@@ -1446,6 +1461,8 @@ struct LogicRuntime::State {
 
 	void drain() {
 		while (head < queue.size() && !fault) {
+			// INFERRED: deliveries past the per-tick cap carry over to the next tick in order. Settle: a note on the logic
+			// update budget.
 			if (tick_deliveries >= options.max_deliveries_per_tick) {
 				break;
 			}
@@ -1479,6 +1496,8 @@ struct LogicRuntime::State {
 		for (uint32_t i = 0; i < nodes.size(); ++i) {
 			NodeState &st = nodes[i];
 			switch (node(i).type) {
+				// INFERRED: a gate without Default starts open, a trigger without Enabled starts enabled. Settle: those
+				// types' field defaults.
 				case T::EventGate:
 				case T::PropertyGate:
 					st.flag = param_bool(i, port::kDefault, true);

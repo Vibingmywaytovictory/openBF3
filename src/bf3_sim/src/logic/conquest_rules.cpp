@@ -61,6 +61,7 @@ float player_rate(const CapturePointParams &p_params, uint32_t p_attackers, uint
 
 }
 
+// SOURCE: notes M-CQ2 5 (AreaValue, or with UseAreaValuesPerTeam the team's AreaValues entry, 0 if none).
 float CapturePointParams::area_value_for(uint8_t p_team) const {
 	if (!area_values_per_team) {
 		return area_value;
@@ -68,6 +69,7 @@ float CapturePointParams::area_value_for(uint8_t p_team) const {
 	return p_team < area_values.size() ? area_values[p_team] : 0.0f;
 }
 
+// SOURCE: notes M-CQ1 reset (InitialOwnerTeam; the pole at 0 with StartAtBottom, else at 100 and controlled if owned).
 CapturePointState reset_capture_point(const CapturePointParams &p_params) {
 	CapturePointState s;
 	s.team = p_params.initial_owner;
@@ -81,6 +83,9 @@ CapturePointState reset_capture_point(const CapturePointParams &p_params) {
 	return s;
 }
 
+// SOURCE: notes M-CQ1 2 (any linked volume, else the strict CaptureRadius sphere; IsCapturedInUpperSphere rejects
+// points below its centre).
+// STAND-IN: a linked volume is tested as its outline in x and z, its height ignored. Settle: M-CQ1 2's volume test.
 bool capture_point_contains(const CapturePointParams &p_params, const Vec3 &p_point) {
 	if (!p_params.volumes.empty()) {
 		for (const CaptureVolume &v : p_params.volumes) {
@@ -102,6 +107,7 @@ bool capture_point_contains(const CapturePointParams &p_params, const Vec3 &p_po
 CaptureEvents step_capture_point(const CapturePointParams &p_params, CapturePointState &r_state,
 		std::span<const uint32_t, kConquestTeams> p_inside, float p_dt) {
 	CaptureEvents ev;
+	// SOURCE: notes M-CQ1 0 (no update while disabled, CTUnableToChangeTeam, or held by OnlyTakeableByTeam).
 	if (!r_state.enabled || p_params.type == CapturableType::UnableToChangeTeam ||
 			(p_params.only_takeable_by_team != 0 && p_params.only_takeable_by_team == r_state.team)) {
 		return ev;
@@ -110,6 +116,8 @@ CaptureEvents step_capture_point(const CapturePointParams &p_params, CapturePoin
 	const uint32_t defenders = own != 0 && own < kConquestTeams ? p_inside[own] : 0;
 	uint32_t attackers = 0;
 	uint8_t switch_team = 0;
+	// SOURCE: notes M-CQ1 3 and its checker (the largest other team attacks, ties to the higher id; the own team when
+	// no other team is inside).
 	for (uint8_t t = 1; t < kConquestTeams; ++t) {
 		if (t == own || p_inside[t] == 0) {
 			continue;
@@ -159,6 +167,7 @@ CaptureEvents step_capture_point(const CapturePointParams &p_params, CapturePoin
 	} else {
 		r_state.rate = 0.0f;
 	}
+	// SOURCE: notes M-CQ1 9 (DisableIfEnemyInside, the intruder edge, underAttack while fewer defend than attack).
 	if (p_params.disable_if_enemy_inside && r_state.team != 0) {
 		(attackers == 0 ? ev.enable_spawners : ev.disable_spawners) = true;
 	}
@@ -186,6 +195,7 @@ void disable_spawner(SpawnerGate &r_gate) {
 	}
 }
 
+// SOURCE: notes M-CQ2 7 (the Tickets output is the tickets truncated toward zero).
 int64_t TicketCounterState::displayed() const {
 	return int64_t(std::trunc(std::max(tickets, 0.0)));
 }
@@ -219,6 +229,7 @@ void ticket_respawn(const TicketCounterParams &p_params, TicketCounterState &r_s
 	}
 }
 
+// SOURCE: notes M-CQ2 4 (TDTOnKilled costs 1 a death of the team unless the kill message's skip flag is set).
 void ticket_killed(
 		const TicketCounterParams &p_params, TicketCounterState &r_state, uint8_t p_team, bool p_suppressed) {
 	if (p_team != p_params.team || p_params.decrease != TicketDecrease::OnKilled || p_suppressed || !r_state.losing()) {
@@ -228,12 +239,15 @@ void ticket_killed(
 	r_state.stopped = r_state.tickets == 0.0;
 }
 
+// SOURCE: notes M-CQ2 4 (a player who leaves the level leaves the spawned set, so a rejoin spawns free once more).
 void ticket_left(const TicketCounterParams &p_params, TicketCounterState &r_state, uint8_t p_slot, uint8_t p_team) {
 	if (p_team == p_params.team) {
 		r_state.spawned.reset(p_slot);
 	}
 }
 
+// SOURCE: notes M-CQ2 5 (a capture adds the area to the point's team, a loss takes it from its controller, the first
+// update counts it afresh), for the three functions below.
 void ticket_captured(const TicketCounterParams &p_params, TicketCounterState &r_state,
 		const CapturePointParams &p_point, const CapturePointState &p_state) {
 	if (p_state.team == p_params.team) {
@@ -268,6 +282,7 @@ bool team_holds_point(uint8_t p_team, std::span<const ConquestPoint> p_points) {
 	return false;
 }
 
+// SOURCE: notes M-CQ2 checker 6b (every non-HQ point held by another team, controlled and at 100).
 bool enemy_holds_all(uint8_t p_team, std::span<const ConquestPoint> p_points) {
 	size_t flags = 0, held = 0;
 	for (const ConquestPoint &p : p_points) {
@@ -349,6 +364,7 @@ TicketEvents ticket_bleed(
 	return ev;
 }
 
+// SOURCE: notes M-CQ5 1-2 (IsDesertingAllowed, alive, IsTeamSpecific; an AI is skipped while IsAiAllowedOutside).
 bool combat_area_tracks(const CombatAreaParams &p_params, const CombatAreaPlayer &p_player, bool p_deserting_allowed) {
 	if (p_deserting_allowed || !p_player.alive) {
 		return false;

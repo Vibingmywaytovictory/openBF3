@@ -86,6 +86,9 @@ constexpr float axis_value(int8_t p_axis) {
 	return float(p_axis < -kAxisMax ? -kAxisMax : p_axis) / float(kAxisMax);
 }
 
+// SOURCE: notes R-H 1 (a missing move is the previous move repeated).
+// STAND-IN: the repeat drops the jump press and has no count limit; R-H's checker finds a fresh default input past an
+// unresolved limit. Settle: that limit and the default input's content.
 constexpr Command repeated_command(const Command &p_last, Tick p_tick) {
 	Command c = p_last;
 	c.tick = p_tick;

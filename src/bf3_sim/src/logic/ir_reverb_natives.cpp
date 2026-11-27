@@ -125,6 +125,7 @@ void IrReverbNatives::update(const LogicRuntime &p_runtime) {
 		std::optional<float> volume;
 		for (const IrReverbSource &src : d.sources) {
 			if (const std::optional<float> v = logic_number(p_runtime.output(src.node, src.port))) {
+				// INFERRED: a Volume fed by several outputs takes the largest. Settle: a note on IrReverbEntityData.
 				volume = std::max(volume.value_or(*v), *v);
 			}
 		}
