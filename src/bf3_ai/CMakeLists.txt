@@ -76,6 +76,8 @@ target_sources(bf3_ai PRIVATE
     include/bf3/ai/vehicle/vehicle_change.h
     src/vehicle/vehicle_urgency.cpp
     src/vehicle/vehicle_change.cpp
+    include/bf3/ai/vehicle/car_control.h
+    src/vehicle/car_control.cpp
 )
 
 target_sources(bf3_ai PRIVATE

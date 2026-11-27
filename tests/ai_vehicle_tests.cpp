@@ -4,6 +4,7 @@
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/bot/bot_main.h"
 #include "bf3/ai/main/ai_script.h"
+#include "bf3/ai/vehicle/car_control.h"
 #include "bf3/ai/vehicle/vehicle_change.h"
 
 #include "ai_infantry_fakes.h"
@@ -545,5 +546,103 @@ TEST_SUITE("ai-vehicle") {
 		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{ 0, 0 }, true) == doctest::Approx(seat + 20.0f));
 		bot.max_speed = 0.0f;
 		CHECK(ai::change_unit_urgency(bot, vehicles, ai::ChangeTarget{}, false) == 0.0f);
+	}
+	TEST_CASE("CarControl drives at clamp(3 x angle) turn and a throttle from the target speed, bangs it below 1.5 m/s "
+			  "and brakes at least 0.4 against the speed when the controls reset") {
+		ai::CarCommand c;
+		c.speed_limit = 20.0f;
+		ai::CarControls k = ai::car_control_towards_direction({ 0.0f, 0.5f }, {}, 10.0f, c);
+		CHECK(k.throttle == 1.0f);
+		CHECK(k.turn == 0.0f);
+		c.angle = 0.1f;
+		k = ai::car_control_towards_direction({ 0.0f, 10.0f }, {}, 10.0f, c);
+		CHECK(k.turn == doctest::Approx(0.3f));
+		CHECK(k.throttle == doctest::Approx(10.0f / 15.0f));
+		c.angle = 0.5f;
+		CHECK(ai::car_control_towards_direction({ 0.0f, 10.0f }, {}, 10.0f, c).turn == 1.0f);
+		CHECK(ai::car_control_towards_direction({ 0.0f, 10.0f }, { 0.5f, 0.0f, 0.0f }, 10.0f, c).throttle ==
+				doctest::Approx((6.0f - 10.0f) / 3.0f + 6.0f / 15.0f));
+		c.mode = -1.0f;
+		c.speed_sign = 1.0f;
+		CHECK(ai::car_control_towards_direction({ 0.0f, 10.0f }, {}, 10.0f, c).turn == -1.0f);
+		CHECK(ai::car_reset_throttle(5.0f) == doctest::Approx(-0.7f));
+		CHECK(ai::car_reset_throttle(-0.3f) == doctest::Approx(0.4f));
+		CHECK(ai::car_reset_throttle(0.01f) == 0.0f);
+		CHECK(ai::car_turn_factor(5.0f, 0.7f) == doctest::Approx(1.0f - 0.9f * 0.8f));
+		CHECK(ai::car_turn_factor(0.5f, 0.7f) == 1.0f);
+		CHECK(ai::car_turn_factor(5.0f, std::nullopt) == 1.0f);
+		CHECK(ai::car_approach_factor(10.0f, 1.0f) == doctest::Approx(8.5f * 8.5f / 225.0f));
+		CHECK(ai::car_approach_factor(2.0f, 1.0f) == doctest::Approx(0.2f));
+		CHECK(ai::car_approach_factor(40.0f, 1.0f) == 1.0f);
+	}
+
+	TEST_CASE("CarControl's move-to status drives on with open space ahead, turns back past a goal behind and halves "
+			  "its speed when traced in on both ends") {
+		ai::CarSituation s;
+		s.radius = 3.0f;
+		s.max_speed = 20.0f;
+		const float open = ai::car_trace_length(s.radius);
+		s.space = { open, open, open, open };
+		s.goal_distance = 100.0f;
+		int status = 0;
+		ai::CarCommand c = ai::car_action_status(status, s);
+		CHECK(status == 0);
+		CHECK(c.mode == 1.0f);
+		CHECK(c.angle == 0.0f);
+		CHECK(c.speed_limit == doctest::Approx(20.0f));
+		s.desired = { 1.0f, 0.0f };
+		c = ai::car_action_status(status, s);
+		CHECK(c.angle == doctest::Approx(1.5707964f));
+		s.desired = { 0.6f, -0.8f };
+		c = ai::car_action_status(status, s);
+		CHECK(status == 11);
+		c = ai::car_action_status(status, s);
+		CHECK(c.mode == -1.0f);
+		CHECK(c.angle < 0.0f);
+		s.desired = { -0.6f, -0.8f };
+		c = ai::car_action_status(status, s);
+		CHECK(status == 9);
+		s.space = { 0.0f, 0.0f, open, open };
+		status = 0;
+		s.desired = { 0.0f, 1.0f };
+		c = ai::car_action_status(status, s);
+		CHECK(c.mode == 1.0f);
+		CHECK(c.speed_limit == doctest::Approx(10.0f));
+		s.space = { s.radius * 1.3f + 0.5f * (open - s.radius * 1.3f), open, open, open };
+		c = ai::car_action_status(status, s);
+		CHECK(c.speed_limit == doctest::Approx(5.0f - 0.5f * 3.0f));
+		s.slow_down = 1.0f;
+		s.slow_down_stop = true;
+		c = ai::car_action_status(status, s);
+		CHECK(c.speed_limit == 1.0f);
+		CHECK(c.angle == -2.0f);
+	}
+
+	TEST_CASE("BotNavigation's progress check for a vehicle: throttle held within 4 m for 20 s is no progress; "
+			  "half a second off the throttle or a 4 m move is") {
+		ai::CarProgress p;
+		p.clear(0.0);
+		const ai::Vec3 at{ 10.0f, 0.0f, 10.0f };
+		CHECK(p.check(0.0, at, 1.0f, 0.0f));
+		CHECK(p.check(19.5, { 11.0f, 0.0f, 10.0f }, 1.0f, 0.0f));
+		CHECK_FALSE(p.check(20.5, { 12.0f, 0.0f, 12.0f }, 1.0f, 0.0f));
+		CHECK_FALSE(p.check(20.6, at, -1.0f, 0.0f));
+		CHECK(p.check(21.2, at, -1.0f, 0.0f));
+		CHECK(p.check(21.3, at, 1.0f, 0.0f));
+		CHECK(p.check(40.0, { 20.0f, 0.0f, 10.0f }, 1.0f, 0.0f));
+		CHECK(p.check(59.9, { 20.0f, 0.0f, 13.0f }, 0.0f, 1.0f));
+		CHECK_FALSE(p.check(60.1, { 20.0f, 0.0f, 13.0f }, 0.0f, 1.0f));
+	}
+
+	TEST_CASE("BotNavigation's largest angle difference: the path legs within max(2 s of speed, 3 m) against the "
+			  "facing, tested every 0.5 s") {
+		ai::CarAngleDiff d;
+		const std::vector<ai::Vec3> path{ { 0.0f, 0.0f, 2.0f }, { 2.0f, 0.0f, 2.0f }, { 2.0f, 0.0f, 40.0f } };
+		const std::vector<ai::Vec3> straight{ { 0.0f, 0.0f, 10.0f } };
+		CHECK(d.largest(1.0, {}, { 0.0f, 1.0f }, 0.0f, path) == doctest::Approx(0.0f));
+		CHECK(d.largest(1.2, {}, { 0.0f, 1.0f }, 5.0f, path) == doctest::Approx(0.0f));
+		CHECK(d.largest(1.5, {}, { 0.0f, 1.0f }, 5.0f, path) == doctest::Approx(1.5707964f));
+		CHECK(d.largest(1.7, {}, { 0.0f, 1.0f }, 5.0f, straight) == doctest::Approx(1.5707964f));
+		CHECK(d.largest(2.0, {}, { 0.0f, 1.0f }, 5.0f, straight) == doctest::Approx(0.0f));
 	}
 }
