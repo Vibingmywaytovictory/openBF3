@@ -61,6 +61,8 @@ struct ProgramConstantLane {
 	bool engine = false;
 };
 
+// WHY: a double-sided deferred program that reads no SV_IsFrontFace writes its vertex normal on both faces, so this undoes
+// Godot's back-face flip.
 inline constexpr std::string_view kFaceBlindNormal = "\tNORMAL = FRONT_FACING ? NORMAL : -NORMAL;\n";
 
 inline constexpr std::array<std::string_view, 3> kEngineGlobals{ "outdoorLightHemisphereDir", "outdoorLightTopColor",

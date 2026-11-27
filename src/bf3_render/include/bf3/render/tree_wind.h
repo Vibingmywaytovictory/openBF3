@@ -18,15 +18,21 @@ struct PlacedObject;
 
 namespace bf3::render {
 
+// SOURCE: notes R6-VG2-rate rule 1: fixed 0.015 s steps, at most two steps of advance a frame.
 inline constexpr float kTreeStep = 0.015f;
 inline constexpr float kTreeMaxAdvance = 2.0f * kTreeStep;
+// SOURCE: notes R6-VG2-rate and its checker: a 2.0 s pre-simulation, given at once after a camera jump over 5 m.
 inline constexpr float kTreePreSimulation = 2.0f;
 inline constexpr float kTreePreSimulationMove = 5.0f;
+// SOURCE: notes R6-VG2-rate checker: a tree the draw pass has not refreshed for over 10 frames is not stepped.
 inline constexpr uint32_t kTreeIdleFrames = 10;
 inline constexpr unsigned kTreeLanes = 4;
+// SOURCE: notes R5-VG2 A4: gust height offset 0.1 m, travel 0.005 per metre, force scale 0.005 x 0.8.
 inline constexpr float kTreeWindHeight = 0.1f;
 inline constexpr float kTreeGustTravel = 0.005f;
 inline constexpr float kTreeForceScale = 0.005f * 0.8f;
+// SOURCE: notes R6-VG2-bones S1 and S2: the 0.2 pull past node 2, damping 1 / (dt + 1.06), restoring 200, the fixed
+// 0.015 position factor, ground factor 0.4, the 1e-6 gates, the 0.01 degenerate bone, at most 10 children a node.
 inline constexpr float kTreeGravity = 0.2f;
 inline constexpr float kTreeDampingBase = 1.06f;
 inline constexpr float kTreeRestoring = 200.0f;
@@ -35,10 +41,14 @@ inline constexpr float kTreeGroundFriction = 0.4f;
 inline constexpr float kTreeThreshold = 1e-6f;
 inline constexpr float kTreeDegenerateBone = 0.01f;
 inline constexpr size_t kTreeMaxChildren = 10;
+// SOURCE: notes R6-VG2-rate checker: up to 8 job calls a frame, each with its own pre-simulation budget.
 inline constexpr uint32_t kTreeJobsPerFrame = 8;
+// SOURCE: notes R5-VG2 A3: the wind direction without a visual environment.
 inline constexpr core::Vec3 kTreeDefaultWindDirection{ 0.4f, 0.0f, 0.8434434f };
+// SOURCE: notes R5-VG2 A4 and its checker: the four gust frequencies.
 inline constexpr float kTreeGustFrequencies[4] = { 4.585867f, 1.485746f, 9.654985f, 31.567549f };
 
+// SOURCE: notes R5-VG2: the engine's VegetationSystemSettings defaults, as no bundle holds an instance.
 struct VegetationSystemSettings {
 	float wind_strength = 2.0f;
 	float wind_variation = 1.1f;

@@ -110,6 +110,7 @@ core::Result<PreparedMesh> prepare_mesh(const core::res::LoadedMeshSet &p_mesh, 
 					s.weights[i * 4 + l] = w;
 					sum += w;
 				}
+				// WHY: one-bone subsets store their BoneWeights as 0 (the M9's), so such a vertex follows its first lane.
 				if (sum <= 0.0f) {
 
 					const uint16_t lane = (*d.bone_indices)[i][0];
@@ -133,6 +134,7 @@ core::Result<PreparedMesh> prepare_mesh(const core::res::LoadedMeshSet &p_mesh, 
 			if (i0 >= n || i1 >= n || i2 >= n) {
 				return core::make_error(where + ": subset " + std::to_string(d.subset) + " index outside its vertices");
 			}
+			// WHY: Godot's front faces wind clockwise and the decoded faces counter-clockwise.
 			s.indices.push_back(int32_t(i0));
 			s.indices.push_back(int32_t(i2));
 			s.indices.push_back(int32_t(i1));

@@ -76,6 +76,8 @@ std::vector<LocalLight> health_state_lights(const EbxResolver &p_db, const EbxIn
 		if (!at.component.is_a("PartComponentData")) {
 			continue;
 		}
+		// INFERRED: a mesh's lights are those among the Objects of its first HealthStates entry, the intact state.
+		// Settle: a retail frame of a damaged lamp.
 		const std::vector<EbxInstance> states = p_db.follow_all(at.component.data(), "HealthStates");
 		if (states.empty()) {
 			continue;
@@ -237,6 +239,7 @@ core::Result<SceneLightPlan> plan_level_lights(const EbxResolver &p_db, const Wo
 				refuse(refusal, note);
 				continue;
 			}
+			// INFERRED: a mesh's light is off while the mesh starts hidden. Settle: a retail frame of a lamp shown by logic.
 			if (*hidden) {
 				++plan.stats.switched_off;
 				continue;
@@ -247,6 +250,8 @@ core::Result<SceneLightPlan> plan_level_lights(const EbxResolver &p_db, const Wo
 	return plan;
 }
 
+// STAND-IN: the lights nearest the camera by distance less radius are shown, as many as the budget allows, in place of
+// BF3's own light culling. Settle: the engine's light culling read.
 void nearest_lights(std::span<const SceneLight> p_lights, const core::Vec3 &p_eye, size_t p_budget,
 		std::vector<uint32_t> &r_shown) {
 	r_shown.clear();

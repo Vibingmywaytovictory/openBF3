@@ -131,6 +131,8 @@ core::Result<MeshMaterials> materials_of(const EbxResolver &p_db, const EbxInsta
 				break;
 			}
 		}
+		// INFERRED: a slot no variation material names takes the variation material at its index.
+		// Settle: an entry whose Material references differ from the mesh's list.
 		if (chosen == nullptr && i < variations.size()) {
 			chosen = &variations[i];
 		}
@@ -204,6 +206,8 @@ core::Result<MeshMaterials> mesh_materials(const EbxResolver &p_library, std::st
 	const EbxInstance asset = mesh->primary();
 
 	std::optional<EbxInstance> entry;
+	// INFERRED: VariationAssetNameHash 0 is the mesh's default look, used when the asked variation has no entry.
+	// Settle: a variation without an entry drawn against retail.
 	for (int pass = 0; pass < 2 && !entry; ++pass) {
 		const uint32_t want = pass == 0 ? p_variation_hash : 0u;
 		if (pass == 1 && p_variation_hash == 0) {

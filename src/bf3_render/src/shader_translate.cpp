@@ -24,6 +24,8 @@ using dxbc::OperandType;
 
 constexpr char kLanes[] = "xyzw";
 constexpr uint32_t kSystemPosition = 1;
+// SOURCE: bf3dump programs, DeferredOutdoorLight: g_gbufferTexture0 holds the normal x 0.5 + 0.5 and smoothness in w,
+// g_gbufferTexture1 a colour whose square is the albedo and w squared the specular; notes R5-VG1 7.
 constexpr uint32_t kGbufferAlbedo = 1;
 constexpr uint32_t kGbufferNormal = 0;
 constexpr uint16_t kImad = 35;
@@ -707,6 +709,8 @@ constexpr uint32_t kWorldRows = 3;
 
 constexpr const char *kCameraViewProjection = "crViewProjMatrix";
 constexpr const char *kTransparentFade = "transparentStartAndEndAndClamp";
+// STAND-IN: transparentStartAndEndAndClamp, an engine value no data holds, is (0, 1, 0): no fade.
+// Settle: the engine's value.
 constexpr const char *kTransparentFadeOff[] = { "0.0", "1.0", "0.0" };
 
 std::string clip_w_lane(uint32_t p_lane) {
@@ -819,6 +823,8 @@ public:
 	}
 
 private:
+	// INFERRED: a part's boneVectors rows are the model matrix's, as the level and vehicles draw each part at its own
+	// transform. Settle: a destructible mesh drawn against retail.
 	void bone_rows() {
 		for (Instruction &ins : vs_.code) {
 			for (size_t s = 1; s < ins.operands.size(); ++s) {
@@ -844,6 +850,8 @@ private:
 		}
 	}
 
+	// STAND-IN: a destruction part's shown-test is taken as passed, as the level draws every part.
+	// Settle: destruction states built.
 	bool part_shown(size_t p_if) const {
 		const Instruction &branch = vs_.code[p_if];
 		if (!branch.nonzero || branch.operands.size() != 1 || !branch.operands[0].is(OperandType::Temp)) {
@@ -1036,6 +1044,8 @@ private:
 		return core::Status::success();
 	}
 
+	// INFERRED: three consecutive instanceVectorBuffer rows dp4'd with one register are the instance's world matrix.
+	// Settle: the instancing solutions' vertex programs drawn against retail.
 	void find_world_base() {
 		std::map<uint32_t, int64_t> loaded;
 		std::map<uint64_t, std::set<int64_t>> by_other;
@@ -1117,6 +1127,8 @@ private:
 		return false;
 	}
 
+	// INFERRED: the registers a per-instance vertex stream builds and the position is dp4'd with are the instance's world
+	// matrix rows. Settle: the proppreset instancing solutions drawn against retail.
 	void find_instance_input_rows() {
 		std::map<std::pair<uint64_t, uint64_t>, std::map<uint8_t, std::set<size_t>>> groups;
 		for (size_t i = 0; i < vs_.code.size(); ++i) {
@@ -1831,6 +1843,8 @@ private:
 		std::string attribute;
 		const auto usage = input_usage_.find(lane_key(uint8_t(OperandType::Input), p_reg, p_lane));
 		const bool four = format == kDxgiR16G16B16A16Float || format == kDxgiR32G32B32A32Float;
+		// INFERRED: an interpolant's UV set is its texture's database vertex usage, else the order of the two-channel elements
+		// (first UV, second UV2). Settle: every element's declared usage read.
 		if ((two_channel(format) || (four && o.element > 0)) && usage != input_usage_.end() &&
 				usage->second.size() == 1) {
 			const uint32_t set = *usage->second.begin();
@@ -1942,6 +1956,7 @@ private:
 				"(1.0 / VIEWPORT_SIZE.y)" };
 			return std::string(kScreen[p_component & 3u]);
 		}
+		// INFERRED: viewportZMinMaxKzKw is (0, 1, -P[2][2], P[3][2]) of Godot's projection P. Settle: the engine's own values.
 		if (p_name == "viewportZMinMaxKzKw") {
 			static const char *kDepth[] = { "0.0", "1.0", "(-PROJECTION_MATRIX[2][2])", "PROJECTION_MATRIX[3][2]" };
 			return std::string(kDepth[p_component & 3u]);
@@ -1977,6 +1992,7 @@ private:
 						[](const dxbc::SignatureElement &p_e) { return p_e.name == "SV_IsFrontFace"; });
 	}
 
+	// STAND-IN: roughness 0.6 where a program's lanes do not slice. Settle: every G-buffer program's lanes translated.
 	std::string common_uniforms() const {
 		if (request_.target == ProgramTarget::DeferredDecal) {
 			return light_pass_head();
@@ -2034,6 +2050,8 @@ uniform float roughness_value = 0.6;
 	}
 )";
 		}
+		// INFERRED: a deferred decal's o1 is its colour times its cover o1.w and o0 its normal, at smoothness and specular 0.
+		// Settle: the decal solutions' blend states read.
 		if (request_.target == ProgramTarget::DeferredDecal) {
 			std::string code = "\tfloat decal_cover = max(o1.w, 0.0001);\n\tvec3 decal_colour = o1.xyz / decal_cover;\n"
 							   "\tALBEDO = decal_colour * decal_colour;\n\tALPHA = clamp(o1.w, 0.0, 1.0);\n" +
@@ -2092,6 +2110,7 @@ core::Result<PixelTranslation> translate_pixel_program(
 		if (!sampler.is(OperandType::Sampler) || state == emitter.samplers.end()) {
 			return refuse("sample through s" + std::to_string(sampler.index[0]) + " without a sampler state");
 		}
+		// WHY: Godot's sampler hints give repeat or clamp only, so a sampler that does not wrap folds its coordinate here.
 		if (state->second.address[0] != uint32_t(TextureAddress::Wrap) ||
 				state->second.address[1] != uint32_t(TextureAddress::Wrap)) {
 			emitter.clamped.insert(res.index[0]);

@@ -27,6 +27,8 @@ using Clock = std::chrono::steady_clock;
 constexpr uint8_t kColor = 0, kNormal = 1, kSpecular = 2, kEmissive = 3;
 constexpr uint32_t kGbufferSpecularTarget = 1;
 
+// STAND-IN: slot parameter names ranked best first per role (colour, normal, specular, emissive), a hand-made list.
+// Settle: each shader graph's own use of its parameters.
 constexpr std::string_view kColorParameters[] = { "diffuse", "maindiffuse", "color", "difusealpha", "paintingdiffuse", "topdiffuse", "bottomdiffuse",
 	"maintexture", "mat1_d", "mat2_d", "diffuseleaves", "diffuseatlas", "frame_d", "awningtexture", "tilediffuse", "detaildiffuse", "background",
 	"diffuse2", "dirtdiffuse", "diffusebark", "texture2", "texture3", "camo", "decal", "decaltexture", "brandtexture", "logo", "detailtexture",
@@ -36,6 +38,8 @@ constexpr std::string_view kNormalParameters[] = { "normal", "mainnormal", "norm
 constexpr std::string_view kSpecularParameters[] = { "specular", "spec", "frame_s", "detailspecular" };
 constexpr std::string_view kEmissiveParameters[] = { "emissive", "emissivetexture", "emissivemap", "selfillumination" };
 
+// STAND-IN: the suffix and word lists below classify textures and shaders by name, not by what the programs sample.
+// Settle: every slot's shader programs translated.
 constexpr std::string_view kColorSuffixes[] = { "d", "c", "df", "da", "color", "diffuse" };
 constexpr std::string_view kNormalSuffixes[] = { "n", "nm", "normal" };
 constexpr std::string_view kMaskSuffixes[] = { "m", "rgb" };
@@ -170,6 +174,8 @@ bool tiled(const LookTexture &p_t) {
 	return p_t.scale != 1.0f || contains_any(last_part(p_t.name), kTileStrips);
 }
 
+// STAND-IN: a role's texture is ranked by tier, off the overlay UV set, quality, graph, untiled, streamed, then authored
+// order. Settle: each slot's shader programs translated.
 auto rank_key(const Candidate &p_c) {
 	return std::make_tuple(uint8_t(p_c.rank.tier), p_c.texture.channel == kLookUvOverlay, p_c.rank.quality, p_c.rank.graph, tiled(p_c.texture),
 			p_c.rank.resident, p_c.rank.order);
@@ -316,6 +322,8 @@ struct LookResolver::ProgramInfo {
 
 namespace {
 
+// INFERRED: the (1, 0, 0, 1) every shader's one-target depth and shadow solutions write is not a colour.
+// Settle: those solutions' passes read.
 constexpr std::array<float, 4> kDepthPassOutput{ 1.0f, 0.0f, 0.0f, 1.0f };
 
 std::optional<std::pair<float, uint32_t>> discard_cut(const dxbc::Program &p_pixel) {
@@ -412,6 +420,8 @@ struct FlatOutputs {
 	std::optional<std::array<float, 4>> emitted;
 
 	void note(const dxbc::Program &p_pixel) {
+		// INFERRED: a shader with no colour texture draws target 1's constant as a lit albedo, else a one-target solution's
+		// colour unlit. Settle: such a shader drawn against retail.
 		if (writes_target(p_pixel, 1)) {
 			if (!gbuffer) {
 				albedo = constant_target(p_pixel, 1);
@@ -750,6 +760,8 @@ LookResolver::ProgramInfo &LookResolver::program_info(const SurfaceShader &p_sha
 			info->flat_unlit = !flat.gbuffer;
 		}
 	};
+	// STAND-IN: the first solution that writes the target and translates stands for the one the engine picks.
+	// Settle: the solution choice per pass read.
 	for (const ShaderSolution &s : p_shader.solutions) {
 		if (!s.pixel_program || !s.vertex_program) {
 			continue;
@@ -862,6 +874,8 @@ core::Result<TranslatedProgram> LookResolver::translate(
 	request.bound_textures = registers;
 	request.target = p_info.target;
 	const uint8_t blend = p_info.solution->blend_mode;
+	// INFERRED: blend byte 2 multiplies, 1 and 3 add, the rest mix, read off the shader names.
+	// Settle: the solutions' blend states read.
 	request.blend = blend == 2			 ? ProgramBlend::Multiply
 			: (blend == 1 || blend == 3) ? ProgramBlend::Add
 										 : ProgramBlend::Mix;
@@ -923,6 +937,7 @@ void LookResolver::attach_program(LookMaterial &r_out, const SurfaceShader &p_sh
 		parameters.push_back(b.parameter.empty() ? b.name : b.parameter);
 		const std::string name = b.parameter.empty() ? b.name : to_lower_ascii(p_slot.texture(b.parameter));
 		const bool cube = std::find(info.cubes.begin(), info.cubes.end(), info.used[i]) != info.cubes.end();
+		// INFERRED: a texture parameter the slot leaves unset binds zero. Settle: such a slot drawn against retail.
 		if (deferred && name.empty() && !b.parameter.empty() && !cube) {
 			textures.push_back(name);
 			continue;
@@ -1070,6 +1085,8 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 		}
 	}
 
+	// STAND-IN: for a shader the database lacks, the colour is a texture named like the mesh in the shader's or the mesh's
+	// folder. Settle: those shaders found in a database.
 	const bool missing_graph = graphs.empty() || std::any_of(graphs.begin(), graphs.end(), [](const SurfaceShader *g) { return g == nullptr; });
 	if (missing_graph && std::none_of(candidates.begin(), candidates.end(), [](const Candidate &c) { return c.role == kColor; })) {
 		std::vector<std::string> folders;
@@ -1115,6 +1132,8 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	std::optional<LookTexture> color;
 	if (const Candidate *chosen = best(kColor, candidates)) {
 		color = chosen->texture;
+		// STAND-IN: an untiled graph colour without a normal map, in a masked graph, gives way to a tiled colour layer that
+		// has one. Settle: the graph's program translated.
 		if (chosen->rank.tier == LookTier::Graph && chosen->texture.scale == 1.0f) {
 			std::vector<std::pair<uint8_t, float>> normal_uvs;
 			for (const Candidate &c : candidates) {
@@ -1150,6 +1169,8 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	}
 
 	{
+		// STAND-IN: the normal map is the best one on the colour's UV set and tiling, else the best on a mesh UV set.
+		// Settle: each slot's shader programs translated.
 		std::vector<Candidate> paired, meshed;
 		for (const Candidate &c : candidates) {
 			if (c.role != kNormal) {
@@ -1196,6 +1217,8 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	}
 	out.double_sided = shader_info != nullptr ? shader_info->double_sided : foliage;
 
+	// STAND-IN: a glass or window shader with no colour of its own is drawn as a tint at a fixed opacity.
+	// Settle: the glass programs' opacity (OpacityMul, Fresnel) translated.
 	const bool glass_named =
 			has_word(shader_name, kGlassWords) && (!color || (out.blend == LookBlend::Blend && !color_alpha));
 	out.glass = glass_named && (shader == nullptr || is_transparent(shader->surface_type));
@@ -1214,6 +1237,7 @@ LookMaterial LookResolver::resolve(const MaterialSlot &p_slot, std::string_view 
 	if (shader != nullptr) {
 		out.shader_transparent = is_transparent(shader->surface_type);
 		out.gbuffer_lanes = !out.shader_transparent && writes_gbuffer(*shader);
+		// STAND-IN: the first solution's blend byte stands for the shader's. Settle: the solution choice per pass read.
 		if (!shader->solutions.empty()) {
 			out.solution_blend = shader->solutions.front().blend_mode;
 		}

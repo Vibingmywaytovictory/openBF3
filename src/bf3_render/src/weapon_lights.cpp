@@ -56,6 +56,7 @@ core::Result<std::vector<WeaponSocketLight>> weapon_socket_lights(const core::Eb
 	return out;
 }
 
+// INFERRED: a cone's half angle is ConeOuterAngle, a frustum's FrustumFov / 2. Settle: a retail weapon light's spread.
 float spot_light_half_angle_deg(const core::level::SpotLight &p_light) {
 	return p_light.shape == core::level::SpotLightShape::Cone ? p_light.cone_outer_deg : 0.5f * p_light.frustum_fov_deg;
 }

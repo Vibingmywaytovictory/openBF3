@@ -44,6 +44,7 @@ std::unique_ptr<EffectMeshSet> load_effect_meshes(const core::EbxResolver &p_db,
 			continue;
 		}
 		MeshRequest request;
+		// STAND-IN: LOD 0 at every distance. Settle: the meshes' LOD distances read.
 		request.lods = { 0 };
 		request.filter = core::res::SubsetFilter::Drawn;
 		core::Result<CachedMesh> mesh = load_mesh_cached(p_cache, p_mount, name, request);

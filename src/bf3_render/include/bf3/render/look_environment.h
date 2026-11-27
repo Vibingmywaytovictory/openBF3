@@ -27,6 +27,8 @@ using LookCubic = std::array<float, 4>;
 inline constexpr size_t kMaxVisualEnvironments = 64;
 inline constexpr uint32_t kGradeLutSide = 32;
 inline constexpr uint32_t kHorizonWidth = 256;
+// STAND-IN: the static exposure estimate's reference albedo and sunlit share of the view.
+// Settle: the exposure pass's measured mean luminance.
 inline constexpr float kReferenceAlbedo = 0.3f;
 inline constexpr float kSunlitShare = 0.1f;
 
@@ -36,6 +38,8 @@ enum class LookTonemap : uint8_t {
 };
 const char *look_tonemap_name(LookTonemap p_tonemap);
 
+// STAND-IN: the member defaults below stand where a level's environment lacks the component or field (sun rotation,
+// sky, ground and horizon colours, exposure). Settle: the engine's defaults for those components read.
 struct LookEnvState {
 	bool light = false, enlighten = false, sky = false, fog = false, tonemap = false, correction = false,
 		 camera = false, view = false, wind = false;

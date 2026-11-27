@@ -9,6 +9,8 @@ namespace bf3::render {
 
 inline constexpr uint32_t kTerrainPageColourLayer = 1u << 18;
 inline constexpr uint32_t kTerrainPageNormalLayer = 1u << 19;
+// STAND-IN: terrain pages are 512 texels a side, drawn top down from the terrain's own look.
+// Settle: the engine's virtual texture pages read.
 inline constexpr uint32_t kTerrainPageSide = 512;
 inline constexpr std::array<std::string_view, 2> kTerrainPageAtlases{ "texture_virtualTextureAtlas0",
 	"texture_virtualTextureAtlas1" };

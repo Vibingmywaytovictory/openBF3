@@ -463,6 +463,7 @@ core::Result<MaskScaleProgram> MaskScaleProgram::build(std::span<const uint8_t> 
 			out.constants_.assign((cb.size + 15) / 16, std::array<float, 4>{});
 			for (const dxbc::Variable &v : cb.variables) {
 				std::array<float, 4> value{};
+				// STAND-IN: clipToWorldSpaceXzTransform and dynamicMaskUvScale are (1, 1, 0, 0). Settle: the engine's values read.
 				if (v.name == "external_clipToWorldSpaceXzTransform" || v.name == "external_dynamicMaskUvScale") {
 					value = { 1.0f, 1.0f, 0.0f, 0.0f };
 				} else if (v.name == "external_worldToHeightfieldUvTransform") {
@@ -474,8 +475,11 @@ core::Result<MaskScaleProgram> MaskScaleProgram::build(std::span<const uint8_t> 
 					value = { 1.0f / float(p_heights.width), 1.0f / float(p_heights.height),
 						1.0f / p_heights.spacing[1], 1.0f / p_heights.spacing[0] };
 				} else if (v.name == "external_heightmapWorldSizeY") {
+					// WHY: the height grid holds metres, so heightmapWorldSizeY is 1.
 					value = { 1.0f, 0.0f, 0.0f, 0.0f };
 				} else if (v.name.starts_with(kMaskPrefix) && v.name.ends_with(kMaskSuffix)) {
+					// INFERRED: worldToMask<n> addresses the combination's n-th layer other than layer 0.
+					// Settle: the engine's set-up of those constants read.
 					const std::string_view digits = std::string_view(v.name).substr(
 							kMaskPrefix.size(), v.name.size() - kMaskPrefix.size() - kMaskSuffix.size());
 					unsigned n = 0;
@@ -500,11 +504,14 @@ core::Result<MaskScaleProgram> MaskScaleProgram::build(std::span<const uint8_t> 
 		if (b.type != uint32_t(dxbc::BindingType::Texture)) {
 			continue;
 		}
+		// INFERRED: a slot the data binds no texture to reads (0, 0, 0, 1), as an empty D3D11 slot.
+		// Settle: that slot's binding read.
 		Texture t;
 		t.slot = b.bind_point;
 		if (b.name == "texture_maskMap") {
 			t.source = ScatterSource::Mask;
 		} else if (b.name == "texture_dynamicMask") {
+			// STAND-IN: the dynamic mask reads 0. Settle: what the engine writes into it.
 			t.source = ScatterSource::Zero;
 		} else if (b.name == "texture_heightfieldAtlas") {
 			t.source = ScatterSource::Height;
@@ -567,6 +574,8 @@ MaskScaleOutput MaskScaleProgram::run(
 	std::array<std::array<float, 4>, 4> outputs{};
 	execute(p_samplers, p_x, p_z, p_footprint, false, nullptr, outputs);
 	MaskScaleOutput out;
+	// INFERRED: targets 0 and 1 hold the scattered layers' masks in rising layer order, 2 and 3 their scales.
+	// Settle: the scatter pass's use of the targets read.
 	for (size_t i = 0; i < 8; ++i) {
 		out.mask[i] = outputs[i / 4][i % 4];
 		out.scale[i] = outputs[2 + i / 4][i % 4];
@@ -582,6 +591,7 @@ void MaskScaleProgram::execute(const ScatterSamplers &p_samplers, float p_x, flo
 	for (const auto &[id, size] : program_.indexable_temps) {
 		indexed[id].assign(size, Lanes{});
 	}
+	// INFERRED: v1 is the world xz with z 0.9, as the terrain decals' input. Settle: the scatter vertex program read.
 	const Lanes input = { p_x, p_z, 0.9f, 0.0f };
 	const auto raw = [&](const dxbc::Operand &p_op) -> Lanes {
 		if (p_op.is(OperandType::Temp)) {
@@ -661,6 +671,7 @@ void MaskScaleProgram::execute(const ScatterSamplers &p_samplers, float p_x, flo
 			return { p_samplers.heights->bilinear(p_u, p_v), 0.0f, 0.0f, 1.0f };
 		}
 		if (bound->source == ScatterSource::Image && bound->image < p_samplers.images.size()) {
+			// INFERRED: a graph texture is read at the mip of the type's mean spacing. Settle: the scatter pass's sampling read.
 			float lod = 0.0f;
 			if (p_ins.is(Op::SampleL)) {
 				lod = read(p_ins.operands[4])[0];

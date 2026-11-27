@@ -32,6 +32,8 @@ struct SoldierTeamSpec {
 };
 
 struct SoldierSpec {
+	// STAND-IN: the default spec reads its soldiers from MP_Subway, the US and RU assault appearances with the M16A4 and
+	// AK-74M as each team's base, at LOD 0. Settle: each level's own TeamData and appearances read.
 	std::string superbundle = "Win32/Levels/MP_Subway/MP_Subway";
 	std::string settings_superbundle = "Win32/default_settings_win32";
 	std::string settings_partition = "default/settings_win32";

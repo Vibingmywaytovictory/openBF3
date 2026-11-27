@@ -97,12 +97,16 @@ struct ViewmodelClip {
 	float endpoint_deg = 0;
 
 	std::vector<anim::AntFloatStateTag> state_tags;
+	// STAND-IN: 0.5 clip frames a tick where a route gives no FPSScale. Settle: a route without one read.
 	float tick_frames = 0.5f;
 	std::vector<anim::VmReachTag> reach;
 };
 
+// STAND-IN: a zoom clip drives the ADS transition only when its end frames lie within 2 degrees of the poses it joins.
+// Settle: the 1P graph's zoom transition read.
 inline constexpr float kZoomPathToleranceDeg = 2.0f;
 
+// STAND-IN: the procedural stab and throw last 0.5 s and 0.6 s. Settle: the knife and throw clips decoded.
 inline constexpr float kKnifeStandInSeconds = 0.5f;
 inline constexpr float kThrowStandInSeconds = 0.6f;
 
@@ -112,6 +116,8 @@ const char *viewmodel_item_kind_name(ViewmodelItemKind p_kind);
 struct ViewmodelAdsData {
 	std::string controller;
 	uint32_t zoom_levels = 0;
+	// STAND-IN: a 55 degree FOV and 0.15 s and 0.2 s transitions where the aiming data has none.
+	// Settle: those fields' defaults read.
 	float hip_fov = 55, zoom_fov = 55;
 	float look_speed_hip = 1, look_speed_zoom = 1;
 	float fov_transition = 0.15f, zoom_transition = 0.2f;
@@ -133,8 +139,11 @@ struct ViewmodelSlotLook {
 	std::array<float, 4> tint{ 1.0f, 1.0f, 1.0f, 1.0f };
 	bool no_specular = false;
 };
+// STAND-IN: alpha-tested viewmodel slots cut at 0.5. Settle: their programs' discard values read.
 inline constexpr float kViewmodelAlphaScissor = 0.5f;
 
+// STAND-IN: the knife's dog-tag surfaces are hidden, as there is no dog-tag customization or chain physics.
+// Settle: the persistence dog tags built.
 inline constexpr std::string_view kDogTagTexture = "/dogtag";
 
 struct ViewmodelAttachment {

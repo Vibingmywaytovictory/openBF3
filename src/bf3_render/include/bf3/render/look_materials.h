@@ -35,6 +35,7 @@ inline constexpr uint8_t kLookUv1 = 1;
 inline constexpr uint8_t kLookUvOverlay = 2;
 inline constexpr uint8_t kLookUvProjected = 3;
 
+// STAND-IN: glass draws at 30 % opacity under a 0.25 grey tint. Settle: the glass shaders' programs translated.
 inline constexpr float kLookGlassOpacity = 0.3f;
 inline constexpr float kLookGlassTint = 0.25f;
 

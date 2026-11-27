@@ -21,6 +21,8 @@ constexpr std::string_view kComboSuffix = "__maskscale2d__0";
 constexpr std::string_view kScattered = "ms";
 constexpr std::string_view kMasking = "m";
 constexpr size_t kMaxScatterImages = 64;
+// INFERRED: record byte 66 set marks a type that stands upright; notes R5-VG2 C read it only as the gate of the
+// billboard flag at byte 67. Settle: the scatter placement traced.
 constexpr size_t kUprightByte = 66;
 
 using core::to_lower_ascii;
@@ -29,6 +31,8 @@ float unit(std::mt19937 &r_rng) {
 	return float(r_rng() >> 8) * (1.0f / 16777216.0f);
 }
 
+// STAND-IN: the candidates' place, yaw and size come from a Mersenne twister seeded by cell and type.
+// Settle: the engine's scatter generator traced.
 uint32_t cell_seed(const ScatterCellId &p_cell, uint32_t p_type) {
 	uint64_t h = core::splitmix64(uint64_t(p_cell.level));
 	h = core::splitmix64(h ^ uint64_t(uint32_t(p_cell.x)));
@@ -146,6 +150,7 @@ SceneScatterPlan plan_terrain_scatter(const core::LevelMount &p_mount, const Sha
 		combo.layers = std::move(parsed.layers);
 		combo.scattered = std::move(parsed.scattered);
 		const ShaderSolution *solution = nullptr;
+		// STAND-IN: the first solution with a pixel program stands for the one the engine picks. Settle: the solution choice read.
 		for (const ShaderSolution &s : shader->solutions) {
 			if (s.pixel_program) {
 				solution = &s;
@@ -245,6 +250,8 @@ core::Result<std::shared_ptr<const TerrainScatter>> TerrainScatter::build(
 		out->programs_.push_back(Program{ combo.layers, combo.scattered, std::move(*code) });
 	}
 
+	// INFERRED: a cell holds density x area candidates, at most the visual header's fourth word.
+	// Settle: the per-cell count traced (notes R5-VG2 found the settings only).
 	const double cap = p_input.plan->cell_instances > 0 ? double(p_input.plan->cell_instances) : double(UINT32_MAX);
 	for (uint32_t i = 0; i < p_input.plan->types.size(); ++i) {
 		const SceneScatterType &source = p_input.plan->types[i];
@@ -310,6 +317,8 @@ std::vector<ScatterCellId> TerrainScatter::cells_within(uint8_t p_level, float p
 	return out;
 }
 
+// STAND-IN: the program is the one with the most present layers above the type's, then the most present, then the fewest.
+// Settle: the engine's program choice read.
 int32_t TerrainScatter::program_for(uint8_t p_layer, uint64_t p_present) const {
 	int32_t best = -1;
 	int best_above = -1, best_present = -1;
@@ -397,15 +406,19 @@ std::vector<ScatterBatch> TerrainScatter::generate(
 			if (mask > 0.0f) {
 				batch.coverage += double(std::fmin(mask, 1.0f));
 			}
+			// INFERRED: a candidate stays with the probability its program's mask gives. Settle: the scatter placement traced.
 			if (!(accept < mask)) {
 				continue;
 			}
 			const float scale = result.scale[slot];
+			// INFERRED: the size is drawn between the two scale pairs, times the program's scale. Settle: the placement traced.
 			const float sx = (type.scale_min[0] + (type.scale_max[0] - type.scale_min[0]) * size) * scale;
 			const float sy = (type.scale_min[1] + (type.scale_max[1] - type.scale_min[1]) * size) * scale;
 			if (!(sx > 0.0f) || !(sy > 0.0f) || !std::isfinite(sx) || !std::isfinite(sy)) {
 				continue;
 			}
+			// INFERRED: a uniform yaw, then a tilt onto the drawn terrain and a drop until the footprint meets it, but for upright
+			// types. Settle: the placement traced (notes R5-VG2 did not find it).
 			ScatterInstance instance{ { x, *y, z }, turn * 2.0f * std::numbers::pi_v<float>, { sx, sy } };
 			if (const std::optional<std::array<float, 3>> up = type.upright ? std::nullopt : heights_.normal(x, z)) {
 				instance.up = *up;

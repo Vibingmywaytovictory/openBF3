@@ -110,6 +110,7 @@ core::Result<TerrainMaterial> terrain_solution_material(const SceneWaterShader &
 				}
 				value[lane] = (*engine)[l.component & 3u];
 			} else if (l.value == kHeightScale && l.component == 0) {
+				// WHY: the height image holds metres, so heightmapWorldSizeY is 1.
 				value[lane] = 1.0f;
 			} else if (l.value == kHeightUv) {
 				value[lane] = p_height_uv[l.component & 3u];
@@ -192,7 +193,10 @@ core::Result<TerrainMaterial> terrain_water_material(const SceneWaterShader &p_s
 	SolutionBinding binding;
 	binding.envmap = p_envmap;
 	binding.height_uv = p_height_uv;
+	// INFERRED: water blends premultiplied, as its programs write colour times alpha whatever the solution's blend byte.
+	// Settle: the water solutions' blend states read.
 	binding.blend = ProgramBlend::Premultiplied;
+	// STAND-IN: the first solution that translates stands for the one the engine picks. Settle: the solution choice read.
 	for (size_t i = 0; i < p_shader.solutions.size(); ++i) {
 		core::Result<TerrainMaterial> material =
 				terrain_solution_material(p_shader, p_shader.solutions[i], p_look, binding);

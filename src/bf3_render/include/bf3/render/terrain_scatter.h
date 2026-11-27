@@ -202,6 +202,8 @@ public:
 	const std::vector<uint8_t> &levels() const { return levels_; }
 	const std::array<float, 4> &bounds() const { return bounds_; }
 	float cell_size(uint8_t p_level) const;
+	// INFERRED: a type draws within one cell side of the camera, with no fade; notes R5-VG2 B3 fade it over D/2 to D.
+	// Settle: D's cell inputs traced.
 	float view_distance(uint8_t p_level) const { return cell_size(p_level); }
 	std::array<float, 4> cell_rect(const ScatterCellId &p_cell) const;
 	std::vector<ScatterCellId> cells_within(uint8_t p_level, float p_x, float p_z, float p_distance) const;
@@ -234,6 +236,8 @@ private:
 	std::vector<Program> programs_;
 };
 
+// STAND-IN: the scatter placement reads a texture's mips of at most 512 texels a side, the finer ones dropped.
+// Settle: the scatter pass's sampling read.
 inline constexpr uint32_t kScatterImageMaxSide = 512;
 
 }

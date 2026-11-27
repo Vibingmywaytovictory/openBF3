@@ -64,6 +64,7 @@ struct SceneTerrainPlan {
 	uint32_t object = 0;
 	std::string asset;
 	core::level::LevelTransform transform;
+	// STAND-IN: the flat terrain's colour where no terrain look is drawn. Settle: every terrain's look drawn.
 	std::array<float, 3> color{ 0.36f, 0.33f, 0.27f };
 	std::vector<SceneTerrainCombo> combos;
 	std::optional<TerrainSurfaceLanes> surface;
@@ -74,6 +75,7 @@ struct SceneTerrainPlan {
 	std::vector<SceneWaterShader> surface_decals;
 };
 struct SceneTerrainOptions {
+	// STAND-IN: the drawn terrain grid is about 4 m apart. Settle: the heightfield drawn at its own finest spacing.
 	float spacing = 4.0f;
 };
 
@@ -131,6 +133,8 @@ struct SceneInstancePlan {
 	uint32_t tree = kNoSceneTree;
 };
 
+// STAND-IN: the plain look's sun, sky and fog defaults below, for a level with no visual environment.
+// Settle: such a level drawn against retail.
 struct SceneEnvironment {
 	bool from_data = false;
 	core::Vec3 sun_direction{ -0.35f, -0.8f, 0.45f };

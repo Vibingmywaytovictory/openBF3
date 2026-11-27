@@ -195,6 +195,8 @@ core::Result<std::unique_ptr<SoldierAssets>> load_soldier_assets(const core::Ins
 				 anim::CrowdClip::RunRight, anim::CrowdClip::AimUp, anim::CrowdClip::AimDown }) {
 		driven = anim::mask_union(driven, a->clips.get(c).mask);
 	}
+	// STAND-IN: the undriven Wep_* joints take weaponske01's LocalPose in place of the 3p master skeleton's TransformMap.
+	// Settle: the TransformMap's use traced.
 	anim::BoneMask weapon_joints;
 	weapon_joints.weight.assign(rig.size(), 0.0f);
 	std::vector<anim::Xform> weapon_local(rig.size(), anim::xform_identity());
@@ -530,6 +532,8 @@ PinchReport measure_pinch(const SoldierTeam &p_team, const anim::Skeleton &p_rig
 namespace bf3::render {
 namespace {
 
+// INFERRED: a kit's role is read from its partition name (assault, engineer, support, recon).
+// Settle: a kit field that names its role.
 int kit_role(std::string_view p_kit) {
 	const std::string k = core::to_lower_ascii(p_kit);
 	const char *words[4] = { "assault", "engineer", "support", "recon" };

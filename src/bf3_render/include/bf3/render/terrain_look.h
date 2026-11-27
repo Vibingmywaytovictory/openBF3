@@ -50,6 +50,9 @@ std::vector<SceneTerrainCombo> plan_terrain_combos(const core::LevelMount &p_mou
 
 inline constexpr std::string_view kTerrainSurfaceShader = "/defaultterrainsurfaceshader";
 
+// SOURCE: bf3dump programs, TerrainEncodeSurface_A and _B: atlas 0 = (g_source0.y, .z, g_source2.x, g_source0.x) and
+// atlas 1 = (g_source1.y, .z, g_source2.y, g_source1.x).
+// INFERRED: g_sourceN is the combination's output oN. Settle: the encode pass's source bindings read.
 inline constexpr std::array<std::array<std::pair<uint8_t, uint8_t>, 4>, 2> kTerrainAtlasLanes{ {
 		{ { { 0, 1 }, { 0, 2 }, { 2, 0 }, { 0, 0 } } },
 		{ { { 1, 1 }, { 1, 2 }, { 2, 1 }, { 1, 0 } } },
@@ -65,6 +68,8 @@ struct TerrainLane {
 	bool operator==(const TerrainLane &) const = default;
 };
 
+// STAND-IN: a surface shader whose lanes do not trace takes smoothness 0.5 and specular o1.y, the other terrains' values.
+// Settle: XP3_Alborz's and XP3_Desert's surface shaders traced.
 inline constexpr float kTerrainUntracedSmoothness = 0.5f;
 inline constexpr TerrainLane kTerrainUntracedSpecular{ std::nullopt, 1, 0 };
 
@@ -177,7 +182,11 @@ struct TerrainLookInput {
 	std::optional<TerrainSurfaceLanes> surface;
 };
 
+// STAND-IN: masks and colour map are painted at most 1024 texels a side, and a patch is the finest mask record split
+// twice into quarters (kTerrainPatchSplits). Settle: the engine's terrain virtual texture read.
 inline constexpr uint32_t kTerrainMaxMaskSide = 1024;
+// INFERRED: a level without a colour map gets 128, the neutral of the programs' colour map x 2.
+// Settle: such a level drawn against retail.
 inline constexpr uint8_t kTerrainNeutralColour = 128;
 inline constexpr size_t kTerrainMissedSets = 8;
 inline constexpr uint32_t kTerrainPatchSplits = 2;

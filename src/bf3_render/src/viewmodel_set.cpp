@@ -172,6 +172,7 @@ ViewmodelAdsData read_ads(const core::EbxLibrary &p_lib, const std::string &p_co
 	}
 	const core::EbxStruct d = sims.front().data();
 	uint32_t clamped = 0;
+	// STAND-IN: 0.15 s, 0.2 s and a 55 degree hip FOV where the aiming data has none. Settle: those fields' defaults read.
 	a.fov_transition = sane(number(d.get("FovTransitionTime")), 0.15f, 0.0f, 5.0f, clamped);
 	a.zoom_transition = sane(number(d.get("ZoomTransitionTime")), 0.2f, 0.0f, 5.0f, clamped);
 	const std::vector<core::EbxInstance> levels = p_lib.follow_all(d, "ZoomLevels");
@@ -219,6 +220,7 @@ struct RoleRule {
 	std::array<const char *, 3> names;
 	std::array<const char *, 3> controllers{};
 };
+// INFERRED: which named clip plays each role, with the controller breaking ties. Settle: the 1P graph's clip routing read.
 const RoleRule kRoleRules[] = {
 	{ Role::Deploy, { "Deploy Anim", nullptr, nullptr } },
 	{ Role::Idle, { "IdlePose Anim", nullptr, nullptr } },
@@ -329,6 +331,8 @@ void clip_model(const anim::Skeleton &p_rig, const anim::LocalPose &p_base, cons
 
 constexpr float kBc1RedStep = 1.0f / 31.0f;
 
+// INFERRED: a slot darkened to black (DiffuseDarkening 0) whose Specular red stays within one BC1 step over its UVs has no
+// specular. Settle: the weapon shader's program translated.
 bool specular_dark(const core::LevelMount &p_mount, const ViewmodelPart &p_part, uint32_t p_slot) {
 	const MaterialSlot &slot = p_part.materials.slots[p_slot];
 	const std::array<float, 4> *dark = slot.vector("DiffuseDarkening");
@@ -371,6 +375,8 @@ bool specular_dark(const core::LevelMount &p_mount, const ViewmodelPart &p_part,
 	return true;
 }
 
+// INFERRED: an optic's sight is its widest unlit blended surface, centred on the camera axis at ADS; WeaponZoomedOffsetY
+// is not used. Settle: the zoomed camera placement read.
 std::optional<ViewmodelSight> optic_sight(const anim::Skeleton &p_rig, const ViewmodelItem &p_item) {
 	const ViewmodelClip &zoom = p_item.clips[size_t(Role::ZoomIdle)];
 	const int32_t camera = p_rig.find("CameraJoint");
@@ -434,6 +440,8 @@ void read_optic_zoom_mesh_factors(const core::EbxLibrary &p_lib, ViewmodelItem &
 		if (!arr || arr->size() < 2) {
 			continue;
 		}
+		// INFERRED: ZoomInOutMeshTransitionFactors is [in, out], and an optic with a multiply ring hides the weapon at ADS.
+		// Settle: the ADS mesh transition read.
 		const std::optional<core::EbxValue> in = arr->get(0), out = arr->get(1);
 		const std::optional<float> in_factor = in ? in->as_f32() : std::nullopt,
 								   out_factor = out ? out->as_f32() : std::nullopt;
@@ -512,6 +520,8 @@ void read_attachments(const core::EbxLibrary &p_lib, const core::EbxInstance &p_
 				a.skinned = object.skinned;
 				a.transform = object.transform;
 				a.hip = mesh == object.mesh_1p;
+				// INFERRED: a HideByZoomTransition socket hides at ADS only when a drawn optic swaps in its zoom mesh.
+				// Settle: the ADS mesh swap read.
 				a.zoom = mesh == object.mesh_1p_zoom && !(socket.hide_by_zoom_transition && zoom_mesh_transition);
 				a.light_toggle = socket.hide_by_light_toggle;
 				a.part.mesh = mesh;
@@ -621,6 +631,7 @@ const PreparedTexture *ViewmodelSet::texture(const std::string &p_name, TextureR
 	return nullptr;
 }
 
+// INFERRED: only multiplying unlit slots fade by their vertex colour. Settle: the scope shaders' programs translated.
 bool viewmodel_slot_vertex_colour(const ViewmodelSlotLook &p_look) {
 	return p_look.blend && p_look.unlit && p_look.blend_mode == ViewmodelBlend::Multiply;
 }
@@ -680,6 +691,7 @@ anim::AdsParams viewmodel_ads_params(const ViewmodelItem &p_item, const anim::Vi
 	p.look_speed_zoom = a.look_speed_zoom;
 	p.fov_in_seconds = p_tuning.fov_transition_specific && a.fov_in >= 0.0f ? a.fov_in : a.fov_transition;
 	p.fov_out_seconds = p_tuning.fov_transition_specific && a.fov_out >= 0.0f ? a.fov_out : a.fov_transition;
+	// STAND-IN: the tuning's ADS times where ZoomTransitionTimeArray has no entry. Settle: the engine's fallback read.
 	p.zoom_in_seconds = a.zoom_in >= 0.0f ? a.zoom_in : p_tuning.ads_in_seconds;
 	p.zoom_out_seconds = a.zoom_out >= 0.0f ? a.zoom_out : p_tuning.ads_out_seconds;
 	p.render_fov = p_item.render_fov > 0.0f ? p_item.render_fov : a.hip_fov;
@@ -825,6 +837,8 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		item.reload_threshold = def->fire.reload_threshold;
 		item.magazine_capacity = def->fire.magazine_capacity;
 		item.weapon_class = def->weapon_class;
+		// INFERRED: HoldAndRelease items are grenades, a knife unlock the knife, two or more zoom levels a gun, else a gadget.
+		// Settle: a weapon class field read.
 		const bool aims = def->aiming.zoom_levels.size() >= 2;
 		item.kind = def->fire.logic == core::gameplay::FireLogic::HoldAndRelease ? ViewmodelItemKind::Grenade
 				: spec.unlock.find("knife") != std::string::npos				 ? ViewmodelItemKind::Knife
@@ -1016,6 +1030,8 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 			c.name = p_what;
 			c.seconds = p_seconds;
 		};
+		// STAND-IN: roles without a clip play procedural stand-ins: raise, kick, lower and raise, IdlePose to ZoomPose blend.
+		// Settle: the missing clips (VBR, curve) decoded.
 		const ViewmodelAdsData &ads = item.ads;
 		const float zoom_seconds_in = ads.zoom_in >= 0.0f ? ads.zoom_in : ads.zoom_transition;
 		const float zoom_seconds_out = ads.zoom_out >= 0.0f ? ads.zoom_out : ads.zoom_transition;
@@ -1032,6 +1048,7 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				stand_in(Role::Fire, Source::ProceduralStandIn, "procedural kick (kick springs)", 0.0f);
 			}
 			stand_in(Role::Reload, Source::ProceduralStandIn, "procedural lower and raise over ReloadTime", std::max(0.05f, item.reload_time_bullets_left));
+			// STAND-IN: an empty reload with no clip of its own plays the Reload clip. Settle: a retail empty reload of such a weapon.
 			if (item.clips[size_t(Role::ReloadEmpty)].source == Source::Missing && item.clips[size_t(Role::Reload)].source == Source::Clip) {
 
 				item.clips[size_t(Role::ReloadEmpty)] = ViewmodelClip{};
@@ -1168,12 +1185,14 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 				if (out[i].blend) {
 					const SurfaceShader *shader = look->shaders().by_name(
 							core::to_lower_ascii(slot.variation_shader.empty() ? slot.shader : slot.variation_shader));
+					// STAND-IN: the first solution's blend byte stands for the shader's. Settle: the solution choice per pass read.
 					if (shader != nullptr && !shader->solutions.empty()) {
 						out[i].blend_mode = viewmodel_blend_of(shader->solutions.front().blend_mode);
 					}
 					if (slot.texture("Diffuse").empty() && lm.color && !lm.glass) {
 						out[i].color_texture = lm.color->name;
 					}
+					// INFERRED: a blended slot without a normal map is unlit. Settle: its program translated.
 					out[i].unlit = !lm.normal.has_value();
 					if (out[i].unlit) {
 						out[i].color_role = out[i].blend_mode == ViewmodelBlend::Multiply ? TextureRole::InvertedMask
@@ -1295,6 +1314,8 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 	return set;
 }
 
+// INFERRED: blend byte 2 multiplies, 1 and 3 add, the rest mix, read off the shader names.
+// Settle: the solutions' blend states read.
 ViewmodelBlend viewmodel_blend_of(uint8_t p_solution_blend_mode) {
 	switch (p_solution_blend_mode) {
 		case 1:
@@ -1585,6 +1606,8 @@ std::string viewmodel_kits_difference(std::span<const ViewmodelKit> p_data, std:
 
 ViewmodelSetSpec team_viewmodel_items(int p_team, std::span<const std::string> p_unlocks) {
 	ViewmodelSetSpec spec;
+	// INFERRED: the RU arms come from the RU assault upperbody appearance, else the RU arms mesh.
+	// Settle: the RU kits' appearance links read.
 	if (p_team == 2) {
 		spec.appearance = "persistence/unlocks/soldiers/visual/mp/ru/upperbody/mp_ru_assault_upperbody01";
 		spec.arms_mesh = "characters/arms/arms1p_ru/arms1p_rus_mesh";
@@ -1655,6 +1678,7 @@ std::string route_path(const anim::AntClipRoute &p_route) {
 	return out;
 }
 
+// STAND-IN: 0.5 clip frames a tick where a route gives no FPSScale. Settle: a route without one read.
 float route_tick_frames(const anim::AntClipRoute &p_route) {
 	return std::isfinite(p_route.fps_scale) && p_route.fps_scale > 0.0f ? p_route.fps_scale : 0.5f;
 }

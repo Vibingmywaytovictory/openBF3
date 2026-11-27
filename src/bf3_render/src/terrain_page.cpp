@@ -15,6 +15,8 @@ std::string terrain_page_function(int32_t p_atlas) {
 	return "terrain_atlas" + std::to_string(p_atlas);
 }
 
+// INFERRED: from the atlas encode (kTerrainAtlasLanes), atlas 0 reads (colour, normal x) and atlas 1 (o1.y, normal y,
+// o2.y, normal z), whose x and z read 0 here. Settle: the engine's virtual texture pages read.
 std::string terrain_page_sampling() {
 	const std::string uv(kTerrainPageUvUniform);
 	return "uniform sampler2D terrain_page_colour : filter_linear, repeat_disable;\n"
@@ -44,6 +46,7 @@ std::string terrain_page_sampling() {
 			"}\n";
 }
 
+// WHY: the page camera takes the colour or normal through EMISSION with albedo 0, so the page holds them unlit.
 std::string terrain_page_output(std::string_view p_colour, std::string_view p_normal) {
 	const std::string colour(p_colour), normal(p_normal);
 	return "if (" + terrain_page_camera() +

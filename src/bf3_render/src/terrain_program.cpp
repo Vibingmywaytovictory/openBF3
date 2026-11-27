@@ -64,6 +64,7 @@ core::Status bind_terrain_program(const std::string &p_where, const dxbc::Progra
 		}
 		for (const dxbc::Variable &v : cb.variables) {
 			std::array<float, 4> value{};
+			// STAND-IN: clipToWorldSpaceXzTransform and dynamicMaskUvScale are (1, 1, 0, 0). Settle: the engine's values read.
 			if (v.name == "external_clipToWorldSpaceXzTransform" || v.name == "external_dynamicMaskUvScale") {
 				value = { 1.0f, 1.0f, 0.0f, 0.0f };
 			} else if (v.name == "external_worldToHeightfieldUvTransform") {

@@ -44,6 +44,8 @@ using Clock = std::chrono::steady_clock;
 using scene_internal::Mat3;
 using Vec3 = core::Vec3;
 
+// STAND-IN: the plain look's name rules below: undrawn shader words, alpha-test and double-sided words, drawn parameters.
+// Settle: the shader database read for each slot.
 constexpr std::string_view kUndrawnShaders[2] = { "invisible", "ui_menu" };
 
 constexpr std::string_view kAlphaTestWords[] = { "foliage", "vegetation", "alphatest", "alpha_test", "fence", "decal", "grass", "leaf", "leaves",
@@ -54,8 +56,10 @@ constexpr std::string_view kNormalParameters[] = { "Normal", "MainNormal", "Tile
 constexpr std::string_view kDoubleSidedWords[] = { "foliage", "vegetation", "grass", "leaf", "leaves", "tree", "bush", "ivy", "twosided", "two_sided",
 	"doublesided" };
 
+// STAND-IN: the terrain is drawn to 256 m beyond the placed instances. Settle: the terrain's own extent and Visible read.
 constexpr float kTerrainMargin = 256.0f;
 
+// STAND-IN: the plain look's sun energy is SunColor's peak x 0.25. Settle: the plain look against retail at one exposure.
 constexpr float kSunEnergyPerColor = 0.25f;
 constexpr size_t kMaxTerrainChunks = 1u << 16;
 
@@ -282,6 +286,8 @@ SceneEnvironment read_environment(const EbxResolver &p_db, const World &p_world)
 	}
 	env.from_data = true;
 
+	// SOURCE: notes R5-VG1 2: toward the sun (sin X cos Y, sin Y, cos X cos Y), X SunRotationX and Y SunRotationY in degrees.
+	// STAND-IN: 200 and 35 degrees where the fields are missing. Settle: a level without them.
 	const float azimuth = float_field(best->outdoor, "SunRotationX").value_or(200.0f) * 3.14159265358979f / 180.0f;
 	const float elevation = float_field(best->outdoor, "SunRotationY").value_or(35.0f) * 3.14159265358979f / 180.0f;
 	const Vec3 to_sun = { std::sin(azimuth) * std::cos(elevation), std::sin(elevation), std::cos(azimuth) * std::cos(elevation) };
@@ -302,6 +308,8 @@ SceneEnvironment read_environment(const EbxResolver &p_db, const World &p_world)
 	if (!ground || !(max_component(*ground) > 1e-6f)) {
 		ground = vec3_field(best->outdoor, "GroundColor");
 	}
+	// STAND-IN: the plain look keeps only the hue of the sky and ground colours, at peaks 0.7 and 0.3.
+	// Settle: the plain look against retail at one exposure.
 	if (sky && max_component(*sky) > 1e-6f) {
 		env.sky_color = with_peak(*sky, 0.7f);
 	}
@@ -1075,6 +1083,8 @@ core::Result<LevelScenePlan> plan_level_scene(const EbxResolver &p_resolver, con
 			const auto sky_texture = [&](const std::string &p_name) { return p_name.empty() ? -1 : int32_t(builder.texture(p_name, TextureRole::Color)); };
 			std::map<std::string, bool> envmap_srgb;
 			for (SceneTerrainPlan &terrain : plan.terrains) {
+				// INFERRED: the water's sky envmap is the base environment's StaticEnvmapTexture.
+				// Settle: the engine's envmap binding for water read.
 				if (!terrain.water.empty() && !base.static_envmap.empty()) {
 					terrain.water_envmap = plan_terrain_texture(
 							*p_options.mount, 0, base.static_envmap,
@@ -1130,6 +1140,7 @@ core::Result<PreparedSceneMesh> prepare_scene_mesh(core::Cache *p_cache, const c
 		return core::make_error("scene mesh " + p_blob.name + ": blob LOD list and meshes differ");
 	}
 
+	// STAND-IN: the first LOD that draws a triangle is drawn at every distance. Settle: MeshLodGroup's distances read.
 	std::vector<size_t> order(p_blob.meshes.size());
 	for (size_t i = 0; i < order.size(); ++i) {
 		order[i] = i;

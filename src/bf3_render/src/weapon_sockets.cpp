@@ -68,6 +68,8 @@ std::vector<WeaponSocket> read_weapon_sockets(const core::EbxResolver &p_db, con
 		const std::optional<core::EbxValue> light_hide = socket.get("HideByLightToggle");
 		s.hide_by_zoom_transition = zoom_hide && zoom_hide->as_bool().value_or(false);
 		s.hide_by_light_toggle = light_hide && light_hide->as_bool().value_or(false);
+		// INFERRED: a rigid object sits on BoneName at BoneRigidTransform x Transform x the object's Transform.
+		// Settle: a socket whose transforms are not identity checked against retail.
 		const anim::Mat34 socket_m =
 				anim::mat_mul(mat_of(socket.get("BoneRigidTransform")), mat_of(socket.get("Transform")));
 		for (const core::EbxInstance &object : p_db.follow_all(socket.data(), "AvailableObjects")) {
@@ -98,6 +100,8 @@ std::vector<WeaponSocket> read_weapon_sockets(const core::EbxResolver &p_db, con
 	return out;
 }
 
+// INFERRED: a weapons/common/no* socket is drawn unless the weapon lists that unlock among its accessories.
+// Settle: the default customization read.
 bool socket_drawn(std::string_view p_unlock, const WeaponAccessories &p_accessories) {
 	if (contains(p_accessories.active, p_unlock)) {
 		return true;

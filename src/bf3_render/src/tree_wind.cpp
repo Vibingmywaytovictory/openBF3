@@ -46,6 +46,8 @@ core::Result<std::vector<Vec3>> field_translations(const EbxInstance &p_tree) {
 	return out;
 }
 
+// SOURCE: notes R6-VG2-bones S1: rest frames, the R1 and R2 rigid nodes, stiffness and wind by stem, branch and L2, and
+// the height lever restarted at stem forks.
 struct RigBuilder {
 	TreeRig &rig;
 	const TreeRigData &data;
@@ -216,6 +218,8 @@ core::Result<TreeRig> read_tree_rig(const EbxInstance &p_tree) {
 	return build_tree_rig(data);
 }
 
+// SOURCE: notes R5-VG2 A3: direction (cos a, 0, sin a) and R = (S x 0.5 + 1) x 0.5 x WindVariationRate.
+// INFERRED: the level's wind is WindComponentData's WindDirection and WindStrength. Settle: the blended state traced.
 TreeWind tree_wind(const VegetationSystemSettings &p_settings, const std::optional<LevelWind> &p_level) {
 	TreeWind w;
 	w.variation = p_settings.wind_variation;
@@ -232,6 +236,7 @@ TreeWind tree_wind(const VegetationSystemSettings &p_settings, const std::option
 	return w;
 }
 
+// SOURCE: notes R5-VG2 A4: four sines of a travelling phase, G held at V - 1 at least, and g x 0.004 x S along the wind.
 Vec3 tree_gust(const TreeWind &p_wind, const Vec3 &p_tree_position, float p_clock) {
 	const Vec3 p = vec::add(p_tree_position, Vec3{ 0.0f, kTreeWindHeight, 0.0f });
 	const float u = p_wind.rate * p_clock - kTreeGustTravel * vec::dot(p_wind.direction, p);
@@ -246,6 +251,7 @@ Vec3 tree_gust(const TreeWind &p_wind, const Vec3 &p_tree_position, float p_cloc
 	return vec::scale(p_wind.direction, (g * v + (1.0f - v)) * kTreeForceScale * p_wind.strength);
 }
 
+// SOURCE: notes R6-VG2-bones S0: the force is taken into the tree frame divided by the instance scale.
 Vec3 tree_local_force(const core::level::LevelTransform &p_tree, const Vec3 &p_force) {
 	const float scale = p_tree.axis_scales().x;
 	return scale > 0.0f ? vec::scale(p_force, 1.0f / scale) : p_force;
@@ -278,6 +284,7 @@ void TreeSim::hold_above_ground(uint32_t p_node) {
 	positions_[p_node].y = rig_->ground;
 }
 
+// SOURCE: notes R6-VG2-bones S2 3d: f = dt (1 - c^2) 200 m K toward the rest direction in the parent's current frame.
 void TreeSim::restore(uint32_t p_bone, const Vec3 &p_direction, const Transform &p_parent) {
 	const TreeRig &r = *rig_;
 	const Vec3 rest = vec::normalize(p_parent.transform_vector(r.rest_directions[p_bone]));
@@ -306,6 +313,7 @@ void TreeSim::restore(uint32_t p_bone, const Vec3 &p_direction, const Transform 
 	}
 }
 
+// SOURCE: notes R6-VG2-bones S2 3: ground clamp, tip re-projection, R2 hold, R1 snap, restoring, then the bone frame.
 void TreeSim::rebuild(uint32_t p_parent) {
 	const TreeRig &r = *rig_;
 	const Transform parent = frames_[p_parent];
@@ -335,6 +343,8 @@ void TreeSim::rebuild(uint32_t p_parent) {
 	}
 }
 
+// SOURCE: notes R6-VG2-bones S2 1 and 2: the wind push on node 1's subtree, then the free nodes integrated.
+// STAND-IN: no detached or frozen nodes, local influences or shader wiggle (notes R5-VG2 A5). Settle: those built.
 void TreeSim::step(const Vec3 &p_local_force) {
 	const TreeRig &r = *rig_;
 	for (const uint32_t j : r.driven) {
@@ -365,6 +375,8 @@ std::vector<Transform> TreeSim::bone_offsets() const {
 	return out;
 }
 
+// SOURCE: notes R6-VG2-bones S2 3f: a bone's skin is its rest frame's inverse, its frame and the tree matrix.
+// WHY: Godot poses a skeleton under the instance matrix, so the skin is taken back through its inverse.
 std::vector<Transform> tree_bone_poses(const TreeSim &p_sim, const core::level::LevelTransform &p_tree) {
 	const float scale = p_tree.axis_scales().x;
 	const Transform tree{ Vec3{ scale, 0.0f, 0.0f }, Vec3{ 0.0f, scale, 0.0f }, Vec3{ 0.0f, 0.0f, scale },
@@ -420,6 +432,8 @@ size_t TreeForest::active() const {
 			[this](const State &p_s) { return p_s.sim != nullptr && frames_ - p_s.touched_frame <= kTreeIdleFrames; }));
 }
 
+// SOURCE: notes R5-VG2 A1 and A2, and R6-VG2-rate rule 1 with its checker's pre-simulation budget.
+// INFERRED: the activation budget's worker count is JobCount. Settle: the job system's worker count traced.
 void TreeForest::frame(float p_dt, const Vec3 &p_camera, const TreeWind &p_wind) {
 	++frames_;
 	const float advance = std::clamp(settings_.time_scale * p_dt, 0.0f, kTreeMaxAdvance);
@@ -430,6 +444,8 @@ void TreeForest::frame(float p_dt, const Vec3 &p_camera, const TreeWind &p_wind)
 		return;
 	}
 	const uint32_t budget = (settings_.job_count + 1) * settings_.max_pre_sims_per_job;
+	// STAND-IN: one pre-simulation budget for the frame (MaxPreSimsPerJob x 8), not one per job call.
+	// Settle: how the job calls split the trees traced.
 	const uint32_t pre_simulations = settings_.max_pre_sims_per_job * kTreeJobsPerFrame;
 	uint32_t activated = 0, pre_simulated = 0;
 	std::vector<uint32_t> due;
@@ -445,6 +461,8 @@ void TreeForest::frame(float p_dt, const Vec3 &p_camera, const TreeWind &p_wind)
 				s.posed = moved;
 				++activated;
 			}
+			// INFERRED: a tree within MaxActiveDistance counts as refreshed by the draw pass, drawn or not.
+			// Settle: the draw/cull pass's frame stamp traced.
 			if (s.sim != nullptr) {
 				s.touched_frame = frames_;
 			}

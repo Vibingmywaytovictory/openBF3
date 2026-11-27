@@ -81,6 +81,7 @@ struct SceneLanes::Impl {
 
 	bool admit(uint64_t p_bytes) {
 		std::unique_lock<std::mutex> lock(mutex);
+		// WHY: an item larger than the cap is let through when nothing is in flight, or the load would never finish.
 		wake.wait(lock, [&] { return cancelled || inflight == 0 || inflight + p_bytes <= options.max_inflight_bytes; });
 		if (cancelled) {
 			return false;

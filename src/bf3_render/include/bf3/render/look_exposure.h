@@ -7,6 +7,8 @@
 
 namespace bf3::render {
 
+// SOURCE: notes Q1 2 to 4 and its checker: luminance 0.30 R + 0.59 G + 0.11 B, exposure key / (luminance + 0.001), no
+// update outside 1e-5..1e4, and the blend only above 0.01 s adjust time; the five constants below.
 inline constexpr std::array<float, 3> kExposureLuminanceWeights{ 0.30f, 0.59f, 0.11f };
 inline constexpr float kExposureLuminanceEpsilon = 0.001f;
 inline constexpr float kExposureMinLuminance = 0.00001f;

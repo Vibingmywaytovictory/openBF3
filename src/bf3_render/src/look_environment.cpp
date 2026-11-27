@@ -31,7 +31,9 @@ constexpr float kPi = 3.14159265358979f;
 constexpr size_t kMaxComponents = 256;
 constexpr uint32_t kFogFitSamples = 48;
 constexpr uint32_t kFogFitSteps = 128;
+// STAND-IN: the fog fit weighs the first 1500 m past Start, where a level's views lie. Settle: BF3's fog shader read.
 constexpr float kFogFitReach = 1500.0f;
+// STAND-IN: the sky's horizon colour is the mean of the panorama's bottom 15 % of rows. Settle: a retail horizon.
 constexpr float kHorizonRows = 0.15f;
 constexpr float kLobeMinWidth = 1e-4f;
 
@@ -118,6 +120,8 @@ std::string texture_name(const EbxResolver &p_db, const EbxInstance &p_c, std::s
 }
 
 bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::string &p_source, LookEnvState &r_state) {
+	// INFERRED: a component with Enable false is dropped whole, with ColorCorrection's grading cube even where
+	// ColorGradingEnable is true. Settle: a retail frame of such a level.
 	if (!flag(p_c, "Enable", true)) {
 		return false;
 	}
@@ -189,6 +193,7 @@ bool read_component(const EbxResolver &p_db, const EbxInstance &p_c, const std::
 		r_state.fog_color_enable = flag(p_c, "FogColorEnable", false);
 		r_state.fog_color_curve = cubic(p_c, "FogColorCurve").value_or(LookCubic{});
 		fog_fit(r_state.fog_curve, kFogFitReach / (*end - *start), r_state.fog_peak, r_state.fog_exponent, r_state.fog_fit_end);
+		// STAND-IN: FogColor's share of the fog colour is the peak of FogColorCurve over 0..1. Settle: BF3's fog shader read.
 		float tint = 0.0f;
 		if (r_state.fog_color_enable && max3(r_state.fog_color) > 1e-6f) {
 			for (uint32_t s = 0; s <= 256; ++s) {
@@ -361,6 +366,8 @@ std::vector<uint8_t> grade_cube_of(const core::LevelMount &p_mount, const std::s
 	return out;
 }
 
+// STAND-IN: what cannot be blended (textures, wind, tonemap method, grading LUT) switches at weight 0.5.
+// Settle: a retail crossing of an area edge.
 void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 	const bool take = p_w >= 0.5f;
 	if (p_a.light) {
@@ -405,6 +412,8 @@ void blend_state(LookEnvState &r_state, const LookEnvState &p_a, float p_w) {
 		r_state.horizon = lerp3(r_state.horizon, p_a.horizon, p_w);
 	}
 	if (p_a.fog) {
+		// STAND-IN: fog only an area has comes with the area's distances and fades in by density from 0.
+		// Settle: a retail crossing into such an area.
 		if (!r_state.fog) {
 
 			r_state.fog_start = p_a.fog_start;
@@ -470,6 +479,8 @@ float look_cubic(const LookCubic &p_c, float p_t) {
 	return ((p_c[0] * p_t + p_c[1]) * p_t + p_c[2]) * p_t + p_c[3];
 }
 
+// STAND-IN: Godot's depth fog (density x smoothstep(begin, end) ^ curve) fitted by least squares to the data's Fog
+// Curve, in place of BF3's fog. Settle: BF3's fog shader read.
 void fog_fit(const LookCubic &p_curve, float p_reach, float &r_density, float &r_curve, float &r_end) {
 	r_density = 0.0f;
 	r_curve = 1.0f;
@@ -514,6 +525,8 @@ void fog_fit(const LookCubic &p_curve, float p_reach, float &r_density, float &r
 	}
 }
 
+// INFERRED: Contrast about 0.5, then Brightness, then Saturation about Rec. 601 luma, then the grading cube, on the
+// display value. Settle: BF3's colour correction shader read.
 LookVec3 look_grade(const LookEnvState &p_state, const std::vector<uint8_t> &p_cube, const LookVec3 &p_display) {
 	LookVec3 c{};
 	for (size_t k = 0; k < 3; ++k) {
@@ -548,6 +561,8 @@ LookVec3 look_grade(const LookEnvState &p_state, const std::vector<uint8_t> &p_c
 }
 
 std::optional<std::array<float, 4>> look_engine_global(const LookEnvState &p_state, std::string_view p_name) {
+	// INFERRED: from the names, the hemisphere direction is world up and the top and bottom colours are OutdoorLight's
+	// SkyColor and GroundColor. Settle: the engine's own values for these constants.
 	if (p_name == "outdoorLightHemisphereDir") {
 		return std::array<float, 4>{ 0.0f, 1.0f, 0.0f, 0.0f };
 	}
@@ -562,11 +577,14 @@ std::optional<std::array<float, 4>> look_engine_global(const LookEnvState &p_sta
 		const LookVec3 to_light = look_frame_of(p_state).sun_direction;
 		return std::array<float, 4>{ -to_light[0], -to_light[1], -to_light[2], 0.0f };
 	}
+	// INFERRED: SunColor x SunSpecularScale, and hemisphere visibility 1. Settle: the engine's own values.
 	if (p_name == "outdoorLightKeySpecularColorAndHemisphereVisibility") {
 		const float s = p_state.sun_specular_scale;
 		return std::array<float, 4>{ p_state.sun_color[0] * s, p_state.sun_color[1] * s, p_state.sun_color[2] * s,
 			1.0f };
 	}
+	// INFERRED: x is StaticEnvmapScale, as SkyEnvmap8BitTexScale scales the runtime sky cube, which is not drawn.
+	// Settle: the engine's own value.
 	if (p_name == "outdoorLightSkyEnvmap8BitTexInvScale") {
 		return std::array<float, 4>{ p_state.static_envmap_scale, 0.0f, 0.0f, 0.0f };
 	}
@@ -663,6 +681,8 @@ core::Result<LookEnvironment> read_look_environment(const EbxResolver &p_db, con
 			if (ve.proximity) {
 				continue;
 			}
+			// INFERRED: an environment whose Visibility is 0 or less is left out, and Enabled false does not keep one out.
+			// Settle: retail frames of the levels whose environments say Enabled false.
 			if (const std::optional<EbxValue> v = ve.object->entity.get("Visibility"); v && v->as_f32() && *v->as_f32() <= 0.0f) {
 				continue;
 			}
@@ -680,6 +700,8 @@ core::Result<LookEnvironment> read_look_environment(const EbxResolver &p_db, con
 			if (!found) {
 				continue;
 			}
+			// INFERRED: the base takes each component from the always-on environment of highest Priority; when every one that
+			// holds it is switched by logic, from the lowest-priority switched one. Settle: a note on environment priority.
 			bool better = best == nullptr;
 			if (!better) {
 				if (best->switched != ve.switched) {
@@ -747,6 +769,7 @@ core::Result<LookEnvironment> read_look_environment(const EbxResolver &p_db, con
 		}
 		env.areas.push_back(std::move(*area));
 	}
+	// INFERRED: areas blend over the base in ascending Priority. Settle: a retail frame where areas overlap.
 	std::stable_sort(env.areas.begin(), env.areas.end(), [](const LookArea &a, const LookArea &b) { return a.priority < b.priority; });
 	return env;
 }
@@ -816,11 +839,15 @@ void decode_look_textures(const core::LevelMount &p_mount, LookEnvironment &r_en
 	}
 }
 
+// INFERRED: an area weighs 1 inside its shape, falling linearly to 0 at ProximityDistance outside it.
+// Settle: a retail crossing of an area edge.
 float look_area_weight(const LookArea &p_area, const LookVec3 &p_position) {
 	return core::level::area_fade(
 			core::level::AreaFadeCurve::LinearAmplitude, p_area.volume.distance(p_position), p_area.fade);
 }
 
+// INFERRED: a sky box light's Size is its cap's half-angle in radians, falling linearly in the cosine to the edge.
+// Settle: Enlighten's sky box shader read.
 float look_lobe_weight(const LookSkyLobe &p_lobe, const LookVec3 &p_direction) {
 	if (!(p_lobe.size > 0.0f)) {
 		return 0.0f;
@@ -847,6 +874,8 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 		f.sun_lobe = { to_sun, p_s.skybox_sun, p_s.skybox_sun_size };
 		f.back_lobe = { toward(p_s.back_rotation_x, p_s.back_rotation_y), p_s.skybox_back, p_s.skybox_back_size };
 	}
+	// INFERRED: SunColor's peak is the light's energy, as Godot draws albedo x energy x N.L like BF3's Lambert without
+	// 1 / pi. Settle: a retail frame against ours at one exposure.
 	const float peak = max3(p_s.sun_color);
 	if (peak > 1e-6f) {
 		f.sun_color = scaled(p_s.sun_color, 1.0f / peak);
@@ -856,6 +885,8 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 		f.sun_energy = 0.0f;
 	}
 	f.sun_specular_scale = p_s.sun_specular_scale;
+	// STAND-IN: the ambient is an unoccluded hemisphere: the sky box's (else OutdoorLight's) sky and ground colours, their
+	// mean at the horizon, in place of Enlighten's radiosity. Settle: Enlighten's data decoded.
 	const LookVec3 sky = p_s.enlighten && max3(p_s.sky_color) > 1e-6f ? p_s.sky_color : p_s.outdoor_sky;
 	const LookVec3 ground = p_s.enlighten && max3(p_s.ground_color) > 1e-6f ? p_s.ground_color : p_s.outdoor_ground;
 	f.ambient_up = sky;
@@ -866,6 +897,8 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 	f.uv_min_y = p_s.uv_min_y;
 	f.uv_max_y = p_s.uv_max_y;
 	f.horizon = scaled(p_s.horizon, p_s.sky_brightness);
+	// INFERRED: FogDistanceMultiplier divides Start and End. Settle: a retail frame of a level whose multiplier is not 1.
+	// STAND-IN: the fog colour is the horizon tinted toward FogColor at the horizon's level. Settle: BF3's fog shader read.
 	if (p_s.fog && p_s.fog_peak > 0.0f && p_s.fog_end > p_s.fog_start) {
 		f.fog = true;
 		f.fog_begin = p_s.fog_start / p_s.fog_multiplier;
@@ -883,6 +916,8 @@ LookFrame look_frame_of(const LookEnvState &p_s) {
 	f.exposure_time = p_s.exposure_time;
 	f.tonemap = p_s.tonemap_method;
 
+	// STAND-IN: a static estimate of BF3's exposure: a kReferenceAlbedo surface under the ambient with kSunlitShare of
+	// the view in the sun. Settle: the exposure pass's measured mean luminance.
 	const auto luma = [](const LookVec3 &p_c) { return 0.2126f * p_c[0] + 0.7152f * p_c[1] + 0.0722f * p_c[2]; };
 	const float ambient = 0.5f * (luma(f.ambient_up) + luma(f.ambient_horizon)) +
 			look_lobe_mean(f.sun_lobe) * luma(f.sun_lobe.color) + look_lobe_mean(f.back_lobe) * luma(f.back_lobe.color);

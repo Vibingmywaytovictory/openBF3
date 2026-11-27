@@ -204,6 +204,8 @@ std::string light_pass_head() {
 			std::string(kSunSpecularScaleGlobal) + ";\n";
 }
 
+// STAND-IN: Godot's sky reflection stands for the light pass's envmap term, at ROUGHNESS 1 - smoothness and SPECULAR
+// sqrt(specular) / 0.4. Settle: the envmap term drawn from the sky cube at the program's mip.
 std::string light_pass_gloss(std::string_view p_smoothness, std::string_view p_specular) {
 	return "\tbf3_smoothness = clamp(" + std::string(p_smoothness) + ", 0.0, 1.0);\n\tbf3_specular = max(" +
 			std::string(p_specular) +
@@ -211,6 +213,12 @@ std::string light_pass_gloss(std::string_view p_smoothness, std::string_view p_s
 			"0.4, 1.0);\n";
 }
 
+// SOURCE: bf3dump programs, DeferredOutdoorLight: Lambert N.L, and specular N.L x pow(N.H, power) x norm x specular x
+// g_keyColor.w, no Fresnel term; notes R5-VG1 3: g_keyColor.w is OutdoorLightComponentData.SunSpecularScale.
+// STAND-IN: a point or spot light's specular scale is its Godot specular amount x 0.5.
+// Settle: the local light programs read.
+// STAND-IN: the translucency add and the gbuffer3 x 8 radiance term of notes R5-VG1 7 are not drawn. Settle: both built.
+// INFERRED: Godot's LIGHT_COLOR carries a factor of pi, which / PI takes back. Settle: a lit frame against the program.
 std::string light_pass_code() {
 	char lobe[256];
 	std::snprintf(lobe, sizeof(lobe),

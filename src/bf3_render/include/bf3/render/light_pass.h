@@ -8,11 +8,14 @@
 
 namespace bf3::render {
 
+// SOURCE: bf3dump programs, kOutdoorLightProgram below: power exp2(10 x smoothness + 1), (power + 8) x 0.125, sky envmap
+// mip (1 - smoothness) x 10; the five constants below.
 inline constexpr float kSpecularPowerScale = 10.0f;
 inline constexpr float kSpecularPowerBias = 1.0f;
 inline constexpr float kSpecularNormAdd = 8.0f;
 inline constexpr float kSpecularNormScale = 0.125f;
 inline constexpr float kEnvmapMipScale = 10.0f;
+// STAND-IN: specular 0.04 where no program gives the specular lane. Settle: the material programs' lanes translated.
 inline constexpr float kLookSpecular = 0.04f;
 inline constexpr std::string_view kSunSpecularScaleGlobal = "bf3_sun_specular_scale";
 inline constexpr std::string_view kOutdoorLightProgram =

@@ -49,6 +49,8 @@ SurfaceDecalShapes surface_decal_shapes(const core::EbxResolver &p_db, std::stri
 			}
 		}
 	}
+	// INFERRED: a Shader3d shape that also has a Shader2d is the planar shape's twin and reads the terrain's virtual texture,
+	// so only Shader3d-only shapes draw. Settle: the twins' programs translated.
 	for (const std::string &name : out.paired) {
 		out.standalone.erase(name);
 	}
@@ -76,6 +78,7 @@ TerrainSurfaceDecalStats add_terrain_surface_decals(const core::res::TerrainDeca
 				p_shaders.begin(), p_shaders.end(), [&](const SceneWaterShader &s) { return s.shader == name; });
 		std::string refused;
 		std::optional<TerrainMaterial> material;
+		// STAND-IN: the first solution that translates stands for the one the engine picks. Settle: the solution choice read.
 		for (size_t i = 0; i < shader.solutions.size() && !material; ++i) {
 			SolutionBinding binding;
 			binding.height_uv = r_look.height_uv;

@@ -168,6 +168,7 @@ std::vector<SceneTerrainCombo> plan_terrain_combos(const core::LevelMount &p_mou
 		SceneTerrainCombo combo;
 		combo.shader = name;
 		combo.layers = *terrain_combo_layers(name, p_asset);
+		// STAND-IN: the first solution with a pixel program stands for the one the engine picks. Settle: the solution choice read.
 		for (const ShaderSolution &s : shader->solutions) {
 			if (s.pixel_program) {
 				combo.program = s.pixel_program;
@@ -323,6 +324,8 @@ std::string terrain_lane_code(const TerrainLane &p_lane, std::string_view p_cove
 	return "(" + code + " * " + std::to_string(p_lane.scale) + " + " + std::to_string(p_lane.bias) + ")";
 }
 
+// STAND-IN: a patch takes the combination of exactly its present layers, else the smallest superset, else one for the
+// layers from the top opaque layer up, else the one sharing most. Settle: the engine's combination choice read.
 TerrainChoiceResult choose_terrain_combo(std::span<const SceneTerrainCombo> p_combos,
 		const std::vector<uint8_t> &p_present, const std::vector<uint8_t> &p_opaque) {
 	bool exact = false;
@@ -404,6 +407,8 @@ core::Result<std::string> terrain_shader_code(
 	code += "void fragment() {\nvec4 v1 = vec4(UV.x, UV.y, 0.0, 0.0);\n";
 	code += terrain_shader_locals(p_translation, p_material);
 	code += detail->body;
+	// INFERRED: the combination's colour is (o0.y, o0.z, o2.x) and its world normal (o0.x, o1.z, o1.x) x 2 - 1, as the
+	// atlas encode packs them. Settle: the terrain surface shader's atlas reads translated.
 	code += "vec3 terrain_colour = vec3(o0.y, o0.z, o2.x);\n"
 			"vec3 terrain_normal = normalize(vec3(o0.x, o1.z, o1.x) * 2.0 - 1.0);\n" +
 			terrain_page_output("terrain_colour", "terrain_normal");
@@ -634,6 +639,7 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 	const std::array<float, 4> height_pixel = { 1.0f / float(height.width), 1.0f / float(height.height),
 		1.0f / hg.sample_spacing[1], 1.0f / hg.sample_spacing[0] };
 
+	// STAND-IN: the dynamic mask is one texel of 0. Settle: what the engine writes into it.
 	TerrainImage dynamic;
 	dynamic.format = TerrainImageFormat::R8;
 	dynamic.width = dynamic.height = 1;
@@ -667,6 +673,7 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 			if (p_name == "external_worldToGlobalColorUvTransform") {
 				return colour_uv;
 			}
+			// WHY: the height image holds metres, so the height scale is 1.
 			if (p_name == "external_heightmapWorldSizeY") {
 				return std::array<float, 4>{ 1.0f, 0.0f, 0.0f, 0.0f };
 			}
@@ -676,6 +683,8 @@ core::Result<TerrainLook> build_terrain_look(const TerrainLookInput &p_input) {
 			const std::string_view digits = std::string_view(p_name).substr(
 					kMaskPrefix.size(), p_name.size() - kMaskPrefix.size() - kMaskSuffix.size());
 			unsigned n = 0;
+			// INFERRED: worldToMask<n> addresses the combination's n-th layer other than layer 0.
+			// Settle: the engine's set-up of those constants read.
 			std::vector<uint8_t> masked;
 			for (uint8_t l : combo.layers) {
 				if (l != 0) {

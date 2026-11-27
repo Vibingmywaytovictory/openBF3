@@ -184,6 +184,7 @@ std::optional<std::vector<VertexInputLanes>> lanes_in(
 					continue;
 				}
 				const uint8_t lane = uint8_t((byte - e.offset) / d.bytes);
+				// INFERRED: a four-lane Position's w is the binormal sign. Settle: a mesh whose Position w is not +1.
 				const bool sign = e.usage == core::res::VertexUsage::Position && lane == kPositionSignLane;
 				out[i][c] = sign ? VertexInputLane{ uint8_t(core::res::VertexUsage::BinormalSign), 0 }
 								 : VertexInputLane{ uint8_t(e.usage), lane };
@@ -571,6 +572,7 @@ SurfaceShaderType surface_shader_type(uint32_t p_value) {
 	return p_value <= 4 ? SurfaceShaderType(p_value) : SurfaceShaderType::Other;
 }
 
+// INFERRED: bit 0 of a solution's flags byte marks it double-sided. Settle: a solution's raster state read.
 bool SurfaceShader::double_sided() const {
 	return std::any_of(solutions.begin(), solutions.end(), [](const ShaderSolution &s) { return (s.flags & 1u) != 0; });
 }

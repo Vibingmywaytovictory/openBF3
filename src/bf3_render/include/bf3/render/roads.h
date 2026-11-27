@@ -28,6 +28,8 @@ namespace bf3::render {
 
 class ShaderLookup;
 
+// STAND-IN: terrain decals are pulled 0.05 % toward the camera against z-fighting.
+// Settle: the decal pass's depth bias read.
 inline constexpr float kTerrainDecalViewPull = 0.0005f;
 inline constexpr int32_t kTerrainDecalFirstPriority = -100;
 inline constexpr int32_t kTerrainDecalLastPriority = -1;

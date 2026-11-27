@@ -11,6 +11,8 @@ LookExposure look_exposure_of(const LookFrame &p_frame) {
 	return LookExposure{ p_frame.middle_gray, p_frame.min_exposure, p_frame.max_exposure, p_frame.exposure_time };
 }
 
+// INFERRED: the luminance is of the scene's mean colour, not the log-average form of notes Q1 2 behind a switch.
+// Settle: the retail post-process settings' log-average switch.
 float exposure_luminance(const LookVec3 &p_mean) {
 	return kExposureLuminanceWeights[0] * p_mean[0] + kExposureLuminanceWeights[1] * p_mean[1] +
 			kExposureLuminanceWeights[2] * p_mean[2];
@@ -20,6 +22,7 @@ bool exposure_luminance_valid(float p_luminance) {
 	return p_luminance >= kExposureMinLuminance && p_luminance <= kExposureMaxLuminance;
 }
 
+// INFERRED: the Min/MaxExposure clamp, which notes Q1 4 apply behind a switch, is always on. Settle: the retail switch.
 float exposure_target(float p_luminance, const LookExposure &p_exposure) {
 	return std::clamp(p_exposure.middle_gray / (p_luminance + kExposureLuminanceEpsilon), p_exposure.min_exposure,
 			std::max(p_exposure.min_exposure, p_exposure.max_exposure));

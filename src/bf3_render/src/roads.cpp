@@ -86,6 +86,7 @@ std::vector<SceneDecalShader> plan_terrain_decals(const core::LevelMount &p_moun
 		SceneDecalShader decal;
 		decal.shader = shader_name;
 		const std::vector<std::pair<uint32_t, std::string>> *slots = nullptr;
+		// STAND-IN: the first solution with a pixel program stands for the one the engine picks. Settle: the solution choice read.
 		for (const ShaderSolution &s : shader->solutions) {
 			if (s.pixel_program) {
 				decal.program = s.pixel_program;
@@ -129,6 +130,8 @@ DrapeCells drape_cells(const core::res::HeightGrid &p_grid, const std::optional<
 	return cells;
 }
 
+// STAND-IN: each planar triangle is cut along the drawn terrain grid and lifted onto it on the CPU, in place of the decal
+// vertex program. Settle: that vertex program translated.
 double drape_triangle(const core::res::HeightGrid &p_grid, const std::array<DrapeVertex, 3> &p_triangle,
 		std::vector<DrapedVertex> &r_triangles, const DrapeCells &p_cells) {
 	if (p_grid.width < 2 || p_grid.height < 2 || !(p_grid.sample_spacing[0] > 0.0f) ||
@@ -274,10 +277,14 @@ core::Result<std::string> terrain_decal_shader_code(
 			");\nNORMAL = normalize((MODELVIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);\n"
 			"TANGENT = normalize((MODELVIEW_MATRIX * vec4(TANGENT, 0.0)).xyz);\n"
 			"BINORMAL = normalize((MODELVIEW_MATRIX * vec4(BINORMAL, 0.0)).xyz);\n}\n";
+	// INFERRED: v1 is the mask, v2 the terrain-local xz with z 0.9 and v3 the uv, as the decal vertex program passes them.
+	// Settle: that vertex program translated.
 	code += "void fragment() {\nvec4 v1 = COLOR;\nvec4 v2 = vec4(UV2.x, UV2.y, 0.9, 0.0);\nvec4 v3 = vec4(UV.x, UV.y, "
 			"0.0, 0.0);\n";
 	code += terrain_shader_locals(p_translation, p_material);
 	code += p_translation.body;
+	// INFERRED: the decal writes the terrain's lanes times its cover o0.w, so each lane is divided by it.
+	// Settle: the decal solutions' blend states read.
 	code += "float decal_cover = max(o0.w, 0.0001);\n"
 			"vec3 decal_colour = vec3(o0.y, o0.z, o2.x) / decal_cover;\n"
 			"vec3 decal_normal = normalize(vec3(o0.x, o1.z, o1.x) / decal_cover * 2.0 - 1.0);\n" +

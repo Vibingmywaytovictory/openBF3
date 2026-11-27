@@ -49,6 +49,7 @@ core::Result<std::unique_ptr<DeployedGadgetSet>> load_deployed_gadgets(const cor
 		}
 		part.materials = std::move(*materials);
 		MeshRequest request;
+		// STAND-IN: LOD 0 at every distance. Settle: the meshes' LOD distances read.
 		request.lods = { 0 };
 		request.filter = core::res::SubsetFilter::Drawn;
 		core::Result<CachedMesh> mesh = load_mesh_cached(p_cache, p_mount, object->mesh, request);

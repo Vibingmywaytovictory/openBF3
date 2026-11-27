@@ -23,6 +23,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
+// STAND-IN: the 3p reload rate is clamped to 0.5..2 times the clip's own speed. Settle: retail 3p reloads timed.
 constexpr float kReloadRateMin = 0.5f;
 constexpr float kReloadRateMax = 2.0f;
 
@@ -65,6 +66,7 @@ core::Result<uint32_t> weapon_ant_ref(const core::EbxInstance &p_data, const std
 }
 
 std::string mesh_3p(const core::EbxLibrary &p_library, const core::EbxInstance &p_data) {
+	// STAND-IN: the 3p mesh, reload clip and AntRef come from WeaponStates[0] only. Settle: weapon state switching built.
 	const std::optional<core::EbxValue> state = p_data.get_path("WeaponStates[0]");
 	if (!state) {
 		return {};
@@ -259,6 +261,8 @@ core::Result<MuzzleEntry> muzzle_entry(const core::EbxLibrary &p_library, const 
 		if (const std::optional<core::EbxInstance> fx = p_library.follow(*s, "Effect")) {
 			effect = partition_name(p_library, *fx);
 		}
+		// STAND-IN: the 3p muzzle is the first FireEffects3p entry whose effect name holds "muzz", else the first one.
+		// Settle: how the engine picks the muzzle flash entry.
 		const bool is_muzzle = effect.find("muzz") != std::string::npos;
 		if (!found || (is_muzzle && !muzzle)) {
 			best.offset = *offset;
@@ -446,6 +450,7 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 		}
 	}
 	if (r_part.have_reload && def && std::isfinite(def->fire.reload_time) && def->fire.reload_time > 0.0f) {
+		// INFERRED: the 3p reload clip plays over the weapon's ReloadTime. Settle: a retail 3p reload timed against its clip.
 		const float rate = r_part.reload.tracks.duration_seconds() / def->fire.reload_time;
 		r_part.reload_rate = std::isfinite(rate) ? std::clamp(rate, kReloadRateMin, kReloadRateMax) : 1.0f;
 		char line[96];
@@ -462,8 +467,10 @@ core::Status prepare_item(const core::EbxLibrary &p_lib, const SoldierSpec &p_sp
 			const anim::Xform inv_bind = anim::xform_inverse(xform_of(p_assets.weapon_skeleton.model_pose[size_t(w_root)]));
 			const anim::Vec3 r = entry->rotation_deg;
 
+			// INFERRED: Rotation is in degrees, turned about y, then x, then z. Settle: a retail muzzle entry with a rotation.
 			const anim::Quat q = anim::quat_mul(anim::quat_mul(axis_quat(0, 1, 0, r.y * core::kDegToRadF), axis_quat(1, 0, 0, r.x * core::kDegToRadF)),
 					axis_quat(0, 0, 1, r.z * core::kDegToRadF));
+			// INFERRED: effects emit along their +Y; a quarter turn about x lays it along the barrel (+Z). Settle: a retail flash.
 			const anim::Xform in_mesh{ anim::quat_mul(q, axis_quat(1, 0, 0, 90.0f * core::kDegToRadF)), entry->offset };
 			r_part.muzzle_joint = rig_root;
 			r_part.muzzle_offset = anim::xform_mul(inv_bind, in_mesh);

@@ -174,6 +174,8 @@ std::array<uint8_t, 16> bc1_luminance(const uint8_t *p_block) {
 	return out;
 }
 
+// INFERRED: an unlit blended slot's BC1 colour texture is a mask: its brightness becomes alpha over white.
+// Settle: the scope shaders' programs translated.
 std::array<uint8_t, 16> bc1_mask_to_bc3(const uint8_t *p_bc1_block) {
 	std::array<uint8_t, 16> out{};
 	const std::array<uint8_t, 8> alpha = bc4_encode(bc1_luminance(p_bc1_block));
@@ -182,6 +184,8 @@ std::array<uint8_t, 16> bc1_mask_to_bc3(const uint8_t *p_bc1_block) {
 	return out;
 }
 
+// INFERRED: a multiplying unlit slot multiplies the scene by one minus its texture's brightness.
+// Settle: the scope shaders' programs translated.
 bool inverted_brightness(const MipSlice &p_mip, TextureFormat p_format, std::vector<uint8_t> &r_l8) {
 	std::vector<std::array<float, 4>> texels;
 	if (!p_mip.texels(p_format, texels) || texels.size() != size_t(p_mip.width) * size_t(p_mip.height)) {
@@ -293,6 +297,7 @@ core::Result<PreparedTexture> prepare_faces(const LoadedTexture &p_texture, Text
 		return core::make_error(where + ": format " + std::to_string(int(tex.format)) + " is not uploaded");
 	}
 
+	// WHY: Godot's normal maps read .xy only, and NormalDxt5 holds x in alpha and y in green, so it becomes BC5.
 	const bool transcode = p_role == TextureRole::Normal && tex.format == TextureFormat::NormalDxt5;
 	const bool mask = p_role == TextureRole::Mask && stored == GpuFormat::Bc1;
 	const bool inverted = p_role == TextureRole::InvertedMask;
@@ -389,6 +394,8 @@ core::Result<PreparedTexture> prepare_texture(const LoadedTexture &p_texture, Te
 	return prepare_faces(p_texture, p_role, TextureKind::Texture2D);
 }
 
+// INFERRED: a cube's faces keep their stored D3D order, which Godot's cube map takes as is; the horizontal order is not
+// measured. Settle: a cube whose four sides differ checked against retail.
 core::Result<PreparedTexture> prepare_cube_texture(const LoadedTexture &p_texture, TextureRole p_role) {
 	return prepare_faces(p_texture, p_role, TextureKind::Cube);
 }

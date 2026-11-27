@@ -130,6 +130,8 @@ std::vector<VehicleMeshPart> split_mesh_parts(const PreparedMesh &p_mesh) {
 	return out;
 }
 
+// INFERRED: a wheel's mesh part is the one whose pivot lies within half a radius of the wheel's centre and whose half
+// height is within half a radius of its radius. Settle: a data link from a wheel component to its mesh part.
 std::vector<int8_t> vehicle_wheel_parts(const VehicleMeshKind &p_kind, std::span<const VehicleWheelRest> p_wheels) {
 	std::vector<int8_t> out(p_kind.parts.size(), -1);
 	for (size_t w = 0; w < p_wheels.size(); ++w) {
@@ -183,6 +185,8 @@ core::Result<std::unique_ptr<VehicleMeshSet>> load_vehicle_meshes(const core::Eb
 			if (!materials) {
 				return core::error_at(what + ": " + name, materials.error());
 			}
+			// STAND-IN: LOD 0 at every distance, split per part and drawn rigid, the skeletons unread.
+			// Settle: the vehicles' LOD distances and skinned track meshes read.
 			MeshRequest request;
 			request.lods = { 0 };
 			request.filter = core::res::SubsetFilter::Drawn;

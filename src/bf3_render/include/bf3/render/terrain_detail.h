@@ -13,6 +13,8 @@
 
 namespace bf3::render {
 
+// STAND-IN: the fine mask and colour window is at most 1024 texels a side around the camera, in place of BF3's terrain
+// streaming. Settle: the terrain streaming read.
 inline constexpr uint32_t kTerrainDetailSide = 1024;
 
 struct TerrainDetailLayout {
