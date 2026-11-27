@@ -106,6 +106,7 @@ Result<FontMappingCollection> read_font_mapping(const EbxResolver &p_ebx, std::s
 		}
 		c.fonts.push_back(std::move(m));
 	}
+	// INFERRED: the font library is the partition name with _fontlib for _fontmapcollection. Settle: a field naming it.
 	if (key.size() > kMapSuffix.size() && key.compare(key.size() - kMapSuffix.size(), kMapSuffix.size(), kMapSuffix) == 0) {
 		c.font_library = key.substr(0, key.size() - kMapSuffix.size()) + std::string(kLibSuffix);
 	}
@@ -211,6 +212,8 @@ ResolvedFont resolve_font_name(const FontMappingCollection &p_collection, std::s
 		return r;
 	}
 
+	// STAND-IN: an unlisted $ name falls back by family: $hud* to $HUD_medium, $menu* to $MENU_medium, $font_title* to
+	// $MENU_bold. Settle: a retail capture of a $HUD_light or $FONT_TITLE line.
 	std::string target;
 	if (starts_with(folded, "$hud")) {
 		target = "$hud_medium";

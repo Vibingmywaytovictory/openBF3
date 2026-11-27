@@ -15,11 +15,15 @@ namespace bf3::core::level {
 namespace {
 
 constexpr size_t kMaxLods = 4;
+// STAND-IN: a mesh of radius 16 m or more placed at most 4 times is a world mesh kept only if LOD0 draws; other meshes
+// are kept if LOD0 or LOD1 draws. Settle: a note on how the renderer picks a mesh's LODs.
 constexpr float kWorldRadius = 16.0f;
 constexpr size_t kWorldMaxPlacements = 4;
 constexpr size_t kMaxComponents = 4096;
 
 constexpr size_t kMaxResName = 1024;
+// STAND-IN: a material slot whose shader name contains one of these words is not drawn. Settle: the shader data's
+// own visibility (a note on those shaders).
 constexpr std::string_view kUndrawnShaders[2] = { "invisible", "ui_menu" };
 
 using Vec3f = core::Vec3;
@@ -167,6 +171,8 @@ struct MeshResult {
 
 }
 
+// STAND-IN: HealthStates[0] is the intact state and the parts only later states name start hidden; no state ever
+// changes (no destruction). Settle: build destruction from PartComponentData.
 Result<std::optional<std::vector<uint16_t>>> hidden_parts(const EbxResolver &p_db, const EbxInstance &p_entity, WorkBudget &r_budget) {
 	std::vector<uint16_t> intact;
 	std::vector<uint16_t> damaged;
@@ -232,6 +238,8 @@ std::optional<bool> driver_start(const Connection &p_connection, gameplay::Logic
 
 }
 
+// INFERRED: a placement starts hidden when a Bool's DefaultValue or a SyncedBool's In on this side drives its Visible
+// or Enabled false. Settle: a note on how a level applies those start values.
 Result<bool> starts_hidden(const World &p_world, const PlacedObject &p_object, gameplay::LogicSide p_side) {
 	WorkBudget &budget = *p_world.budget;
 	BF3_TRY(budget.status());
@@ -694,6 +702,8 @@ Result<std::vector<CollisionPlacement>> collision_placements(const EbxResolver &
 			}
 			assets.emplace_back(*name, *scale);
 		}
+		// INFERRED: a placement uses the ScaledAssets entry whose Scale is nearest (in log) to its own scale, the first one
+		// present in the mount. Settle: a note on how ScaledAssets is picked.
 		const auto off = [&](float p_scale) { return total_order_key(std::fabs(std::log(p_scale / placed))); };
 		std::stable_sort(assets.begin(), assets.end(), [&](const auto &p_a, const auto &p_b) { return off(p_a.second) < off(p_b.second); });
 		const std::pair<std::string_view, float> *chosen = nullptr;

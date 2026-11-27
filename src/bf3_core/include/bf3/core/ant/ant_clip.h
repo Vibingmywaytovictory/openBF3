@@ -102,6 +102,8 @@ AntResult decode_clip(const GdStruct &p_clip, DecodedClip &r_out, DecodeStats *r
 
 inline constexpr std::array<std::array<uint8_t, 3>, 6> kEulerOrders{ { { 0, 1, 2 }, { 0, 2, 1 }, { 1, 0, 2 },
 		{ 1, 2, 0 }, { 2, 0, 1 }, { 2, 1, 0 } } };
+// INFERRED: a CurveAnimationAsset rotation is q = qz qy qx, the order fitted on the M40A5 Fire clip's constant
+// rotations against its IdlePose. Settle: a note on the Curve codec's angle order.
 inline constexpr uint32_t kCurveEulerOrder = 5;
 
 Quat euler_quat(const float p_angles[3], uint32_t p_order);

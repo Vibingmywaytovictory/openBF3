@@ -1,5 +1,7 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 class Widget.TicketCounter.TicketCounter (bf3dump swf as2 actionscriptlibrary), which this file
+// ports; bind() is ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -117,6 +119,7 @@ private:
 				r_out.push_back({ "EnemyTeamName", As2Value::of(p_client.localise_hash(t.enemy_team1_name)) });
 			}
 		}
+		// INFERRED: Conquest's MaxTickets is the global maximum. Settle: a note on UITicketCounterComp's MaxTickets.
 		if (k.global_max_tickets > 0) {
 			r_out.push_back({ "MaxTickets", As2Value::of(k.global_max_tickets) });
 		}

@@ -12,6 +12,8 @@ namespace {
 using C = LogicTypeClass;
 using T = LogicTypeId;
 
+// INFERRED: each type's class (primitive, native, passive, data, structural) is openBF3's own sorting by what the
+// server reads, not stated by the data. Settle: a note per type's runtime side.
 constexpr LogicTypeInfo kRows[] = {
 	{ T::Unknown, "", C::Unknown, false },
 

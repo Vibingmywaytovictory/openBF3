@@ -18,6 +18,8 @@ std::string_view tail_of(std::string_view p_path) {
 
 }
 
+// STAND-IN: a kit's appearance is picked from its visual unlock's LinkedTo list by partition name
+// (mp_<faction>_<role>_appearance*), not by a data link. Settle: the EBX field that ties a kit to its appearance.
 bool appearance_matches_kit(std::string_view p_kit_asset, std::string_view p_appearance) {
 	const std::string kit = to_lower_ascii(tail_of(p_kit_asset));
 	const std::string app = to_lower_ascii(tail_of(p_appearance));
@@ -73,6 +75,8 @@ Result<KitAppearance> read_kit_appearance(const EbxResolver &p_db, std::string_v
 	if (camos.empty()) {
 		return make_error("kit appearance: `" + out.kit + "`: no visual unlock");
 	}
+	// INFERRED: the first SelectableUnlocks entry of the first UnlockParts is the default camouflage.
+	// Settle: a note on the default visual unlock of a kit.
 	const EbxInstance &camo = camos.front();
 	BF3_TRY(budget.charge_type(camo.data()));
 	out.visual_unlock = partition_name(budget, p_db, camo);

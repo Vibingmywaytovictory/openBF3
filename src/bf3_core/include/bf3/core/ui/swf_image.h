@@ -12,6 +12,7 @@
 
 namespace bf3::core::ui {
 
+// SOURCE: Widget.Image.ImageManager's AS2 loads "img://" + url through MovieClipLoader.loadClip (bf3dump swf as2).
 inline constexpr std::string_view kSwfImageScheme = "img://";
 inline constexpr std::string_view kSwfImageSuperbundle = "Win32/UI";
 inline constexpr uint32_t kSwfImageMaxSide = 4096;

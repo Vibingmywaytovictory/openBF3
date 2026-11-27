@@ -10,6 +10,7 @@
 
 namespace bf3::core::ui {
 
+// SOURCE: research/topics/gap-r1-ui-hud-minimap-localisation.md 6 (DefineFont3 glyphs at 20 twips x 1024 em).
 inline constexpr int32_t kSwfFontUnitsPerEm = 20480;
 
 inline constexpr uint32_t kSwfFontMaxGlyphs = 65535;

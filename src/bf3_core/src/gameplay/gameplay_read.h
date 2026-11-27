@@ -84,6 +84,8 @@ inline Result<level::LevelTransform> component_transform(const EbxInstance &p_co
 inline constexpr size_t kMaxVehicleComponents = 8192;
 inline constexpr size_t kMaxVehicleComponentDepth = 32;
 
+// STAND-IN: an UnlockComponentData subtree counts only with InvertUnlockTest, as for a player who owns no unlock; no
+// vehicle loadout chooses one. Settle: a vehicle loadout with the unlock test.
 inline bool active_component(const EbxInstance &p_component) {
 	if (!p_component.is_a("ComponentData") || boolean(p_component.data(), "Excluded").value_or(false)) {
 		return false;

@@ -9,6 +9,8 @@
 namespace bf3::core::ui {
 
 inline constexpr std::string_view kUiCustomizationCategory = "ui/uicomponents/uicustomizationcomp";
+// INFERRED: the CUSTOMIZE screens' KitView Setup DataKeys below, each paired with its selector by the widget it binds,
+// as the key hash is unknown. Settle: a note on how UICustomizationComp derives its DataKeys.
 inline constexpr int32_t kCustomizeKitsSetupKey = 537447676;
 inline constexpr std::array<int32_t, kHudSpawnKitItems> kCustomizeItemSetupKeys{ 892395121, -1698501497, -167212006,
 	-167212007, 175312528 };

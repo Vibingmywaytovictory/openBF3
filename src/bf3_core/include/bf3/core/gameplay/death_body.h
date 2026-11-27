@@ -6,9 +6,13 @@
 
 namespace bf3::core::gameplay {
 
+// INFERRED: codes 0..3 are HitFront, HitRight, HitLeft, HitBack (R5-DT1 A2 maps them by field order).
+// Settle: retail footage of a death from a known side.
 enum class DeathHitDirection : uint8_t { Front = 0, Right = 1, Left = 2, Back = 3, None = 4 };
 enum class DeathBone : uint8_t { Body = 0, Head = 1, RightArm = 2, LeftArm = 3, RightLeg = 4, LeftLeg = 5 };
 
+// SOURCE: notes R5-DT1 A and B with its checker (0.1 m/s dead zone as the double nearest 0.1f, the 1e-6 test, the mod 5
+// counter, RandomValue (k + 1) 2^-24 from 24 bits, the 1.0 s Revived pulse) and the six constants below.
 inline constexpr double kDeathSpeedDeadZone = double(0.1f);
 inline constexpr float kDeathDirectionMinLengthSq = 1.0e-6f;
 inline constexpr uint32_t kDeathAnimationVariants = 5;
@@ -69,11 +73,14 @@ public:
 	uint64_t count() const { return count_; }
 
 private:
+	// INFERRED: the counter starts at 0 (R5-DT1 A6). Settle: a note on the counter's start value.
 	uint64_t count_ = 0;
 };
 
 DeathRecord make_death_record(const DeathInput &p_input, DeathCounter &r_counter);
 
+// SOURCE: notes R5-DT1 E and its checker (0.1 s ramp, 1e-6, 4.0 s, 0.99, two pose copies), R5-DT2 C (settle 0.5 s,
+// 0.5 m/s, 0.5 rad/s) and R5-DT2 F (hold 1.0 s, root 0.7 s): the constants below.
 inline constexpr float kRagdollFinalRampSeconds = 0.1f;
 inline constexpr float kRagdollSettleEpsilon = 1.0e-6f;
 inline constexpr float kRagdollForceSeconds = 4.0f;

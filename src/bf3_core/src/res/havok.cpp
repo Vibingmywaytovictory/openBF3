@@ -246,6 +246,8 @@ ResError PackReader::shape_at(uint32_t p_at, uint32_t p_depth, Shape &r_shape) {
 		s.extended = std::make_unique<ExtendedMesh>();
 		e = extended_mesh(p_at, c == "hkpStorageExtendedMeshShape", p_depth, *s.extended);
 	} else {
+		// STAND-IN: a shape class not read above is kept by name and collides as nothing.
+		// Settle: count such classes over the install's Havok res with bf3dump.
 		s.type = ShapeType::Unsupported;
 		s.class_name = c;
 	}

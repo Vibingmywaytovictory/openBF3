@@ -15,10 +15,12 @@ namespace bf3::core::ui {
 class HudScreen;
 
 inline constexpr int32_t kSwfMaxLayerSide = 4096;
+// STAND-IN: a blur kernel is cut to 63 taps per axis and renormalised. Settle: a retail capture of the widest blur.
 inline constexpr int32_t kSwfMaxKernelTaps = 63;
 inline constexpr int32_t kSwfPageRound = 8;
 inline constexpr int32_t kSwfPagePadding = 1;
 inline constexpr uint64_t kSwfTargetFactor1x = 1;
+// WHY: a 4x MSAA target holds four samples per pixel plus its resolved 1x copy.
 inline constexpr uint64_t kSwfTargetFactor4x = 5;
 inline constexpr double kSwfPageMargin = 1.25;
 inline constexpr uint32_t kSwfNoLayer = 0xffffffffu;

@@ -12,6 +12,8 @@ namespace bf3::core::gameplay {
 
 inline constexpr uint32_t kCapsuleTableVersion = 2;
 inline constexpr size_t kCapsuleStances = 3;
+// STAND-IN: rewound hit capsules come from this table, sampled at 33 aim pitches and 16 fractions of each stance
+// transition, not from the live pose. Settle: a note on how the rewind poses the hit capsules.
 inline constexpr size_t kCapsulePitchBuckets = 33;
 inline constexpr size_t kCapsuleTransitions = 6;
 inline constexpr size_t kCapsuleTransitionFractions = 16;

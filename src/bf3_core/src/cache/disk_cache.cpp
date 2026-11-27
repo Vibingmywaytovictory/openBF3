@@ -637,6 +637,7 @@ CacheStatus Cache::open(CacheOptions p_options, std::string *r_detail) {
 	}
 	s->lock = cd::open_child_lock(s->vdir, kLockName, err);
 	if (!s->lock.valid()) {
+		// WHY: error 32 is a sharing violation: another process holds the lock file open.
 		return fail(err == 32   ? CacheStatus::Busy : CacheStatus::Io, "cannot lock the cache", err);
 	}
 

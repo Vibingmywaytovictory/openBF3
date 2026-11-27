@@ -94,6 +94,7 @@ std::optional<float> ui_flow_action_float(const UiFlowAction &p_action) {
 	return v;
 }
 
+// WHY: DataSetNode Params carry both "true"/"True" and "false"/"False" (notes R5-UI2 A5).
 bool ui_flow_truthy(std::string_view p_value) {
 	if (p_value.empty()) {
 		return false;
@@ -231,6 +232,8 @@ std::vector<uint64_t> UiFlow::take_closing() {
 	return out;
 }
 
+// INFERRED: a data source with no DataCategory reads the incoming value (endofroundgraph's Compare_SelectedTab compares
+// the TabReleased tab id). Settle: a note on UI graph data sources.
 std::optional<std::string> UiFlow::read(const UiDataRef &p_ref, const std::optional<std::string> &p_incoming) {
 	if (!p_ref.defined() || p_ref.category.empty()) {
 		return p_incoming;
@@ -309,6 +312,8 @@ UiFlowScreen *UiFlow::ensure_screen(Instance &r_inst, uint32_t p_node, bool p_sh
 		}
 	}
 	if (s == nullptr) {
+		// INFERRED: in a graph without ProtectScreens, a push reached from an InstanceInput closes the screens that graph
+		// showed before that input (weapongraph, 18.57 at 327.2 s). Settle: a note on the UI manager's push.
 		if (p_focus && r_inst.graph == input_graph_ && !r_inst.asset->protect_screens) {
 			for (size_t i = 0; i < screens_.size(); ++i) {
 				if (screens_[i].graph == r_inst.graph && screens_[i].id < input_first_screen_) {
@@ -492,6 +497,8 @@ void UiFlow::enter(Instance &r_inst, uint32_t p_node, uint32_t p_port, const std
 					actions_ != nullptr ? actions_->name_of(n.action_key) : std::nullopt;
 			a.name = name ? std::string(*name) : std::to_string(n.action_key);
 			a.params = n.params;
+			// INFERRED: the incoming value is appended when AppendIncomingParams is set or Params is empty.
+			// Settle: a note on ActionNode.
 			if (p_value && (n.append_params || n.params.empty())) {
 				a.params.push_back(*p_value);
 			}
@@ -509,6 +516,8 @@ void UiFlow::enter(Instance &r_inst, uint32_t p_node, uint32_t p_port, const std
 			note("set " + data_text(n.data) + "=" + value);
 			host_.data_set(n.data, value, n.force_update);
 			if (const std::optional<uint32_t> o = n.port(UiGraphPortRole::Out)) {
+				// INFERRED: a DataSetNode passes its incoming value on, not the Param it set (customizesoldiersubscreen's
+				// SelectorChanged needs the picked index). Settle: a note on DataSetNode.
 				follow(r_inst, p_node, *o, p_value ? *p_value : value);
 			}
 			break;
@@ -534,6 +543,7 @@ void UiFlow::enter(Instance &r_inst, uint32_t p_node, uint32_t p_port, const std
 		case UiGraphNodeKind::DataIncrement: {
 			const std::optional<std::string> v = host_.data_get(n.data);
 			double next = (v ? number_of(*v).value_or(n.minimum) : n.minimum) + n.increment;
+			// INFERRED: past Max the value wraps to Min, from the minimap zoom cycle. Settle: a note on DataIncrementNode.
 			if (next > n.maximum) {
 				next = n.minimum;
 			}
@@ -687,6 +697,8 @@ bool UiFlow::widget_fired(
 	return found;
 }
 
+// INFERRED: a concept goes to the focused screen, then down the shown stack to the first modal one, and is taken by the
+// first whose state has an output port for it. Settle: a note on the UI manager's input routing.
 std::optional<uint64_t> UiFlow::concept_screen(int32_t p_action) const {
 	std::vector<uint64_t> order;
 	if (const UiFlowScreen *focused = focus_ ? screen(*focus_) : nullptr; focused != nullptr && focused->shown) {

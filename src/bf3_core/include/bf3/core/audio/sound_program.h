@@ -34,6 +34,7 @@ inline constexpr size_t kMaxProgramConnections = 4096;
 inline constexpr size_t kMaxProgramWaves = 4096;
 inline constexpr size_t kMaxCurvePoints = 64;
 inline constexpr uint16_t kNoRegister = 0xffff;
+// SOURCE: the djb2-xor name hash of "AreaType" (research/topics/gap-r1-level-logic-schematics.md, port names).
 inline constexpr uint32_t kMixerAreaType = 3772263626u;
 
 struct SoundPort {

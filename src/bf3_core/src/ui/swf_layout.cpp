@@ -176,6 +176,8 @@ const char *hud_anchor_name(HudAnchor p_anchor) {
 	return "?";
 }
 
+// STAND-IN: a widget takes the nearest of nine anchors by stage thirds; the movies align through
+// fb.Base.UIBase.updateAlignment. Settle: port updateAlignment's rule.
 HudAnchor hud_anchor_for(float p_x, float p_y, const SwfRect &p_stage) {
 	const float w = p_stage.width();
 	const float h = p_stage.height();

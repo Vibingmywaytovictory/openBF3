@@ -71,6 +71,8 @@ Result<ImpulseResponseHeader> read_impulse_header(std::span<const uint8_t> p_chu
 	return h;
 }
 
+// INFERRED: each block's bins are the low (re, im) bins of a 2048-point real FFT of the zero-padded block, scaled by
+// 2^k - 1; the response is the inverse's first 1024 samples over scale + 1. Settle: a research/ fact on irf1 blocks.
 Result<ImpulseResponse> decode_impulse_response(std::span<const uint8_t> p_chunk) {
 	Result<ImpulseResponseHeader> h = read_impulse_header(p_chunk);
 	if (!h) {

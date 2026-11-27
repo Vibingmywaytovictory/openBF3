@@ -41,6 +41,8 @@ Error volume_error(const std::string &p_what) {
 
 }
 
+// INFERRED: 1 inside, faded over FadeWidth outside: SineAmplitude cos(t pi/2), LinearAmplitude 1 - t, LinearDecibel
+// 0 to -60 dB. Settle: a note on FadeCurveType, or retail recordings across an area edge.
 float area_fade(AreaFadeCurve p_curve, float p_distance, float p_width) {
 	if (std::isnan(p_distance)) {
 		return 0.0f;
@@ -183,6 +185,8 @@ Result<AreaVolume> read_area_volume(const EbxInstance &p_shape, const LevelTrans
 		}
 		world.push_back(p_transform.transform_point(*v));
 	}
+	// INFERRED: a VolumeVectorShapeData is a prism: the points' polygon at their lowest point, extruded Height along the
+	// first normal; tilted normals, open paths and Tension curves are counted, not modelled. Settle: a note on the shape.
 	Vec3 up{ 0.0f, 1.0f, 0.0f };
 	bool tilted = false;
 	const std::optional<EbxValue> normals = p_shape.get("Normals");

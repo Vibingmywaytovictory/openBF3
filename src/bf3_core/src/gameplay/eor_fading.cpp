@@ -92,6 +92,8 @@ Result<std::vector<EorFadingKey>> read_sequence_float_track(
 		if (!ta || !va || ta->size() != va->size() || ta->size() == 0) {
 			return make_error("the float track's times and values differ");
 		}
+		// INFERRED: FloatPropertyTrackData.Times are in ms (mp_eor_fading's keys end at its SequenceLength 750).
+		// Settle: a note on the property track time unit.
 		std::vector<EorFadingKey> keys;
 		for (size_t i = 0; i < ta->size(); ++i) {
 			const std::optional<EbxValue> t = ta->get(i);
@@ -109,6 +111,7 @@ Result<std::vector<EorFadingKey>> read_sequence_float_track(
 	return make_error("no float track " + std::to_string(p_track));
 }
 
+// INFERRED: a float track is linear between its keys and holds its end values. Settle: a note on the track evaluator.
 float eor_fading_key_at(std::span<const EorFadingKey> p_keys, float p_seconds) {
 	if (p_keys.empty()) {
 		return 0.0f;
@@ -162,6 +165,8 @@ Status read_grade(
 
 }
 
+// INFERRED: the flash stays at its last key until the screen is black, then goes off; the screen and UI fades are
+// linear over their FadeTime. Settle: retail footage of a round end.
 float EorFading::visibility_at(float p_seconds) const {
 	if (visibility.empty() || p_seconds < 0.0f || p_seconds >= flash_s + screen_fade_s) {
 		return 0.0f;
@@ -212,6 +217,7 @@ Result<EorFading> read_eor_fading(const EbxResolver &p_db, level::WorkBudget &r_
 		return make_error(where + ": StartFade starts no sequence");
 	}
 	EorFading out;
+	// INFERRED: SequenceEntityData.SequenceLength is in ms. Settle: a note on the sequence's time unit.
 	const std::optional<float> length_ms = seconds_in(sequence->data(), "SequenceLength");
 	if (!length_ms || *length_ms <= 0.0f) {
 		return make_error(where + ": the sequence has no SequenceLength");

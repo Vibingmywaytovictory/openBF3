@@ -16,6 +16,8 @@ enum class HudSquadOrder : uint8_t {
 	Defend,
 };
 
+// SOURCE: bf3dump swf labels iconsingame: mc_iconsIngameSmall frames 16, 17 and 18 are ObjectiveDefend, ObjectiveMoveTo
+// and ObjectiveAttack; fb.Defines gives UIHudIcon_ObjectiveAttack 18.
 inline constexpr int32_t kUiHudIconObjectiveDefend = 16;
 inline constexpr int32_t kUiHudIconObjectiveMoveTo = 17;
 inline constexpr int32_t kUiHudIconObjectiveAttack = 18;

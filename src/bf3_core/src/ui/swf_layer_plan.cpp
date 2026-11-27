@@ -25,6 +25,8 @@ SwfBounds box_of(const SwfRect &p_r) {
 	return b;
 }
 
+// INFERRED: Flash's blur, a box of blurX/blurY px applied quality (passes) times, taken as GFx's.
+// Settle: a retail capture of a glow against this kernel.
 std::vector<double> box_kernel(double p_width, uint32_t p_passes) {
 	std::vector<double> k{ 1.0 };
 	if (p_passes == 0 || !(p_width > 1.0)) {
@@ -278,6 +280,7 @@ struct LayerWalker {
 			}
 			const bool add = n->blend_mode == swf_blend::kAdd;
 			const bool blend_layer = n->blend_mode == swf_blend::kLayer;
+			// STAND-IN: blend modes other than normal, layer and add are drawn as normal. Settle: a renderer for them.
 			if (n->blend_mode > swf_blend::kLayer && !add) {
 				visitor.unsupported_blend(*n);
 			}
@@ -439,6 +442,8 @@ uint64_t swf_target_bytes(int32_t p_width, int32_t p_height, uint64_t p_factor) 
 	return uint64_t(std::max(0, p_width)) * uint64_t(std::max(0, p_height)) * 4u * p_factor;
 }
 
+// STAND-IN: only DropShadow, Glow and Blur are drawn; Bevel, ColorMatrix, Convolution and gradient filters are dropped.
+// Settle: a renderer for the other filter kinds.
 bool swf_filter_supported(const SwfFilter &p_filter) {
 	return p_filter.kind == SwfFilterKind::DropShadow || p_filter.kind == SwfFilterKind::Glow ||
 			p_filter.kind == SwfFilterKind::Blur;
@@ -460,6 +465,8 @@ SwfPoint SwfGridWarp::warp(SwfPoint p_p) const {
 	return { float(grid_axis(p_p.x, bx0, bx1, l, r, sx)), float(grid_axis(p_p.y, by0, by1, t, b, sy)) };
 }
 
+// INFERRED: a shape takes the DefineScalingGrid of its nearest ancestor sprite that has one, sliced in that sprite's
+// space, for nested clips in GFx. Settle: a retail capture of a scaled nested grid clip.
 const SwfSceneNode *swf_grid_owner(const SwfScene &p_scene, const SwfSceneNode &p_node, SwfAffine *r_to_owner) {
 	SwfAffine to_owner = swf_affine(p_node.matrix);
 	for (const SwfSceneNode *s = p_scene.node(p_node.parent); s != nullptr; s = p_scene.node(s->parent)) {
@@ -506,6 +513,8 @@ SwfGridWarp swf_grid_warp(const SwfScene &p_scene, const SwfSceneNode &p_node, c
 	return g;
 }
 
+// STAND-IN: a StaticText node (DefineText, 12 tags in the install by bf3dump swf census) gets no pieces and is not drawn.
+// Settle: a DefineText renderer.
 SwfNodePieces swf_node_pieces(const SwfScene &p_scene, const SwfFontSet *p_fonts, const SwfSceneNode &p_node) {
 	SwfNodePieces out;
 	out.frame = &p_node;

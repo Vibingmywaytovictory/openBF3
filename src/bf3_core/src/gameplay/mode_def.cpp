@@ -105,6 +105,8 @@ std::string scope_prefab(const LogicWorld &p_world, uint32_t p_scope) {
 	return copy_text(p_world.budget(), p_world.scope_name(p_scope));
 }
 
+// STAND-IN: the SyncedBool's start value opens the gates as if it fired; notes M-RU1 E read that it fires nothing at
+// init, so the 25 s fuse stays in Rush and Squad Rush. Settle: follow M-RU1 E, or a note on SyncedBool init order.
 Status read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 	WorkBudget &budget = p_world.budget();
 	const LogicScope &scope = p_world.scopes()[p_scope];
@@ -208,6 +210,8 @@ Status read_fuse(const LogicWorld &p_world, uint32_t p_scope, McomDef &r_mcom) {
 	return Status::success();
 }
 
+// INFERRED: a mode's GameModeSize is the Win32 size whose Name or MetaIdentifier is the mode id without its trailing
+// digits, else that platform's DefaultSize. Settle: a note on how the server picks a GameModeSize.
 std::optional<GameModeSizeDef> read_size(const EbxResolver &p_db, const std::string &p_level, std::string_view p_mode, WorkBudget &r_budget) {
 	const EbxPartition *partition = p_db.partition_by_name("levels/" + p_level + "/" + p_level + "/settings_win32");
 	if (!partition || !r_budget.take(partition->instance_count())) {
@@ -357,6 +361,8 @@ Result<std::vector<std::string>> level_modes(const EbxResolver &p_db, std::strin
 	return out;
 }
 
+// INFERRED: a capture point's name is the nearest enclosing scope's LocationTextSid that has no space.
+// Settle: a note on the HUD's flag name source.
 std::string location_sid(const LogicWorld &p_world, uint32_t p_scope) {
 	std::optional<uint32_t> at = p_scope;
 	for (size_t guard = 0; at && guard < 64; ++guard) {

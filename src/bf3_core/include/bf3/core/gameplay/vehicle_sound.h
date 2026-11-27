@@ -38,6 +38,7 @@ inline constexpr int32_t kGForce = logic_port_id("GForce");
 }
 
 inline constexpr int32_t kUseFirstPersonSoundsField = logic_port_id("UseFirstPersonSounds");
+// SOURCE: notes R5-UI1 A1 (0xfff52c2c, the camera component's ACTIVE output; its name is unknown).
 inline constexpr int32_t kCameraViewActiveField = int32_t(4294257708u);
 
 struct VehicleEngineSound {

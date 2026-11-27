@@ -2,6 +2,8 @@
 
 #include "bf3/core/ui/hud_icons.h"
 
+// SOURCE: the AS2 class Widget.Hud.ObjectiveBar (bf3dump swf as2 actionscriptlibrary), which this file ports,
+// all but hud_objective_status and hud_minimap_flags.
 namespace bf3::core::ui {
 
 namespace {
@@ -108,6 +110,8 @@ private:
 
 }
 
+// INFERRED: the flag letters run A onward in the status order (SpawnMenuListOrdinal), HQs unlettered.
+// Settle: a note on where the engine takes a flag's letter.
 As2Value hud_objective_status(const HudCapturePointList &p_points) {
 	As2Value out = As2Value::array();
 	char letter = 'A';
@@ -129,6 +133,7 @@ As2Value hud_objective_status(const HudCapturePointList &p_points) {
 	return out;
 }
 
+// INFERRED: the same A-onward letter rule as hud_objective_status. Settle: a note on where a flag's letter comes from.
 std::vector<HudFlagIcon> hud_minimap_flags(const HudCapturePointList &p_points) {
 	std::vector<HudFlagIcon> out;
 	char letter = 'A';

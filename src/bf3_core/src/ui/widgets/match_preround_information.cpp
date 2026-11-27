@@ -1,5 +1,6 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 class Widget.Hud.MatchPreroundInformation (bf3dump swf as2 actionscriptlibrary), ported here.
 namespace bf3::core::ui {
 
 namespace {

@@ -59,6 +59,8 @@ struct KeyBindingMaps {
 Result<KeyBindingMaps> read_key_binding_maps(const EbxResolver &p_db);
 Result<std::vector<std::string>> read_key_binding_tabs(const EbxResolver &p_db);
 
+// INFERRED: TabBar_02's tabs ON FOOT, IN VEHICLE, IN JET, IN HELI and ALL are these maps, paired by name.
+// Settle: a note on how the key bindings screen picks a map per tab.
 inline constexpr std::array<std::string_view, 5> kKeyBindingTabMaps = { "infantry", "vehicle", "jet", "heli",
 	"default" };
 

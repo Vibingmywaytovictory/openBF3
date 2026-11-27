@@ -75,6 +75,8 @@ Result<UiPostProcessData> read_ui_post_process(const EbxResolver &p_db) {
 	return out;
 }
 
+// INFERRED: the glitch power falls linearly by TimeScale per second, read off the 18.57 footage.
+// Settle: a note on UIPostProcessComponentData.
 float ui_glitch_power(const UiPostProcessData &p_data, float p_start_power, double p_elapsed_s) {
 	if (!std::isfinite(p_start_power) || p_start_power <= 0.0f || !std::isfinite(p_elapsed_s) ||
 			!(p_data.time_scale > 0.0f)) {
@@ -153,6 +155,8 @@ Result<MenuGrade> read_menu_visual_environment(const EbxResolver &p_db) {
 	return out;
 }
 
+// INFERRED: saturation about Rec. 601 luma, then contrast about 0.5, then brightness, an order read off the 18.57
+// footage. Settle: a note on ColorCorrectionComponentData.
 std::array<float, 3> menu_grade_rgb(const MenuGrade &p_grade, const std::array<float, 3> &p_rgb, float p_visibility) {
 	const float v = std::isfinite(p_visibility) ? std::clamp(p_visibility, 0.0f, 1.0f) : 0.0f;
 	const float luma = p_rgb[0] * 0.299f + p_rgb[1] * 0.587f + p_rgb[2] * 0.114f;
@@ -165,6 +169,7 @@ std::array<float, 3> menu_grade_rgb(const MenuGrade &p_grade, const std::array<f
 	return out;
 }
 
+// STAND-IN: vignette = (centre distance x Scale) ^ Exponent x Opacity. Settle: a note on VignetteComponentData.
 float menu_vignette(const MenuGrade &p_grade, float p_u, float p_v) {
 	if (!p_grade.vignette) {
 		return 0.0f;
@@ -213,6 +218,8 @@ Result<UiDimmerRamp> read_ingame_dimmer(const EbxResolver &p_db) {
 			}
 			track.keys.push_back(DimmerKey{ float(*ms), float(*value) });
 		}
+		// INFERRED: Times in ms; the track ending above 0 is the fade-in, below 0 the fade-out.
+		// Settle: a note on uiingamedimmer's FloatPropertyTrackData events.
 		track.length_ms = track.keys.back().ms;
 		if (track.keys.back().value > 0.0f && !have_in) {
 			out.in = std::move(track);

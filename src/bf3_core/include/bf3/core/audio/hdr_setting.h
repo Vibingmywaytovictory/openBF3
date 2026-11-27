@@ -11,6 +11,7 @@ namespace bf3::core::audio {
 
 inline constexpr std::string_view kSoundStatesPartition = "sound/soundstates";
 
+// SOURCE: the HdrSetting of sound/soundstates; every default in this block is that instance's field value.
 struct HdrSetting {
 	float window_size_db = 45.0f;
 	float window_min_top_db = 80.0f;

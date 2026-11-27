@@ -12,6 +12,7 @@ class EbxInstance;
 
 namespace bf3::core::gameplay {
 
+// SOURCE: research/topics/gap-r1-level-logic-schematics.md (port names are djb2-xor hashes, u32 stored as i32).
 constexpr int32_t logic_port_id(std::string_view p_name) {
 	uint32_t h = 5381;
 	for (const char c : p_name) {
@@ -57,6 +58,7 @@ inline constexpr int32_t kOnTriggeredByMatchingTeam = logic_port_id("OnTriggered
 inline constexpr int32_t kOnTriggerOnlyForSpecifiedTeam = logic_port_id("OnTriggerOnlyForSpecifiedTeam");
 inline constexpr int32_t kDelay = logic_port_id("Delay");
 
+// SOURCE: bf3dump logic ports on the install: EventSplitterEntityData's events Impulse and OnImpulse, as their hashes.
 inline constexpr int32_t kSplitterIn = 1723395486;
 inline constexpr int32_t kSplitterOut = -137490305;
 }
@@ -227,6 +229,7 @@ enum class LogicRealm : uint8_t { Client = 0, Server = 1, ClientAndServer = 2, N
 
 std::optional<LogicRealm> logic_realm_from_name(std::string_view p_enumerator);
 
+// INFERRED: an entity with no Realm field (Unset) runs on both sides. Settle: a note on realm-less entities.
 constexpr bool realm_on_server(LogicRealm p_realm) {
 	return p_realm == LogicRealm::Server || p_realm == LogicRealm::ClientAndServer || p_realm == LogicRealm::Unset;
 }
@@ -249,6 +252,8 @@ constexpr bool delivered_on_server(LogicEventTarget p_target) {
 	return p_target == LogicEventTarget::Server || p_target == LogicEventTarget::ClientAndServer || p_target == LogicEventTarget::NetworkedClientAndServer;
 }
 
+// INFERRED: a Networked target type fires on the server and is delivered to clients over the wire, as
+// research/topics/gap-r1-level-logic-schematics.md 3.4 reads the names. Settle: a note on networked event connections.
 constexpr bool networked_to_clients(LogicEventTarget p_target) {
 	return p_target == LogicEventTarget::NetworkedClient || p_target == LogicEventTarget::NetworkedClientAndServer;
 }

@@ -19,11 +19,15 @@ class EbxResolver;
 
 namespace bf3::core::ui {
 
+// SOURCE: research/topics/gap-r1-ui-hud-minimap-localisation.md 4 (binary chunk 0x00039000, histogram 0x00039001).
 inline constexpr uint32_t kTextBinaryMagic = 0x00039000;
 inline constexpr uint32_t kTextHistogramMagic = 0x00039001;
 
+// WHY: a string byte 0x80..0xFF indexes the histogram by its own value, so a usable histogram holds 256 units.
 inline constexpr size_t kTextHistogramMinUnits = 256;
 
+// STAND-IN: an entry reading <MISSING> counts as absent; research gap-r1 4 found none in us_loc.
+// Settle: a census of the other ten languages' text databases.
 inline constexpr std::string_view kTextMissingMarker = "<MISSING>";
 
 uint32_t text_hash(std::string_view p_sid);

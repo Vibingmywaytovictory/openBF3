@@ -64,6 +64,8 @@ struct WorkerGroup::Impl {
 			for (;;) {
 				uint64_t v = next.load(std::memory_order_relaxed);
 				bool took = false;
+				// WHY: the kick's generation in the counter's high half stops a lane still leaving the last kick from
+				// taking an index of the next one.
 				while (uint32_t(v >> 32) == seen && size_t(uint32_t(v)) < n) {
 					if (next.compare_exchange_weak(v, v + 1, std::memory_order_relaxed)) {
 						took = true;

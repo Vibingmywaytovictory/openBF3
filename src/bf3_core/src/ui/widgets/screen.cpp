@@ -1,5 +1,7 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 classes fb.Base.UIScreen and fb.Base.UIPopup (bf3dump swf as2 actionscriptlibrary): the popup's
+// 0.8 start scale and 0.4 s easeOutExpo scale-in, ported here.
 namespace bf3::core::ui {
 
 namespace {

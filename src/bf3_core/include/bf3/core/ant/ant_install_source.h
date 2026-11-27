@@ -15,6 +15,8 @@
 
 namespace bf3::core::ant {
 
+// SOURCE: research/probes/ant-animation-probe.md 2 (AssetBank res type 0x51A3C853; AntPackageAsset partitions under
+// animations/antanimations/).
 inline constexpr uint32_t kAssetBankResType = 0x51A3C853;
 inline constexpr const char *kAntPackagePrefix = "animations/antanimations/";
 

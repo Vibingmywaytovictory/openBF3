@@ -2,11 +2,15 @@
 
 #include <cstdio>
 
+// SOURCE: the AS2 classes TurretDisplay, VehicleHudWarnings, VehicleZoomFlir, VehicleWeaponUnlockDisplay,
+// VehicleWeaponName, VehicleStaticArt, VehicleGunnerWeaponElevation, VehicleCrosshair (actionscriptlibrary), ported here.
 namespace bf3::core::ui {
 
 namespace {
 
 constexpr std::string_view kVehicleCompCategory = "ui/uicomponents/uivehiclecomp";
+// SOURCE: notes R5-UI2 E: the UIVehicleComp and UIWeaponComp DataKeys below (Health, DamageStateDisabled, Velocity,
+// Entry1/2Rotation and Inverted, the weapon pitches, ActiveWeaponName, InVehicle, ShortName, Reloading, Heat, Ammo).
 constexpr int32_t kVehicleHealthKey = int32_t(0x49ba4cf0u);
 constexpr int32_t kDamageStateDisabledKey = int32_t(0x39331320u);
 constexpr int32_t kVelocityKey = int32_t(0xbff6f23bu);
@@ -23,6 +27,7 @@ constexpr std::string_view kWeaponCompCategory = "ui/uicomponents/uiweaponcomp";
 constexpr int32_t kActiveWeaponIsReloadingKey = int32_t(0x8a21ce13u);
 constexpr int32_t kHeatKey = int32_t(0xf35e738eu);
 constexpr int32_t kAmmoKey = int32_t(0x8d4b17b6u);
+// SOURCE: notes R5-UI2 B3 (elevation = weapon pitch - hull pitch + 90; primary at precision 0, secondary truncated).
 constexpr float kWeaponPitchOffset = 90.0f;
 
 std::string fixed(double p_value, int p_precision) {
@@ -842,6 +847,8 @@ constexpr std::string_view kCrosshairFirstFrameHidden[] = { "hitIndicator", "Zoo
 	"FIM_92", "HeliDefaultCross", "HeliGunner", "HeliGunnerHellfire", "HeliAIM9", "jetDefaultCross", "F18AIM9", "MFD",
 	"MFDMissile", "SP_MFD", "SP_MFD_CAS", "SP_MFD_HARM", "SP_MFD_JDAM", "SOFLAM", "EOD", "Javelin", "MAV" };
 
+// WHY: VehicleCrosshair's and VehicleStaticArt's first-frame scripts hide every crosshair type and art type; construct()
+// runs them, so the AS2 shows only the selected one.
 class VehicleCrosshairClass final : public VehicleWidget {
 public:
 	static constexpr double kShootBlinkSeconds = 1.0;
@@ -1001,6 +1008,8 @@ private:
 
 namespace {
 
+// INFERRED: while seated, UIWeaponComp's Reloading, Heat and Ammo are the seat weapon's; notes R5-UI2 D leaves the two
+// key sets unassigned. Settle: a note assigning UIWeaponComp's key sets.
 std::optional<As2Value> hud_seat_weapon_source(const HudVehicle &p_vehicle, int32_t p_key) {
 	if (!p_vehicle.in_vehicle || !p_vehicle.seat_weapon) {
 		return std::nullopt;
@@ -1028,15 +1037,20 @@ std::optional<As2Value> hud_vehicle_source(
 		return std::nullopt;
 	}
 	const HudVehicle &v = p_model.vehicle;
+	// SOURCE: notes R5-UI2 B3 and its checker (EntryN Rotation is -(entry yaw - hull yaw), Inverted unnegated, precision 1).
+	// INFERRED: the yaw sign, the view yaw the compass negates. Settle: footage of a turned turret.
 	const double inverted[2] = { double(v.entry_yaw_deg[0] - v.hull_yaw_deg),
 		double(v.entry_yaw_deg[1] - v.hull_yaw_deg) };
 	switch (p_source.key) {
 		case kInVehicleKey:
 			return As2Value::of(v.in_vehicle);
+		// SOURCE: notes R5-UI2 B3 (Health is an integer percent, truncated).
 		case kVehicleHealthKey:
 			return As2Value::of(std::trunc(double(v.health)));
 		case kDamageStateDisabledKey:
 			return As2Value::of(v.damage_state_disabled);
+		// INFERRED: ShortName is VehicleEntityData.NameSid; fb.HelperFunctions' twelve Russian names are NameSids.
+		// Settle: a note on the ShortName field.
 		case kShortNameKey:
 			return As2Value::of(hud_string(v.short_name));
 		case kVelocityKey:
@@ -1059,6 +1073,8 @@ std::optional<As2Value> hud_vehicle_source(
 				return As2Value::of(std::trunc(double(*v.secondary_pitch_deg)) + kWeaponPitchOffset);
 			}
 			return std::nullopt;
+		// INFERRED: ActiveWeaponName is the uivehicleweaponmetadata Name whose ItemIds hold the seat weapon's hash.
+		// Settle: a note on ActiveWeaponName's lookup.
 		case kActiveWeaponNameKey: {
 			const ItemIcon *item =
 					p_client.items != nullptr && v.weapon_item != 0 ? p_client.items->find(v.weapon_item) : nullptr;

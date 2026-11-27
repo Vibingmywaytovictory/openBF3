@@ -172,6 +172,8 @@ void read_aiming(Fields &r_f, std::string_view p_controller, WeaponAiming &r_aim
 	r_aiming.present = r_f.ok();
 }
 
+// INFERRED: a negative count or time in a modifier keeps the weapon's own value, and active modifiers apply in
+// WeaponModifierData order, a later one overriding. Settle: a note on how weapon modifiers combine.
 bool apply_modifier(Fields &r_f, const EbxInstance &p_mod, WeaponDef &r_w, std::optional<EbxInstance> &r_projectile) {
 	const EbxStruct m = p_mod.data();
 	if (p_mod.is_a("WeaponShotModifier")) {
@@ -483,6 +485,8 @@ std::vector<std::string> list_weapon_variants(const EbxLibrary &p_library) {
 	return out;
 }
 
+// STAND-IN: the base variant is the shortest-named unlock with no Extra in the blueprint's folder.
+// Settle: a data link from a weapon blueprint to its base unlock.
 std::string base_variant_of(const EbxLibrary &p_library, std::string_view p_blueprint) {
 	const EbxPartition *bp = p_library.partition_by_name(p_blueprint);
 	if (bp == nullptr) {

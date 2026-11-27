@@ -1,5 +1,7 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 classes Widget.Crosshair.Crosshair and Widget.Crosshair.Hitindicator (bf3dump swf as2
+// actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 namespace {
@@ -142,6 +144,8 @@ public:
 		const HudWeapon &w = p_model.weapon;
 		const double level = w.show_hitindicator ? std::clamp(std::round(double(w.hitindicator_level)), 1.0, 3.0) : 0.0;
 		r_out.push_back({ "IndicatorValue", As2Value::of(level) });
+		// STAND-IN: IsInVehicle is always false here; the seat state does not reach this widget.
+		// Settle: feed UIVehicleComp's IsInVehicle (notes R5-UI2 E, key fa9a1c08).
 		r_out.push_back({ "IsInVehicle", As2Value::of(false) });
 	}
 

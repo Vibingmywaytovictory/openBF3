@@ -310,6 +310,9 @@ Result<std::vector<HitCapsule>> read_hit_capsules(const EbxResolver &p_db, std::
 	return out;
 }
 
+// SOURCE: notes R-A5 1 (the hit's only per-target factor is DamageProtectionMultiplier of the bullet and hit materials).
+// INFERRED: the zones are the hi-LOD capsules' material names Head, Body, Chest and Foot (legs); R-A5 infers only
+// that zones are materials. Settle: a note on whether the soldier damage receiver scales by zone.
 BodyMultipliers body_multipliers(const MaterialGrid &p_grid, std::span<const HitCapsule> p_capsules, uint8_t p_projectile_property) {
 	const float nan = std::numeric_limits<float>::quiet_NaN();
 	BodyMultipliers out{ nan, nan, nan, nan };

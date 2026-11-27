@@ -1,5 +1,7 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 classes Widget.Hud.VehicleHealth and Widget.Hud.PassangerList (bf3dump swf as2 actionscriptlibrary),
+// which this file ports; the binds and hud_passenger_list are ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -60,6 +62,7 @@ public:
 	}
 
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
+		// SOURCE: notes R5-UI2 B3 (Health is trunc(100 x health / max health); Disabled the damage state).
 		r_out.push_back({ "IsInVehicle", As2Value::of(p_model.vehicle.in_vehicle) });
 		r_out.push_back({ "Health", As2Value::of(double(p_model.vehicle.health)) });
 		r_out.push_back({ "Disabled", As2Value::of(p_model.vehicle.damage_state_disabled) });
@@ -159,6 +162,8 @@ private:
 
 }
 
+// SOURCE: notes R5-UI2 B3 and its checker (an item per seat: Name, isPlayer, teamState 0 same team and group, 1 same
+// team otherwise, 2 other team or empty, and its seat).
 As2Value hud_passenger_list(const HudPassengerList &p_list) {
 	As2Value list = As2Value::array();
 	for (size_t i = 0; i < p_list.count && i < p_list.passengers.size(); ++i) {

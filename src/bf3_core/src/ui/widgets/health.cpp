@@ -1,5 +1,6 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 class Widget.Hud.Health (bf3dump swf as2 actionscriptlibrary), which this file ports; bind() is ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -42,6 +43,7 @@ public:
 
 	void bind(const HudModel &p_model, const HudClientState &p_client, HudData &r_out) const override {
 		r_out.push_back({ "Health", As2Value::of(double(p_model.soldier.health)) });
+		// INFERRED: Health hides while the own soldier is seated. Settle: footage of a seated soldier's HUD.
 		r_out.push_back({ "Visible",
 				As2Value::of(hud_soldier_widgets_visible(p_model, p_client) && !p_model.vehicle.in_vehicle) });
 	}

@@ -77,6 +77,8 @@ void UiDirectAccess::error(std::string p_message) {
 	}
 }
 
+// INFERRED: registerMC's argument layout read off the movies' AS2 calls (REGISTER_ARRAY's item op before or after the
+// handle); the engine side is native. Settle: a note on Data.UIDirectAccessComp.
 std::optional<uint32_t> UiDirectAccess::register_mc(std::string_view p_clip, const std::vector<As2Value> &p_args) {
 	if (regs_.size() >= kUiDirectAccessMaxRegistrations) {
 		error("registerMC: more than " + std::to_string(kUiDirectAccessMaxRegistrations) + " registrations");

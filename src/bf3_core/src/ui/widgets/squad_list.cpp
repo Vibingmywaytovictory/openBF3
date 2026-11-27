@@ -1,5 +1,7 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 class Widget.Hud.SquadList (bf3dump swf as2 actionscriptlibrary), which this file ports; bind() is
+// ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -12,6 +14,8 @@ public:
 		}
 		r_host.renderer(r_host.self(), "t2");
 		r_host.self().set_visible(false);
+		// INFERRED: Data.UINametagComp.getUIColor is native, so its slot 0 is taken as the txt field's authored colour and
+		// tint2Texts' shadow and glow are left out. Settle: a note on the engine's nametag UI colours.
 		const std::optional<uint32_t> slot0 = nametag_colour_slot0_as_authored_txt(r_host);
 		if (!slot0) {
 			return;
@@ -112,6 +116,7 @@ public:
 			m.set("Dead", As2Value::of(!p.alive));
 			m.set("Kit", As2Value::of(int32_t(p.kit_icon)));
 			m.set("SquadLeader", As2Value::of(slot == members.leader));
+			// STAND-IN: no voice chat is modelled, so Voip is 0. Settle: build voice state.
 			m.set("Voip", As2Value::of(int32_t(0)));
 			m.set("BoosterIcon", As2Value::of(int32_t(p.booster_icon)));
 			list.push(std::move(m));

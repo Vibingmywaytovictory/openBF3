@@ -1,5 +1,7 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 classes Widget.Message.HudMessage, MessageTypes.MessageBase, KillLogMessage, LocalKillLogMessage,
+// ScoreMessage, GameMessage and Util.ColorTinting (bf3dump swf as2 actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 namespace {
@@ -186,6 +188,8 @@ struct UiTint {
 	uint32_t glow = 0;
 };
 
+// INFERRED: the engine's UI colour table behind Util.ColorTinting is the kill row name sprite's frames: slot 0 squad,
+// 1 friendly, 3 enemy, 2 none; the footage's kill log colours match. Settle: a note on the engine's UI colour slots.
 constexpr std::array<std::string_view, 4> kUiColourSlotNameFrames{ "squad", "friendly", "", "enemy" };
 constexpr float kTintShadowBlur = 8.0f;
 constexpr float kTintShadowStrength = 1.7f;

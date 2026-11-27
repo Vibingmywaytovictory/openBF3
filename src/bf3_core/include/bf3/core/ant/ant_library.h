@@ -66,6 +66,8 @@ struct ClipBinding {
 	GdStruct channel_to_dof;
 	std::string_view controller_name;
 	std::string_view target_name;
+	// STAND-IN: 30 fps and scale 1 when the controller has no FPS or FPSScale (research/probes/ant-animation-probe.md
+	// 5 finds FPS 30 on the clips it read). Settle: a note on the clip controller's playback defaults.
 	float fps = 30.0f;
 	float fps_scale = 1.0f;
 	float num_ticks = 0.0f;

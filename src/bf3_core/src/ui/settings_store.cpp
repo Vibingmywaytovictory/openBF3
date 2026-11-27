@@ -130,6 +130,7 @@ bool SettingsStore::valid(size_t p_index, double p_value) const {
 			return p_value == 0.0 || p_value == 1.0;
 		case ProfileOptionKind::Enum:
 			return std::floor(p_value) == p_value && p_value >= 0.0 && p_value < double(o.items.size());
+		// WHY: the install's own default may lie outside its range (ResolutionHertz 0 in 1..10000), so it stays valid.
 		case ProfileOptionKind::Int:
 			return std::floor(p_value) == p_value && ((p_value >= o.min && p_value <= o.max) || p_value == o.value);
 		case ProfileOptionKind::Float:

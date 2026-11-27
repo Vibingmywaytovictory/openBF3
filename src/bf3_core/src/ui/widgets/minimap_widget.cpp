@@ -1,5 +1,7 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 class Widget.Hud.Minimap (bf3dump swf as2 actionscriptlibrary): the 600 large size, offsets and the
+// 0.05 s tween, ported here; bind() is ours.
 namespace bf3::core::ui {
 
 namespace {

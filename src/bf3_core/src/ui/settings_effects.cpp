@@ -46,6 +46,8 @@ SettingsEffects settings_effects(const SettingsStore &p_store) {
 	const float master = gain_of(p_store.value(kVolumeOption));
 	const float music = gain_of(p_store.value(kMusicVolumeOption));
 	const float dialogue = gain_of(p_store.value(kDialogueVolumeOption));
+	// INFERRED: Volume on every bus, times MusicVolume on Music and LoadingMusic and DialogueVolume on Dialog and
+	// NarrVoice, as linear gains, from the option names. Settle: a note on how the options reach the MasterBus gains.
 	e.bus_gains.fill(master);
 	for (const audio::MasterBus b : { audio::MasterBus::Music, audio::MasterBus::LoadingMusic }) {
 		e.bus_gains[size_t(b)] = master * music;
@@ -55,6 +57,8 @@ SettingsEffects settings_effects(const SettingsStore &p_store) {
 	}
 	e.sound_system = uint32_t(std::clamp(std::lround(p_store.value(kSoundSystemOption)), 0L, 255L));
 	e.stereo_mode = p_store.value(kStereoModeOption) >= 0.5 ? 1u : 0u;
+	// INFERRED: the look scale is MouseSensitivity over its default 0.5, from the option name.
+	// Settle: a note on the MouseSensitivity curve.
 	const double sensitivity_default = p_store.default_value(kMouseSensitivityOption);
 	e.look_scale = sensitivity_default > 0.0
 			? float(std::max(0.0, p_store.value(kMouseSensitivityOption)) / sensitivity_default)

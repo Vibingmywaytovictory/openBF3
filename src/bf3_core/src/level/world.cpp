@@ -214,6 +214,8 @@ const PlacedObject *World::placed(uint32_t p_scope, const EbxInstance &p_object)
 	return found == placed_.end() ? nullptr : &objects[found->second];
 }
 
+// INFERRED: a variation is looked up in the sub-world's MeshVariationDatabase and its parents', then as variation 0.
+// Settle: a note on mesh variation lookup.
 std::optional<EbxInstance> World::mesh_variation(uint32_t p_subworld, const EbxInstance &p_mesh, uint32_t p_variation) const {
 	const auto lookup = [&](uint32_t p_hash) -> std::optional<EbxInstance> {
 		std::optional<uint32_t> at = p_subworld;
@@ -529,6 +531,8 @@ private:
 					++explicit_count;
 					local = LevelTransform::from_rows(*explicit_rows);
 				} else {
+					// INFERRED: a member instance with no InstanceTransforms entry takes the next subpart transform of the
+					// group's Havok data, in member order. Settle: a research/ format fact on group subparts.
 					++needed;
 					if (cursor >= subparts.size()) {
 

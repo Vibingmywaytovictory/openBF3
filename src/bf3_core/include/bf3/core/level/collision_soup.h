@@ -60,6 +60,8 @@ std::string_view surface_name(uint8_t p_surface);
 
 std::optional<uint8_t> classify_surface(std::string_view p_name);
 
+// INFERRED: a Havok triangle's material word holds the grid's MaterialPairs index in its low 24 bits and a see-through
+// flag in bit 27. Settle: a research/ format fact on the Havok material word.
 inline constexpr uint32_t kMaterialSeeThrough = 0x0800'0000;
 inline constexpr uint32_t kMaterialPairMask = 0x00FF'FFFF;
 
@@ -167,6 +169,8 @@ struct SoupOptions {
 	float tile_size = 64.0f;
 	unsigned threads = 0;
 	bool terrain = true;
+	// STAND-IN: terrain collision is the coarsest terrain level with samples at most 2 m apart.
+	// Settle: a note on the resolution BF3's terrain physics uses.
 	float terrain_spacing = 2.0f;
 	SoupProgress *progress = nullptr;
 

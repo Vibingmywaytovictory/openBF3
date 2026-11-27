@@ -80,6 +80,8 @@ Result<Icon3dStyle> read_icon3d_style(
 	return out;
 }
 
+// INFERRED: 1 - MaxScaleMod x clamp(d / ScaleDistance), the nametags' formula; 1 when ScaleDistance is 0.
+// Settle: a note on UI3dIconComp's scale.
 float icon3d_scale(const Icon3dStyle &p_style, float p_distance_m) {
 	if (!(p_style.scale_distance > 0.0f)) {
 		return 1.0f;
@@ -87,6 +89,8 @@ float icon3d_scale(const Icon3dStyle &p_style, float p_distance_m) {
 	return 1.0f - p_style.max_scale_mod * clamp01(p_distance_m / p_style.scale_distance);
 }
 
+// INFERRED: 1 to MaxFarFade from FadeDistance to FadeEndDistance, times a close fade below MinimumFadeDistance.
+// Settle: a note on UI3dIconComp's fade.
 float icon3d_alpha(const Icon3dStyle &p_style, float p_distance_m) {
 	float alpha = 1.0f;
 	if (p_style.fade_end_distance > p_style.fade_distance) {
@@ -103,11 +107,14 @@ float icon3d_alpha(const Icon3dStyle &p_style, float p_distance_m) {
 	return clamp01(alpha);
 }
 
+// INFERRED: SnapCenterYOffset moves the snap origin down by that share of the half height.
+// Settle: a note on UI3dIconComp's snap.
 SwfPoint icon3d_snap_origin(const Icon3dStyle &p_style, const SwfRect &p_visible) {
 	return { 0.5f * (p_visible.x_min + p_visible.x_max),
 		0.5f * (p_visible.y_min + p_visible.y_max) + p_style.snap_center_y_offset * 0.5f * p_visible.height() };
 }
 
+// INFERRED: SnapSafeZone scales the visible rect round its centre. Settle: a note on UI3dIconComp's snap.
 SwfRect icon3d_snap_box(const Icon3dStyle &p_style, const SwfRect &p_visible) {
 	const float cx = 0.5f * (p_visible.x_min + p_visible.x_max);
 	const float cy = 0.5f * (p_visible.y_min + p_visible.y_max);
@@ -150,6 +157,7 @@ Icon3dPlacement place_icon3d(
 	}
 	const float rx = 0.5f * p_visible.width() * p_style.tracker_radius_x;
 	const float ry = 0.5f * p_visible.height() * p_style.tracker_radius_y;
+	// INFERRED: CircularSnap snaps to the TrackerHudRadiusX/Y ellipse. Settle: a note on UI3dIconComp's snap.
 	if (p_style.circular_snap && rx > 0.0f && ry > 0.0f) {
 		const float k = 1.0f / std::sqrt((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry));
 		out.x = o.x + dx * k;

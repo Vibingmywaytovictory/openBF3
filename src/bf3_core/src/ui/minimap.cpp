@@ -421,6 +421,8 @@ MinimapZoom minimap_zoom_at(const MinimapProfile &p_profile, bool p_small, int32
 	MinimapZoom z;
 	z.step = p_step;
 	z.zoom = z.step >= 0 && size_t(z.step) < p_profile.zoom_steps.size() ? p_profile.zoom_steps[size_t(z.step)] : 0.0f;
+	// INFERRED: a large map at or past IsMaxZoom's step no longer centres the player; the graph names the test only.
+	// Settle: footage of the large map at its last zoom step.
 	z.player_is_center = p_small || !(float(z.step) >= p_profile.max_zoom_step);
 	return z;
 }

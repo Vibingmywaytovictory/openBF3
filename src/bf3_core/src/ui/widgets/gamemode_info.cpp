@@ -1,9 +1,12 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 class Widget.Info.GamemodeInfo (bf3dump swf as2 actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 namespace {
 
+// INFERRED: the key of the game mode name, measured on the in-game menu's bindings as the key hash is unknown.
+// Settle: a note on how UISettingsComp derives its DataKeys.
 constexpr int32_t kGamemodeKey = 1733092213;
 constexpr std::string_view kGamemodeSource = "Gamemode";
 

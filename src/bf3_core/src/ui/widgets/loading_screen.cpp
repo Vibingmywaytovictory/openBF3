@@ -12,6 +12,8 @@
 #include <optional>
 #include <utility>
 
+// SOURCE: the AS2 classes Screen.LoadingScreen (HINT_INTERVAL 13, the mode texts) and Widget.Message.LoadingMessage
+// (bf3dump swf as2 actionscriptlibrary), which this file ports; LoadingScreenData is ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -51,6 +53,7 @@ struct ModeId {
 	std::string_view game_mode;
 };
 
+// INFERRED: the gameMode string the AS2 expects for each level mode id. Settle: a note on the loading screen's gameMode.
 constexpr std::array<ModeId, 14> kModeIds{ {
 		{ "TeamDeathMatchC", "team deathmatch cq" },
 		{ "TeamDeathMatch", "team deathmatch" },
@@ -107,6 +110,7 @@ public:
 	}
 
 	void advance(HudWidgetHost &r_host, double) override {
+		// INFERRED: onResize runs again once the level image has loaded. Settle: a note on the loading screen's resize.
 		if (loader_.state() == As2ClipLoader::State::Loading && loader_.poll() == As2ClipLoader::State::Loaded) {
 			resized_ = std::nullopt;
 		}
@@ -416,6 +420,8 @@ LoadingScreenSource loading_screen_source(const level::LevelInfo &p_info, std::s
 	return s;
 }
 
+// STAND-IN: the hints are shuffled once, seeded by the level, the mode and the session seed; the retail order is not
+// known. Settle: a note on how the loading screen picks its hints.
 LoadingScreenData::LoadingScreenData(LoadingScreenSource p_source) : source_(std::move(p_source)) {
 	order_.resize(source_.hints.size());
 	for (size_t i = 0; i < order_.size(); ++i) {

@@ -100,6 +100,8 @@ Result<std::optional<EorCamera>> read_eor_camera(const EbxResolver &p_db, const 
 		out.fov_deg = *f;
 		const std::optional<EbxValue> priority = object.entity.get("Priority");
 		out.priority = priority ? priority->as_i32().value_or(0) : 0;
+		// INFERRED: the camera's light and visual environment are the first SpotLight and LogicVisualEnvironment in its
+		// prefab scope. Settle: a data link from the showroom camera to them.
 		std::optional<uint32_t> light, environment;
 		for (uint32_t j = 0; j < p_world.objects.size(); ++j) {
 			const PlacedObject &other = p_world.objects[j];

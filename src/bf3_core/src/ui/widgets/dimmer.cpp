@@ -1,5 +1,6 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 class Widget.Image.Dimmer (bf3dump swf as2 actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 namespace {
@@ -53,6 +54,8 @@ public:
 		}
 	}
 
+	// INFERRED: the Dimmer resizes on a stage change too; its AS2 sizes itself only at initialize.
+	// Settle: footage of a live window resize with a dimmed popup.
 	void update_screen_size(HudWidgetHost &r_host) override { resize_to_screen(r_host); }
 
 	bool mouse_move(HudWidgetHost &r_host, const HudMouse &p_mouse) override { return p_mouse.target == r_host.path(); }

@@ -18,6 +18,7 @@
 
 namespace bf3::core::gameplay {
 
+// SOURCE: the djb2-xor port hash of "Geometry" (research/topics/gap-r1-level-logic-schematics.md, port names).
 inline constexpr int32_t kAreaShapeLink = 838548383;
 inline constexpr int32_t kSoundAreaProximity = logic_port_id("Proximity");
 inline constexpr int32_t kSoundAreaProximityMultiplier = logic_port_id("ProximityMultiplier");

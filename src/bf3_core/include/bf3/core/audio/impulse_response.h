@@ -13,6 +13,8 @@
 
 namespace bf3::core::audio {
 
+// SOURCE: research/topics/gap-r1-audio-system.md (irf1 magic; header version 1, 2 channels, 48000 Hz, block 1024).
+// INFERRED: the 48-byte header and the 16-byte per-block, per-channel header. Settle: a research/ fact on irf1 blocks.
 inline constexpr uint32_t kIrfMagic = 0x69726631u;
 inline constexpr uint32_t kMaxImpulseChannels = 8;
 inline constexpr uint32_t kMaxImpulseFrames = 48000u * 30u;

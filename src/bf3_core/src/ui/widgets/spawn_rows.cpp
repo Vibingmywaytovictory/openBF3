@@ -2,6 +2,8 @@
 
 #include "bf3/core/util/key_values.h"
 
+// SOURCE: the AS2 classes Widget.List.Rows.TeamSpawn, BaseSpawn and SpawnEmpty (bf3dump swf as2 actionscriptlibrary),
+// ported here; the spawn list feeds are ours.
 namespace bf3::core::ui {
 
 void goto_row_icon(const As2Clip &p_clip, const As2Value &p_frame) {
@@ -159,6 +161,7 @@ As2Value squad_spawn_row(const HudModel &p_model, const HudSpawnPoint &p_point, 
 	As2Value row = As2Value::object();
 	row.set("Type", As2Value::of(std::string(kSquadSpawnRowType)));
 	row.set("Label", As2Value::of(known ? hud_player_name(p_model, p_point.player) : std::string()));
+	// STAND-IN: no ranks are kept, so a squad mate's row shows rank 0. Settle: build ranks.
 	row.set("Rank", As2Value::of(0));
 	row.set("KitIcon", As2Value::of(known ? int32_t(p_model.players[p_point.player].kit_icon) : 0));
 	row.set("BoosterIcon", As2Value::of(known ? int32_t(p_model.players[p_point.player].booster_icon) : 0));

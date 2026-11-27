@@ -14,16 +14,22 @@
 
 namespace bf3::core::ui {
 
+// SOURCE: the AS2 class fb.Defines (bf3dump swf as2 actionscriptlibrary): DEFAULT_HUD_PERSPECTIVE 25.
 inline constexpr float kHudPerspectiveFov = 25.0f;
 inline constexpr std::string_view kBgDrawRenderer = "t2;iBgDraw";
 inline constexpr std::string_view kSoldierRenderer = "t2;iUISoldierCompRender";
 inline constexpr std::string_view kMinimapRenderer = "t2;iUIMinimapRender";
 inline constexpr std::string_view kSpawnRowType = "baseSpawn";
 inline constexpr std::string_view kSpawnRowClass = "Widget.List.Rows.BaseSpawn";
+// INFERRED: a row without a vehicle shows the VehicleIcon frame Blank, read off the 18.57 footage.
+// Settle: a note on UISpawnPointComp's VehicleIcon value.
 inline constexpr std::string_view kSpawnRowNoVehicleIcon = "Blank";
 inline constexpr std::string_view kSquadSpawnRowType = "squadSpawn";
+// STAND-IN: no voice chat is modelled, so Voip shows frame 2, taken as the icon's empty frame. Settle: build voice state.
 inline constexpr int32_t kSquadSpawnVoipOffFrame = 2;
+// SOURCE: the AS2 class Widget.Hud.Ammo: m_firingModes, the same six names in this order.
 inline constexpr std::array<std::string_view, 6> kAs2FiringModes{ "single", "single", "auto", "burst", "auto", "single" };
+// SOURCE: the AS2 class Shared.HudBackground: HORIZONTAL_FADE_PERCENTAGE 20, VERTICAL_FADE_PERCENTAGE 4.25.
 inline constexpr double kHorizontalFadePercentage = 20.0;
 inline constexpr double kVerticalFadePercentage = 4.25;
 
@@ -88,6 +94,8 @@ public:
 	virtual std::vector<std::string> tag_paths() const = 0;
 };
 
+// INFERRED: every member of this block is fitted to the 18.57 footage (premultiplied light, coverage and the ramps),
+// as the engine draws iBgDraw. Settle: a note on the iBgDraw renderer.
 struct HudBgDrawLook {
 	std::array<float, 3> premul_rgb255{ 0.91f, 31.7f, 54.12f };
 	float coverage = 0.1458f;
@@ -99,6 +107,8 @@ struct HudBgDrawLook {
 
 inline constexpr HudBgDrawLook kHudBgDrawLook{};
 
+// INFERRED: every member of this block is read off the 18.57 footage at full health; the engine draws the EKG.
+// Settle: a note on the EKG renderer and whether it follows health.
 struct HudEkgLook {
 	float rect_x0 = 1056.0f;
 	float rect_y0 = 566.0f;
@@ -120,20 +130,32 @@ struct HudEkgLook {
 
 inline constexpr HudEkgLook kHudEkgLook{};
 
+// INFERRED: read off the 18.57 footage at MapZoom 0, the small map InitSmall starts with.
+// Settle: a note on the minimap renderer's scale.
 inline constexpr float kMinimapMetresPerLocalUnit = 1.375f;
 
+// INFERRED: the (1 + MapZoom) factor, from the MapZoom steps 0, 0.4 and 1.2, not seen in footage.
+// Settle: footage of the zoomed large map.
 constexpr float minimap_metres_per_unit(float p_zoom) {
 	return kMinimapMetresPerLocalUnit * (1.0f + (p_zoom > 0.0f ? p_zoom : 0.0f));
 }
 
+// INFERRED: the footage's minimap shows no slope on the satellite texture. Settle: a note on the minimap shader.
 inline constexpr float kMinimapSatelliteWeight = 0.0f;
+// INFERRED: the minimap square in local units, read off the 18.57 footage (the AS2 HudBackgroundWidget's MINIMAP_SIZE is
+// also 170). Settle: a note on the minimap render target.
 inline constexpr float kMinimapSquareLocal = 170.0f;
 inline constexpr std::string_view kMinimapMaskTexture = "ui/hud/minimap/minimapmask";
+// SOURCE: the AS2 class fb.Defines: UIHudIcon_SquadLeader 7, UIHudIcon_Dead 145, UIHudIcon_Voip 122,
+// ObjectiveAttack 18, EnemyBase 35, ObjectiveScout 15, EnemyPlayer 4, UISpottedInfo_None 0.
 inline constexpr int32_t kUiHudIconSquadLeader = 7;
 inline constexpr int32_t kUiHudIconDead = 145;
 inline constexpr int32_t kUiHudIconVoip = 122;
+// SOURCE: the AS2 class Widget.Icon3D.Mapmarker.Mapmarkertag: these icons take the red background.
 inline constexpr std::array<int32_t, 4> kUiHudIconsOnRedMarker{ 18, 35, 15, 4 };
 inline constexpr int32_t kUiSpottedInfoNone = 0;
+// INFERRED: read off the 18.57 footage at FOV 100; its dependence on the field of view is not known.
+// Settle: footage at another field of view, or a note on UIWeaponComp's Dispersion.
 inline constexpr double kHudCrosshairDispersionPerDegree = 0.2;
 
 int32_t hud_compass_frame(float p_heading_deg);

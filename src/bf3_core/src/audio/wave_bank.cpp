@@ -31,6 +31,8 @@ std::string loc_superbundle(std::string_view p_language) {
 			return "Win32/Loc/" + std::string(code);
 		}
 	}
+	// STAND-IN: a language not listed above uses its first two letters as the Win32/Loc folder code.
+	// Settle: the install's Win32/Loc superbundle list.
 	const std::string code = to_lower_ascii(p_language.substr(0, 2));
 	return "Win32/Loc/" + code;
 }

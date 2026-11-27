@@ -19,6 +19,8 @@ inline constexpr std::string_view kTeamSupportTagCompPartition = "ui/uicomponent
 inline constexpr std::string_view kMapmarkerTagCompPartition = "ui/uicomponents/uimapmarkertagcomp";
 inline constexpr std::string_view kCapturepointTagCompPartition = "ui/uicomponents/uicapturepointtagcomp";
 
+// SOURCE: bf3dump of MP_Subway's ui/uicomponents/uialerttagcomp: every default in this block is that
+// UI3dIconCompData's value.
 struct Icon3dStyle {
 	float draw_distance = 15.0f;
 	float minimum_draw_distance = 0.0f;

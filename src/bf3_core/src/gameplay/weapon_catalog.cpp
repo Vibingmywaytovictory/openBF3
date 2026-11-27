@@ -53,6 +53,7 @@ Result<MaterialGrid> load_level_grid(WeaponSources &r_sources) {
 		return make_error(r_sources.level_partition + ": no RuntimeMaterialGrid");
 	}
 	Result<MaterialGrid> grid = MaterialGrid::load(*r_sources.level, *name);
+	// WHY: a level's grid can name material pairs its own bundles do not hold; MP_Subway's bundle supplies them.
 	if (grid && grid->report().unresolved_in_level > 0) {
 		if (!r_sources.fallback) {
 			Result<std::unique_ptr<EbxLibrary>> fb = open_spec(r_sources.install, kDefaultWeaponLevel);

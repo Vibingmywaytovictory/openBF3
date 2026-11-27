@@ -12,6 +12,7 @@
 
 namespace bf3::core::ui {
 
+// SOURCE: the REGISTER_* static fields of AS2 class fb.Defines, ui/assets/actionscriptlibrary (bf3dump swf as2).
 enum class UiDirectAccessOp : int32_t {
 	Text = 0,
 	GotoAndStop = 1,

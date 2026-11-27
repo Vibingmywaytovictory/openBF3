@@ -301,6 +301,8 @@ Status read_engine(const EbxResolver &p_db, const LogicConnections &p_vehicle, c
 	return r_budget.status();
 }
 
+// INFERRED: the wreck is the whole-object (PartIndex 0xffffffff) HealthStateData at Health 0 or less that spawns a
+// banger; only that one state is used. Settle: a note on the vehicle health states' order.
 std::optional<EbxInstance> wreck_state(
 		WorkBudget &r_budget, const EbxResolver &p_db, const std::vector<Framed> &p_frames, const Framed **r_at) {
 	for (const Framed &f : p_frames) {
@@ -335,6 +337,8 @@ Status read_wreck(const EbxResolver &p_db, const std::vector<Framed> &p_frames, 
 	VehicleWreckDef w;
 	w.blueprint = partition_name(r_budget, p_db, *blueprint);
 	w.mesh = ref_name(r_budget, p_db, banger->data(), "Mesh");
+	// INFERRED: the husk lives for the banger's TimeToLive (notes R3-G3 found no WreckDuration reader).
+	// Settle: a note on the wreck's lifetime.
 	w.time_to_live = static_cast<float>(number_or(banger->data(), "TimeToLive", 0));
 	const Result<level::LevelTransform> placed = component_transform(*banger);
 	w.transform = model_transform((placed ? *placed : level::LevelTransform::identity()).in_parent(chassis->frame));
@@ -419,6 +423,8 @@ Result<VehicleDamageVisualsDef> read_vehicle_damage_visuals(
 	return out;
 }
 
+// INFERRED: a RandomEventEntityData fires OnSuccess with Probability percent, else OnFail. Settle: a RandomEvent note.
+// STAND-IN: the draw is splitmix64 mod 100 from the caller's seed, not BF3's generator. Settle: a RandomEvent note.
 std::vector<bool> roll_wreck_effects(const VehicleWreckDef &p_wreck, uint64_t p_seed) {
 	uint64_t state = p_seed;
 	std::vector<int8_t> gate(p_wreck.gates.size(), -1);

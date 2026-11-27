@@ -252,6 +252,8 @@ Result<std::vector<WaterPlane>> read_water_planes(const World &p_world) {
 		if (!asset) {
 			continue;
 		}
+		// STAND-IN: only LakeData outlines become water, each a flat plane at its highest outline point; RiverData is not
+		// read. Settle: the WaterAsset's own surface (rivers and lakes) from the water mesh.
 		const std::vector<EbxInstance> lakes = asset->partition().instances_of("LakeData");
 		BF3_TRY(budget.charge(1 + lakes.size()));
 		for (const EbxInstance &lake : lakes) {

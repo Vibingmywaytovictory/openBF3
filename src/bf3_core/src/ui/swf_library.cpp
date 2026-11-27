@@ -34,6 +34,7 @@ std::string_view strip_extension(std::string_view p_file) {
 
 }
 
+// WHY: the first holder in this order is read; every SwfMovie name has one SHA-1 across holders (bf3dump swf census).
 std::vector<std::string> swf_superbundle_order(const Install &p_install) {
 	std::vector<std::string> ui, frontend, levels, rest;
 	for (const std::string &sb : p_install.superbundle_names()) {
@@ -75,6 +76,7 @@ bool is_font_library_url(std::string_view p_url) {
 	return iequals_ascii(file_component(p_url), "gfxfontlib.swf");
 }
 
+// SOURCE: research/topics/gap-r1-ui-hud-minimap-localisation.md 1 (<swf>_iN.tga is DxTexture ui/assets/<swf>/<swf>_iN).
 std::string swf_atlas_texture_name(std::string_view p_movie_name, std::string_view p_file_name) {
 	return to_lower_ascii(p_movie_name) + "/" + to_lower_ascii(strip_extension(file_component(p_file_name)));
 }

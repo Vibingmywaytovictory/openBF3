@@ -90,6 +90,8 @@ Result<HudDamageIndicatorCompData> read_hud_damage_indicator_comp(const EbxResol
 	return out;
 }
 
+// INFERRED: the Angle frame is the bearing clockwise from the view heading plus 1, read off the indicator sprite's
+// rotation per frame. Settle: a note on UIDamageIndicatorComp's Angle.
 int32_t hud_damage_angle_frame(float p_view_heading_deg, float p_bearing_deg) {
 	if (!std::isfinite(p_view_heading_deg) || !std::isfinite(p_bearing_deg)) {
 		return 1;
@@ -101,6 +103,8 @@ int32_t hud_damage_angle_frame(float p_view_heading_deg, float p_bearing_deg) {
 
 void HudDamageIndicatorComp::update(const HudModel &p_model, double p_now_s) {
 	const double now = std::isfinite(p_now_s) ? p_now_s : 0.0;
+	// INFERRED: a positive UpdatesPerSecond caps the refresh rate; notes R5-UI2 D only guesses this.
+	// Settle: a note on the UI component update scheduler.
 	if (data_.updates_per_second > 0) {
 		if (now < next_update_s_ && now >= next_update_s_ - 1.0 / double(data_.updates_per_second)) {
 			return;
@@ -110,6 +114,8 @@ void HudDamageIndicatorComp::update(const HudModel &p_model, double p_now_s) {
 	for (Source &s : sources_) {
 		s.fresh = false;
 	}
+	// INFERRED: one indicator source per shooter, dropped MaxUpdateTime after its last hit, newest first.
+	// Settle: a note on UIDamageIndicatorComp's source list.
 	const HudDamageFeed &f = p_model.damage;
 	if (f.newest_serial < last_serial_) {
 		last_serial_ = 0;
@@ -143,6 +149,7 @@ void HudDamageIndicatorComp::update(const HudModel &p_model, double p_now_s) {
 	for (const Source &s : sources_) {
 		As2Value e = As2Value::object();
 		e.set("Angle", As2Value::of(hud_damage_angle_frame(p_model.soldier.compass_angle, s.bearing_deg)));
+		// INFERRED: Scale is the hit's damage, held to 0..100. Settle: a note on UIDamageIndicatorComp's Scale.
 		e.set("Scale", As2Value::of(double(std::clamp(s.damage, 0.0f, 100.0f))));
 		e.set("New", As2Value::of(s.fresh));
 		list.push(std::move(e));
@@ -192,6 +199,7 @@ int32_t hud_relation(const HudModel &p_model, uint8_t p_player) {
 	if (p_player >= p_model.players.size()) {
 		return kHudRelationEnemy;
 	}
+	// INFERRED: the squad colour marks the local player and his squad mates. Settle: retail footage of an own kill.
 	if (p_player == p_model.local_player) {
 		return kHudRelationSquad;
 	}
@@ -235,6 +243,8 @@ void HudMessageComp::add(HudMessageSource p_source, As2Value p_value, double p_n
 	for (const Row &r : q.rows) {
 		alive += r.removing ? 0 : 1;
 	}
+	// INFERRED: a full queue cuts its oldest live row to ShortMessageTime; a negative NormalMessageTime never expires.
+	// Settle: a note on UIMessageComp's queue overflow and expiry.
 	if (info.queue_size > 0 && alive >= size_t(info.queue_size)) {
 		for (Row &r : q.rows) {
 			if (!r.removing) {
@@ -254,6 +264,8 @@ void HudMessageComp::add(HudMessageSource p_source, As2Value p_value, double p_n
 	q.added++;
 }
 
+// INFERRED: an expired row is published once with RemoveFlag 1 and dropped on the next update.
+// Settle: a note on UIMessageComp's RemoveFlag order.
 void HudMessageComp::expire(HudMessageSource p_source, double p_now_s) {
 	Queue &q = queues_[size_t(p_source)];
 	q.rows.erase(std::remove_if(q.rows.begin(), q.rows.end(), [&](const Row &r) { return r.removing && r.removed_at < updates_; }), q.rows.end());
@@ -276,6 +288,8 @@ void HudMessageComp::publish(HudMessageSource p_source) {
 	q.list = std::move(list);
 }
 
+// STAND-IN: the queues update on every call; UIMessageCompData's UpdatesPerSecond is not applied.
+// Settle: a note on the UI component update scheduler.
 void HudMessageComp::update(const HudModel &p_model, const HudClientState &p_client, double p_now_s) {
 	++updates_;
 	const double now = std::isfinite(p_now_s) ? p_now_s : 0.0;
@@ -313,6 +327,8 @@ void HudMessageComp::update(const HudModel &p_model, const HudClientState &p_cli
 		v.set("Text", As2Value::of(localised(p_client, e.sid_hash)));
 		v.set("Score", As2Value::of(e.points));
 		add(HudMessageSource::Score, std::move(v), now);
+		// INFERRED: ScoreAggregation is the sum of the points, reset ScoreAggregateTime after the last score.
+		// Settle: a note on UIMessageComp's ScoreAggregation value.
 		if (now >= aggregate_until_s_) {
 			aggregate_sum_ = 0;
 		}

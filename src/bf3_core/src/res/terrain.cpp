@@ -20,6 +20,8 @@ constexpr uint32_t kMaxSamplesPerSide = 4096;
 constexpr size_t kParallelRows = 512;
 constexpr uint32_t kChildX[4] = { 0, 1, 1, 0 };
 constexpr uint32_t kChildY[4] = { 0, 0, 1, 1 };
+// INFERRED: a children chunk holds its children in reverse child order, all heights, then all mask tiles, then all
+// colour tiles (the order fitted on XP3_Desert's heights). Settle: a note on the streaming tree's children chunk.
 constexpr int kChildrenChunkOrder[4] = { 3, 2, 1, 0 };
 
 TerrainNodeId child_of(const TerrainNodeId &p_id, int p_index) {
@@ -551,6 +553,8 @@ uint8_t HeightfieldTree::max_level() const {
 	return level;
 }
 
+// INFERRED: a u16 sample spans 0 to the tree's world size y in metres, linearly.
+// Settle: bf3dump terrain heights against placed objects' ground heights on one level.
 float HeightfieldTree::height_metres(uint16_t p_sample) const {
 	return float(p_sample) * world_size_y / 65535.0f;
 }
@@ -580,6 +584,8 @@ ResError TerrainStreamingTree::parse(Bytes p_res, TerrainStreamingTree &r_tree) 
 		if (!reader.ok()) {
 			return reader.error();
 		}
+		// STAND-IN: payload kinds other than heightfield 0, mask 1 and colour 2 are skipped unread.
+		// Settle: a reader for the other payloads of the streaming tree.
 		if (kind == 0) {
 			HeightfieldTree heightfield;
 			uint64_t used = 0;
@@ -659,6 +665,8 @@ ResError TerrainStreamingTree::height_grid(uint8_t p_depth, const std::function<
 			order.push_back(&node);
 		}
 	}
+	// WHY: coarse levels first so finer tiles overwrite them, and a level's holes before its tiles so a tile's shared
+	// edge row wins over a neighbouring hole.
 	std::stable_sort(order.begin(), order.end(), [](const HeightfieldNode *p_a, const HeightfieldNode *p_b) {
 
 		if (p_a->id.level != p_b->id.level) {
@@ -669,6 +677,7 @@ ResError TerrainStreamingTree::height_grid(uint8_t p_depth, const std::function<
 	const size_t samples = size_t(tree.samples_per_side) * tree.samples_per_side;
 	std::vector<uint16_t> fetched;
 	for (const HeightfieldNode *node : order) {
+		// INFERRED: a disabled heightfield node is a hole in the terrain. Settle: a note on the node's disabled flag.
 		if (node->disabled) {
 			paint_hole(tree, grid, *node, p_depth);
 			continue;
@@ -747,6 +756,8 @@ bool region_ok(const TerrainRegion &p_region) {
 template <int Channels, class Write>
 void resample_tile(const TerrainRegion &p_region, const std::array<float, 4> &p_rect, const uint8_t *p_tile,
 		uint32_t p_side, uint32_t p_border, const PixelSpan &p_span, Write &&p_write) {
+	// INFERRED: a tile's border texels are split evenly on both sides of its rect and texels sit at their centres.
+	// Settle: a note on how the terrain samples its mask and colour tiles.
 	const double interior = double(p_side - p_border);
 	const double shift = double(p_border) * 0.5 - 0.5;
 	const double sx = interior / (double(p_rect[2]) - double(p_rect[0]));
@@ -915,6 +926,7 @@ ResError TerrainStreamingTree::mask_grids(const TerrainRegion &p_region, uint8_t
 		const uint8_t *tile = nullptr;
 		PixelSpan span;
 	};
+	// INFERRED: a finer mask record replaces a coarser one where it lies. Settle: a note on the mask tree's refinement.
 	for (uint8_t level = 0; level <= std::min<uint8_t>(p_depth, kMaxLevel); ++level) {
 		std::vector<Job> jobs;
 		std::vector<std::vector<uint8_t>> held;

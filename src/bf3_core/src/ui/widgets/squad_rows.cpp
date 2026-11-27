@@ -5,6 +5,8 @@
 #include "bf3/core/ui/hud_squads.h"
 #include "bf3/core/ui/hud_widgets.h"
 
+// SOURCE: the AS2 classes Widget.List.Rows.SquadSpawn, SquadListRow and SquadDetailedRow (bf3dump swf as2
+// actionscriptlibrary), which this file ports; the squadscreen feeds below them are ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -23,6 +25,7 @@ constexpr uint32_t kFriendlyText = 7586815u;
 constexpr std::string_view kLabel = "Label";
 constexpr std::string_view kMembers = "Members";
 constexpr std::string_view kSquadsPerRow = " / 4";
+// STAND-IN: squads cannot be made private, so Privacy and SquadPrivacyEnabled are false. Settle: build squad privacy.
 constexpr bool kSquadPrivacyOffered = false;
 
 HudListLabel *row_label(HudWidgetHost &r_host, std::string_view p_name) {
@@ -469,6 +472,7 @@ As2Value available_squad_rows(const HudModel &p_model, const HudClientState &p_c
 		row.set("Members", As2Value::of(int32_t(e.members)));
 		row.set("IsSquad", As2Value::of(true));
 		row.set("LocalSquad", As2Value::of(e.squad == own));
+		// STAND-IN: no private squads or friends are modelled. Settle: build squad privacy and friends.
 		row.set("IsPrivate", As2Value::of(false));
 		row.set("HasFriend", As2Value::of(false));
 		row.set("Index", As2Value::of(int32_t(i)));
@@ -487,6 +491,7 @@ As2Value squad_member_row(const HudModel &p_model, uint8_t p_slot, int32_t p_loc
 	row.set("Score", As2Value::of(p.score));
 	row.set("LocalSquad", As2Value::of(p_local_squad));
 	row.set("Kit", As2Value::of(int32_t(p.kit_icon)));
+	// STAND-IN: no voice chat is modelled, so Voip shows its off frame. Settle: build voice state.
 	row.set("Voip", As2Value::of(kVoipOffFrame));
 	row.set("BoosterIcon", As2Value::of(int32_t(p.booster_icon)));
 	row.set("SquadLeader", As2Value::of(p_model.squad_leaders[p_slot]));
@@ -512,6 +517,7 @@ As2Value squad_member_rows(const HudModel &p_model, const HudClientState &p_clie
 		rows.push(squad_member_row(p_model, uint8_t(slot), local, members));
 		++members;
 	}
+	// INFERRED: the member list is padded with empty rows to the squad size of 4. Settle: footage of a squad of fewer.
 	for (; members < kHudSquadSize; ++members) {
 		As2Value row = As2Value::object();
 		row.set("Label", As2Value::of(std::string()));
@@ -558,6 +564,8 @@ std::optional<As2Value> hud_squad_button_item(
 		label = kSquadJoinSid;
 		visible = selected > 0 && selected != own && open;
 	} else if (p_source.key == kSquadCreateButtonKey) {
+		// INFERRED: CreateSquad's button reads LEAVE SQUAD while the player has a squad, as the 18.57 footage shows.
+		// Settle: a note on the squad screen's buttons.
 		label = own != 0 ? kSquadLeaveSid : kSquadCreateSid;
 		visible = p_model.local_team != 0;
 	} else if (p_source.key == kSquadKickButtonKey) {
@@ -581,6 +589,8 @@ std::optional<As2Value> hud_squad_source_value(
 	if (p_source.key == kSquadHeaderNameKey) {
 		return As2Value::of(squad_label(p_client, hud_selected_squad(p_model, p_client)));
 	}
+	// INFERRED: the Privacy CheckBox shows on the own squad, in JOIN's place, as the 18.57 footage shows.
+	// Settle: a note naming that key.
 	if (p_source.key == kSquadPrivacyVisibleKey) {
 		const int32_t own = own_squad(p_model);
 		return As2Value::of(own != 0 && hud_selected_squad(p_model, p_client) == own);

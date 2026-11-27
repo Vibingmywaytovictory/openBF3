@@ -2,6 +2,7 @@
 
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 class Widget.Image.ImageManager (bf3dump swf as2 actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 void ImageManagerWidget::construct(HudWidgetHost &r_host) {

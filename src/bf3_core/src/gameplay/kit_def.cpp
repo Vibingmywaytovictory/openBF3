@@ -154,6 +154,8 @@ Result<UnlockProgression> read_unlock_progression(const EbxResolver &p_db, WorkB
 
 namespace {
 
+// INFERRED: a slot's default is its first unlock that no rank, licence, award or scoring table gates and that has no
+// Extra. Settle: a note on a fresh profile's default loadout.
 const KitUnlock *first_free(const std::vector<KitUnlock> &p_unlocks) {
 	for (const KitUnlock &u : p_unlocks) {
 		if (u.gate == UnlockGate::Free && !u.variant) {

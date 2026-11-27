@@ -89,6 +89,8 @@ inline size_t hud_icon_frame(const HudIconStateFrames &p_state, double p_seconds
 	return size_t(std::floor(p_seconds * double(p_state.frame_rate))) % p_state.frames.size();
 }
 
+// SOURCE: the AS2 class fb.Defines (bf3dump swf as2 actionscriptlibrary): UIHudIcon_NeutralFlag 31 .. EnemyBase 35 and
+// UITeamState_FriendlyPicked 3 .. EnemyDropped 6 (the 9 constants below).
 inline constexpr int32_t kUiHudIconNeutralFlag = 31;
 inline constexpr int32_t kUiHudIconFriendlyFlag = 32;
 inline constexpr int32_t kUiHudIconEnemyFlag = 33;
@@ -98,7 +100,11 @@ inline constexpr int32_t kUiTeamStateFriendlyPicked = 3;
 inline constexpr int32_t kUiTeamStateEnemyPicked = 4;
 inline constexpr int32_t kUiTeamStateFriendlyDropped = 5;
 inline constexpr int32_t kUiTeamStateEnemyDropped = 6;
+// INFERRED: a dead team-mate shows UIHudIcon_PlayerDead on the minimap until his revive window ends; not seen in
+// footage. Settle: footage of a dead team-mate on the minimap.
 inline constexpr std::string_view kHudIconPlayerDead = "UIHudIcon_PlayerDead";
+// INFERRED: the viewer's squad leader's nametag draws these two icons (Squad state) in place of the kit icon.
+// Settle: footage of a squad leader's nametag.
 inline constexpr std::string_view kHudIconSquadLeader = "UIHudIcon_SquadLeader";
 inline constexpr std::string_view kHudIconSquadLeaderBg = "UIHudIcon_SquadleaderBg";
 

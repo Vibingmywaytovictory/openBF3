@@ -37,6 +37,8 @@ struct TerrainDecalVertex {
 	Vec3 position{};
 	Vec2 uv{};
 	Vec4 mask{};
+	// STAND-IN: world up and +x for the planar and surface groups, which store no normal or tangent.
+	// Settle: the normal and tangent the groups' Shader2d and Shader3d programs use.
 	Vec3 normal{ 0.0f, 1.0f, 0.0f };
 	Vec3 tangent{ 1.0f, 0.0f, 0.0f };
 };
@@ -48,6 +50,8 @@ struct TerrainDecalSet {
 };
 
 struct TerrainDecals {
+	// INFERRED: the 13-byte head (two floats, a u32, a byte) carries nothing the three groups need; its meaning is
+	// unknown. Settle: a note on the TerrainDecals RES head.
 	float head_a = 0.0f;
 	float head_b = 0.0f;
 	uint32_t head_c = 0;

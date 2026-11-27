@@ -1,5 +1,6 @@
 #include "list.h"
 
+// SOURCE: the AS2 class Widget.List.Rows.BaseRow (bf3dump swf as2 actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 namespace {

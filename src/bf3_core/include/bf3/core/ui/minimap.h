@@ -31,6 +31,7 @@ namespace bf3::core::ui {
 inline constexpr uint32_t kMaxMinimapImageSide = 4096;
 inline constexpr size_t kMaxCombatAreas = 64;
 inline constexpr size_t kMaxObjectives = 64;
+// SOURCE: research/topics/gap-r1-ui-hud-minimap-localisation.md 2: UIMinimapData.CombatAreaAlphaThreshold 0.496.
 inline constexpr float kResearchCombatAreaThreshold = 0.496f;
 
 struct MinimapFieldParams {
@@ -84,6 +85,7 @@ struct MinimapUv {
 	float v = 0.0f;
 };
 
+// SOURCE: research/topics/gap-r1-ui-hud-minimap-localisation.md 2, the formula and its orientation test.
 constexpr MinimapUv world_to_minimap_uv(const MinimapMapping &p_m, float p_x, float p_z) {
 	return { 0.5f - (p_x - p_m.center_x) / p_m.size, 0.5f - (p_z - p_m.center_z) / p_m.size };
 }
@@ -336,6 +338,8 @@ struct MinimapWorldRect {
 std::optional<MinimapWorldRect> combat_area_bounds(
 		const L8Image &p_field, float p_threshold, const MinimapMapping &p_mapping);
 
+// INFERRED: fitted to the 18.57 footage's OverviewMap_01 spans in ingamemenump and spawnscreenpc.
+// Settle: a note on how the overview map frames the combat area.
 inline constexpr float kMinimapOverviewMargin = 1.15f;
 
 MinimapView minimap_overview_view(

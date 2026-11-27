@@ -11,6 +11,8 @@ namespace bf3::core::ui {
 
 namespace {
 
+// INFERRED: optionsgraph's save-or-revert and bind-key ActionNode keys (2 below), taken from the graph as their
+// names are unknown. Settle: the action names whose hash these are.
 constexpr int32_t kSaveOrRevertOptionsKey = -2113864226;
 constexpr int32_t kBindKeyKey = -164353320;
 
@@ -25,6 +27,8 @@ std::string_view first_param(std::span<const std::string> p_params) {
 
 }
 
+// INFERRED: the display mode label format and the monitor labels 1..N are read off the footage.
+// Settle: footage of the Video tab's resolution and monitor rows.
 std::string display_mode_label(const DisplayModeChoice &p_mode) {
 	char buf[64];
 	std::snprintf(buf, sizeof(buf), "%ux%u %.2fHz", p_mode.width, p_mode.height, double(p_mode.hertz));

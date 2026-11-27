@@ -4,6 +4,7 @@
 #include <optional>
 #include <vector>
 
+// SOURCE: the AS2 class Widget.CheckBox.CheckBox (bf3dump swf as2 actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 namespace {

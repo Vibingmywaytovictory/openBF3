@@ -11,6 +11,7 @@ namespace bf3::core::res {
 namespace {
 
 constexpr size_t kMaxMeshName = 512;
+// SOURCE: notes R5-VG2 C (record after the mesh name: density @4, scale min and max pairs @21 and @29, tree level @53).
 constexpr size_t kDensityAt = 4;
 constexpr size_t kScaleAt = 21;
 constexpr size_t kTreeLevelAt = 53;

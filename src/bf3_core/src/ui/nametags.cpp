@@ -120,6 +120,8 @@ TagRelation tag_relation(const NametagViewer &p_viewer, uint8_t p_team, uint8_t 
 	return p_viewer.squad != 0 && p_squad == p_viewer.squad ? TagRelation::Squad : TagRelation::Friendly;
 }
 
+// INFERRED: the look-at radius in stage units runs from MaxLookAtThreshold at 0 m to MinLookAtThreshold at
+// MinLookAtThresholdDistance and beyond. Settle: a note on UINametagComp's look-at test.
 float look_at_threshold(const NametagStyle &p_style, float p_distance_m) {
 	const float span = p_style.min_look_at_threshold_distance;
 	const float t = span > 0.0f && std::isfinite(p_distance_m) ? std::clamp(p_distance_m / span, 0.0f, 1.0f) : 1.0f;
@@ -141,6 +143,8 @@ NametagDecision decide_nametag(const NametagStyle &p_style, const NametagViewer 
 	const float tf = std::clamp((d - p_style.fade_distance) / span, 0.0f, 1.0f);
 	out.alpha = std::clamp(1.0f + (p_style.max_far_fade - 1.0f) * tf, 0.0f, 1.0f);
 	const bool looked_at = std::isfinite(p_subject.crosshair_stage) && p_subject.crosshair_stage <= look_at_threshold(p_style, d);
+	// INFERRED: an enemy shows its icon only while spotted and its name only while looked at with a clear line of sight,
+	// a friend the icon always and the name within ShowLabelRange or looked at. Settle: a note on UINametagComp.
 	if (out.relation == TagRelation::Enemy) {
 		out.icon = spotted;
 		out.needs_line_of_sight = looked_at && d <= p_style.draw_distance;
@@ -148,6 +152,7 @@ NametagDecision decide_nametag(const NametagStyle &p_style, const NametagViewer 
 		return out;
 	}
 	out.icon = true;
+	// INFERRED: the viewer's squad leader's tag carries the squad leader icon. Settle: footage of a squad leader's tag.
 	out.squad_leader = out.relation == TagRelation::Squad && p_subject.leader;
 	out.name = d <= p_style.show_label_range || looked_at;
 	return out;
@@ -167,6 +172,7 @@ std::array<float, 4> tag_tint(const NametagStyle &p_style, TagRelation p_relatio
 	return { 1.0f, 1.0f, 1.0f, 1.0f };
 }
 
+// INFERRED: the minimap shows every living friend and an enemy only while revealed. Settle: a note on UIMinimapComp.
 TagRelation minimap_relation(const NametagViewer &p_viewer, uint8_t p_team, uint8_t p_squad, bool p_alive, double p_now_s, double p_revealed_until_s) {
 	if (!p_alive) {
 		return TagRelation::None;

@@ -25,6 +25,8 @@ double screen_safe_margin(double p_size, double p_fraction) {
 	return as2_round(p_size * (1.0 - p_fraction) / 2.0);
 }
 
+// INFERRED: the footage's offset at 0.95 moved by size x (0.95 - fraction) / 2; the AS2 formula alone gives 32 x 18
+// at 0.95. Settle: footage at another safe-area fraction.
 float hud_safe_offset(float p_footage_offset, float p_size, double p_fraction) {
 	if (!std::isfinite(p_fraction)) {
 		return p_footage_offset;

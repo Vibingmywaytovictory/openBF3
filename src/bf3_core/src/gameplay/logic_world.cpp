@@ -104,6 +104,8 @@ bool is_kind(std::string_view p_kind, std::initializer_list<std::string_view> p_
 
 }
 
+// INFERRED: an interface field's Value text is "<type> <value>" (Boolean, Int*, Float*, CString, TeamId as Team<n> or
+// Neutral, LinearTransform as 12 floats in row order, Vec3). Settle: a research/ format fact on DataField values.
 std::optional<PropertyValue> PropertyValue::parse(std::string_view p_constant) {
 	const std::string_view constant = trim(p_constant);
 	if (constant.empty()) {
@@ -342,6 +344,9 @@ std::optional<EbxValue> data_field(const EbxInstance &p_object, int32_t p_field)
 	return partition.decode(found->first_field, size_t(data.offset()) + found->first_offset);
 }
 
+// SOURCE: research/topics/gap-r1-level-logic-schematics.md (sub-worlds filtered by their GameMode inclusion criterion).
+// INFERRED: AutoLoad false never loads, the mode matches case-insensitively and other criteria are ignored.
+// Settle: a note on SubWorldInclusionSetting.
 Result<bool> subworld_included(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, WorkBudget &r_budget,
 		size_t *r_scanned) {
 	const auto scanned = [&](size_t p_entries) {
@@ -790,6 +795,8 @@ bool LogicWorld::query_step(size_t &r_steps) const {
 	return budget_->take(1);
 }
 
+// INFERRED: a field's start value is the first PropertyConnection into it that resolves (through interfaces to the
+// descriptor's Fields Value), else its stored value. Settle: a note on how a level seeds connected fields.
 std::optional<PropertyValue> LogicWorld::property_in(const Frame &p_frame, const EbxInstance &p_target, int32_t p_field, uint32_t p_depth, size_t &r_steps) const {
 	if (p_depth == 0 || !query_step(r_steps)) {
 		return std::nullopt;

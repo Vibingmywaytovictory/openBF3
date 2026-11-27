@@ -348,6 +348,7 @@ float MixerAsset::accumulate(size_t p_input, std::span<const float> p_contributi
 	if (inputs[p_input].accumulate == MixerAccumulate::Max) {
 		return *std::max_element(p_contributions.begin(), p_contributions.end());
 	}
+	// INFERRED: MixerValueAccumulateMode_None keeps the last contribution. Settle: a note on the mixer's accumulate modes.
 	return p_contributions.back();
 }
 

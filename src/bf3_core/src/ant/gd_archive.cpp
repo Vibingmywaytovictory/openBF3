@@ -6,6 +6,8 @@ namespace bf3::core::ant {
 
 namespace {
 
+// INFERRED: a blob's body starts 16 bytes in, 4 past the 12-byte id, endian and size that probe 3.2 gives.
+// Settle: a bf3dump look at the first bytes of a GD.REFL blob.
 constexpr uint32_t kBlobHeader = 16;
 constexpr uint32_t kLayoutHeader = 32;
 constexpr uint32_t kEntryHeader = 32;
@@ -270,6 +272,8 @@ bool GdArchive::parse_reflection(uint32_t p_begin, uint32_t p_end, std::string &
 	return true;
 }
 
+// SOURCE: research/probes/ant-animation-probe.md 3.2 (GD.STRM, then one GD.REFL and the GD.DATA blobs, 'l' endian on
+// BF3 PC, the 32-byte entry headers, the LayoutData magic 0x030E6205, strings and arrays as count and blob pointer).
 bool GdArchive::parse(std::span<const uint8_t> p_bytes, std::string &r_error) {
 	bytes_ = p_bytes;
 	layouts_.clear();

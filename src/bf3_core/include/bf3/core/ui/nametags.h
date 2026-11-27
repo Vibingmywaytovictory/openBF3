@@ -14,6 +14,8 @@ namespace bf3::core::ui {
 inline constexpr std::string_view kNametagCompPartition = "ui/uicomponents/uinametagcomp";
 inline constexpr std::string_view kSoldierBlueprintPartition = "characters/soldiers/mpsoldier";
 
+// SOURCE: bf3dump of MP_Subway's ui/uicomponents/uinametagcomp: every default in this block is that
+// UINametagCompData's value.
 struct NametagStyle {
 	std::array<float, 4> friendly_tint{ 0.0f, 0.8f, 0.8f, 1.0f };
 	std::array<float, 4> squad_tint{ 0.45490196f, 0.8627451f, 0.8f, 1.0f };
@@ -38,6 +40,7 @@ struct NametagStyle {
 	uint32_t clamped = 0;
 };
 
+// SOURCE: bf3dump of characters/soldiers/mpsoldier: the defaults are its SpottingTargetComponentData values.
 struct SpottingRules {
 	float active_spotted_time = 7.0f;
 	float passive_spotted_time = 1.5f;
@@ -45,6 +48,8 @@ struct SpottingRules {
 	bool from_data = false;
 	uint32_t clamped = 0;
 
+	// INFERRED: a shot shows the shooter on the enemy minimap for ActiveSpottedTime x SpotOnFireMultiplier.
+	// Settle: a note on SpotOnFireMultiplier.
 	float fire_reveal_seconds() const { return active_spotted_time * spot_on_fire_multiplier; }
 };
 

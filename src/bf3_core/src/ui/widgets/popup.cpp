@@ -1,5 +1,7 @@
 #include "button.h"
 
+// SOURCE: the AS2 classes Widget.Popup.PopupGenericWidget and PopupButtonsManager (bf3dump swf as2
+// actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 namespace {

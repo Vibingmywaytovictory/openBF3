@@ -90,6 +90,7 @@ Result<std::vector<VehicleInputModifierDef>> read_disabled_input(
 	return out;
 }
 
+// SOURCE: notes R3-G3-vehicle-damage and R3-G2-turret-input (level = clamp(level x Scale + Offset, -1, 1)).
 float apply_input_modifiers(
 		std::span<const VehicleInputModifierDef> p_modifiers, std::string_view p_action, float p_level) {
 	float level = p_level;

@@ -1,6 +1,8 @@
 #include "hud_widget_support.h"
 #include "scroll_text.h"
 
+// SOURCE: the AS2 class Widget.Input.InputListener (bf3dump swf as2 actionscriptlibrary): m_tabDelay 300 and
+// m_comDelay 200 ms, the event indices and the PC branch, ported here.
 namespace bf3::core::ui {
 
 namespace {

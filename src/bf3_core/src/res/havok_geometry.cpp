@@ -10,6 +10,8 @@ namespace bf3::core::res {
 
 namespace {
 
+// STAND-IN: a sphere, capsule or cylinder becomes a hull of 12-point rings (a cap's rings at 0, 30 and 60 degrees).
+// Settle: collide against the round shape itself.
 constexpr size_t kRoundSegments = 12;
 
 using V = std::array<double, 3>;
@@ -387,6 +389,8 @@ void basis(const Vec3 &p_axis, Vec3 &r_u, Vec3 &r_v) {
 	r_v = vec::cross(axis, r_u);
 }
 
+// WHY: the volatile read keeps the cos and sin calls scalar, not a vectorised variant that can round a ring's points
+// differently.
 float scalar_cos(float p_x) {
 	volatile float x = p_x;
 	return std::cos(float(x));
@@ -617,6 +621,8 @@ void subpart_triangles(const TrianglesSubpart &p_subpart, const Transform &p_tra
 std::vector<Tri> havok_triangles(const Shape &p_shape, const Transform &p_transform) {
 	std::vector<Tri> out;
 	Visitor visitor;
+	// STAND-IN: a convex piece's triangles are the hull of its points, without its convex radius.
+	// Settle: grow the hull by the shape's radius as Havok collides it.
 	visitor.convex = [&](const Convex &p_convex, const Transform &p_t, uint32_t p_part) {
 		const Hull hull = convex_hull(p_convex.points);
 		const bool mirrored = p_t.determinant() < 0.0f;

@@ -15,6 +15,7 @@ namespace bf3::core::ui {
 inline constexpr std::string_view kUiInputConceptsPartition = "input/defaultinputconcepts";
 inline constexpr size_t kUiInputMaxBindings = 4096;
 
+// SOURCE: the static fields of AS2 class fb.Input.InputConceptActions, ui/assets/actionscriptlibrary (bf3dump swf as2).
 enum class UiInputConcept : int32_t {
 	NavigateUp = 0,
 	NavigateDown = 1,

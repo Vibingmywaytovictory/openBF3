@@ -50,6 +50,8 @@ public:
 };
 
 inline constexpr std::string_view kSpawnPointListCategory = "ui/uicomponents/uispawnpointcomp";
+// INFERRED: spawnscreenpc List_01's ListQuery key (the spawn points) and DefaultSelectionQuery key (2 below, taken as
+// the first available row); the key hash is unknown. Settle: a note on UISpawnPointComp's DataKeys.
 inline constexpr int32_t kSpawnPointListKey = 1755421927;
 
 inline constexpr int32_t kDefaultSpawnPointKey = -233610778;
@@ -61,6 +63,7 @@ std::optional<As2Value> hud_menu_list_rows(const HudDataSource &p_query, const H
 
 class RowBaseClass : public HudWidgetController {
 public:
+	// SOURCE: the AS2 class Widget.List.Rows.RowBase: m_ID starts at -123456789.
 	static constexpr double kNoId = -123456789.0;
 
 	void construct(HudWidgetHost &r_host) override;

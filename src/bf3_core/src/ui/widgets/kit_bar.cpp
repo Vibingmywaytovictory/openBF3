@@ -4,6 +4,7 @@
 #include "kit_icons.h"
 #include "scroll_text.h"
 
+// SOURCE: the AS2 class Widget.Bar.KitBar (bf3dump swf as2 actionscriptlibrary), which this file ports; bind() is ours.
 namespace bf3::core::ui {
 
 namespace {

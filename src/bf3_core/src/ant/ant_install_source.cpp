@@ -194,6 +194,8 @@ const LevelMount *AntInstallSource::weapons_mount(std::string &r_error) const {
 	return weapons_.get();
 }
 
+// SOURCE: research/probes/ant-animation-probe.md 2 (Static and Bundle packages are the res named lowercase(Name), Chunk
+// packages the StreamingGuid chunk, all 88 of them in win32/weapons).
 bool AntInstallSource::read(const AntPackageInfo &p_info, std::vector<uint8_t> &r_bytes, std::string &r_error) const {
 	if (p_info.packaging == AntPackagingType::Chunk && p_info.is_asset_package) {
 		const auto it = package_mount_.find(p_info.partition);

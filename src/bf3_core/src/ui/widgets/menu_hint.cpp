@@ -1,6 +1,8 @@
 #include "hud_widget_support.h"
 #include "scroll_text.h"
 
+// SOURCE: the AS2 class Widget.Text.MenuHint (bf3dump swf as2 actionscriptlibrary): FRAME_START_FADE_IN 15,
+// FRAME_START_TEXT 26 and the 700 ms quick update, ported here.
 namespace bf3::core::ui {
 
 namespace {

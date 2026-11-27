@@ -14,6 +14,8 @@ namespace bf3::core::ui {
 
 namespace {
 
+// SOURCE: research/topics/gap-r1-ui-hud-minimap-localisation.md 4 (binary header to the tag at 0x14, 12-byte histogram
+// header, 8-byte entries, offsets counted from byte 8), the four constants below.
 constexpr size_t kBinaryHeader = 0x14;
 constexpr size_t kHistogramHeader = 12;
 constexpr size_t kEntryLen = 8;
@@ -94,6 +96,7 @@ private:
 	uint16_t high_ = 0;
 };
 
+// SOURCE: research/topics/gap-r1-ui-hud-minimap-localisation.md 4 (histogram string decoding).
 void decode_string(std::span<const uint8_t> p_encoded, std::span<const uint8_t> p_units, size_t p_unit_count, std::string &r_out,
 		size_t &r_errors) {
 	auto unit = [&](size_t p_index) { return le16(p_units.data() + 2 * p_index); };
@@ -131,6 +134,7 @@ void decode_string(std::span<const uint8_t> p_encoded, std::span<const uint8_t> 
 
 }
 
+// SOURCE: research/topics/gap-r1-ui-hud-minimap-localisation.md 4 (SID hash: seed 0xFFFFFFFF, h * 33 + c per byte).
 uint32_t text_hash(std::string_view p_sid) {
 	uint32_t h = 0xFFFFFFFFu;
 	for (const char c : p_sid) {
@@ -257,6 +261,8 @@ namespace {
 constexpr std::string_view kLocalizationPartition = "localization/localization";
 constexpr std::string_view kLocPrefix = "win32/loc/";
 
+// INFERRED: the Win32/Loc/<code> superbundle name per language; a miss falls back to every Win32/Loc site.
+// Settle: an install with the other languages.
 std::string loc_code(std::string_view p_language) {
 	static const struct {
 		const char *word;

@@ -328,6 +328,8 @@ std::optional<uint32_t> SwfTimeline::label_frame(std::string_view p_label) const
 			return l.frame;
 		}
 	}
+	// INFERRED: Flash AS2's case-insensitive frame-label match taken as GFx's, after an exact match.
+	// Settle: a retail goto whose label differs from the movie's only in case.
 	for (const SwfFrameLabel &l : labels) {
 		if (l.name.size() == p_label.size() &&
 				std::equal(l.name.begin(), l.name.end(), p_label.begin(), [](char a, char b) { return to_lower_ascii(a) == to_lower_ascii(b); })) {

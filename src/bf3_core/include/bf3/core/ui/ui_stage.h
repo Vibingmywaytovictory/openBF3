@@ -4,6 +4,8 @@
 
 namespace bf3::core::ui {
 
+// SOURCE: the SWF header stage, 1280x720, of the HUD, crosshair, spawn, menu, scoreboard, EOR and popup screen movies
+// (bf3dump swf census).
 inline constexpr SwfRect kUiScreenStage{ 0.0f, 1280.0f, 0.0f, 720.0f };
 
 struct UiStage {

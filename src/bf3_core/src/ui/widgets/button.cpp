@@ -1,5 +1,7 @@
 #include "button.h"
 
+// SOURCE: the AS2 classes Widget.Button.Button and Widget.Button.Buttons.* (ButtonBase, ResizableButton, TextButton,
+// IconButton, LargeArrowButton, TextIconButton, TextIconButtonAlignedRight) of actionscriptlibrary, ported here.
 namespace bf3::core::ui {
 
 namespace {

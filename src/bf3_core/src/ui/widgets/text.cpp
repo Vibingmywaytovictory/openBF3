@@ -7,15 +7,21 @@ namespace bf3::core::ui {
 
 namespace {
 
+// SOURCE: Widget.Text.TextField's AS2: SHOW 0, HIDE 1, ChatLogMode hides after Util.TimeUtil.wait 4000 ms, the three
+// constants below (bf3dump swf as2).
 constexpr int32_t kTextFieldShow = 0;
 constexpr int32_t kTextFieldHide = 1;
 constexpr double kChatLogHideSeconds = 4.0;
 constexpr std::string_view kChatLogMode = "ChatLogMode";
 constexpr std::string_view kEndOfRoundCategory = "ui/uicomponents/uiendofroundcomp";
+// INFERRED: the two uiendofroundcomp DataKeys below paired with LevelChangeTimerText and TimeUntilLevelChange by widget
+// name; DataKeys are not name hashes (notes R5-UI2 A2). Settle: a debug screen naming the keys.
 constexpr int32_t kLevelChangeTimerTextKey = -463343046;
 constexpr int32_t kTimeUntilLevelChangeKey = 1475220671;
 constexpr std::string_view kNextRoundStartsInSid = "ID_M_EOR_NEXT_ROUND_STARTS_IN";
 constexpr std::string_view kKitCategory = "ui/uicomponents/uikitcomp";
+// INFERRED: the uikitcomp DataKey bound by customizesoldiersubscreen's TextField_01, taken as the selected kit's name.
+// Settle: a debug screen naming the key.
 constexpr int32_t kKitNameTextKey = 1978414970;
 
 std::optional<As2Value> text_field_source(

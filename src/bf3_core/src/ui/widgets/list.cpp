@@ -2,6 +2,8 @@
 
 #include "scroll_bar.h"
 
+// SOURCE: the AS2 classes Widget.List.List, Widget.List.ListLogic and Widget.List.Rows.RowBase (bf3dump swf as2
+// actionscriptlibrary), which this file ports; bind() and the hud_list_* feeds are ours.
 namespace bf3::core::ui {
 
 namespace {

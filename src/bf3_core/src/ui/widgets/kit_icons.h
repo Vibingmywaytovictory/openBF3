@@ -45,6 +45,7 @@ struct GameUtilsKit {
 	std::string_view label;
 };
 
+// SOURCE: the AS2 class Main.GameUtils getKitFrameLabel (bf3dump swf as2 actionscriptlibrary): these kit names and labels.
 inline constexpr std::array<GameUtilsKit, kHudKitCount> kGameUtilsKits{ {
 		{ "USAssault", "RUAssault", "ID_M_ASSAULT", "assault" },
 		{ "USEngineer", "RUEngineer", "ID_M_ENGINEER", "engineer" },

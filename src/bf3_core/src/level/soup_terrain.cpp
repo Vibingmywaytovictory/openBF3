@@ -71,6 +71,8 @@ void make_cell(const res::HeightGrid &p_grid, const Transform &p_frame, uint32_t
 	const res::Vec3 b = point(1, 0);
 	const res::Vec3 c = point(0, 1);
 	const res::Vec3 d = point(1, 1);
+	// INFERRED: each cell splits on its (x, z) to (x + 1, z + 1) diagonal and is open when any corner is a hole.
+	// Settle: a research/ format fact on the terrain physics triangulation.
 	const std::array<std::array<res::Vec3, 3>, 2> pair = { { { a, d, b }, { a, c, d } } };
 	for (const std::array<res::Vec3, 3> &t : pair) {
 		SoupTriangle tri;
@@ -86,6 +88,7 @@ void make_cell(const res::HeightGrid &p_grid, const Transform &p_frame, uint32_t
 		}
 		tri.material = 0;
 		tri.placement = p_placement;
+		// STAND-IN: all terrain is dirt; the TerrainMaterialTreeAsset is not read. Settle: read the terrain materials.
 		tri.surface = surface::kDirt;
 		tri.body = uint8_t(CollisionBody::Collision);
 		tri.flags = kSoupTerrain;

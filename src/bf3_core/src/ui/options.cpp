@@ -14,6 +14,8 @@ constexpr std::string_view kOff = "ID_M_OPTIONS_OFF";
 constexpr std::string_view kYes = "ID_M_OPTIONS_YES";
 constexpr std::string_view kNo = "ID_M_OPTIONS_NO";
 
+// INFERRED: each row's DataKey to UISettingsComp source to profile option, matched by the rows' labels as the key hash
+// is unknown; the bool rows' choice SIDs and their false-first order are read off the footage. Settle: a note on the keys.
 constexpr OptionSource kSources[] = {
 	{ 2036655012, "VerticalLook", "Scheme0FlipY", OptionValue::Profile, "ID_M_OPTIONS_NORMAL", "ID_M_OPTIONS_INVERT" },
 	{ 1197323515, "VerticalFlight", "Scheme2FlipY", OptionValue::Profile, "ID_M_OPTIONS_NORMAL",
@@ -44,6 +46,8 @@ constexpr OptionSource kSources[] = {
 	{ -1903337626, "MotionBlur", "MotionBlur", OptionValue::Profile, {}, {} },
 	{ -908194755, "Stereoscopy", "Stereoscopy", OptionValue::Profile, kOff, kOn },
 	{ 778093026, "StereoConvergence", "StereoConvergence", OptionValue::Profile, {}, {} },
+	// STAND-IN: ColorblindSupport has no profile option; it is stored with OFF, the footage's value.
+	// Settle: a note on where retail keeps ColorblindSupport.
 	{ 32383342, "ColorblindSupport", "ColorblindSupport", OptionValue::Unbacked, kOff, kOn },
 	{ 1089114246, "OverallGraphicsQuality", "OverallGraphicsQuality", OptionValue::Profile, {}, {} },
 	{ -522365085, "TextureQuality", "TextureQuality", OptionValue::Profile, {}, {} },

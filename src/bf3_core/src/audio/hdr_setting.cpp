@@ -55,6 +55,7 @@ Status read_curve(const EbxStruct &p_s, std::string_view p_field, WorkBudget &r_
 		BF3_TRY(read_field(*ps, "K", pt.k));
 		r_curve.points.push_back(pt);
 	}
+	// STAND-IN: the points are sorted by X; notes R2-D1 evaluate them in stored order. Settle: R2-D1's rule.
 	std::stable_sort(r_curve.points.begin(), r_curve.points.end(), [](const AudioCurvePoint &a, const AudioCurvePoint &b) { return a.x < b.x; });
 	return Status::success();
 }
@@ -65,6 +66,7 @@ bool in(float p_v, float p_lo, float p_hi) {
 
 }
 
+// SOURCE: HdrSetting.WindowTopReleaseTimeCurve of sound/soundstates, its five points.
 AudioCurve default_hdr_release_curve() {
 
 	AudioCurve c;

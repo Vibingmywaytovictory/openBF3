@@ -21,6 +21,8 @@ struct ActionConcept {
 	bool negative = false;
 };
 
+// INFERRED: the InputConcept behind each action, paired by name; bf3_gadget and bf3_use as ConceptSwitchToStaticGadget
+// and ConceptChangeVehicle are picked. Settle: footage of the retail keys for the gadget and vehicle entry.
 inline constexpr ActionConcept kActionConcepts[] = {
 	{ "bf3_forward", "infantry", "ConceptMoveFB", false },
 	{ "bf3_back", "infantry", "ConceptMoveFB", true },
@@ -103,6 +105,8 @@ struct SettingsEffects {
 
 SettingsEffects settings_effects(const SettingsStore &p_store);
 
+// STAND-IN: look radians per mouse count at MouseSensitivity 0.5; the install holds no counts-to-angle factor.
+// Settle: retail footage of a measured mouse sweep.
 inline constexpr float kBaseLookRadiansPerCount = 0.0022f;
 
 struct LookMultipliers {

@@ -439,6 +439,7 @@ struct SwfScene::Impl {
 		stats.live_nodes--;
 	}
 
+	// INFERRED: a swapDepths clip leaves its timeline's control, as in Flash. Settle: a retail swapped clip across a seek.
 	Status swap_with(SwfSceneNode &r_n, int32_t p_depth) {
 		SwfSceneNode *parent = get(r_n.parent);
 		if (parent == nullptr) {
@@ -474,6 +475,8 @@ struct SwfScene::Impl {
 		}
 	}
 
+	// INFERRED: Flash's rule that a property a script set is no longer driven by the timeline, taken as GFx's.
+	// Settle: a retail clip moved by script, then replayed across a seek.
 	void apply_slot(SwfSceneNode &r_n, const SwfTimeline &p_parent_tl, const Slot &p_slot) {
 		if (!r_n.script_matrix) {
 			r_n.matrix = p_slot.matrix;
@@ -728,6 +731,8 @@ struct SwfScene::Impl {
 			}
 			for (const SwfFrameOp &op : s->ops) {
 				BF3_TRY(charge(1));
+				// STAND-IN: no AVM1 interpreter; frame-script ops after a branch are skipped and other actions go to the
+				// clip's controller. Settle: run the frame scripts' AVM1.
 				if (op.after_branch) {
 					stats.ops_conditional_skipped++;
 					continue;

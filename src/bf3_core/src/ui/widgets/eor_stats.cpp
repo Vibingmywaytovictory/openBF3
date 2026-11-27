@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <string>
 
+// SOURCE: the AS2 class Widget.Stats.Stats (bf3dump swf as2 menuactionscriptlibrary), which this file ports; bind() is
+// ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -53,6 +55,8 @@ public:
 		};
 		feed("TotalScore", As2Value::of(e.total_score));
 		feed("CombatScore", As2Value::of(e.combat_score));
+		// STAND-IN: no stats are kept, so AwardScore is 0 and the page is never a match page, as 18.52 shows unranked.
+		// Settle: build player stats.
 		feed("AwardScore", As2Value::of(0));
 		feed("Kills", As2Value::of(e.kills));
 		feed("Deaths", As2Value::of(e.deaths));

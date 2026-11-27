@@ -37,6 +37,8 @@ TerrainDecalVertex read_vertex(Reader &r, uint64_t p_at, Layout p_layout) {
 	TerrainDecalVertex v;
 	switch (p_layout) {
 		case Layout::Planar:
+			// INFERRED: a planar vertex's two floats are terrain x and z, its height left to the terrain.
+			// Settle: a note on the TerrainDecals planar vertex.
 			v.position = { r.f32(p_at), 0.0f, r.f32(p_at + 4) };
 			v.uv = { r.f32(p_at + 8), r.f32(p_at + 12) };
 			v.mask = half4(r, p_at + 16);
@@ -145,6 +147,7 @@ bool read_set(Reader &r, uint64_t &r_at, Layout p_layout, TerrainDecalSet &r_set
 
 }
 
+// INFERRED: the record's float at 57 is 1 / (draw order + 1). Settle: a note on the TerrainDecals record.
 int32_t TerrainDecalRecord::draw_order() const {
 	if (!(inverse_order > 0.0f) || !std::isfinite(inverse_order)) {
 		return 0;

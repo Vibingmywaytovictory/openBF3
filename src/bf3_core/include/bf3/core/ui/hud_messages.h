@@ -17,12 +17,16 @@ namespace bf3::core::ui {
 
 inline constexpr std::string_view kUiMessageCompPartition = "ui/uicomponents/uimessagecomp";
 inline constexpr std::string_view kUiDamageIndicatorCompPartition = "ui/uicomponents/uidamageindicatorcomp";
+// SOURCE: the AS2 class Widget.Hud.DamageIndicator (bf3dump swf as2 actionscriptlibrary): indicator0..indicator2.
 inline constexpr size_t kHudDamageIndicators = 3;
+// SOURCE: bf3dump text 0x52ddee25: the install text "[{0:~}]".
+// INFERRED: the kill row's weapon text is this format around the weapon name. Settle: a note on the kill message text.
 inline constexpr uint32_t kHudKillWeaponFormatHash = 0x52ddee25u;
 inline constexpr std::string_view kHudKillWeaponFormat = "[{0:~}]";
 inline constexpr std::string_view kHudKillsIsNoSid = "ID_H_MSG_KILLS_ISNO";
 inline constexpr std::string_view kHudScoreKillSid = "ID_SCORE_KILL";
 inline constexpr std::string_view kHudScoreHeadshotSid = "ID_SCORE_HEADSHOT";
+// SOURCE: the AS2 class Widget.Message.MessageTypes.KillLogMessage setColor: 0 friendly, 1 enemy, 2 squad frame.
 inline constexpr int32_t kHudRelationFriendly = 0;
 inline constexpr int32_t kHudRelationEnemy = 1;
 inline constexpr int32_t kHudRelationSquad = 2;
@@ -72,6 +76,8 @@ struct HudMessageKey {
 	std::string_view data_source;
 };
 
+// INFERRED: which UIMessageComp source each MessageQuery DataKey is; the key hash is unknown, so the pairs are matched
+// by hand. Settle: a note on how UIMessageComp derives its DataKeys.
 inline constexpr std::array<HudMessageKey, 6> kHudMessageKeys{ {
 		{ 224794678, HudMessageSource::Kill, "KillMessage" },
 		{ 1675248891, HudMessageSource::LocalKill, "LocalKillMessage" },

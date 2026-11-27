@@ -21,6 +21,8 @@ struct NtApi {
 	RtlNtStatusToDosErrorFn to_dos = nullptr;
 };
 
+// WHY: the rename goes through NtSetInformationFile with these two classes, which winternl.h does not declare, because
+// SetFileInformationByHandle rejects a RootDirectory and without one resolves a bare name against the current directory.
 constexpr ULONG kFileRenameInformation = 10;
 constexpr ULONG kFileRenameInformationEx = 65;
 
@@ -298,6 +300,8 @@ bool rename_into(const Handle &p_file, const Handle &p_dir, std::wstring_view p_
 	std::memcpy(info->FileName, p_name.data(), name_bytes);
 	IO_STATUS_BLOCK io{};
 	NTSTATUS st = nt().set_information(p_file.get(), &io, info, static_cast<ULONG>(total), kFileRenameInformationEx);
+	// WHY: volumes without POSIX rename (FAT, older NTFS) refuse the extended class; the classic class then replaces
+	// the target without POSIX semantics.
 	if (st == static_cast<NTSTATUS>(0xC0000003L)   || st == static_cast<NTSTATUS>(0xC00000BBL)   ||
 			st == static_cast<NTSTATUS>(0xC000000DL)  ) {
 

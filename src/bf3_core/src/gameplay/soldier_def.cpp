@@ -291,6 +291,8 @@ const char *soldier_pose_name(SoldierPose p_pose) {
 	return "?";
 }
 
+// INFERRED: a Vec2 curve (ThrottleModifierCurve, the fall damage curves) is linear between points and flat past its
+// ends. Settle: a note on the curve evaluation.
 float eval_curve(const std::vector<CurvePoint> &p_points, float p_x) {
 	if (p_points.empty()) {
 		return 0;
@@ -526,6 +528,8 @@ Result<SoldierDef> read_soldier_def(const EbxResolver &p_db, std::string_view p_
 			spec.value = number_or(pairs[i].data(), "UnlockedValue", 0);
 			spec.default_value = number_or(pairs[i].data(), "DefaultValue", 0);
 			spec.squad = squad;
+			// STAND-IN: a value goes to the wired field whose name shares the longest prefix with its Id, else the
+			// i-th target. Settle: the data link from an UnlockValues entry to its field.
 			if (!targets.empty()) {
 				size_t pick = std::min(i, targets.size() - 1);
 				size_t best = 0;

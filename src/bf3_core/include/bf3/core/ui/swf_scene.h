@@ -22,7 +22,10 @@ inline constexpr uint32_t kSwfSceneMaxNodes = 1u << 16;
 inline constexpr uint32_t kSwfSceneMaxNesting = 32;
 inline constexpr uint32_t kSwfSceneMaxImportHops = 8;
 inline constexpr uint32_t kSwfSceneMaxJumpsPerNode = 64;
+// STAND-IN: at most 8 movie frames per advance; a longer hitch drops the rest. Settle: how GFx catches up after a stall.
 inline constexpr uint32_t kSwfSceneMaxCatchUpFrames = 8;
+// INFERRED: Flash Player's AS2 depths (timeline depth = AS2 depth + 16384, top 1048575) taken as GFx's, both constants.
+// Settle: getDepth of a timeline-placed clip in a retail script.
 inline constexpr int32_t kSwfAs2DepthOffset = 16384;
 inline constexpr int32_t kSwfAs2MaxDepth = 1048575 - kSwfAs2DepthOffset;
 inline constexpr size_t kSwfSceneBudgetUnits = size_t(1) << 24;

@@ -5,6 +5,8 @@
 
 namespace bf3::core::ui {
 
+// INFERRED: the order icons for an area order, the minimap icon choice and the empty marker label; not seen in footage.
+// Settle: footage of a squad order's marker.
 std::optional<HudSquadOrderLook> squad_order_look(HudSquadOrder p_order) {
 	switch (p_order) {
 		case HudSquadOrder::Attack:
@@ -57,6 +59,8 @@ HudWorldTag capture_point_tag(uint32_t p_id, const HudCapturePoint &p_point, cha
 	tag.data.push_back(HudDataEntry{ "Progress", As2Value::of(double(std::lround(p_point.progress * 100.0f))), true });
 	tag.data.push_back(HudDataEntry{ "Blink", As2Value::of(p_point.contested), true });
 	tag.data.push_back(HudDataEntry{ "Name", As2Value::of(std::string(p_name)), true });
+	// INFERRED: Distance is the camera's distance in whole metres with no unit, as its $HUD_medium field draws only
+	// U+0020..U+003F. Settle: footage of a Conquest flag tag.
 	tag.data.push_back(HudDataEntry{ "Distance", As2Value::of(double(std::lround(p_distance_m))), true });
 	tag.data.push_back(HudDataEntry{ "Snap", As2Value::of(p_placement.snapped), true });
 	return tag;

@@ -38,6 +38,8 @@ inline constexpr size_t kHudMaxScreenWidgets = 64;
 inline constexpr size_t kHudMaxWidgetProperties = 32;
 inline constexpr size_t kHudMaxNestedLists = 64;
 
+// INFERRED: the screen widgets' safe offset in stage px at ScreenSafeAreaWidth/Height 0.95, read off the 18.57 footage
+// (the AS2's own formula gives 32 x 18). Settle: a note on the engine's safe-area offset.
 inline constexpr float kHudFootageSafeX = 49.806f;
 inline constexpr float kHudFootageSafeY = 28.195f;
 

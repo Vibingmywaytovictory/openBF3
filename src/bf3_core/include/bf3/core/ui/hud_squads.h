@@ -17,6 +17,8 @@ namespace bf3::core::ui {
 struct HudClientState;
 
 inline constexpr std::string_view kUiSquadCompPartition = "ui/uicomponents/uisquadcomp";
+// INFERRED: squadscreen's UISquadComp DataKeys below, each named by the graph node or widget that uses it, as the key
+// hash is unknown. Settle: a note on how UISquadComp derives its DataKeys.
 inline constexpr int32_t kSquadAvailableSquadsKey = 1663005790;
 inline constexpr int32_t kSquadMembersKey = -487423817;
 inline constexpr int32_t kSquadSelectedSquadKey = -164313827;
@@ -30,6 +32,8 @@ inline constexpr int32_t kSquadFlowActionKey = -1497091703;
 inline constexpr int32_t kSwitchTeamFlowActionKey = 1283842800;
 inline constexpr int32_t kSquadPrivacyKey = -1385101326;
 inline constexpr int32_t kSquadPrivacyEnabledKey = 1518455639;
+// INFERRED: the Privacy CheckBox's Visible key; no graph node names it, it is used only by CheckBox_01's binding.
+// Settle: a note naming UISquadComp key -331214896.
 inline constexpr int32_t kSquadPrivacyVisibleKey = -331214896;
 inline constexpr int32_t kSquadHeaderNameKey = -917467149;
 inline constexpr std::string_view kSquadJoinParam = "join";

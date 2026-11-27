@@ -89,6 +89,8 @@ struct Reader {
 		a.type = p_type;
 		if (p_type == LogicTypeId::AreaProximity) {
 			a.out_port = kAreaProximityOut;
+			// INFERRED: an AreaProximity fades linearly over its ProximityDistance outside the shape.
+			// Settle: a note on AreaProximityEntityData's output.
 			a.curve = AreaFadeCurve::LinearAmplitude;
 			a.fade_width = float(number(world.effective(scope, *inst, "ProximityDistance")).value_or(0.0));
 		} else {

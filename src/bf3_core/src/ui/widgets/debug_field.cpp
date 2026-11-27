@@ -2,6 +2,7 @@
 #include "bf3/core/util/format.h"
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 class Widget.Text.DebugField (bf3dump swf as2 actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 namespace {
@@ -127,6 +128,7 @@ HudScreenAsset debug_screen_asset(std::span<const DebugFieldText> p_fields) {
 	return asset;
 }
 
+// WHY: the install's updateDataData does nothing, so the value is written into txtValue here.
 size_t debug_screen_show(HudScreen &r_screen, std::span<const DebugFieldText> p_fields) {
 	size_t shown = 0;
 	for (size_t i = 0; i < p_fields.size() && i < kDebugScreenFields; ++i) {

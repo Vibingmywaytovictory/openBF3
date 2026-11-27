@@ -10,6 +10,8 @@
 
 namespace bf3::core::audio {
 
+// INFERRED: the codec ids and the 0x48 / 0x44 / 0x45 block kinds below; no research/ format fact states them.
+// Settle: a research/ format fact on the sound stream blocks.
 enum class SoundCodec : uint8_t {
 	Pcm16Be = 2,
 	EaXas = 4,

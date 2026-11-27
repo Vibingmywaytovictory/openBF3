@@ -215,6 +215,8 @@ std::vector<KeyBindingRow> key_binding_rows(const InputActionMap &p_map) {
 		if (c.hidden) {
 			continue;
 		}
+		// INFERRED: a concept without a NameSid is labelled ID_M_OPTIONS_ plus its upper-case id; an axis or negated key adds
+		// a _NEG row and axes fill both rows, as the heli footage shows. Settle: a note on the key bindings list rows.
 		const std::string label = c.name_sid.empty() ? "ID_M_OPTIONS_" + to_upper_ascii(c.id) : c.name_sid;
 		const bool axis = std::any_of(c.inputs.begin(), c.inputs.end(), [](const ConceptInput &i) {
 			return (i.input.starts_with("IDA_") && input_is_bound(i.input)) ||
@@ -430,6 +432,7 @@ KeyBindResult KeyBindCapture::press(KeyBindingTable &r_table, std::string_view p
 		return KeyBindResult::Refused;
 	}
 	conflicts_.clear();
+	// INFERRED: a conflict is the same input in another cell of the same tab and column. Settle: footage of a rebind conflict.
 	for (const KeyCell &h : r_table.holders(cell_.tab, cell_.column, p_input)) {
 		if (!(h == cell_)) {
 			conflicts_.push_back(h);
@@ -455,6 +458,7 @@ KeyBindResult KeyBindCapture::confirm(KeyBindingTable &r_table, bool p_bind_anyw
 		pending_.clear();
 		return KeyBindResult::Cancelled;
 	}
+	// STAND-IN: bind anyway leaves the other cell's key in place, as no data says otherwise. Settle: footage of bind anyway.
 	r_table.set(cell_, pending_);
 	return KeyBindResult::Bound;
 }
@@ -467,6 +471,8 @@ KeyBindResult KeyBindCapture::cancel() {
 	return was ? KeyBindResult::Cancelled : KeyBindResult::Refused;
 }
 
+// STAND-IN: clearing is a separate call; the Escape hold time that clears a binding is not in the data.
+// Settle: a note on the key capture's clear.
 KeyBindResult KeyBindCapture::clear(KeyBindingTable &r_table) {
 	if (!waiting_ || conflict_) {
 		return KeyBindResult::Refused;

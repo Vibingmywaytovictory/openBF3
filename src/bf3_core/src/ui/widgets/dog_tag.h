@@ -7,6 +7,8 @@
 #include <string>
 #include <string_view>
 
+// SOURCE: the AS2 classes Widget.DogTag.DogTagPair, DogTag and DogTagText (bf3dump swf as2 actionscriptlibrary),
+// with their field values (TAG_WIDTH, GAMERTAG_X, BASIC_ROTATION and the rest), ported here.
 namespace bf3::core::ui {
 
 class ImageManagerWidget;

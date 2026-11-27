@@ -392,6 +392,8 @@ Result<UiGraphAsset> read_ui_graph_asset(const EbxResolver &p_db, std::string_vi
 	return out;
 }
 
+// SOURCE: an ActionNode.ActionKey and an InstanceOutputNode.Id are the djb2-xor hash of a name, ActionKeys from the 197
+// UIActionData.ActionKeys of veniceuiactions (bf3dump dump of spawngraphpc and veniceuiactions).
 int32_t ui_action_key(std::string_view p_name) {
 	return int32_t(ebx_name_hash(p_name));
 }

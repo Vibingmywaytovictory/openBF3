@@ -4,6 +4,8 @@
 
 namespace bf3::core::ui {
 
+// SOURCE: the AS2 class Widget.ScreenSpecific.ScreenAdjust: SCREEN_WIDTH_CHANGED 0, SCREEN_HEIGHT_CHANGED 1, fractions
+// 0.95 at start, steps of 0.01 within 0.85..1 (the 6 constants below).
 inline constexpr int32_t kScreenWidthChanged = 0;
 inline constexpr int32_t kScreenHeightChanged = 1;
 inline constexpr double kScreenAdjustDefault = 0.95;

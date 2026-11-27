@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+// SOURCE: the AS2 class Widget.ScreenSpecific.KillCam (bf3dump swf as2 actionscriptlibrary), which this file ports,
+// all but bind().
 namespace bf3::core::ui {
 
 namespace {

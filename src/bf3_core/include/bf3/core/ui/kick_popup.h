@@ -9,6 +9,8 @@ namespace bf3::core::ui {
 
 class TextDatabase;
 
+// SOURCE: bf3dump text: 0xf9dc710a YOU HAVE BEEN DISCONNECTED, 0x74dc0c2d TIMED OUT, 0x1f272fe7 QUIT.
+// STAND-IN: the pick of these texts for a kick popup. Settle: footage of a retail kick popup.
 inline constexpr uint32_t kKickTitleHash = 0xf9dc710au;
 inline constexpr uint32_t kKickTimedOutHash = 0x74dc0c2du;
 inline constexpr uint32_t kKickQuitHash = 0x1f272fe7u;

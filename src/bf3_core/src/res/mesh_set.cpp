@@ -334,6 +334,8 @@ ResError decode_vertices(const MeshSubset &p_subset, Bytes p_region, DecodedSubs
 	for (uint32_t word : p_subset.part_mask) {
 		any_part = any_part || word != 0;
 	}
+	// INFERRED: a composite mesh vertex's part is the first byte of its BoneIndices element.
+	// Settle: bf3dump a composite MeshSet's part bounds against the vertices of each part.
 	const VertexElement *bone_indices = decl.find(VertexUsage::BoneIndices);
 	if (bone_indices != nullptr && any_part) {
 		std::vector<uint16_t> parts;
@@ -673,6 +675,8 @@ ResError MeshLod::decode(Bytes p_geometry, SubsetFilter p_filter, std::vector<De
 	uint64_t vertex_bytes = 0, index_bytes = 0;
 	for (size_t index = 0; index < subsets.size(); index++) {
 		const MeshSubset &subset = subsets[index];
+		// INFERRED: a subset in the LOD's fourth category list (ZOnly) writes depth or shadow only, so it is not drawn.
+		// Settle: a note on what BF3 draws a ZOnly subset into.
 		if (p_filter == SubsetFilter::Drawn && subset.is_z_only()) {
 			continue;
 		}

@@ -238,8 +238,12 @@ SimpleTransformOp simple_transform_op(std::string_view p_enumerator) {
 	return SimpleTransformOp::Unknown;
 }
 
+// SOURCE: notes R5-VS1 10 and its checker (SimpleTransform and ScaleClamp laws, the 1e-6 guard, Round as floor(X + 0.5)).
+// INFERRED: Ceiling is ceil(X), which R5-VS1 leaves inferred. Settle: a note on the Ceiling case.
 constexpr double kGraphDivisorFloor = 1e-6;
 
+// STAND-IN: an out-of-domain or non-finite result is 0; R5-VS1 10 gives the plain function (asin, log, pow ...) with
+// no guard. Settle: a note on what the graph does with a NaN or infinite node output.
 float simple_transform(uint8_t p_option, float p_x, float p_y) {
 	constexpr float kPi = 3.14159265358979323846f;
 	const bool degrees = (p_option & port::kSimpleTransformDegrees) != 0;

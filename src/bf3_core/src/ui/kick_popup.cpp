@@ -9,6 +9,8 @@ namespace bf3::core::ui {
 HudPopup hud_kick_popup(std::string_view p_reason, bool p_timed_out, const TextDatabase &p_text) {
 	HudPopup popup;
 	popup.title = std::string(p_text.find(kKickTitleHash).value_or(std::string_view()));
+	// STAND-IN: the text is the server's reason, after "TIMED OUT: " for a timed-out load; the install has no string
+	// for the other kick reasons. Settle: footage of a retail kick popup.
 	const std::string_view timed_out = p_text.find(kKickTimedOutHash).value_or(std::string_view());
 	popup.text = p_timed_out && !timed_out.empty() ? std::string(timed_out) + ": " + std::string(p_reason)
 												   : std::string(p_reason);

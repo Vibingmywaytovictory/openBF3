@@ -1,5 +1,7 @@
 #include "scroll_bar.h"
 
+// SOURCE: the AS2 class Widget.Bar.ScrollBar (bf3dump swf as2 actionscriptlibrary), with its bar sizes and page jump
+// counts, ported here.
 namespace bf3::core::ui {
 
 namespace {

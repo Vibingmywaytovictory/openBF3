@@ -1,5 +1,6 @@
 #include "deploy_widgets.h"
 
+// SOURCE: the AS2 class Widget.SpawnTimer.SpawnTimer (bf3dump swf as2 actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 namespace {
@@ -210,6 +211,7 @@ private:
 
 }
 
+// INFERRED: Time is the respawn time in whole seconds, rounded up. Settle: a note on UISpawnLogicComp's Time.
 int32_t hud_spawn_timer_seconds(float p_time_to_respawn) {
 	return p_time_to_respawn > 0.0f ? int32_t(std::ceil(p_time_to_respawn)) : 0;
 }

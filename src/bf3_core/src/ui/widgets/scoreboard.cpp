@@ -1,6 +1,8 @@
 #include "list.h"
 #include "squad_data.h"
 
+// SOURCE: the AS2 classes Widget.List.Rows.ScoreBoardRow, Widget.List.ScoreboardHeader and
+// Widget.ScreenSpecific.ScoreboardSpectatorBox (bf3dump swf as2 actionscriptlibrary), ported here; the feeds are ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -168,6 +170,8 @@ struct HeaderKey {
 	HeaderSide side = HeaderSide::Friendly;
 };
 
+// INFERRED: the header keys, matched to the model from the two-team screens' FriendlyHeader and EnemyHeader nodes as
+// the key hash is unknown. Settle: a note on those components' DataKeys.
 constexpr std::array<HeaderKey, 7> kHeaderKeys{ {
 		{ -909259276, HeaderField::TeamName, HeaderSide::Friendly },
 		{ -1549914696, HeaderField::TeamName, HeaderSide::Enemy },
@@ -250,6 +254,8 @@ public:
 					}
 					break;
 				}
+				// INFERRED: a side with no max tickets (TDM) gets no Tickets, as the 18.57 EOR header at 330 s shows none.
+				// Settle: a note on UITicketCounterComp's Tickets in TDM.
 				case HeaderField::Tickets:
 					if ((friendly ? p_model.tickets.friendly_team_max_tickets
 								  : p_model.tickets.enemy_team_max_tickets) <= 0) {
@@ -482,8 +488,12 @@ public:
 };
 
 constexpr std::string_view kTeamCategory = "ui/uicomponents/uiteamcomp";
+// INFERRED: UITeamComp's FriendlyTeamPlayers and EnemyTeam1Players keys (2 below), named by the lists that bind them.
+// Settle: a note on UITeamComp's DataKeys.
 constexpr int32_t kFriendlyTeamPlayersKey = 644095251;
 constexpr int32_t kEnemyTeam1PlayersKey = -163624481;
+// STAND-IN: no ranks or voice chat are kept, so every row shows the Rank and Voip icons' empty frames (2 below).
+// Settle: build ranks and voice state.
 constexpr int32_t kRankZeroFrame = 1;
 constexpr int32_t kVoipOffFrame = 2;
 constexpr const char *kNoPing = "-";
@@ -506,9 +516,11 @@ As2Value scoreboard_row(const HudModel &p_model, uint8_t p_slot) {
 	r.set("Kills", As2Value::of(int32_t(p.kills)));
 	r.set("Deaths", As2Value::of(int32_t(p.deaths)));
 	r.set("Score", As2Value::of(p.score));
+	// INFERRED: a bot's ping shows '-', as the 18.57 footage shows. Settle: a note on UITeamComp's bot ping.
 	r.set("Ping", p.bot ? As2Value::of(kNoPing) : As2Value::of(int32_t(p.ping_ms)));
 	r.set("LocalSquad", As2Value::of(in_local_squad(p_model, p)));
 	r.set("LocalPlayer", As2Value::of(p_slot == p_model.local_player));
+	// STAND-IN: no ready-up mode is built, so MatchReady is false. Settle: build the ready-up mode.
 	r.set("MatchReady", As2Value::of(false));
 	return r;
 }

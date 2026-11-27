@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+// SOURCE: the AS2 classes Widget.Eor.EorHeader and EorHeaderValuePair (bf3dump swf as2 menuactionscriptlibrary), which
+// this file ports; bind() and the hud_eor_* helpers are ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -81,6 +83,8 @@ public:
 			sources_.feed(r_out, p_key, std::move(p_value));
 		};
 		feed("GameMode", As2Value::of(hud_string(p_model.settings.current_game_mode)));
+		// INFERRED: IsWinner is the place index (0 won), TeamNumber the 0-based own team and TeamResults US then RU with no
+		// TeamName, from how the AS2 reads them. Settle: a note on UIEndOfRoundComp's header values.
 		feed("IsWinner", As2Value::of(hud_eor_place(e)));
 		As2Value results = As2Value::array();
 		for (const int32_t kills : e.team_results) {

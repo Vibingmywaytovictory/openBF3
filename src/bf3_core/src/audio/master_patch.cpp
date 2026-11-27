@@ -12,9 +12,15 @@ namespace {
 
 constexpr std::array<SpeakerRole, 1> kMono{ SpeakerRole::Mono };
 constexpr std::array<SpeakerRole, 2> kStereo{ SpeakerRole::L, SpeakerRole::R };
+// STAND-IN: the 4-channel order (the buses' ChannelCount 4) is the usual quad order, not read from the data.
+// Settle: a note on the channel order of a 4-channel bus.
 constexpr std::array<SpeakerRole, 4> kQuad{ SpeakerRole::L, SpeakerRole::R, SpeakerRole::Ls, SpeakerRole::Rs };
+// SOURCE: bf3dump of sound/master: MatrixPannerNodeData's FrontLeft, Center, FrontRight, RearLeft, RearRight, Lfe,
+// FarRearLeft and FarRearRight link to its plugin's attributes 0 to 7.
+// INFERRED: a 6- or 8-channel voice's channel k is the speaker of attribute k. Settle: a retail surround recording.
 constexpr std::array<SpeakerRole, 6> kFive{ SpeakerRole::L, SpeakerRole::C, SpeakerRole::R, SpeakerRole::Ls,
 	SpeakerRole::Rs, SpeakerRole::Lfe };
+// SOURCE: the same bf3dump read (FarRearLeft and FarRearRight are attributes 6 and 7, Lb and Rb here).
 constexpr std::array<SpeakerRole, 8> kSeven{ SpeakerRole::L, SpeakerRole::C, SpeakerRole::R, SpeakerRole::Ls,
 	SpeakerRole::Rs, SpeakerRole::Lfe, SpeakerRole::Lb, SpeakerRole::Rb };
 
@@ -79,6 +85,8 @@ struct MasterUnitPort {
 	bool decibels;
 };
 
+// INFERRED: a preset's dB fields (decibels true) become linear gains 10^(dB / 20); FadeTime, which the data wires to
+// the output clip, is a level read as is. Settle: a retail recording of one preset against another.
 constexpr MasterUnitPort kMasterUnitPorts[] = {
 	{ "MasterGain", "MasterVolume", false, false, true },
 	{ "MainMixGain", "MainMixVolume", false, false, true },
@@ -248,6 +256,8 @@ Result<bool> evaluate_node(Graph &r_g, const EbxInstance &p_node, uint32_t p_pre
 		const float in = r_g.value(read_port(n, "In")), in_min = r_g.value(read_port(n, "InMin")),
 					in_max = r_g.value(read_port(n, "InMax"));
 		const float out_min = r_g.value(read_port(n, "OutMin")), out_max = r_g.value(read_port(n, "OutMax"));
+		// STAND-IN: a zero span gives OutMin and t is clamped to [0, 1]; notes R5-VS1 10 clamp In to [InMin, InMax] and
+		// floor the span at 1e-6 (InMax < InMin pins In to InMax). Settle: use the shared scale_clamp.
 		const float t = in_max != in_min ? std::clamp((in - in_min) / (in_max - in_min), 0.0f, 1.0f) : 0.0f;
 		return r_g.set(*out.reg, out_min + (out_max - out_min) * t);
 	}
@@ -482,6 +492,7 @@ Result<MasterMixData> read_master_mix(
 					MasterStep step;
 					step.kind = *kind;
 					step.map.fill(-1);
+					// INFERRED: a Gain plugin no link feeds (the DAC's) is unity. Settle: a note on the unlinked attribute value.
 					if (step.kind == MasterStepKind::Gain) {
 						step.values[0] = 1.0f;
 					}
@@ -522,6 +533,7 @@ Result<MasterMixData> read_master_mix(
 							}
 						}
 					}
+					// SOURCE: bf3dump of sound/master (MatrixPanner attributes 0 to 7 are L C R Ls Rs LFE Lb Rb).
 					if (step.kind == MasterStepKind::MatrixPan) {
 						const std::span<const SpeakerRole> roles = speaker_layout(8);
 						for (size_t a = 0; a < roles.size(); ++a) {

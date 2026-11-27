@@ -14,12 +14,15 @@
 
 namespace bf3::core::ui {
 
+// INFERRED: Flash's 2 px TextField gutter taken as GFx's. Settle: a retail capture of a bordered text field.
 inline constexpr float kSwfTextGutter = 2.0f;
 inline constexpr uint8_t kSwfGridFitNone = 0;
 inline constexpr uint8_t kSwfGridFitPixel = 1;
 inline constexpr uint8_t kSwfGridFitSubpixel = 2;
 inline constexpr uint32_t kSwfTextMaxChars = 1u << 16;
 inline constexpr uint32_t kSwfHtmlMaxNesting = 64;
+// STAND-IN: GFx textAutoSize shrink/fit as 24 halvings of one scale up to 16x (this and the next constant).
+// Settle: GFx's own fit rule against a retail capture of a shrunk field.
 inline constexpr uint32_t kSwfTextFitSteps = 24;
 inline constexpr float kSwfTextFitMaxScale = 16.0f;
 inline constexpr float kSwfMaxTextSize = 1024.0f;

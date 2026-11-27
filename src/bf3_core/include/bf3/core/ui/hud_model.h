@@ -267,6 +267,8 @@ struct HudCombatArea {
 
 inline constexpr size_t kHudMaxPassengers = 6;
 
+// INFERRED: the feed gives Driver for seat 0, Turret for a seat with weapons, else Idle; notes R5-UI2's checker gives
+// the seat as EntryComponentHudData.SeatType. Settle: feed SeatType and compare.
 enum class HudPassengerSeat : int32_t { Driver = 0, Turret = 1, Idle = 2 };
 
 struct HudPassenger {
@@ -288,6 +290,7 @@ struct HudVehicle {
 	HudPassengerList passenger_list{};
 	HudPlayerName short_name{};
 	int32_t speed_kmh = 0;
+	// SOURCE: notes R5-UI2 B3 and its checker (Entry1/2Rotation are written for entries 0 and 1 only).
 	std::array<float, 2> entry_yaw_deg{};
 	float hull_yaw_deg = 0.0f;
 	bool weapon_orientations = false;

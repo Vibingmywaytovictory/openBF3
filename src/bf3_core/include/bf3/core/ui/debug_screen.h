@@ -12,7 +12,9 @@ namespace bf3::core::ui {
 
 inline constexpr std::string_view kDebugScreenMovie = "ui/assets/debugscreen";
 inline constexpr std::string_view kDebugFieldWidget = "ui/assets/debugfield";
+// SOURCE: bf3dump swf layout debugscreen: 72 DebugField instances.
 inline constexpr size_t kDebugScreenFields = 72;
+// SOURCE: the AS2 class Widget.Text.DebugField (bf3dump swf as2 actionscriptlibrary): setColor 16711680.
 inline constexpr uint32_t kDebugFieldRgb = 0xFF0000;
 
 struct DebugFieldText {

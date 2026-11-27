@@ -232,6 +232,7 @@ private:
 				st = external_image(p_code, r);
 				break;
 			case swf_tag::kGfxDefineSubImage: {
+				// SOURCE: research/topics/gap-r1-ui-hud-minimap-localisation.md 3 (u16 id, image id, x1, y1, x2, y2 in pixels).
 				SwfSubImage s;
 				s.id = r.u16();
 				s.image_id = r.u16();
@@ -696,6 +697,8 @@ private:
 		SwfExporterInfo &x = m_.exporter;
 		x.present = true;
 		x.version = r.u16();
+		// INFERRED: a u32 flags field follows from exporter version 0x10a on; the retail movies carry 0x36f (research gap-r1 3).
+		// Settle: a GFx exporter tag reference.
 		if (x.version >= 0x10a) {
 			x.flags = r.u32();
 		}
@@ -712,6 +715,8 @@ private:
 		SwfExternalImage im;
 		im.tag_version = p_code == swf_tag::kGfxDefineExternalImage2 ? 2 : 1;
 		im.image_id = r.u16();
+		// INFERRED: GFX_DefineExternalImage2 holds a u16 of unknown meaning after the image id.
+		// Settle: a GFx tag reference.
 		if (im.tag_version == 2) {
 			im.field_2 = r.u16();
 		}
@@ -914,6 +919,7 @@ Result<SwfMovie> SwfMovie::parse(std::span<const uint8_t> p_payload, WorkBudget 
 	if (p_payload.size() < 8) {
 		return make_error("swf: payload of " + std::to_string(p_payload.size()) + " bytes is shorter than the 8-byte header");
 	}
+	// SOURCE: research/topics/gap-r1-ui-hud-minimap-localisation.md 3 (CFX headers are zlib, GFX uncompressed).
 	const bool cfx = p_payload[0] == 'C' && p_payload[1] == 'F' && p_payload[2] == 'X';
 	const bool gfx = p_payload[0] == 'G' && p_payload[1] == 'F' && p_payload[2] == 'X';
 	if (!cfx && !gfx) {

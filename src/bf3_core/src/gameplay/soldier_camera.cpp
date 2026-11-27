@@ -73,6 +73,8 @@ const SoldierCameraDef *SoldierCameras::target_of(const PlayerCameraDef &p_playe
 		case CameraTargetMode::FirstPerson:
 			return first_person();
 		case CameraTargetMode::ThirdPerson:
+			// INFERRED: TargetMode_ThirdPerson takes the soldier's first camera that is not an FPSCameraData.
+			// Settle: a note on PlayerCameraEntityData's target modes.
 			for (const SoldierCameraDef &c : cameras) {
 				if (c.kind != SoldierCameraKind::FirstPerson) {
 					return &c;

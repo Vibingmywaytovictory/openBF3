@@ -18,6 +18,8 @@ class ScrollTextTimer {
 public:
 	using Listener = std::function<void(double p_value)>;
 
+	// SOURCE: Util.ScrollTextTimer's AS2 statics BEGIN_DELAY 2500, SCROLL_FORWARD_TIME_MS 2000, END_DELAY 1000 and
+	// SCROLL_BACK_TIME_MS 500 ms, the four constants below (bf3dump swf as2).
 	static constexpr double kBeginDelay = 2.5;
 	static constexpr double kScrollForwardTime = 2.0;
 	static constexpr double kEndDelay = 1.0;
@@ -132,6 +134,7 @@ private:
 
 class SimpleScrollTextWidget final : public HudWidgetController {
 public:
+	// SOURCE: Util.SimpleScrollText's AS2 fields FPS 30, SCROLL_SPEED 50 and SCROLL_DELAY 3 (bf3dump swf as2).
 	static constexpr double kFps = 30.0;
 	static constexpr double kScrollSpeed = 50.0;
 	static constexpr double kScrollDelay = 3.0;
@@ -173,6 +176,7 @@ private:
 
 class SimpleTextBlockScrollWidget final : public HudWidgetController {
 public:
+	// SOURCE: Util.SimpleTextBlockScroll's AS2 fields FPS 30, SCROLL_SPEED 15 and SCROLL_DELAY 3 (bf3dump swf as2).
 	static constexpr double kFps = 30.0;
 	static constexpr double kScrollSpeed = 15.0;
 	static constexpr double kScrollDelay = 3.0;

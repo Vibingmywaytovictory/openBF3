@@ -141,6 +141,8 @@ void As2Clip::note(const Status &p_status) const {
 	}
 }
 
+// INFERRED: Flash's rule that a TextField's _x, _y, _width and _height are its (autoSize-sized) field rect, taken as
+// GFx's. Settle: a retail capture of an autoSize field moved by script.
 float As2Clip::x() const {
 	const SwfSceneNode *n = node();
 	if (n == nullptr) {

@@ -31,6 +31,8 @@ core::Transform model_transform(const level::LevelTransform &p_t) {
 	return { p_t.right, p_t.up, p_t.forward, p_t.trans };
 }
 
+// INFERRED: the component with a VehicleConfig is the chassis and a ChildComponentData on a ChildRotationBodyData is a
+// turret. Settle: a note on the vehicle component kinds.
 Role role_of(const EbxResolver &p_db, const EbxInstance &p_component) {
 	if (p_component.get("VehicleConfig")) {
 		return Role::Chassis;
@@ -123,6 +125,8 @@ public:
 		return current;
 	}
 
+	// INFERRED: a weapon aims with its enclosing turret, else the innermost turret beside it; a component belongs to the
+	// nearest seat up the component tree or beside it. Settle: a note on how a vehicle binds weapons to seats.
 	int aiming(int p_at) const {
 		const int up = enclosing(p_at, Role::Turret);
 		if (up >= 0) {

@@ -2,6 +2,7 @@
 
 #include "bf3/core/ui/screen_adjust.h"
 
+// SOURCE: the AS2 class Widget.ScreenSpecific.ScreenAdjust (bf3dump swf as2 actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 namespace {

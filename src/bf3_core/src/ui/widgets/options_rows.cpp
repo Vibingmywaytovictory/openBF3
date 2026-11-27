@@ -3,11 +3,15 @@
 #include "bf3/core/ui/options_model.h"
 #include "bf3/core/ui/ui_graph.h"
 
+// SOURCE: the AS2 classes Widget.List.Rows.TextSelectorRow, BarSelectorRow and KeyBindingRow (bf3dump swf as2
+// actionscriptlibrary), which this file ports; the hud_options_* feeds are ours.
 namespace bf3::core::ui {
 
 namespace {
 
 constexpr std::string_view kSettingsCategory = "uisettingscomp";
+// INFERRED: the uisettingscomp key of the key bindings list, named by the list that binds it as the key hash is unknown.
+// Settle: a note on UISettingsComp's DataKeys.
 constexpr int32_t kKeyBindingsListKey = 922801620;
 constexpr double kSelectorScrollSteps = 2.0 * 30.0;
 constexpr double kSelectorScrollWaitSeconds = 3.0;

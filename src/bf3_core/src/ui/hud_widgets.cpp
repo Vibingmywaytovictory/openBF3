@@ -2,6 +2,8 @@
 
 namespace bf3::core::ui {
 
+// INFERRED: the compass frame is the heading rounded up, fitted on 10 still footage moments; notes R5-UI2 B3 gives the
+// compass key as 360 - trunc(yaw), 1..360. Settle: the note's yaw zero and sign against the model's heading.
 int32_t hud_compass_frame(float p_heading_deg) {
 	if (!std::isfinite(p_heading_deg)) {
 		return 0;

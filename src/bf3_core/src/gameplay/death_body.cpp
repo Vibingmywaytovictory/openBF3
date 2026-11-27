@@ -5,6 +5,8 @@
 
 namespace bf3::core::gameplay {
 
+// INFERRED: row 0 (right) and row 2 (forward) of a yaw-only soldier transform; R5-DT1 A1's checker leaves which way
+// "right" points inferred. Settle: retail footage of a strafing death.
 DeathFrame death_frame_of_yaw(float p_yaw_radians) {
 	const float s = std::sin(p_yaw_radians);
 	const float c = std::cos(p_yaw_radians);
@@ -14,6 +16,8 @@ DeathFrame death_frame_of_yaw(float p_yaw_radians) {
 	return f;
 }
 
+// SOURCE: notes R5-DT1 A2 and its checker (world X when the hit is vertical, both dots over |row 0|^2, ties to
+// front or back).
 DeathHitDirection death_hit_direction(const DeathFrame &p_frame, const Vec3 &p_damage_direction) {
 	Vec3 h{ p_damage_direction.x, 0.0f, p_damage_direction.z };
 	const float length_sq = h.x * h.x + h.z * h.z;
@@ -47,6 +51,9 @@ DeathBone death_bone_of_type(uint32_t p_bone_type) {
 
 DeathRecord make_death_record(const DeathInput &p_input, DeathCounter &r_counter) {
 	DeathRecord r;
+	// SOURCE: notes R5-DT1 A1 (the minus on RightSpeed is in the rule).
+	// INFERRED: RightSpeed +1 means moving right, and the damage direction is the hit's travel direction (R5-DT1 A).
+	// Settle: retail footage of deaths while strafing and from a known side.
 	r.forward_speed = death_speed_sign(vec::dot(p_input.frame.forward, p_input.velocity));
 	r.right_speed = death_speed_sign(-vec::dot(p_input.frame.right, p_input.velocity));
 	r.direction =
@@ -108,6 +115,8 @@ void RagdollBlend::update(float p_dt, float p_target) {
 		}
 		if (root_started_ && root_left_ > 0.0f) {
 			root_left_ = std::max(root_left_ - p_dt, 0.0f);
+			// INFERRED: a fraction of 1 is the stored ragdoll transform, 0 the soldier's (R5-DT2 F3).
+			// Settle: a note on the blend-out's interpolation ends.
 			root_fraction_ = root_left_ / kReviveRootSeconds;
 		}
 		if (!settled_) {
@@ -131,6 +140,8 @@ void RagdollBlend::blend_out() {
 		return;
 	}
 	blending_out_ = true;
+	// INFERRED: a blend-out clears the settled state and never runs the final ramp (R5-DT2 F leaves both open).
+	// Settle: a note on the ramp and settled state in the blend-out branch.
 	settled_ = false;
 	ramp_ = 0.0f;
 	hold_left_ = kReviveHoldSeconds;

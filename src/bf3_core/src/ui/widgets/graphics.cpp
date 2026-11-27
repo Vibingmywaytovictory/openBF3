@@ -1,5 +1,6 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 classes Graphics.GlowRect and Graphics.PopupBox (bf3dump swf as2 actionscriptlibrary), ported here.
 namespace bf3::core::ui {
 
 namespace {

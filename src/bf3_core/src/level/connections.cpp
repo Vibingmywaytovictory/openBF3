@@ -141,6 +141,8 @@ const std::vector<uint32_t> *Connections::property_into(const EbxInstance &p_tar
 	return found == property_index_.end() ? nullptr : &found->second;
 }
 
+// INFERRED: an interface field's Value text is "<type> <value>" (Boolean, Int*, Float*, CString, TeamId as Team<n> or
+// Neutral, LinearTransform as 12 floats in row order, Vec3). Settle: a research/ format fact on DataField values.
 std::optional<Property> Property::parse(std::string_view p_constant) {
 	const std::string_view constant = trim(p_constant);
 	if (constant.empty()) {
@@ -469,6 +471,8 @@ std::optional<EbxValue> Scopes::descriptor_field(const EbxInstance &p_descriptor
 	return found == index->second.end() ? std::nullopt : array->get(found->second);
 }
 
+// INFERRED: a field's value is the first PropertyConnection into it that resolves (through interfaces to the
+// descriptor's Fields Value), else its stored value. Settle: a note on how a level seeds connected fields.
 std::optional<Property> Scopes::property_in(const Frame &p_frame, const EbxInstance &p_target, int32_t p_field, uint32_t p_depth) const {
 	if (p_depth == 0) {
 		return std::nullopt;

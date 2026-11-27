@@ -11,6 +11,7 @@
 
 namespace bf3::core::ui {
 
+// WHY: 2048 divides DefineFont3's 20480 em exactly, so a TrueType coordinate is the SWF value / 10.
 inline constexpr uint16_t kTrueTypeUnitsPerEm = 2048;
 
 inline constexpr uint32_t kTrueTypeWriterVersion = 1;

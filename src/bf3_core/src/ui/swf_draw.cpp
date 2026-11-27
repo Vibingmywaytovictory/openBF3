@@ -130,6 +130,7 @@ Result<std::shared_ptr<const SwfShape>> SwfDrawing::shape() const {
 		SwfFillMesh mesh;
 		mesh.fill = uint32_t(i);
 		SwfTriangulation t;
+		// INFERRED: drawing-API fills use Flash's even-odd rule in GFx too. Settle: a retail self-overlapping drawn fill.
 		BF3_TRY(swf_triangulate(f.outline, f.contour_ends, SwfFillRule::EvenOdd, budget, t));
 		for (const SwfPoint &p : f.outline) {
 			if (!any) {

@@ -57,6 +57,7 @@ struct CameraCutState {
 	bool eor_camera = false;
 };
 
+// WHY: on a cut the look restarts its auto exposure and sky filtering, which would otherwise adapt over seconds.
 class CameraCuts {
 public:
 	bool step(const CameraCutState &p_state);

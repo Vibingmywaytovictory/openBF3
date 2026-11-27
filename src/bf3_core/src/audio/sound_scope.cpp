@@ -125,6 +125,7 @@ Result<ScopeTable> read_scopes(const EbxResolver &p_db, gameplay::WorkBudget *p_
 					}
 					count = *r_;
 				}
+				// SOURCE: notes R-D4 (KeepOldest plays the first Count instances, otherwise the last Count).
 				const std::optional<EbxValue> keep = st->get("KeepOldest");
 				if (keep && keep->as_bool().value_or(false)) {
 					s.max_instances = count;

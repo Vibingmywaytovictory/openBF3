@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+// SOURCE: the AS2 class Widget.Button.TabBar (bf3dump swf as2 actionscriptlibrary), which this file ports; bind() is ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -17,9 +18,13 @@ constexpr int32_t kShow = 4;
 constexpr int32_t kHide = 5;
 constexpr float kShoulderIconRowHeight = 34.0f;
 constexpr std::string_view kEndOfRoundCategory = "ui/uicomponents/uiendofroundcomp";
+// INFERRED: the EOR TabBar's EORTabsSetup key and the CUSTOMIZE sub-tab setup key (2 below), paired by name as the key
+// hash is unknown. Settle: a note on those components' DataKeys.
 constexpr int32_t kEorTabsSetupKey = -995000405;
 constexpr std::string_view kCustomizationCategory = "ui/uicomponents/uicustomizationcomp";
 constexpr int32_t kCustomizeSubTabsSetupKey = -1696904176;
+// INFERRED: SCOREBOARD and STATS are always enabled and the rest only on a ranked server; unranked 18.52 and 18.57
+// show those two. Settle: footage of a ranked server's EOR tabs.
 constexpr std::array<std::string_view, 2> kUnrankedEorTabs{ "ID_M_SCOREBOARD", "ID_M_STATS" };
 
 const std::string *non_empty_property(const HudWidgetInit &p_init, std::string_view p_name) {
@@ -60,6 +65,7 @@ public:
 			As2Value enabled = As2Value::array();
 			const size_t tabs = as2_split(tabs_text_, ";").size();
 			for (size_t i = 0; i < tabs; ++i) {
+				// INFERRED: the CUSTOMIZE TabBar enables KITS only, as the 18.57 footage shows. Settle: a note on its sub-tabs.
 				enabled.push(As2Value::of(i == 0));
 			}
 			As2Value setup = As2Value::object();

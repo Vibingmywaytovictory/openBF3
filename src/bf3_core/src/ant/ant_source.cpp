@@ -32,6 +32,8 @@ const AntPackageInfo *AntPackageSource::find(std::string_view p_short_name) cons
 	return nullptr;
 }
 
+// STAND-IN: the single-player, co-op, face-poser and voice-over banks by name prefix are the packages MP play does not
+// load. Settle: the list of Ant packages the MP levels' bundles reference.
 bool is_mp_relevant(std::string_view p_short_name) {
 	for (std::string_view prefix : { "b_sp", "b_coop", "b_faceposer", "b_vo" }) {
 		if (p_short_name.substr(0, prefix.size()) == prefix) {

@@ -15,6 +15,8 @@ namespace bf3::core::ui {
 inline constexpr std::string_view kUiPostProcessCompPartition = "ui/uicomponents/uipostprocesscomponent";
 inline constexpr std::string_view kMenuVisualEnvironmentPartition = "ui/assets/menuvisualenvironment";
 inline constexpr std::string_view kIngameDimmerPartition = "ui/flow/logic/uiingamedimmer";
+// SOURCE: ActionNode.ActionKey of spawngraphpc's PostProcessEffect nodes (ActionAsset uipostprocesscomponent); it is
+// the djb2-xor hash of veniceuiactions' OnFrontendCameraChanged, not of PostProcessEffect (bf3dump dump).
 inline constexpr int32_t kPostProcessEffectActionKey = 2033918385;
 inline constexpr size_t kMaxDimmerKeys = 16;
 

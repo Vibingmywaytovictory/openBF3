@@ -43,6 +43,8 @@ public:
 	}
 
 private:
+	// SOURCE: notes R5-UI1 (camera outputs through Or and Or4 into a HUD prefab, BoolToEvent, then UIGraph events).
+	// STAND-IN: a Delay on the path (helicopter, jet and MFD prefabs) is not followed. Settle: follow it with air vehicles.
 	Status follow(const Scope &p_scope, const EbxInstance &p_source, int32_t p_field, const VehicleHudTerm &p_term,
 			size_t p_depth, int32_t p_prefab_field) {
 		if (p_depth > kMaxVehicleHudDepth) {

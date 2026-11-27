@@ -206,6 +206,8 @@ bool SwfHitWorld::masks_pass(SwfNodeId p_leaf, float p_x, float p_y) const {
 	return true;
 }
 
+// INFERRED: Flash's mouse rule taken as GFx's: the outermost target under the point wins, a hitArea stands for its
+// clip's own graphics and mask shapes never hit. Settle: retail clicks on a clip with a hitArea.
 SwfNodeId SwfHitWorld::topmost_target(float p_stage_x, float p_stage_y, const SwfHitTargetOf &p_target_of) const {
 	std::vector<std::pair<SwfNodeId, SwfNodeId>> hit_areas;
 	for (const SwfNodeId id : order_) {

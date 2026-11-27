@@ -292,6 +292,8 @@ struct Compiler {
 			return master_bus_of_name(name);
 		}
 
+		// SOURCE: bf3dump of sound/master: the GUIDs of its ten BusNodeData instances, by BusName.
+		// WHY: a send whose bus partition is not in the database still names its master bus by that GUID.
 		static constexpr std::pair<std::string_view, MasterBus> kGuids[] = {
 			{ "b735bfcd-0afb-4210-8ca2-6f9c61989002", MasterBus::GameMixMain },
 			{ "d72517d3-3816-421a-aca1-f75078942be9", MasterBus::Reverb },
@@ -323,6 +325,8 @@ struct Compiler {
 		out.hf_damping_obstruction = read_float(p_s, "HFDampingObstruction");
 		out.hf_damping_occlusion = read_float(p_s, "HFDampingOcclusion");
 		out.hf_damping_angle = read_float(p_s, "HFDampingAngle");
+		// STAND-IN: an output type with no ReverbGain field (DirectOutput) sends -96 dB, nothing, to the reverb.
+		// Settle: a note on DirectOutput's reverb send.
 		out.reverb_gain_db = p_s.get("ReverbGain") ? read_float(p_s, "ReverbGain") : -96.0f;
 		out.pan_size = read_float(p_s, "PanSize");
 		out.angle = read_float(p_s, "Angle");
@@ -366,6 +370,7 @@ struct Compiler {
 					AudioCurvePoint pt{ read_float(*ps, "X"), read_float(*ps, "Y"), read_float(*ps, "K") };
 					out.attenuation.points.push_back(pt);
 				}
+				// STAND-IN: the points are sorted by X; notes R2-D1 evaluate them in stored order. Settle: R2-D1's rule.
 				std::stable_sort(out.attenuation.points.begin(), out.attenuation.points.end(),
 						[](const AudioCurvePoint &a, const AudioCurvePoint &b) { return a.x < b.x; });
 			}
@@ -962,6 +967,8 @@ struct Compiler {
 
 }
 
+// STAND-IN: clamps to the end points' Y and makes a two-point curve a Hermite segment, where notes R2-D1 extrapolate with
+// the end slopes and use only P0 for two points (Hermite inside, as R2-D1). Settle: build R2-D1's rule.
 float AudioCurve::evaluate(float p_x) const {
 	if (points.empty()) {
 		return 0.0f;

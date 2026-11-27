@@ -167,6 +167,8 @@ bool clip_channel_counts(const GdStruct &p_clip, uint32_t &r_quats, uint32_t &r_
 	}
 }
 
+// SOURCE: research/probes/ant-animation-probe.md 4.1 (MSB-first bits, nibble widths with 15 = CatchAllBitCount, no DC
+// in block 0, DeltaBase added to every block's DC, the 8-term basis scaled by the two QuantizeMult fields).
 AntResult decode_dct(const DctInput &p_in, DecodedClip &r_out, DecodeStats *r_stats) {
 	const uint32_t nq = p_in.num_quats;
 	const uint32_t nv = p_in.num_vec3s;
@@ -368,7 +370,10 @@ AntResult decode_float_object(const GdStruct &p_clip, ClipCodec p_codec, Decoded
 	if (!data.valid() || data.element_hash() != uint32_t(GdPrimitive::Float) || data.stride() != 4) {
 		return AntResult::fail(AntStatus::Malformed, "bad Data array");
 	}
+	// SOURCE: research/probes/ant-animation-probe.md 3.3 (Data count = NumKeys x (4 Quat + 4 Vec3 + Float), vec3 padded).
 	const uint64_t stride_exact = 4ull * nq + 4ull * nv + nf;
+	// INFERRED: floats padded to a multiple of 4 are accepted too; probe 3.3 finds every MP clip at the unpadded count.
+	// Settle: a bf3dump census of Raw and Frame Data counts against both strides.
 	const uint64_t stride_padded = 4ull * nq + 4ull * nv + (uint64_t(nf) + 3) / 4 * 4;
 	uint64_t stride = 0;
 	if (data.size() == stride_exact * keys) {
@@ -480,6 +485,8 @@ AntResult decode_curve_object(const GdStruct &p_clip, DecodedClip &r_out) {
 	if (!blocks.valid() || !groups.valid() || const_offsets.size() != consts.size()) {
 		return AntResult::fail(AntStatus::Malformed, "Curve: bad block, group or constant arrays");
 	}
+	// INFERRED: a key is a 4-float slot per rotation (3 Euler angles) and per vector, then the floats; Consts and
+	// Values land at their ConstOffsets and ChannelOffsets, key-major. Settle: a note on the Curve codec's layout.
 	const uint64_t slots = 4ull * nq + 4ull * nv + nf;
 	uint32_t key_count = 0;
 	for (uint32_t b = 0; b < blocks.size(); ++b) {
@@ -668,6 +675,8 @@ bool sample_clip(const DecodedClip &p_clip, float p_frame, ClipPose &r_pose) {
 		return consistent;
 	}
 
+	// INFERRED: between keys a rotation slerps and vectors and floats lerp; outside the keys the end key holds.
+	// Settle: a note on how Ant samples a clip between keys.
 	uint32_t k0 = 0, k1 = 0;
 	float t = 0.0f;
 	const auto &kt = p_clip.key_times;

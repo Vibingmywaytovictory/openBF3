@@ -31,6 +31,8 @@ void parallel_for(size_t p_count, const std::function<void(size_t)> &p_work, uns
 		return;
 	}
 	std::atomic<size_t> next{ 0 };
+	// WHY: Windows starts a std::thread at normal priority, so each extra lane copies the caller's and a job that lowered
+	// its own thread stays lowered on every lane.
 	const int priority = GetThreadPriority(GetCurrentThread());
 	auto lane = [&]() {
 		for (;;) {

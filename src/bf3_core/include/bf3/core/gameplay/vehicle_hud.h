@@ -11,6 +11,7 @@
 
 namespace bf3::core::gameplay {
 
+// SOURCE: notes R5-UI1 A1 and its checker (a camera component's ACTIVE and ALTVIEW bool outputs; names unknown).
 inline constexpr int32_t kCameraActiveOutput = int32_t(0xfff52c2cu);
 inline constexpr int32_t kCameraAlternateViewOutput = int32_t(0xc9e1d573u);
 inline constexpr size_t kMaxVehicleHudDepth = 16;

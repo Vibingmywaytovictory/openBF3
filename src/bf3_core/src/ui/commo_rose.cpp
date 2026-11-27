@@ -76,6 +76,7 @@ Result<CommoRoseLayout> read_commo_rose(const UiGraphAsset &p_screen) {
 				if (const std::optional<Command> c = command_from(p_screen, t)) {
 					e.command_on_foot = e.command_in_vehicle = c->command;
 					e.button = c->button;
+				// SOURCE: bf3dump of commrosescreen: the branch is the BinaryLogicNode InVehicle on UIVehicleComp key 570599507.
 				} else if (next.kind == UiGraphNodeKind::BinaryLogic) {
 					for (const UiGraphPortRole role : { UiGraphPortRole::True, UiGraphPortRole::False }) {
 						const std::optional<uint32_t> branch = next.port(role);

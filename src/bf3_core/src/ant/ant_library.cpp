@@ -6,12 +6,15 @@ namespace bf3::core::ant {
 
 namespace {
 
+// SOURCE: research/probes/ant-animation-probe.md 3.3 (LayoutAsset slot Type 14 quaternion, 10 float, 6 int) and
+// research/topics/03-animation.md 1.4 (position 2049856663, scale 2049856454).
 constexpr uint32_t kSlotQuat = 14;
 constexpr uint32_t kSlotFloat = 10;
 constexpr uint32_t kSlotInt = 6;
 
 constexpr uint32_t kSlotTranslation = 0x7A2E5497;
 constexpr uint32_t kSlotScale = 0x7A2E53C6;
+// SOURCE: research/probes/ant-animation-probe.md 5 rule 2 (a DeltaTrajLayoutAsset takes 8 DOFs, fitted on Rifle_RunFwd).
 constexpr uint32_t kDeltaTrajDofs = 8;
 constexpr int kMaxHierarchyDepth = 64;
 
@@ -153,6 +156,8 @@ AntResult AntLibrary::set_static(std::unique_ptr<AntPackage> p_static) {
 			}
 		}
 
+		// SOURCE: research/probes/ant-animation-probe.md 5 rule 5 (rest pose: the rig's DefaultVector4Values and
+		// DefaultVector3Values entries named <Layout>.<Joint>.q and .t).
 		std::unordered_map<std::string_view, uint32_t> seen;
 		for (const char *list : { "DefaultVector4Values", "DefaultVector3Values" }) {
 			const GdArray values = rig.array(list);
@@ -220,6 +225,8 @@ AntResult AntLibrary::set_static(std::unique_ptr<AntPackage> p_static) {
 	return {};
 }
 
+// SOURCE: research/probes/ant-animation-probe.md 5 rule 1 (the DOF set is the hierarchy's LayoutAssets in order, each
+// layout's Slots in stored order; Children hierarchies are masks, not appended).
 AntResult AntLibrary::dofs_of(const AntPackage &p_from, const GdStruct &p_hierarchy, std::vector<AntDof> &r_dofs) const {
 	r_dofs.clear();
 	if (p_hierarchy.type_name() != "LayoutHierarchyAsset") {
@@ -316,6 +323,8 @@ AntResult AntLibrary::bind(const AntPackage &p_package, const GdStruct &p_clip, 
 				std::to_string(size_t(nq) + nv + nf));
 	}
 
+	// INFERRED: a clip's rig is the one sharing the most static layouts with the controller's Target, then the most
+	// joints. Settle: a note on how Ant binds a clip to a rig.
 	{
 		std::vector<uint32_t> target_layouts;
 		const GdArray layouts = r_binding.target.array("LayoutAssets");
@@ -351,6 +360,7 @@ AntResult AntLibrary::bind(const AntPackage &p_package, const GdStruct &p_clip, 
 		ChannelTrack &t = r_binding.tracks[c];
 		t.channel = uint32_t(c);
 		t.kind = !counts ? '?' : c < nq ? 'q' : c < size_t(nq) + nv ? 'v' : 'f';
+		// SOURCE: research/probes/ant-animation-probe.md 5 rule 3 (StorageType 1 a u8, 2 a big-endian u16 per channel).
 		t.dof = storage == 1 ? index_data[c] : (uint32_t(index_data[2 * c]) << 8) | index_data[2 * c + 1];
 		if (t.dof >= r_binding.dofs.size()) {
 			return AntResult::fail(AntStatus::Malformed, "channel " + std::to_string(c) + " maps outside the DOF set");

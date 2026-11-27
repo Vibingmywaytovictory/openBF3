@@ -2,6 +2,8 @@
 
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 classes Shared.KitIcons, Shared.ServiceStars, Main.GameUtils and fb.Base.UIBase ObjectToArray (bf3dump
+// swf as2 actionscriptlibrary), which this file ports.
 namespace bf3::core::ui {
 
 namespace {

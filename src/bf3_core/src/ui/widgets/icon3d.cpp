@@ -2,6 +2,8 @@
 
 #include "bf3/core/ui/hud_icons.h"
 
+// SOURCE: the AS2 classes Widget.Icon3D.* (Icon3D, Icon3DManager and the TeamSupport, Alerts, Mapmarker, Capturepoint
+// and Interaction tags and managers) of actionscriptlibrary, ported here; the tags come from HudClientState::world_tags.
 namespace bf3::core::ui {
 
 namespace {

@@ -32,6 +32,8 @@ enum class GdPrimitive : uint32_t {
 };
 
 struct GdGuid {
+	// SOURCE: research/probes/ant-animation-probe.md 3.2 (the first 4 bytes a big-endian reference index; bit 0x80000
+	// set is a static reference into s_BasicAssets).
 	static constexpr uint32_t kStaticBit = 0x80000;
 	uint8_t bytes[16] = {};
 

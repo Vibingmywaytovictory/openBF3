@@ -46,6 +46,7 @@ struct CapturePointDef {
 	bool seesaw = false;
 	bool enabled = true;
 
+	// SOURCE: notes M-CQ1 (the HQ prefab is CTUnableToChangeTeam).
 	bool is_hq() const { return capturable_type == "CTUnableToChangeTeam"; }
 };
 

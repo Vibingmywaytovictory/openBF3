@@ -56,6 +56,8 @@ FireLogic fire_logic_from(int32_t p_value) {
 	return (p_value >= 0 && p_value <= 5) ? FireLogic(p_value) : FireLogic::Unknown;
 }
 
+// STAND-IN: a bolt-action shot waits max(60 / RateOfFire, BoltActionDelay + BoltActionTime); notes R-A3 E run the bolt
+// delay and time after the shot interval. Settle: R-A3 E's order, or the weapon sim's interval.
 double shot_interval(const FireFunction &p_fire) {
 	const double rof = p_fire.rate_of_fire > 0 ? 60.0 / p_fire.rate_of_fire : 0.0;
 	if (p_fire.logic == FireLogic::SingleWithBoltAction) {
@@ -77,6 +79,8 @@ double muzzle_speed(const WeaponDef &p_weapon) {
 	return p_weapon.fire.initial_speed[2];
 }
 
+// SOURCE: notes R-A4 3 (StartDamage to EndDamage, linear across the falloff span).
+// STAND-IN: a span under 1e-6 m but above 0 is linear here, where R-A4 gives EndDamage. Settle: R-A4's 1e-6 guard.
 double damage_at(const ProjectileDef &p_projectile, double p_distance) {
 	const double a = p_projectile.damage_falloff_start;
 	const double b = p_projectile.damage_falloff_end;
@@ -102,6 +106,7 @@ double max_range(const WeaponDef &p_weapon) {
 	return muzzle_speed(p_weapon) * double(p_weapon.projectile.time_to_live);
 }
 
+// SOURCE: research/topics/gap-r1-ui-hud-minimap-localisation.md (SID hash: h = 0xFFFFFFFF, h = h x 33 + c).
 uint32_t loc_sid_hash(std::string_view p_sid) {
 	uint32_t h = 0xFFFFFFFFu;
 	for (const char c : p_sid) {
@@ -110,6 +115,9 @@ uint32_t loc_sid_hash(std::string_view p_sid) {
 	return h;
 }
 
+// SOURCE: notes Q2 and Q3 0 (active attachment modifiers multiply; RecoilMagnitudeMod vertical, RecoilAngleMod
+// horizontal).
+// INFERRED: a MaxAngleModifier of 0 means no change. Settle: a note on a zero dispersion modifier.
 void apply_sway_modifier(std::array<std::array<SwayState, 2>, 3> &r_state, const SwayGatedModifier &p_modifier) {
 	for (size_t stance = 0; stance < 3; ++stance) {
 		for (size_t zoom = 0; zoom < 2; ++zoom) {

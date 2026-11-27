@@ -36,6 +36,8 @@ bool AntPackage::parse(std::string p_name, std::vector<uint8_t> p_bytes, std::st
 		r_error = name_ + ": package shorter than its header";
 		return false;
 	}
+	// SOURCE: research/probes/ant-animation-probe.md 3.1 (a big-endian packaging type, then unless AnimationSet a
+	// PackageMeta of metaBytes that starts with six big-endian u32, then the archive).
 	const uint32_t type = be32(d);
 	if (type > uint32_t(AntPackagingType::AnimationSet)) {
 		r_error = name_ + ": unknown packaging type " + std::to_string(type);

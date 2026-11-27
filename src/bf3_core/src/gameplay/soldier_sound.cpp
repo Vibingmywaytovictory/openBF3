@@ -24,6 +24,7 @@ constexpr int32_t kALessOrEqualB = logic_port_id("A<=B");
 constexpr int32_t kHasLocalPlayer = logic_port_id("HasLocalPlayer");
 constexpr int32_t kOnFootPlantLeft = logic_port_id("OnFootPlantLeft");
 constexpr int32_t kOnFootPlantRight = logic_port_id("OnFootPlantRight");
+// INFERRED: MathOpEntityData.Operators code 2 is multiply. Settle: the MathOp operator enum in the type info.
 constexpr int64_t kMathMultiply = 2;
 
 struct Reader {

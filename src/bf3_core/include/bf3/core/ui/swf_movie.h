@@ -371,6 +371,7 @@ struct SwfSubImage {
 	uint16_t height() const { return uint16_t(y2 - y1); }
 };
 
+// STAND-IN: curves flattened to 1/40 px (half a twip), a chosen tolerance. Settle: GFx's own curve tessellation error.
 inline constexpr float kSwfFlattenTolerance = 0.025f;
 inline constexpr uint32_t kSwfCurveMaxSegments = 256;
 inline constexpr uint32_t kSwfShapeMaxPoints = 1u << 18;

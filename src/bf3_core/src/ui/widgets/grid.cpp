@@ -7,6 +7,8 @@
 #include <cmath>
 #include <functional>
 
+// SOURCE: the AS2 classes Widget.Grid.Grid, Widget.Grid.Cell.KitCell and TextCell (bf3dump swf as2
+// actionscriptlibrary), which this file ports; bind() is ours.
 namespace bf3::core::ui {
 
 namespace {

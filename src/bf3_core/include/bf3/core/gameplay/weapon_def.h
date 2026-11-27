@@ -183,6 +183,8 @@ struct MaterialPairRef {
 	int32_t physics_property_index = 0;
 	uint8_t property() const { return uint8_t(physics_property_index & 0xFF); }
 	uint8_t material() const { return uint8_t(physics_material_index & 0xFF); }
+	// SOURCE: notes R-A4 4 and its checker (a hit material with FlagsAndIndex bit 24 does not stop the bullet; that
+	// the bit means "penetrable" is inferred there).
 	bool penetrable() const { return ((flags_and_index >> 24) & 1u) != 0; }
 };
 

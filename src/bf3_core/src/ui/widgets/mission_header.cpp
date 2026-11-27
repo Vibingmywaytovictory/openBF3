@@ -3,6 +3,8 @@
 
 #include "bf3/core/ui/ui_graph.h"
 
+// SOURCE: the AS2 class Widget.MissionHeader.MissionHeaderMP (bf3dump swf as2 actionscriptlibrary), which this file
+// ports; hud_page_header_data is ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -19,6 +21,8 @@ struct HeaderSource {
 	HeaderText text = HeaderText::GameModeName;
 };
 
+// INFERRED: the header keys, measured on ingamemenump's bindings (game mode name, level, friendly team) as the key
+// hash is unknown. Settle: a note on those components' DataKeys.
 constexpr std::array<HeaderSource, 3> kHeaderSources{ {
 		{ "uisettingscomp", 1098058770, HeaderText::GameModeName },
 		{ "uilevelcomp", -1926457542, HeaderText::LevelName },

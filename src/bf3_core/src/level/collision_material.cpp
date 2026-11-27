@@ -16,6 +16,8 @@ struct Word {
 	uint8_t surface;
 };
 
+// STAND-IN: a grid row's surface class is voted from words in the partition names its relations reference (this table,
+// with weights 3 impacts/, 2 generic_materials/ and special_objects/, else 1). Settle: a surface class field in the data.
 constexpr Word kWords[] = {
 	{ "concrete", surface::kConcrete },
 	{ "cement", surface::kConcrete },

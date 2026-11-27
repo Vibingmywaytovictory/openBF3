@@ -1342,6 +1342,8 @@ private:
 		if (options_.side == LogicSide::Server) {
 			delivered = delivered_on_server(tt);
 		} else {
+			// INFERRED: a client runs Client and ClientAndServer edges itself and gets Networked ones from the server.
+			// Settle: a note on EventConnectionTargetType delivery.
 			delivered = tt == LogicEventTarget::Client || tt == LogicEventTarget::ClientAndServer;
 		}
 

@@ -28,6 +28,8 @@ struct ModeAlias {
 	std::array<std::string_view, 2> ids;
 };
 
+// WHY: openBF3's short mode names for the map list and tools; TDM falls back to TeamDeathMatchC0, the only TDM the
+// four XP2 levels list.
 constexpr ModeAlias kModeAliases[] = {
 	{ "CQL", { "ConquestLarge0" } },
 	{ "CQS", { "ConquestSmall0" } },
@@ -48,6 +50,8 @@ constexpr ModeAlias kModeAliases[] = {
 	{ "AS", { "AirSuperiority0" } },
 };
 
+// STAND-IN: the levels' English names typed in, not read from the localised text. Settle: each level's name SID
+// through the text database.
 constexpr DisplayName kDisplayNames[29] = {
 	{ "MP_001", "Grand Bazaar" },
 	{ "MP_003", "Tehran Highway" },
@@ -390,6 +394,9 @@ Status subworld_references(const EbxResolver &p_db, const EbxInstance &p_contain
 	return search_layers(p_db, p_container, 0, containers, r_budget, r_out);
 }
 
+// SOURCE: research/topics/gap-r1-level-logic-schematics.md (sub-worlds filtered by their GameMode inclusion criterion).
+// INFERRED: AutoLoad false never loads, the mode matches case-insensitively and other criteria are ignored.
+// Settle: a note on SubWorldInclusionSetting.
 Result<bool> includes(const EbxResolver &p_db, const EbxInstance &p_reference, std::string_view p_mode, WorkBudget &r_budget) {
 	const std::optional<EbxValue> auto_load = p_reference.get("AutoLoad");
 	if (!(auto_load ? auto_load->as_bool() : std::nullopt).value_or(false)) {

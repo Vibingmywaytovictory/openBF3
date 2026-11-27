@@ -89,6 +89,8 @@ bool fits16(int32_t p_v) {
 	return p_v >= -32768 && p_v <= 32767;
 }
 
+// STAND-IN: OS/2 weight from the font name (Semibold 600, Medium 500, Bold 700, else 400); DefineFont3 has no weight.
+// Settle: a text path in the renderer that reads the weight.
 uint16_t weight_class(const std::string &p_name, bool p_bold) {
 	const std::string l = to_lower_ascii(p_name);
 	if (l.find("semibold") != std::string::npos) {
@@ -163,6 +165,7 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 	stats.glyphs = uint32_t(n_glyphs);
 
 	std::vector<TtGlyph> glyphs(n_glyphs);
+	// STAND-IN: glyph 0 is a made-up hollow box 0.6 x 0.7 em, so a missing character shows. Settle: what GFx draws.
 	{
 		TtGlyph &g = glyphs[0];
 		const int32_t w = (upem * 6) / 10;
@@ -497,6 +500,8 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 		os2.u16(weight_class(family, p_font.bold));
 		os2.u16(5);
 		os2.u16(0);
+		// STAND-IN: the sub/superscript and strikeout metrics below are hand-picked em fractions; DefineFont3 has none.
+		// Settle: a text path in the renderer that draws them.
 		os2.s16(upem * 65 / 100);
 		os2.s16(upem * 60 / 100);
 		os2.s16(0);
@@ -663,6 +668,7 @@ Result<std::vector<uint8_t>> write_truetype(const SwfFontOutlines &p_font, const
 	Be post;
 	post.u32(0x00030000);
 	post.u32(0);
+	// STAND-IN: underline position -0.1 em and thickness 0.05 em, hand-picked. Settle: a retail underlined text field.
 	post.s16(-upem / 10);
 	post.s16(upem / 20);
 	post.u32(0);

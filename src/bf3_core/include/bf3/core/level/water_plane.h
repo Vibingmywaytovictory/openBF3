@@ -13,6 +13,8 @@ struct WaterPlane {
 
 bool water_plane_covers(const WaterPlane &p_plane, float p_x, float p_z);
 
+// STAND-IN: bots treat terrain more than 1.8 m under a water plane as unwalkable; hand-picked, not the soldier's
+// CharacterPhysicsData.WaterDepthLimit. Settle: swimming, then the nav water rule from the data.
 inline constexpr float kCoverWaterDepth = 1.8f;
 
 }

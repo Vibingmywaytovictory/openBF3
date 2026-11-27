@@ -23,6 +23,7 @@
 
 namespace bf3::core::ui {
 
+// SOURCE: the AS2 class fb.Defines: SOUND_SELECT and SOUND_NAVIGATE.
 inline constexpr std::string_view kSoundSelect = "UIWidgetEventID_PlaySoundSelect";
 inline constexpr std::string_view kSoundNavigate = "UIWidgetEventID_PlaySoundNavigate";
 
@@ -30,6 +31,7 @@ inline bool hud_platform_win32(const HudClientState &p_client) {
 	return p_client.platform == "win32" || p_client.platform.empty();
 }
 
+// SOURCE: the AS2 class fb.HelperFunctions getIsVehicleRussian: these twelve names.
 inline bool hud_vehicle_russian(const HudClientState &p_client) {
 	for (const std::string_view name : { "T90", "BMP2", "9K22", "Pantsir-S1", "Vodnik", "Mi28 Havoc", "Wz-11", "Ka-60",
 				 "Su25", "Su35", "A10", "SPRUT-SD" }) {
@@ -60,6 +62,8 @@ inline bool string_true(const As2Value &p_v) {
 	return to_lower_ascii(p_v.to_string()) == "true";
 }
 
+// INFERRED: the soldier widgets hide while hardcore, in the menu, or under the kill card, spawn screen or end of round,
+// the set the 18.57 footage shows; the engine's rule is not in the data. Settle: a note on that rule.
 inline bool hud_soldier_widgets_visible(const HudModel &p_model, const HudClientState &p_client) {
 	return !p_client.hardcore && !p_model.user.is_in_menu && !p_model.kill_card.visible &&
 			!p_model.spawn_screen.visible && !p_model.end_of_round.visible;
@@ -180,6 +184,8 @@ inline T *controller_at(HudWidgetHost &r_host, const As2Clip &p_clip) {
 	return dynamic_cast<T *>(r_host.screen().controller(p_clip.path()));
 }
 
+// SOURCE: bf3dump swf as2 hitindicator: frame scripts at holder frames 2 and 13 play HitController, and HitController's
+// frame 2 plays its parent; this class runs them.
 class HitAnimation {
 public:
 	void watch(const As2Clip &p_holder) {
@@ -204,6 +210,7 @@ private:
 	uint32_t last_controller_ = 0;
 };
 
+// SOURCE: the AS2 class Widget.Crosshair.Hitindicator: m_levelFrameNr [0, 2, 2, 13].
 inline constexpr std::array<int32_t, 4> kHitLevelFrames{ 0, 2, 2, 13 };
 
 inline bool param_true(const HudWidgetHost &p_host, std::string_view p_name) {

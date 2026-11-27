@@ -9,6 +9,8 @@ namespace bf3::core::ui {
 
 namespace {
 
+// SOURCE: Util.ScrollTextTimer's EASING_FUNCTION, fb.Motion.caurina.transitions.Equations.easeInOutSine:
+// -c / 2 x (cos(pi t / d) - 1) + b (bf3dump swf as2).
 double ease_in_out_sine(double p_t, double p_from, double p_change, double p_duration) {
 	return -p_change / 2.0 * (std::cos(std::numbers::pi * p_t / p_duration) - 1.0) + p_from;
 }
@@ -252,6 +254,7 @@ void ScrollTextWidget::update_align() {
 }
 
 void ScrollTextWidget::on_scroll_update(double p_value) const {
+	// SOURCE: Util.ScrollText.onScrollUpdate's AS2 moves txt by -(m_scrollDistance + 5) x the timer value (bf3dump swf as2).
 	txt_.set_x(float(-(double(scroll_distance_) + 5.0) * p_value));
 }
 
@@ -357,6 +360,7 @@ void SimpleScrollTextWidget::on_scroll_update() {
 	if (delay_count_ < kScrollDelay) {
 		return;
 	}
+	// WHY: the AS2 passes FPS to setInterval as milliseconds and steps by FPS x 0.001 s (bf3dump swf as2).
 	txt_.set_x(float(double(txt_.x()) - kScrollSpeed * (kFps * 0.001)));
 	if (txt_.x() + current_text_width_ < 0.0f) {
 		txt_.set_x(0.0f);

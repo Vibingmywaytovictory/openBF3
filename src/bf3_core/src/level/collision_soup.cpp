@@ -151,6 +151,8 @@ void leaf_triangles(const LeafRef &p_leaf, const res::HavokPhysicsData &p_havok,
 		default:
 			return;
 	}
+	// INFERRED: a convex shape's user data holds its part in bits 0-7 and its material slot in bits 8-15; a slot past
+	// the flags table is looked up by part. Settle: a research/ format fact on Havok shape user data.
 	const uint32_t user_data = shape.user_data;
 	const uint32_t part = user_data & 0xFF;
 	const uint32_t local = (user_data >> 8) & 0xFF;
@@ -175,6 +177,8 @@ bool intact(const Owner &p_owner, uint32_t p_part) {
 	return p_owner.intact == nullptr || p_part >= p_owner.intact->size() || (*p_owner.intact)[p_part];
 }
 
+// STAND-IN: an owner whose name contains "invisible" or "collisionmesh" is collision the player does not see.
+// Settle: a data field that marks invisible collision.
 bool invisible_name(std::string_view p_name) {
 	const std::string lower = to_lower_ascii(p_name);
 	return lower.find("invisible") != std::string::npos || lower.find("collisionmesh") != std::string::npos;
@@ -185,6 +189,8 @@ uint8_t surface_of(const SurfaceMaterials &p_materials, uint32_t p_value, std::s
 	if (p_materials.lookup(p_value, s) == SurfaceMaterials::Lookup::Surface) {
 		return s;
 	}
+	// STAND-IN: an unnamed grid row takes the owner name's class; solid foliage is bark and anything else concrete.
+	// Settle: a surface class field in the data.
 	const std::optional<uint8_t> named = classify_surface(p_name);
 	if (named && *named == surface::kFoliage && (p_value & kMaterialSeeThrough) == 0) {
 		return surface::kBark;
@@ -318,6 +324,8 @@ void finish_placement(std::vector<Piece *> &p_pieces, Built &r_built) {
 	}
 }
 
+// STAND-IN: only physics parts of HealthStateIndex 0 (the intact state) collide; no state ever changes (no destruction).
+// Settle: build destruction from PhysicsPartInfos.
 Status owner_states(const EbxInstance &p_entity, WorkBudget &r_budget, std::map<std::pair<const EbxPartition *, uint32_t>, std::vector<bool>> &r_cache,
 		const std::vector<bool> *&r_states) {
 	const auto key = std::make_pair(&p_entity.partition(), p_entity.index());

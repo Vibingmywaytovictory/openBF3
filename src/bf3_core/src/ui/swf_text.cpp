@@ -679,6 +679,8 @@ const char *swf_text_fit_name(SwfTextFit p_mode) {
 	return "?";
 }
 
+// INFERRED: the AutoSize flag grows the field from its alignment (right, center, else left).
+// Settle: a retail capture of a right-aligned autoSize field as its text grows.
 SwfTextOptions swf_edit_text_options(const SwfEditText &p_field) {
 	SwfTextOptions o;
 	if (!p_field.has(SwfEditText::kAutoSize)) {

@@ -105,6 +105,8 @@ uint32_t specialization_mask(const SpecializationTable &p_table, uint32_t p_own,
 	return mask;
 }
 
+// INFERRED: an active specialization replaces its field's DefaultValue with its UnlockedValue; two on one field do not
+// stack (the later entry wins). Settle: a note on how unlock values combine on a field.
 SpecializationEffects specialization_effects_of(const SpecializationTable &p_table, uint32_t p_mask) {
 	SpecializationEffects out = p_table.defaults;
 	for (size_t i = 0; i < p_table.entries.size() && i < kMaxSpecializationEntries; ++i) {
@@ -118,6 +120,7 @@ SpecializationEffects specialization_effects_of(const SpecializationTable &p_tab
 	return out;
 }
 
+// INFERRED: the boosted magazine count rounds to nearest. Settle: a note on AmmoClipIncreaseMultiplier's use.
 int32_t boosted_magazines(int32_t p_magazines, const SpecializationEffects &p_effects) {
 	const double boosted = std::round(double(p_magazines) * double(p_effects[SpecializationTarget::AmmoClips]));
 	return int32_t(std::clamp(boosted, 0.0, double(INT32_MAX)));

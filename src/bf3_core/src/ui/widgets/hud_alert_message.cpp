@@ -1,5 +1,7 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the AS2 class Widget.Message.HudAlertMessage (bf3dump swf as2 actionscriptlibrary), which this file ports,
+// all but bind().
 namespace bf3::core::ui {
 
 namespace {
@@ -22,6 +24,7 @@ public:
 				if (src.key == kCombatAreaVisibleKey) {
 					r_out.push_back({ src.name, As2Value::of(p_model.combat_area.outside), src.on_initialize });
 				} else if (src.key == kCombatAreaTimerKey && p_model.combat_area.outside) {
+					// INFERRED: the countdown text is whole seconds. Settle: footage of the out-of-bounds countdown.
 					r_out.push_back({ src.name, As2Value::of(std::to_string(p_model.combat_area.seconds_left)),
 							src.on_initialize });
 				}
@@ -135,6 +138,8 @@ private:
 	static constexpr int32_t kOnHide = 17;
 	static constexpr int32_t kOnShowCompleted = 18;
 	static constexpr std::string_view kPreRoundCategory = "ui/uicomponents/uipreroundcomp";
+	// INFERRED: the UIPreRoundComp CountLeft and UICombatAreaComp Visible and Timer keys (3 below), named from the screens'
+	// bindings as the key hash is unknown. Settle: a note on those components' DataKeys.
 	static constexpr int32_t kPreRoundCountLeftKey = -1933733975;
 	static constexpr std::string_view kCombatAreaCategory = "ui/uicomponents/uicombatareacomp";
 	static constexpr int32_t kCombatAreaVisibleKey = -1103276527;

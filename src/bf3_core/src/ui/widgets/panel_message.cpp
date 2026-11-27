@@ -1,9 +1,13 @@
 #include "hud_widget_support.h"
 
+// SOURCE: the onClipLoad tilts and initialize of the AS2 classes Widget.Message.LogMessage, TooltipMessage and
+// ObjectiveMessage (bf3dump swf as2 actionscriptlibrary).
 namespace bf3::core::ui {
 
 namespace {
 
+// STAND-IN: only those two steps are ported; the classes' message handling is not built, as TDM feeds them nothing.
+// Settle: port the rest of the three classes with a data source.
 class PanelMessageClass final : public HudWidgetController {
 public:
 	struct Spec {

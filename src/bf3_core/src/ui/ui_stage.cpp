@@ -5,6 +5,7 @@
 
 namespace bf3::core::ui {
 
+// INFERRED: the screens scale as Scaleform's showAll (uniform fit, centred). Settle: a retail capture at a 4:3 window.
 UiStage ui_stage_show_all(const SwfRect &p_stage, float p_width_px, float p_height_px) {
 	UiStage s;
 	s.stage = p_stage;

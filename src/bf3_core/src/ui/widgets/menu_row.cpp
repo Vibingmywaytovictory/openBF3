@@ -2,11 +2,15 @@
 
 #include "bf3/core/ui/ui_graph.h"
 
+// SOURCE: the AS2 class Widget.List.Rows.MenuRow (bf3dump swf as2 menuactionscriptlibrary): inactive 10066329, premium
+// 15302420, glow 7586815 at 1.45, ported here; hud_menu_list_rows is ours.
 namespace bf3::core::ui {
 
 namespace {
 
 constexpr std::string_view kIngameMenuCategory = "uiingamemenucomp";
+// INFERRED: the uiingamemenucomp key of ingamemenump List_01's menu entries, named by that list (key hash unknown).
+// Settle: a note on UIIngameMenuComp's DataKeys.
 constexpr int32_t kMenuEntriesKey = 366660527;
 constexpr std::string_view kPremiumSid = "ID_M_PREMIUM";
 constexpr uint32_t kInactiveColor = 10066329u;

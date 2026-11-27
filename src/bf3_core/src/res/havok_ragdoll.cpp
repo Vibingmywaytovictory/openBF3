@@ -11,6 +11,8 @@ using detail::Reader;
 
 namespace {
 
+// INFERRED: the object offsets below are fitted to the install's ragdoll01 32-bit packfile so that every joint's two
+// pivots coincide at rest. Settle: a research/ note on the packfile's Havok class layouts.
 constexpr uint32_t kVariantBytes = 12;
 constexpr uint32_t kVariantObject = 8;
 constexpr uint32_t kPhysicsDataSystems = 12;
@@ -236,6 +238,7 @@ float RagdollDef::pivot_gap(const RagdollJointDef &p_joint) const {
 	return vec::length(vec::sub(a, b));
 }
 
+// SOURCE: notes R5-DT2 data fields (bodies, joints, limits, masses and damping live in the ragdoll resource, not EBX).
 ResError RagdollDef::parse(Bytes p_res, const ResMeta &p_res_meta, RagdollDef &r_def) {
 	r_def = RagdollDef();
 	const uint32_t packfile32_len = uint32_t(p_res_meta[0]) | (uint32_t(p_res_meta[1]) << 8) |

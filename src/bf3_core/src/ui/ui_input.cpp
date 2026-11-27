@@ -17,6 +17,8 @@ struct ConceptRow {
 	std::string_view identifier;
 };
 
+// INFERRED: pairs where the names differ: Navigate* to ConceptMove*, TabLeft/TabRight to ConceptParentNavigate*, Tab to
+// ConceptScoreboard, Com to ConceptCommMenu1, OK unbound. Settle: the retail key that fires each concept.
 constexpr std::array<ConceptRow, kUiInputConceptCount> kConcepts = { {
 		{ UiInputConcept::NavigateUp, "NavigateUp", "ConceptMoveForward" },
 		{ UiInputConcept::NavigateDown, "NavigateDown", "ConceptMoveBackward" },
@@ -48,6 +50,7 @@ struct KeyRow {
 	int32_t code;
 };
 
+// INFERRED: GFx hands AS2 Flash Key codes (Windows virtual-key numbers) for the IDK_ keys. Settle: a retail Key.getCode.
 constexpr KeyRow kKeys[] = {
 	{ "IDK_Backspace", 8 },
 	{ "IDK_Tab", 9 },
@@ -122,6 +125,8 @@ std::optional<UiInputConcept> ui_input_concept_of_action(std::string_view p_ui_i
 	return std::nullopt;
 }
 
+// INFERRED: letters, digits, F1-F15 and numpad digits get Flash Key codes (Windows virtual-key numbers) as well.
+// Settle: a retail Key.getCode.
 int32_t ui_flash_key_code(std::string_view p_idk) {
 	if (!p_idk.starts_with(kIdkPrefix)) {
 		return 0;

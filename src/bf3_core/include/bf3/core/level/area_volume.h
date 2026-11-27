@@ -16,6 +16,7 @@
 namespace bf3::core::level {
 
 inline constexpr size_t kMaxAreaVolumePoints = 4096;
+// INFERRED: a LinearDecibel fade reaches -60 dB at FadeWidth. Settle: a note on FadeCurveType, or a retail recording.
 inline constexpr float kAreaFadeDecibelFloor = -60.0f;
 
 enum class AreaFadeCurve : uint8_t { SineAmplitude, LinearAmplitude, LinearDecibel };

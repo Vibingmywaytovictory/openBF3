@@ -213,6 +213,8 @@ float tween_value(const As2Clip &p_clip, HudTweenProperty p_property) {
 	return std::nanf("");
 }
 
+// STAND-IN: after a long frame at most 16 interval fires and 8 enter frames run per advance (2 constants below), chosen.
+// Settle: how Scaleform catches up setInterval and onEnterFrame after a stall.
 constexpr uint32_t kMaxIntervalFiresPerAdvance = 16;
 constexpr uint32_t kMaxEnterFramesPerAdvance = 8;
 }
@@ -518,6 +520,8 @@ float hud_align_axis(HudAxisAlign p_align, float p_original, float p_visible_min
 	return p_original;
 }
 
+// SOURCE: the AS2 class fb.Motion.caurina.transitions.Equations (bf3dump swf as2 actionscriptlibrary): easeOutBack
+// 1.70158, easeOutExpo 1.001, easeOutQuad, easeInOutSine.
 double hud_tween_ease(HudTweenEase p_ease, double p_t) {
 	const double t = std::clamp(p_t, 0.0, 1.0);
 	switch (p_ease) {
@@ -819,6 +823,8 @@ float HudWidgetHost::ymouse(const As2Clip &p_clip) const {
 	return p ? p->y : 0.0f;
 }
 
+// WHY: Flash queues an attached clip's onLoad to the end of the running action block, so queued onClipLoad calls run
+// when the outermost block ends.
 class HudScreen::ActionBlock {
 public:
 	explicit ActionBlock(HudScreen &r_screen) : screen_(r_screen) {
@@ -1313,6 +1319,8 @@ void HudScreen::initialize(const HudModel &p_model) {
 		}
 		w->screen_widget = true;
 		w->host->set_events(n.events);
+		// INFERRED: the focus group is every widget at the lowest non-negative FocusIndex, read off the 18.57 footage.
+		// Settle: a note on UIScreen.initializeScreen's focus pick.
 		if (n.focus_index >= 0 && (focused_widget_.empty() || n.focus_index < focus_index_)) {
 			focused_widget_ = w->path;
 			focus_index_ = n.focus_index;

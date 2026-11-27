@@ -3665,3 +3665,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Cost: host.tdm.conquest_vehicles.seed2 back to 18 s; with seated members out of formation its first get-out comes at 30 s of game time and the row runs in 13 s.
 * BotDriver uses core's dot, normalize, add, scale, sub and horizontal_distance and sim's quantize_axis and axis_value instead of its own copies; kNavProbeHeight lives once in bot_crew.h.
 * Comment rule: comments come back as SOURCE:, INFERRED: and STAND-IN: (with Settle:) and WHY: only, own-line, two lines at most; hygiene.rules checks tags, bans and commented-out code, hygiene.comment_rule tests the check; --strip removed; .clang-format adds no namespace comments.
+* Comments, bf3_core: 198 INFERRED, 161 SOURCE, 77 STAND-IN, 22 WHY on 216 files; Comment lines only: no code line is added, removed or changed.

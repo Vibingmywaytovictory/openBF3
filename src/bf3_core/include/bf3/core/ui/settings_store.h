@@ -18,6 +18,7 @@ inline constexpr size_t kMaxSettingsBytes = 256 * 1024;
 inline constexpr size_t kMaxSettingsLines = 4096;
 inline constexpr std::string_view kSettingsVersionKey = "version";
 
+// INFERRED: the options that wait for APPLY, from optionsgraph's resolution dialog. Settle: a note on ApplyVideoSettings.
 inline constexpr std::string_view kVideoOptions[] = { kResolutionWidth, kResolutionHeight, kResolutionHertz,
 	"FullscreenEnabled", "FullscreenScreen" };
 

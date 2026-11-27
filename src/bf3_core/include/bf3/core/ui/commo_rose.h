@@ -13,6 +13,8 @@ namespace bf3::core::ui {
 
 inline constexpr std::string_view kCommoRoseScreenPartition = "ui/flow/screen/commrosescreen";
 inline constexpr std::string_view kCommoRoseWidget = "ComRose_01";
+// SOURCE: bf3dump of ui/flow/screen/commrosescreen: the UIVoiceComp DataKeys of its DataSetNodes SetCommand and
+// SetButton (the 2 constants below).
 inline constexpr int32_t kCommoRoseCommandKey = -505845692;
 inline constexpr int32_t kCommoRoseButtonKey = -627045675;
 inline constexpr int32_t kCommoRoseNoCommand = -1;

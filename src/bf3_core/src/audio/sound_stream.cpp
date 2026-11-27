@@ -15,6 +15,8 @@ namespace bf3::core::audio {
 
 namespace {
 
+// INFERRED: the EA-XAS predictor pairs, the frame layout (four 32-sample groups, a 4-byte header each, 15 rows of
+// nibbles) and the block headers; no research/ format fact states them. Settle: a research/ format fact on EA-XAS.
 constexpr int32_t kXasCoefficients[4][2] = { { 0, 0 }, { 240, 0 }, { 460, -208 }, { 392, -220 } };
 constexpr size_t kBlockHeaderBytes = 4;
 constexpr size_t kDataHeaderBytes = 8;
@@ -170,6 +172,8 @@ Result<SoundStreamHeader> parse_stream_header(std::span<const uint8_t> p_chunk, 
 	}
 	const uint8_t *h = &p_chunk[p_offset + kBlockHeaderBytes];
 	SoundStreamHeader out;
+	// INFERRED: the header's bit fields (codec in the low nibble, channels - 1 in the top six bits of byte 1, an 18-bit
+	// rate, a 29-bit frame count). Settle: a research/ format fact on the sound stream header.
 	const uint8_t codec = h[0] & 0x0f;
 	if (codec != uint8_t(SoundCodec::EaXas) && codec != uint8_t(SoundCodec::Pcm16Be)) {
 		return stream_error(p_offset, "unsupported codec " + std::to_string(codec));

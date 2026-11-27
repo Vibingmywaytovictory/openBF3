@@ -13,6 +13,8 @@
 
 namespace bf3::core::ui {
 
+// INFERRED: optionsgraph's and screenadjustscreen's UISettingsComp DataKeys below, each named by the graph node that
+// reads or writes it, as the key hash is unknown. Settle: a note on how UISettingsComp derives its DataKeys.
 inline constexpr int32_t kOptionsTabKey = 968900879;
 inline constexpr int32_t kOptionsKeyTabKey = 70081798;
 inline constexpr int32_t kOptionsKeyColumnKey = -668488254;
@@ -115,6 +117,8 @@ enum class OptionsAction : uint8_t {
 	StartResolutionTimer
 };
 
+// STAND-IN: the keep-or-revert resolution dialog's time; the install has no countdown field or binding for it.
+// Settle: footage of the retail resolution dialog.
 inline constexpr double kResolutionKeepSeconds = 15.0;
 
 OptionsAction options_action_of(int32_t p_action_key, std::span<const std::string> p_params);

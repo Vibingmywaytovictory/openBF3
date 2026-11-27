@@ -68,6 +68,8 @@ struct HeightGrid {
 	bool hole(size_t p_x, size_t p_z) const { return holes[p_x + p_z * width] != 0; }
 };
 
+// INFERRED: a mask tile has 2 border texels (66 x 66 tiles, 64 inside); no mask header field is known to give it.
+// Settle: a note on the mask tree header.
 inline constexpr uint32_t kTerrainMaskBorder = 2;
 inline constexpr uint32_t kTerrainColourBorder = 4;
 inline constexpr uint8_t kTerrainFullMask = 255;

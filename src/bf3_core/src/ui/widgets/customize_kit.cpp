@@ -12,6 +12,8 @@
 
 #include <limits>
 
+// SOURCE: the AS2 classes Widget.CustomizeKit.KitView, KitViewSlot, KitSelectorSlot, KitInfoBox and
+// Widget.Info.SquadBoosterInfo (bf3dump swf as2 actionscriptlibrary), ported here; customize_kit_setup is ours.
 namespace bf3::core::ui {
 
 namespace {
@@ -934,6 +936,7 @@ As2Value selector_items(const HudModel &p_model, const HudClientState &p_client,
 		As2Value item = slot_of(p_client, it, true);
 		item.set("Index", As2Value::of(int32_t(i)));
 		item.set("DefaultSelected", As2Value::of(int32_t(i) == p_selected));
+		// STAND-IN: no stats are kept, so every item shows 0 service stars. Settle: build player stats.
 		if (p_stars) {
 			item.set("ServiceStars", As2Value::of(0));
 		}
@@ -964,6 +967,7 @@ std::optional<As2Value> customize_kit_setup(const HudModel &p_model, const HudCl
 			As2Value kit = As2Value::object();
 			kit.set("Label", As2Value::of(localised(p_client, e.name_sid_hash)));
 			kit.set("HeaderIcon", As2Value::of(std::string(kGameUtilsKits[k].label)));
+			// STAND-IN: no stats are kept, so every kit shows 0 service stars and empty bars. Settle: build player stats.
 			kit.set("ServiceStars", As2Value::of(0));
 			kit.set("Index", As2Value::of(int32_t(k)));
 			kit.set("BarValues", As2Value::array({ As2Value::of(0), As2Value::of(0) }));

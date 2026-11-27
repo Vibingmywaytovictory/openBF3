@@ -4,6 +4,8 @@
 #include <cmath>
 #include <limits>
 
+// SOURCE: the AS2 class Widget.List.ListLabel (bf3dump swf as2 actionscriptlibrary): its state colours, glows and
+// alphas (glow 7586815, strength 0.75, inactive alpha 60) and layout, ported here.
 namespace bf3::core::ui {
 
 namespace {

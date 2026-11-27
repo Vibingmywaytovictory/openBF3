@@ -514,6 +514,7 @@ private:
 	void check_registers() {
 		for (const Avm1Action &a : code_.actions) {
 			const Avm1Action *f = code_.function_action(a.scope);
+			// WHY: code outside a DefineFunction2 body has AVM1's four global registers.
 			const uint32_t limit = (f != nullptr && f->op == avm1_op::kDefineFunction2) ? uint32_t(f->register_count) : 4u;
 			if (a.op == avm1_op::kStoreRegister && a.reg >= limit) {
 				code_.registers_out_of_range++;

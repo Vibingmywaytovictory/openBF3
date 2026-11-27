@@ -118,6 +118,7 @@ Status mark_linked_spawns(const World &p_world, uint32_t p_scope, const EbxInsta
 	return Status::success();
 }
 
+// SOURCE: notes M-CQ3 (a character spawner's positions are the AlternateSpawnEntityData points linked to it).
 Result<std::vector<uint32_t>> spawner_linked_points(const World &p_world) {
 	std::vector<uint32_t> linked(p_world.objects.size(), kNoSpawner);
 	const int32_t field = field_id("AlternativeSpawnPoints");

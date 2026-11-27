@@ -92,6 +92,8 @@ float TerrainMaskField::coverage(uint8_t p_layer, float p_x, float p_z) const {
 	}
 	const double fx = (double(p_x) - double(bounds_[0])) / (double(bounds_[2]) - double(bounds_[0]));
 	const double fz = (double(p_z) - double(bounds_[1])) / (double(bounds_[3]) - double(bounds_[1]));
+	// INFERRED: the finest record at the point gives the coverage, bilinear over its tile with the border texels split
+	// evenly on both sides. Settle: a note on how the terrain samples its mask tree.
 	for (int level = deepest_; level >= 0; --level) {
 		const double cells = double(uint32_t(1) << level);
 		const auto found = records_.find(key(p_layer, uint8_t(level), uint32_t(fx * cells), uint32_t(fz * cells)));
