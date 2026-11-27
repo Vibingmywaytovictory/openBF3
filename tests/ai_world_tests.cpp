@@ -20,6 +20,7 @@
 #include "tdm_fixture.h"
 #include "test_scratch.h"
 #include "test_support.h"
+#include "vehicles/server_vehicles.h"
 
 #include <algorithm>
 #include <array>
@@ -647,7 +648,9 @@ TEST_SUITE("ai-world-install") {
 				++teamed;
 				if (p == nullptr || p->id() != int(s) || p->side() != int(view.team(slot)) ||
 						p->is_alive() != view.alive(slot) || p->is_man_down() != down || p->is_ai() != (s < 32) ||
-						p->spawn_kit() != int(view.kit(slot)) || p->current_vehicle() != p->soldier() ||
+						p->spawn_kit() != int(view.kit(slot)) ||
+						(p->current_vehicle() != p->soldier()) !=
+								(view.server_vehicles() != nullptr && view.server_vehicles()->seated(slot)) ||
 						(p->soldier() == nullptr) == view.alive(slot) ||
 						(p->soldier() != nullptr && p->soldier()->position() != view.states()[s].position)) {
 					++player_mismatches;

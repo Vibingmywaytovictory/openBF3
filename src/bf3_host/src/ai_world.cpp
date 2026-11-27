@@ -1,6 +1,7 @@
 #include "ai_world.h"
 
 #include "tdm_bot_shared.h"
+#include "vehicles/server_vehicles.h"
 
 #include "bf3/host/server_view.h"
 #include "bf3/host/tdm_rules.h"
@@ -134,6 +135,7 @@ public:
 		kit_ = p_kit;
 	}
 	void set_ai(bool p_ai) { ai_ = p_ai; }
+	void set_vehicle(SlotObject *p_vehicle) { vehicle_ = p_vehicle; }
 
 	int id() const override { return slot_; }
 	bool is_ai() const override { return ai_; }
@@ -143,11 +145,12 @@ public:
 	int spawn_group() const override { return 0; }
 	int spawn_kit() const override { return kit_; }
 	ai::AiObject *soldier() const override { return alive_ ? soldier_ : nullptr; }
-	ai::AiObject *current_vehicle() const override { return soldier(); }
+	ai::AiObject *current_vehicle() const override { return alive_ && vehicle_ != nullptr ? vehicle_ : soldier(); }
 
 private:
 	uint8_t slot_ = 0;
 	SlotObject *soldier_ = nullptr;
+	SlotObject *vehicle_ = nullptr;
 	int side_ = 0;
 	bool alive_ = false;
 	bool down_ = false;
@@ -167,6 +170,7 @@ struct HostAiWorld::Impl {
 	std::array<SlotObject, kMaxAiSlots> soldiers;
 	std::array<std::array<SlotObject, kMaxAiSlots>, 2> perceived;
 	std::array<SlotPlayer, kMaxAiSlots> players;
+	std::array<SlotObject, kMaxAiSlots> seats;
 	std::array<ai::SquadBot *, kMaxAiSlots> squad_bots{};
 	size_t slots = 0;
 	std::array<uint8_t, kMaxAiSlots> alive{};
@@ -249,6 +253,7 @@ core::Result<std::unique_ptr<HostAiWorld>> HostAiWorld::create(const AiWorldConf
 	}
 	for (uint8_t s = 0; s < kMaxAiSlots; ++s) {
 		m.soldiers[s].set_slot(s, false);
+		m.seats[s].set_slot(s, false);
 		m.perceived[0][s].set_slot(s, true);
 		m.perceived[1][s].set_slot(s, true);
 		m.players[s].bind(s, &m.soldiers[s]);
@@ -357,12 +362,17 @@ void HostAiWorld::step(const ServerView &p_view, std::span<const sim::bots::Hear
 		own.set_kit(p_view.kit(slot));
 		own.place(states[s].position, states[s].yaw, states[s].pose);
 		m.players[s].set(team, m.alive[s] != 0, down[s] != 0, p_view.kit(slot));
+		const bool seated = p_view.server_vehicles() != nullptr && p_view.server_vehicles()->seated(slot);
+		m.seats[s].set_side(team);
+		m.seats[s].place(states[s].position, states[s].yaw, states[s].pose);
+		m.players[s].set_vehicle(seated ? &m.seats[s] : nullptr);
 		for (int side = 1; side <= 2; ++side) {
 			if (m.alive[s] != 0 && team == side) {
 				m.know(side, own);
 			} else {
 				m.forget(side, own);
 			}
+			m.seats[s].handle(side) = own.handle(side);
 		}
 	}
 	m.shots.clear();

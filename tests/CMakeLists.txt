@@ -1760,6 +1760,7 @@ set_tests_properties(ai.strategy.unit PROPERTIES TIMEOUT 60 LABELS "unit")
 openbf3_test(test_ai_world test_main.cpp ai_world_tests.cpp tdm_fixture.h ai_shipped_config.h gunplay_fixture.h test_support.h)
 target_compile_definitions(test_ai_world PRIVATE "OPENBF3_AI_DIR=\"${CMAKE_SOURCE_DIR}/bf3-opensource/ai\"")
 target_link_libraries(test_ai_world PRIVATE bf3_host)
+target_include_directories(test_ai_world PRIVATE ${PROJECT_SOURCE_DIR}/src/bf3_host/src)
 target_compile_definitions(test_ai_world PRIVATE "OPENBF3_MOTOR_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/motor_tuning.cfg\""
     "OPENBF3_MECHANICS_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/weapon_mechanics.cfg\""
     "OPENBF3_TDM_TUNING_CFG=\"${CMAKE_SOURCE_DIR}/bf3-opensource/config/tdm_tuning.cfg\"")
