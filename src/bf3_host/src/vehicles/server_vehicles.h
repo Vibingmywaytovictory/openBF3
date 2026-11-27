@@ -62,6 +62,8 @@ struct ServerVehicleStats {
 	uint64_t water_throw_outs = 0;
 };
 
+// STAND-IN: an exploded vehicle stays on the wire for 6 ticks so every client sees it explode. Settle: a note on how long
+// BF3 keeps a wreck's ghost.
 inline constexpr sim::Tick kWreckWireTicks = 6;
 
 struct ServerVehicle {

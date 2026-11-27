@@ -12,6 +12,7 @@ namespace {
 
 using bf3::core::to_lower_ascii;
 
+// INFERRED: a kit's role is the role word in its asset name. Settle: a kit data field that names the role.
 bool role_of(std::string_view p_asset, KitRole &r_role) {
 	const std::string a = to_lower_ascii(p_asset);
 	const size_t slash = a.rfind('/');
@@ -149,6 +150,8 @@ core::Result<KitTable> make_kit_table(std::span<const core::gameplay::TeamDef> p
 					return core::make_error("kits: " + asset + " has no weapon in slot " + std::to_string(s));
 				}
 			}
+			// STAND-IN: given an assault gadget (the TDM defibrillator), the assault kit carries it in slot 2 whatever its
+			// default unlock there. Settle: the kit's own slot 2 default and the defibrillator's unlock rule.
 			if (gadget != p_defs.size() && role == KitRole::Assault) {
 				l.defs[kKitGadgetSlot] = uint16_t(gadget);
 				l.unlocks[kKitGadgetSlot] = to_lower_ascii(p_options.assault_gadget);

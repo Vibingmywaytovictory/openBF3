@@ -111,6 +111,7 @@ core::Result<std::unique_ptr<TdmStrategy>> TdmStrategy::create(GameServer &r_ser
 		services.decisions = s->decisions_.get();
 		services.commander = s->commander_.get();
 		s->sai_[size_t(side - 1)] = std::make_unique<ai::Sai>(side, services);
+		// STAND-IN: the two sides' SAI cycles start half a period apart. Settle: a playtest of the TDM strategy.
 		s->next_cycle_[size_t(side - 1)] = sim::Tick(side - 1) * (s->tuning_.sai_period_ticks / 2u);
 	}
 	s->orders_ = std::make_unique<ai::SquadOrders>(
@@ -210,6 +211,8 @@ int TdmStrategy::tickets(int p_side) const {
 	if (const sim::logic::ConquestNatives *conquest = rules_->natives().conquest()) {
 		return int(std::clamp<int64_t>(conquest->tickets(uint8_t(p_side)), 0, INT32_MAX));
 	}
+	// STAND-IN: TDM has no tickets, so a side's SAI reads the kills its enemy still needs to win. Settle: a playtest of
+	// the TDM strategy.
 	const net::MatchState &ms = rules_->match_state();
 	const int enemy = p_side == 1 ? 1 : 0;
 	return std::max(0, int(ms.kill_limit) - int(ms.kills[size_t(enemy)]));
@@ -314,6 +317,8 @@ void TdmStrategy::draw_spawn(uint8_t p_slot) {
 	rules_->set_spawn_choice(p_slot, choice);
 }
 
+// STAND-IN: a bot's squad spawn is drawn as it joins and after each spawn, where OpenBF2's SAI draws it once the bot is
+// dead. Settle: a playtest of the bots' squad spawns.
 void TdmStrategy::choose_spawns() {
 	const std::span<const sim::SoldierState> states = server_.view().states();
 	for (size_t slot = 0; slot < bots_.size() && slot < states.size(); ++slot) {

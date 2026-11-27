@@ -11,6 +11,8 @@ namespace bf3::host {
 
 namespace {
 
+// STAND-IN: each derived area's two nearest areas are its neighbours, both ways; BF3 ships no AI area file.
+// Settle: per-level area links authored from the level's flags and routes.
 inline constexpr size_t kDerivedNeighbours = 2;
 
 }

@@ -66,6 +66,8 @@ struct ClientSessionConfig {
 	std::string name = "player";
 	std::optional<uint64_t> game_build;
 	net::NetSimConfig netsim;
+	// STAND-IN: every interpolation, correction and clock default from here to prediction_ring is hand-picked.
+	// Settle: notes R2-H 2 to 4 (BF3's nudge delay, 0.5 s soldier extrapolation, 0.03 to 3 m blend over 0.25 s).
 	float interp_min_ms = 75.0f;
 	float interp_max_ms = 150.0f;
 	float extrapolate_max_ms = 250.0f;

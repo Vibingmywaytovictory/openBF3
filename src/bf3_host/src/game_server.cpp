@@ -296,6 +296,8 @@ struct GameServer::Impl {
 			if (!s.dummy) {
 				soldiers.command(i, combat.clamp_pitch(i, match.restrict(body.last), body.state.pose));
 			}
+			// STAND-IN: a soldier fallen below the static world's lowest bound less his height dies as a suicide; the
+			// level data has no kill height. Settle: a note on BF3's out-of-world kill.
 			if (was_alive && !s.dummy && (match.take_suicide(i) || body.state.position[1] < fall_out_y)) {
 				soldiers.kill(i);
 			}

@@ -13,9 +13,11 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
+// INFERRED: team 1 is the US and team 2 Russia on every level. Settle: the mode's team data per level.
 constexpr std::string_view kTeam1NameSid = "ID_M_US";
 constexpr std::string_view kTeam2NameSid = "ID_M_RU";
 
+// INFERRED: the scoreboard ranks by score, then kills, then slot. Settle: retail footage of a tied scoreboard.
 bool rank_before(const Rank &p_a, const Rank &p_b) {
 	if (p_a.score != p_b.score) {
 		return p_a.score > p_b.score;

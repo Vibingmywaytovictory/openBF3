@@ -11,6 +11,8 @@ namespace bf3::host::tdm_bot {
 
 namespace {
 
+// STAND-IN: a shot passing within 1.5 m of the chest, along its first 150 m, counts as shot-at for 2 s. Settle: a
+// playtest of the bots' reactions.
 constexpr float kShotAtMetres = 1.5f;
 constexpr float kShotRayMetres = 150.0f;
 constexpr uint32_t kShotAtTicks = 120;

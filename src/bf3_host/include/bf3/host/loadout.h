@@ -51,6 +51,8 @@ inline constexpr uint8_t kLoadoutSpecializationSlot = uint8_t(kLoadoutSlots);
 
 enum class LoadoutKitItem : uint8_t { Primary, Sidearm, Gadget1, Gadget2, Specialization };
 
+// INFERRED: the slots whose UICategorySid labels each CUSTOMIZE item, the first set one winning, read off 18.57's
+// CUSTOMIZE labels. Settle: retail footage of every kit's labels.
 inline constexpr std::array<std::array<uint8_t, 2>, kLoadoutKitItems> kLoadoutItemCategorySlots{ { { 0, 0 }, { 1, 1 },
 		{ 2, 4 }, { 5, 2 }, { kLoadoutSpecializationSlot, kLoadoutSpecializationSlot } } };
 

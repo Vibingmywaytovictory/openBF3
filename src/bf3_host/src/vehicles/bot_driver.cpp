@@ -31,6 +31,8 @@ struct Trace {
 Trace trace(sim::NavQuery &r_query, sim::NavPolyRef p_poly, const sim::Vec3 &p_origin, const sim::Vec3 &p_direction,
 		float p_length) {
 	Trace t;
+	// INFERRED: the nav raycast's clear flag stands for IAIPathfinding::trace's status 4.
+	// Settle: OpenBF2's trace status values against a Detour raycast.
 	sim::Vec3 reached{};
 	if (!r_query.raycast(p_poly, p_origin, core::vec::add(p_origin, core::vec::scale(p_direction, p_length)), &reached,
 				&t.clear)) {
@@ -92,6 +94,8 @@ void BotDriver::release(float p_forward_speed, sim::Command &r_cmd) {
 	r_cmd.move_forward = sim::quantize_axis(ai::car_reset_throttle(p_forward_speed));
 }
 
+// STAND-IN: a vehicle paths on the infantry navmesh, as BF3 ships no vehicle navmesh and the host has one map.
+// Settle: a nav bake per vehicle class.
 void BotDriver::request(
 		TdmShared &r_shared, uint8_t p_slot, const sim::Vec3 &p_from, float p_radius, const sim::Vec3 &p_goal) {
 	sim::NavQuery &query = *r_shared.nav->query;
@@ -122,10 +126,12 @@ bool BotDriver::drive(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, con
 	const sim::Vec3 position = state.body.com_position;
 	const core::Transform hull = sim::vehicles::hull_transform(state.body.rotation, position);
 	const ai::Vec2 forward = flat(hull.forward);
+	// WHY: a positive steer turns the hull away from its right axis, so the controller's normal is -right.
 	const ai::Vec2 normal = flat({ -hull.right[0], -hull.right[1], -hull.right[2] });
 	const sim::Vec3 &velocity = state.body.linear_velocity;
 	const float forward_speed = core::vec::dot(velocity, hull.forward);
 	const double now = seconds_at(p_tick);
+	// STAND-IN: the vehicle's radius is its hull box's half diagonal. Settle: BF2's vehicle radius source.
 	const float radius = core::vec::length(kind.box.half);
 	if (!p_goal) {
 		stuck_ = false;
@@ -209,6 +215,8 @@ bool BotDriver::drive(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, con
 	}
 	const float smallest = std::min(kind.box.half[0], kind.box.half[2]);
 	const float approach = ai::car_approach_factor(target_distance, smallest);
+	// INFERRED: CarControl reads the angular velocity in the hull frame (right, up, forward).
+	// Settle: the frame of BF2's rotational velocity input.
 	const sim::Vec3 rotational{ core::vec::dot(state.body.angular_velocity, hull.right),
 		core::vec::dot(state.body.angular_velocity, hull.up),
 		core::vec::dot(state.body.angular_velocity, hull.forward) };

@@ -66,6 +66,7 @@ std::optional<double> logic_node_float(const core::EbxInstance &p_instance, std:
 	return double(*f);
 }
 
+// INFERRED: a fade runs linearly over its FadeTime, from where the last one stood. Settle: retail footage of a fade.
 float LogicFadeRamp::at(sim::Tick p_tick) const {
 	if (ticks == 0 || p_tick >= start + ticks) {
 		return p_tick >= start ? to : from;
@@ -96,6 +97,8 @@ core::Result<LogicScreenEffects> LogicScreenEffects::bind(
 		Fade f;
 		f.screen = bool_of(*inst, "FadeScreen");
 		f.ui = bool_of(*inst, "FadeUI");
+		// INFERRED: a Float node wired to the FadeTime property overrides the entity's own FadeTime.
+		// Settle: a note on property links into entity fields.
 		std::optional<double> seconds = logic_node_float(*inst, "FadeTime");
 		for (const gp::LogicEdge &e : p_graph.property_edges()) {
 			if (e.target != n || e.target_port != kFadeTime || e.source >= p_graph.nodes().size() ||

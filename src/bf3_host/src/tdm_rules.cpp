@@ -354,6 +354,8 @@ struct TdmRules::Impl {
 	bool was_restricted = false;
 	bool level_ended = false;
 	mutable RulesStats stats;
+	// SOURCE: notes M-OT2 retail values (PlayerKilledDelay 5 s) and bf3dump soldier (man_down_time 13, regeneration_delay
+	// 10, regeneration_rate 5, max_health 100, post_revive_health 20): the values until create reads the level's.
 	uint32_t delay_ticks = 300;
 	uint32_t man_down_ticks = 780;
 	uint32_t regen_delay_ticks = 600;
@@ -478,6 +480,8 @@ struct TdmRules::Impl {
 		if (faulted || !runtime || (phase != lg::RoundPhase::PreRound && phase != lg::RoundPhase::InRound)) {
 			return SquadRefusal::Phase;
 		}
+		// STAND-IN: a switch is refused when the joining team would then outnumber the leaving one or pass max_players / 2.
+		// Settle: a note on the server's team switch rule.
 		const uint32_t cap = std::max<uint32_t>(1u, uint32_t(config.max_players) / 2u);
 		const uint32_t leaving = team_count(from), joining = team_count(uint8_t(3u - from));
 		if (joining + 1u > cap || joining + 1u > leaving) {
@@ -531,6 +535,8 @@ struct TdmRules::Impl {
 		return mate_ready(p_slot, mate, last_states) ? mate : kNoSquadMate;
 	}
 
+	// SOURCE: notes M-CQ3 4 (with OnlySquadLeaderSpawn the spawning player or the mate leads the squad).
+	// STAND-IN: no free-seat test for a mate in a vehicle (M-CQ3 4), as no spawn enters a seat. Settle: seat spawns.
 	bool squad_spawn_allowed(uint8_t p_slot, int p_mate) const {
 		return !config.only_squad_leader_spawn || squads.leader(p_slot) ||
 				(p_mate >= 0 && squads.leader(uint8_t(p_mate)));
@@ -608,6 +614,8 @@ struct TdmRules::Impl {
 				sim::nav_poly_component(nav->world(), bots->components, poly) == bots->main_component;
 	}
 
+	// INFERRED: a squad wipe is an enemy kill that leaves a squad of two or more with no living member. Settle: a note on
+	// StatEvent_SquadWipe.
 	bool squad_wiped(uint8_t p_victim) const {
 		const std::span<const uint8_t> members = squads.members(squads.team_of(p_victim), squads.squad_of(p_victim));
 		if (members.size() < 2) {
@@ -737,7 +745,11 @@ core::Result<std::unique_ptr<TdmRules>> TdmRules::create(const SharedLevel &p_le
 	}
 	const core::gameplay::SoldierDef &soldier = p_level.gunplay->soldier;
 	m.delay_ticks = ticks_of(m.natives->player_killed_delay_s());
+	// SOURCE: bf3dump soldier (man_down_time 13, regeneration_delay 10, regeneration_rate 5, max_health 100,
+	// post_revive_health 20) as the fallbacks for a missing field, here and in the next four assignments.
 	m.man_down_ticks = soldier.man_down_time > 0.0f ? ticks_of(soldier.man_down_time) : 780u;
+	// STAND-IN: the regeneration delay leaves out RegenerationDelayModifier (the heal-speed specialization).
+	// Settle: applying the spawn's specialization modifier.
 	m.regen_delay_ticks = soldier.regeneration_delay > 0.0f ? ticks_of(soldier.regeneration_delay) : 600u;
 	m.regen_per_tick = (soldier.regeneration_rate > 0.0f && std::isfinite(soldier.regeneration_rate) ? soldier.regeneration_rate : 5.0f) / float(sim::kSimHz);
 	m.max_health = p_level.gunplay->max_health > 0.0f ? p_level.gunplay->max_health : 100.0f;
@@ -886,6 +898,7 @@ void TdmRules::revive(const net::ReviveEvent &p_event) {
 	if (d.deaths > 0) {
 		--d.deaths;
 	}
+	// SOURCE: notes M-OT2 5 (the killer team's counter takes the kill back when its victim is revived).
 	if (m.tuning->revive_takes_kill && d.last_killer_team != 0 && m.natives && m.runtime && !m.faulted) {
 		const core::Status st = m.natives->kill_undone(d.last_killer_team, *m.runtime);
 		if (!st.ok()) {
@@ -1322,6 +1335,8 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 				const Impl::Slot &o = m.slots[i];
 				float t = 0;
 				if (o.connected && state_alive(r_states[i])) {
+					// STAND-IN: a living soldier's defib sphere is centred 0.9 m above the feet. Settle: a note on the
+					// defibrillator's target test.
 					const sim::Vec3 c{ r_states[i].position[0], r_states[i].position[1] + 0.9f, r_states[i].position[2] };
 					if (segment_hits_sphere(e.origin, e.direction, range, c, m.tuning->living_radius_m, t)) {
 						refused = true;
@@ -1376,6 +1391,7 @@ core::Status TdmRules::step(uint32_t p_tick, const ServerView &p_view, const Gun
 				o.kind = RulesOrder::Kind::SpawnAt;
 				o.slot = uint8_t(i);
 				o.position = m.squad_spawn_point(*s.beacon);
+				// STAND-IN: a beacon spawn faces the player's last corpse yaw. Settle: a note on the radio beacon spawn.
 				o.yaw = s.corpse_yaw;
 				r_orders.push_back(o);
 				++m.stats.beacon_spawns;
@@ -1530,6 +1546,7 @@ size_t TdmRules::choose_spawn(uint8_t p_slot, std::span<const sim::SpawnPoint> p
 		const sim::SoldierState &st = states[i];
 		enemies.push_back(st.position);
 		const size_t pose = size_t(st.pose) < sim::kPoseCount ? size_t(st.pose) : 0;
+		// SOURCE: bf3dump soldier (stand eye 1.6 m) as the fallback.
 		const float eye = m.motor.poses[pose].eye_height > 0.0f ? m.motor.poses[pose].eye_height : 1.6f;
 		eyes.push_back({ st.position[0], st.position[1] + eye, st.position[2] });
 	}
@@ -1550,6 +1567,8 @@ size_t TdmRules::choose_spawn(uint8_t p_slot, std::span<const sim::SpawnPoint> p
 	q.enemies = enemies;
 	q.enemy_eyes = eyes;
 	q.recent_deaths = m.death_ring;
+	// STAND-IN: 10 m, Metro TDM's SpawnProtectionRadius (bf3dump spawns), not read per spawner. Settle: reading each
+	// spawner's SpawnProtectionRadius.
 	q.protection_radius = 10.0f;
 	q.friendly_block_radius = m.tuning->friendly_block_radius_m;
 	q.friendly_block_count = m.tuning->friendly_block_count;

@@ -223,6 +223,7 @@ void ServerGadgets::detonate_packs(sim::Tick p_tick, std::span<const sim::Soldie
 		}
 		pack_soldiers_.push_back(sw::PackSoldier{ uint8_t(i), p_teams[i], s.position, core::vec::length(s.velocity) });
 	}
+	// SOURCE: notes R2-G4 C (packs are armed and checked per 30 Hz update, dt the 30 Hz step).
 	if (sw::starts_sway_tick(p_tick)) {
 		pack_vehicles_.assign(p_vehicles.begin(), p_vehicles.end());
 		for (sw::PackVehicle &v : pack_vehicles_) {

@@ -14,6 +14,7 @@ void VehicleDamageSource::configure(const sw::WeaponTable &p_table, std::span<co
 	repair_.assign(p_table.defs.size(), 0.0f);
 	for (size_t i = 0; i < p_table.defs.size(); ++i) {
 		bullet_[i] = p_table.defs[i].projectile.property;
+		// SOURCE: notes R3-G3 E (a repair tool shot repairs its bullet's StartDamage).
 		if (p_table.defs[i].weapon_class == kRepairToolClass &&
 				p_table.defs[i].projectile.kind == core::gameplay::ProjectileKind::Bullet) {
 			repair_[i] = p_table.defs[i].projectile.start_damage;
@@ -60,6 +61,8 @@ void locate_strike(VehicleStrike &r_strike, const sw::ProjectileStepOutput &p_ou
 	const sw::DamageEvent &e = r_strike.event;
 	if (e.kind == sw::DamageKind::Blast || e.kind == sw::DamageKind::DudBlast) {
 		for (const sw::DetonationEvent &d : p_out.detonations) {
+			// INFERRED: a blast strikes the hull from the detonation toward the hull-box centre. Settle: a note on a blast's
+			// hit point and direction for the vehicle's zones.
 			if (d.player_slot == e.attacker_slot && d.shot_index == e.shot_index) {
 				r_strike.position = d.position;
 				r_strike.direction = { p_centre[0] - d.position[0], p_centre[1] - d.position[1],

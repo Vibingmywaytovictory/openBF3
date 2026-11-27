@@ -13,6 +13,8 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
+// SOURCE: notes R5-UI2 B (teamState 1 same team, 2 an empty seat or the other team).
+// INFERRED: teamState 0 is the own squad, as the note guesses. Settle: the player query behind teamState 0.
 inline constexpr int32_t kPassengerSquad = 0;
 inline constexpr int32_t kPassengerFriend = 1;
 inline constexpr int32_t kPassengerEmpty = 2;
@@ -26,6 +28,8 @@ const net::PlayerRow *row_of(std::span<const net::PlayerRow> p_players, uint8_t 
 	return nullptr;
 }
 
+// STAND-IN: seat 0 drives, an armed seat is a turret, the rest idle. Settle: notes R5-UI1 checker E (the list reads the
+// entry's EntryComponentHudData.SeatType).
 ui::HudPassengerSeat seat_kind(const HudFeedInput &p_input, const PresentedVehicle &p_vehicle, size_t p_seat) {
 	if (p_seat == 0) {
 		return ui::HudPassengerSeat::Driver;
@@ -39,6 +43,7 @@ ui::HudPassengerSeat seat_kind(const HudFeedInput &p_input, const PresentedVehic
 																					 : ui::HudPassengerSeat::Idle;
 }
 
+// INFERRED: a yaw is atan2(x, z) of the forward, the sign the compass negates. Settle: footage of a turned turret.
 float yaw_deg(const core::Vec3 &p_forward) {
 	return std::atan2(p_forward[0], p_forward[2]) / core::kDegToRadF;
 }
@@ -57,6 +62,7 @@ void fill_vehicle_views(const HudFeedInput &p_input, const PresentedVehicle &p_v
 	const std::vector<core::Transform> offsets = p_kind.armament != nullptr
 			? present::turret_offsets(*p_kind.armament, turret_angles)
 			: std::vector<core::Transform>();
+	// SOURCE: notes R5-UI1 checker E (entries 0 and 1, the first IsFirstPerson camera of the entry, active or not).
 	for (size_t entry = 0; entry < r_out.entry_yaw_deg.size(); ++entry) {
 		r_out.entry_yaw_deg[entry] = 0.0f;
 		if (entry >= p_kind.seat_defs.size()) {
@@ -77,6 +83,7 @@ void fill_vehicle_views(const HudFeedInput &p_input, const PresentedVehicle &p_v
 			? vehicle_seat_camera(p_kind.seat_defs[p_seat], p_input.vehicle_camera)
 			: nullptr;
 	r_out.weapon_orientations = camera != nullptr && camera->hud.use_weapon_orientations;
+	// INFERRED: the seat's weapon name is its first weapon's. Settle: footage of a seat with two weapons.
 	if (p_seat < p_kind.seat_defs.size() && !p_kind.seat_defs[p_seat].weapons.empty()) {
 		const int weapon = p_kind.seat_defs[p_seat].weapons.front();
 		r_out.weapon_item =
@@ -91,6 +98,8 @@ void fill_vehicle_views(const HudFeedInput &p_input, const PresentedVehicle &p_v
 	}
 	for (size_t w = 0; w < p_kind.weapons.size() && w < p_kind.armament->weapons.size(); ++w) {
 		const std::string &kind = p_kind.weapons[w].classification;
+		// SOURCE: notes R5-UI1 E (weapon elevation = weapon pitch - hull pitch + 90 deg; the screen widget adds the 90).
+		// INFERRED: R5-UI2's weapon classes 1 and 2 are WCPrimary and WCSecondary. Settle: the enum's values.
 		std::optional<float> *slot = kind == "WCPrimary" ? &r_out.primary_pitch_deg
 				: kind == "WCSecondary"					 ? &r_out.secondary_pitch_deg
 														 : nullptr;
@@ -135,6 +144,9 @@ ui::HudVehicle hud_vehicle(const HudFeedInput &p_input) {
 	out.in_vehicle = true;
 	out.health = std::isfinite(vehicle->health) ? std::clamp(vehicle->health, 0.0f, 1.0f) * 100.0f : 0.0f;
 	out.damage_state_disabled = vehicle->condition != sim::vehicles::VehicleCondition::Healthy;
+	// SOURCE: notes R5-UI1 E (Speed = trunc(|v| x 3.6) km/h).
+	// STAND-IN: every seat reads the hull's velocity, where the notes take a 0.5 s position difference for seats
+	// other than the driver's. Settle: port that window.
 	const float speed = std::sqrt(vehicle->linear_velocity.x * vehicle->linear_velocity.x +
 			vehicle->linear_velocity.y * vehicle->linear_velocity.y +
 			vehicle->linear_velocity.z * vehicle->linear_velocity.z);
@@ -142,6 +154,7 @@ ui::HudVehicle hud_vehicle(const HudFeedInput &p_input) {
 	if (const LevelVehicles *level = p_input.level_vehicles; level != nullptr &&
 			vehicle->spawner < level->spawners.size() && level->spawners[vehicle->spawner].kind < level->kinds.size()) {
 		const LevelVehicleKind &kind = level->kinds[level->spawners[vehicle->spawner].kind];
+		// INFERRED: ShortName is VehicleEntityData.NameSid. Settle: the vehicle HUD movie's binding for it.
 		const size_t n = std::min(kind.name_sid.size(), out.short_name.size() - 1);
 		std::copy_n(kind.name_sid.begin(), n, out.short_name.begin());
 		fill_vehicle_views(p_input, *vehicle, kind, seat->seat, out);

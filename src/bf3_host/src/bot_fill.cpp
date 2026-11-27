@@ -57,6 +57,8 @@ private:
 
 }
 
+// STAND-IN: hand-picked reach (m) within which a spawn, MCOM or flag counts as on the nav mesh, and the vertical
+// reach below. Settle: the objectives' own radii from their trigger volumes.
 float bot_point_radius(BotPointRow::Kind p_kind) {
 	switch (p_kind) {
 		case BotPointRow::Kind::Spawn:
@@ -160,6 +162,8 @@ core::Result<std::shared_ptr<const BotLevel>> load_bot_level(const LevelDatabase
 	nav_options.world.build.threads = p_options.threads;
 	nav_options.world.soup_threads = p_options.threads;
 	nav_options.bake.water = combat->water;
+	// STAND-IN: each water mesh triangle is a flat water plane at its highest corner, besides the LakeData outlines,
+	// so a deep river bed is unwalkable as a lake's is. Settle: BF3's water depth rule for soldiers on water meshes.
 	if (p_shared.water != nullptr) {
 		for (size_t b = 0; b < p_shared.water->body_count(); ++b) {
 			for (const std::array<sim::Vec3, 3> &t : p_shared.water->body_triangles(b)) {
@@ -327,6 +331,8 @@ BotSpawns make_bot_spawns(std::span<const BotPointRow> p_rows, std::span<const s
 		}
 		return false;
 	};
+	// STAND-IN: a side without a spawn on the main nav island shares the other's, and with none at all the bots spawn at
+	// random settled points on it. Settle: spawn the bots through the mode's own spawn rules only.
 	if (!out.points.empty() && (!has_team(1) || !has_team(2))) {
 		out.teams_merged = true;
 		for (sim::SpawnPoint &p : out.points) {

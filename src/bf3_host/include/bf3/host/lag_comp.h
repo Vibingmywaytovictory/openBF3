@@ -15,12 +15,16 @@
 
 namespace bf3::host {
 
+// STAND-IN: the server rewinds a shot's view at most 21 ticks (350 ms); hand-picked. Settle: notes Q8 Rewind (BF3
+// clamps the latency to its stored history) and Q8 3 (MaxAllowedLatency, 0.85 s before the settings apply).
 inline constexpr uint32_t kDefaultMaxRewindTicks = 21;
 inline constexpr uint32_t kHistorySnapshots = 48;
 inline constexpr uint32_t kSentRingEntries = 64;
 inline constexpr uint32_t kShotViewRing = 128;
 inline constexpr uint32_t kPoseCacheEntries = 2048;
 inline constexpr uint32_t kViewSeqWindow = 32;
+// STAND-IN: a shooter's view of a remote soldier extrapolates at most 250 ms. Settle: notes R2-H 3c (BF3 extrapolates
+// a remote soldier's body up to 0.5 s, then holds it at its last state).
 inline constexpr double kMaxViewExtrapolateMs = 250.0;
 
 struct LagCompConfig {
@@ -29,6 +33,8 @@ struct LagCompConfig {
 	bool enabled = true;
 
 	std::array<float, sim::kPoseCount> pose_eye_heights{ 1.6f, 1.0f, 0.3f };
+	// STAND-IN: a rewound target extrapolates at most 250 ms past its newest sample; hand-picked. Settle: notes R2-H 3c
+	// (BF3 extrapolates a remote soldier's body up to 0.5 s, then holds it at its last state).
 	float extrapolate_max_ms = 250.0f;
 	bool pose_cache = true;
 	bool time_provider = true;

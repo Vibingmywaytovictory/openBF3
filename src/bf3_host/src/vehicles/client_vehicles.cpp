@@ -137,6 +137,8 @@ VehicleWreckSight VehicleWrecks::see(const PresentedVehicle &p_vehicle) {
 	return s;
 }
 
+// STAND-IN: a remote vehicle lerps its position, slerps its rotation and extrapolates on its velocities.
+// Settle: notes R-H 3 (the remote vehicle interpolation object, not re-derived there).
 PresentedVehiclePose vehicle_pose_at(const PresentedVehicle &p_vehicle, double p_ticks) {
 	const PresentedVehiclePose now = p_vehicle.pose();
 	if (!std::isfinite(p_ticks)) {

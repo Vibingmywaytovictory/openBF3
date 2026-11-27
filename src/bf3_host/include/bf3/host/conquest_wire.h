@@ -8,6 +8,8 @@
 
 namespace bf3::host {
 
+// STAND-IN: a progress-only change is resent at most every 15 ticks (0.25 s); hand-picked.
+// Settle: a note on how often BF3 replicates capture progress.
 inline constexpr sim::Tick kConquestProgressIntervalTicks = 15;
 
 net::ConquestState conquest_wire_state(const sim::logic::ConquestNatives &p_conquest, sim::Tick p_tick);

@@ -20,6 +20,8 @@ namespace {
 constexpr int32_t kFadeDone = gp::logic_port_id("OnDone");
 constexpr int32_t kOnRoundOver = gp::logic_port_id("OnRoundOver");
 constexpr int32_t kTeamField = gp::logic_port_id("Team");
+// INFERRED: the roles of UIEndOfRound's hashed ports below (start, PreEor, PreEor elapsed, request, answer). Settle: the
+// ports' names.
 constexpr int32_t kEndOfRoundStart = 298914295;
 constexpr int32_t kEndOfRoundPreEor = 1464479596;
 constexpr int32_t kEndOfRoundPreEorElapsed = 1904769966;
@@ -55,10 +57,14 @@ std::string leaf_key(std::string_view p_category, int32_t p_key) {
 }
 }
 
+// STAND-IN: the client logic scope from the mode's name, uigamelogicconquest for Conquest*, else uigamelogictdm.
+// Settle: taking the uigamelogic* scope the mode's client graph holds.
 std::string_view ui_game_logic_scope(std::string_view p_mode) {
 	return p_mode.starts_with("Conquest") ? kUiGameLogicConquest : kUiGameLogicTdm;
 }
 
+// INFERRED: the roles of PreRound's hashed events (waiting, countdown, round started, restarting). Settle: the events'
+// names.
 int32_t ui_preround_event_id(UiPreRoundEvent p_event) {
 	switch (p_event) {
 		case UiPreRoundEvent::Waiting:
@@ -425,6 +431,8 @@ core::Status UiFlowSession::update(const UiGameState &p_state) {
 	}
 	if (p_state.end_of_round && !last_.end_of_round) {
 		enter_scope_input("EndOfRound");
+		// INFERRED: UIEndOfRound's PreEorTime counts from EndOfRound (PreEorTime 12 s and EorTime 48 s fill the server's 60 s
+		// Delay; footage 18.57 agrees). Settle: a note on UIEndOfRound's timers.
 		const sim::Tick at = runtime_->tick() + 1;
 		for (const uint32_t n : end_of_round_nodes_) {
 			if (timers_.size() < kMaxTimers) {
@@ -587,6 +595,8 @@ void UiFlowSession::entity_input(const GraphEntity &p_entity, std::optional<uint
 				graph_owner_[graph] = *p_node;
 			}
 			note("logic " + leaf + "." + input->name);
+			// INFERRED: an input that reaches a State or Dialog takes the graph's place, closing what it showed before (from
+			// weapongraph's one crosshair per WeaponChange and footage 18.57). Settle: a note on UIGraph pushes.
 			push_graph(p_entity, ui_input_settles(*asset, *input));
 			flow_->fire_input(graph, input->name);
 		}
@@ -605,6 +615,8 @@ void UiFlowSession::push_graph(const GraphEntity &p_entity, bool p_take_place) {
 	if (top != entered_.rend() && top->graph == e.graph) {
 		return;
 	}
+	// INFERRED: PopPreviousGraph closes every live graph of its GraphPriority whose asset lacks ProtectScreens (from the
+	// flags, footage 18.57 and the RESUME re-entries). Settle: a note on UIGraph priorities.
 	if (e.pop_previous && p_take_place) {
 		std::vector<std::string> previous;
 		for (auto g = entered_.rbegin(); g != entered_.rend(); ++g) {
@@ -761,6 +773,8 @@ void UiFlowSession::graph_output(std::string_view p_graph, std::string_view p_ou
 	}
 }
 
+// INFERRED: the PC TDM defaults of these hashed UI data keys, read off the graphs' comparisons (the keys' names are not
+// recovered). Settle: the UI components' field names and defaults.
 void ui_flow_tdm_pc_defaults(UiFlowSession &r_session, std::string_view p_mode) {
 	const std::string_view family = p_mode.substr(0, p_mode.find_last_not_of("0123456789") + 1);
 	r_session.set_data("ui/uicomponents/uisettingscomp", -668821714, "win32");

@@ -121,6 +121,8 @@ void RemoteTracks::publish(PresentationFrame &r_frame, uint64_t p_now) {
 		recv_rate = moved / 1.0;
 	}
 	const double snapshot_interval_ms = double(divisor_) * kMsPerTick;
+	// STAND-IN: remote soldiers are drawn two snapshot intervals plus the arrival jitter behind; hand-picked.
+	// Settle: notes R2-H 2c and 2d (BF3's delay is the mean lateness + the mean frame interval + 0.01 s, blended over 5 s).
 	delay_ms_ = std::clamp(2.0 * snapshot_interval_ms + interval_mad_ms_, double(config_.interp_min_ms),
 			double(std::max(config_.interp_min_ms, config_.interp_max_ms)));
 	r_frame.render_ticks_at_publish = local_ticks(p_now) + recv_offset_ - delay_ms_ / kMsPerTick;

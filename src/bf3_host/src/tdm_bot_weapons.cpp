@@ -14,6 +14,8 @@ namespace {
 
 namespace sw = sim::weapons;
 
+// STAND-IN: the fire-mode, single-shot, reload, friendly-line and burst-pause values below, and input()'s tap rates and
+// skill x recoil compensation, are hand-picked. Settle: a playtest of the bots' shooting.
 constexpr uint32_t kModeDelayTicks = 3;
 constexpr uint32_t kModeWaitTicks = 10;
 constexpr float kSingleShotBeyondMetres = 60.0f;

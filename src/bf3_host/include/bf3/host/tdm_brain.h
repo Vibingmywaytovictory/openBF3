@@ -129,9 +129,12 @@ struct TdmBotStats {
 };
 
 struct TdmBotConfig {
+	// STAND-IN: 31 bots fill a 32-player listen game. Settle: the owner's server defaults.
 	uint32_t count = 31;
 	sim::bots::PerceptionParams perception;
 
+	// STAND-IN: every default from here to regen_until_hp is hand-picked, as BF3 has no bots (bot_tuning.cfg repeats
+	// them). Settle: a playtest of the bots against human play.
 	float switch_margin = 0.25f;
 	uint32_t burst_min_rounds = 3, burst_max_rounds = 6;
 
@@ -185,10 +188,13 @@ struct TdmBrainHost {
 	std::shared_ptr<const LevelVehicles> vehicles;
 	std::shared_ptr<const BotLevel> nav;
 	sim::bots::WalkerParams walker;
+	// SOURCE: bf3dump soldier (stand, crouch and prone eye 1.6, 1.0 and 0.3 m), kept until add_tdm_bots reads the motor.
 	float eye_heights[3] = { 1.6f, 1.0f, 0.3f };
 	float soldier_top_speed = 0.0f;
 	uint64_t match_seed = 0;
 	bool rules = false;
+	// STAND-IN: the bots' heat grid centred on the world origin, then on the mean spawn point (add_tdm_bots). Settle: a
+	// playtest of the bots' heat goals.
 	sim::Vec3 heat_origin{ -512.0f, 0.0f, -512.0f };
 };
 core::Result<std::shared_ptr<TdmShared>> make_tdm_shared(const TdmBrainHost &p_host, std::shared_ptr<const TdmBotConfig> p_config);

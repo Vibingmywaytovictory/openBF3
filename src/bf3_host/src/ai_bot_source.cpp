@@ -85,6 +85,8 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		return f().revive != nullptr;
 	}
 
+	// STAND-IN: an ordered bot supports only mates on its way to the mission or near it, a following bot only its
+	// squad mates; openBF3's own filter. Settle: BF2's support plans' target filter.
 	SupportWay support_way() const {
 		SupportWay way;
 		const TdmStrategy *strategy = body.shared->strategy.get();
@@ -124,6 +126,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		sensed.heal_target = support.heal;
 		sensed.supply_target = support.supply;
 		sensed.call_medic = support.call;
+		// WHY: a seated enemy is sensed as his vehicle, BF2's primary object, when a kit weapon scores against it.
 		sensed.vehicle_visible = (!fr.visible || seated) && body.sense_vehicle(fr);
 		sensed.enemy_visible = fr.visible && !(seated && sensed.vehicle_visible);
 		sensed.repair_target = body.sense_repair(fr);
@@ -183,6 +186,8 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 			body.hunt.begin(now);
 		}
 		body.activity = planned;
+		// STAND-IN: the held input stays until the new plan's first run, where decisionMaking in OpenBF2
+		// Code/BF2/AI/AIDLL/AI/AIBot/BotMain.cpp @c47317b resets all controls. Settle: run BF2's reset and compare.
 		intent = body.begin_plan(planned);
 		lost = false;
 		drive_goal.reset();

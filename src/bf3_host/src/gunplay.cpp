@@ -82,6 +82,8 @@ uint64_t derive_match_seed(uint64_t p_server_seed, uint64_t p_level_hash) {
 	return splitmix64(p_server_seed ^ p_level_hash);
 }
 
+// STAND-IN: one capsule layout for every pitch bucket, transitions blended linearly between the stances; used where the
+// pose clips do not build a table. Settle: the clip-derived capsule table for every row.
 core::Result<gp::CapsulePoseTable> standin_capsule_table(const gp::SoldierDef &p_soldier, std::span<const gp::HitCapsule> p_capsules,
 		const sw::SurfaceMaterialTable &p_materials) {
 	core::Result<sw::CapsuleTableData> data = sw::capsule_table_data(p_soldier, p_capsules, p_materials);
@@ -735,6 +737,8 @@ void Gunplay::suppress(uint32_t p_tick, std::span<const sim::SoldierState> p_sta
 				continue;
 			}
 			const sim::SoldierState &st = p_states[v];
+			// SOURCE: notes Q9 A1 to A3 (the step's closest point to the box centre, not behind the step, inside the radius).
+			// INFERRED: the bounding box centre is half the pose's height above the feet. Settle: the soldier's box data.
 			const sim::Vec3 centre{ st.position[0],
 				st.position[1] + 0.5f * m.shared->motor.poses[size_t(st.pose)].height, st.position[2] };
 			const std::optional<sw::NearMiss> miss =
@@ -1011,6 +1015,8 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 		} else {
 			sim::SoldierState &st = p_states[victim];
 			sw::Mechanics mech = m.table->mechanics;
+			// INFERRED: a soldier's first shot ends his spawn protection, as a fire entry in the HealthModule's
+			// AbortSpawnImmortalityInputs would (notes R2-A5 A2 give the state). Settle: the install's abort list.
 			if (m.slots[victim].fired) {
 				mech.spawn_protection_blocks = false;
 			}
@@ -1069,6 +1075,8 @@ void Gunplay::apply_rules(uint32_t p_tick, std::span<sim::SoldierState> p_states
 					record.frame = core::gameplay::death_frame_of_yaw(sim::yaw_radians(st.yaw));
 					record.velocity = st.velocity;
 					record.has_hit = true;
+					// INFERRED: the R5-DT1 damage direction is the bullet's impact velocity or the blast centre to the
+					// victim, and only HitZone Head is bone type Head. Settle: a note on the record's direction and bone.
 					record.damage_direction = damage_direction;
 					record.bone_type = uint32_t(e.zone == sw::HitZone::Head ? core::gameplay::DeathBone::Head
 																			: core::gameplay::DeathBone::Body);

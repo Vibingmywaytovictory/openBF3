@@ -15,6 +15,8 @@ namespace bf3::host::tdm_bot {
 
 namespace {
 
+// STAND-IN: the goal, heat, off-mesh, wedge, strafe and look-around timings and distances below, and the probe boxes in
+// this file's functions, are hand-picked. Settle: a playtest of the bots' movement.
 constexpr uint32_t kGoalResetTicks = 90;
 constexpr uint32_t kRoamGoalTicks = 600;
 constexpr float kHeatMin = 0.2f;

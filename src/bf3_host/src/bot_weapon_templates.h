@@ -29,6 +29,8 @@ struct LevelVehicleKind;
 
 inline constexpr const char *kAiWeaponsCacheKind = "ai-weapons";
 inline constexpr uint32_t kAiWeaponsConverterVersion = 2;
+// STAND-IN: a weaponTemplate strength is the targets of a class the weapon destroys per minute, derived from BF3's
+// weapon data as BF3 ships no templates. Settle: compare with BF2's shipped templates' scale.
 inline constexpr float kStrengthSeconds = 60.0f;
 
 using WeaponTemplates = ai::WeaponTemplateMap;

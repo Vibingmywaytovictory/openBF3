@@ -22,6 +22,8 @@ core::Result<std::shared_ptr<const sw::WeaponTable>> make_vehicle_weapon_table(c
 	auto armed = std::make_shared<sw::WeaponTable>(**table);
 	for (size_t i = 0; i < armed->defs.size() && i < p_level.weapons.size(); ++i) {
 		const core::gameplay::FireFunction &fire = p_level.weapons[i].fire;
+		// INFERRED: a negative NumberOfMagazines with a magazine is an endless reserve that still reloads. Settle: a note
+		// on FireFunction's magazine count.
 		if (fire.number_of_magazines < 0 && fire.magazine_capacity > 0) {
 			armed->defs[i].unlimited_ammo = false;
 			armed->defs[i].infinite_reserve = true;
@@ -105,9 +107,12 @@ void VehicleGunnery::fire(sim::Tick p_tick, size_t p_vehicle, const LevelVehicle
 		const uint16_t def = p_kind.weapon_defs[w];
 		const size_t seat = size_t(weapon.seat);
 		const uint8_t occupant = seat < p_occupants.size() ? p_occupants[seat] : uint8_t(0xFF);
+		// INFERRED: the mount cools before its fire logic runs, and an overheated mount gets no fire. Settle: a note on
+		// the vehicle weapon's overheat order.
 		if (def < heat_rules_.size()) {
 			sim::vehicles::overheat_tick(mount.heat, heat_rules_[def], sim::kTickSeconds);
 		}
+		// STAND-IN: only a seat's stance-0 weapons fire, all on its fire button. Settle: the seat's weapon switching data.
 		if (def == kNoVehicleWeapon || occupant == 0xFF || seat >= p_commands.size() ||
 				!sim::vehicles::weapon_in_stance(weapon, 0)) {
 			mount.occupant = 0xFF;
@@ -164,6 +169,8 @@ void VehicleGunnery::step(sim::Tick p_tick, const sim::CollisionWorld &p_world, 
 			vehicle_damage_.push_back(e);
 			continue;
 		}
+		// STAND-IN: a soldier hit by a vehicle weapon carries no weapon def, so its kill names none. Settle: vehicle
+		// weapon defs in the soldiers' damage and kill events.
 		e.def = sw::kNoWeapon;
 		r_damage.push_back(e);
 		++stats_.damage;

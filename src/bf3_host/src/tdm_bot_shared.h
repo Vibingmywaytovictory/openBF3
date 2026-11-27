@@ -24,6 +24,7 @@ class TdmStrategy;
 
 namespace tdm_bot {
 
+// STAND-IN: the bots' heat map is 64 x 64 cells of heat_cell_m. Settle: a playtest of the bots' heat goals.
 inline constexpr int kHeatCells = 64;
 
 struct RecentShot {
@@ -76,6 +77,7 @@ struct TdmShared {
 	}
 	float eye_of(sim::Pose p_pose) const {
 		const size_t i = size_t(p_pose) < 3 ? size_t(p_pose) : 0;
+		// SOURCE: bf3dump soldier (stand eye 1.6 m) as the fallback.
 		return host.eye_heights[i] > 0.0f ? host.eye_heights[i] : 1.6f;
 	}
 	sim::Vec3 eye_point(const sim::SoldierState &p_state) const { return tdm_bot::add(p_state.position, 0.0f, eye_of(p_state.pose), 0.0f); }

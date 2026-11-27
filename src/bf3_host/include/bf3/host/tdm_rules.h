@@ -38,15 +38,24 @@ struct ImmunityAbortEntry {
 };
 struct TdmTuning {
 
+	// STAND-IN: a dead bot waits for a revive while an assault mate is within 20 m of its corpse, for 8 s. Settle: a
+	// playtest of the bots' revives.
 	float revive_wait_radius_m = 20.0f;
 	float revive_wait_s = 8.0f;
 
+	// SOURCE: notes M-OT2 5 (a revive takes the kill back from the killer team's counter).
 	bool revive_takes_kill = true;
+	// SOURCE: bf3dump weapon weapons/gadgets/defibrillator/defibrillator (instant-hit shot, 1.75 m/s for 1 s: 1.75 m).
+	// STAND-IN: 1.8 m is that range rounded up. Settle: reading the defibrillator's shot speed x lifetime.
 	float defib_range_m = 1.8f;
+	// STAND-IN: the defib shot's target spheres (corpse centre 0.3 m up, radius 0.6 m; a living soldier's 0.6 m).
+	// Settle: a note on the defibrillator's target test.
 	float corpse_up_m = 0.3f;
 	float corpse_radius_m = 0.6f;
 	float living_radius_m = 0.6f;
 
+	// SOURCE: bf3dump scoring (ID_SCORE_KILL 100, HEADSHOT 10, REVIVE 100, SPAWN_SQUAD 10, REVIVE_SQUAD 110, SQUAD_WIPE
+	// 10), this and the five below.
 	int32_t score_kill = 100;
 	int32_t score_headshot = 10;
 	int32_t score_revive = 100;
@@ -54,18 +63,28 @@ struct TdmTuning {
 	int32_t score_revive_squad = 110;
 	int32_t score_squad_wipe = 10;
 
+	// STAND-IN: a bot's kit draw weights (assault, engineer, support, recon). Settle: a playtest of the bots' kit mix.
 	std::array<uint32_t, 4> bot_kit_weights{ 40, 20, 20, 20 };
 
+	// STAND-IN: the nearest-enemy distance beyond which spawn points rank equal. Settle: a note on the spawn point choice.
 	float spawn_safe_distance_m = 40.0f;
+	// STAND-IN: the area of the friendly-death spawn block. Settle: a note on SpawnProtectionFriendlyKilledCount's area.
 	float friendly_block_radius_m = 30.0f;
+	// SOURCE: bf3dump spawns MP_Subway TeamDeathMatch0 (SpawnProtectionFriendlyKilledCount 3, ...KilledTime 30 s), this
+	// and the line below.
 	int32_t friendly_block_count = 3;
 	float friendly_block_s = 30.0f;
+	// STAND-IN: TryToSpawnOutOfSight's ray budget and the chest height the rays aim at. Settle: a note on
+	// TryToSpawnOutOfSight.
 	int32_t spawn_los_rays = 16;
 	float spawn_chest_height_m = 1.3f;
 
+	// SOURCE: notes M-OT2 retail values (both TDM counters' KillWeights all 0.0, so a teamkill adds 0).
 	float team_kill_weight = 0.0f;
 	bool rotate_teams = true;
 
+	// INFERRED: AbortSpawnImmortalityInputs 0 Throttle, 1 Strafe and 7 Fire end the spawn immunity; its other values
+	// (2, 11, 12, 30, 31) end nothing. Settle: the EBX type info of EntryInputActionEnum.
 	std::vector<ImmunityAbortEntry> immunity_abort_map{ { 0, 0, true }, { 1, 0, true }, { 7, sim::buttons::kFire, false } };
 	bool measured = false;
 };
@@ -112,6 +131,7 @@ enum class SpawnRefusal : uint8_t {
 inline constexpr size_t kSpawnRefusalCount = 10;
 
 std::optional<net::SpawnAnswerKind> spawn_answer_of(SpawnRefusal p_refusal);
+// STAND-IN: the nav search box around a squad mate for a squad spawn's position. Settle: a note on the squad spawn point.
 inline constexpr sim::Vec3 kSquadSpawnNavExtents{ 1.0f, 2.0f, 1.0f };
 
 inline constexpr uint8_t kKeepKit = 0xFF;

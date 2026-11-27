@@ -12,6 +12,8 @@ namespace {
 
 namespace sw = sim::weapons;
 
+// STAND-IN: the revive, grenade, retreat and hunt timings and distances below, and the literals in this file's
+// functions, are hand-picked. Settle: a playtest of the bots against human play.
 constexpr float kRunSpeed = 4.5f;
 constexpr float kPathFactor = 1.3f;
 constexpr uint32_t kReviveTimeoutTicks = 900;

@@ -21,7 +21,10 @@ namespace {
 constexpr size_t kMaxAiSlots = 64;
 constexpr float kProbeAbove = 200.0f;
 constexpr float kProbeBelow = 400.0f;
+// STAND-IN: a perceived enemy's Information faces yaw 0, as the perception keeps no orientation.
+// Settle: keep the seen yaw in the perception.
 constexpr uint16_t kUnperceivedYaw = 0;
+// STAND-IN: hand-picked nav search box (m) for a position's polygon. Settle: BF2's polygon lookup tolerance.
 const sim::Vec3 kPolygonExtents{ 2.0f, 4.0f, 2.0f };
 
 }
@@ -142,6 +145,7 @@ public:
 	bool is_alive() const override { return alive_; }
 	bool is_man_down() const override { return down_; }
 	int side() const override { return side_; }
+	// STAND-IN: every player is in spawn group 0, the mode's default spawn. Settle: BF3's squad spawn groups.
 	int spawn_group() const override { return 0; }
 	int spawn_kit() const override { return kit_; }
 	ai::AiObject *soldier() const override { return alive_ ? soldier_ : nullptr; }
@@ -363,6 +367,8 @@ void HostAiWorld::step(const ServerView &p_view, std::span<const sim::bots::Hear
 		own.place(states[s].position, states[s].yaw, states[s].pose);
 		m.players[s].set(team, m.alive[s] != 0, down[s] != 0, p_view.kit(slot));
 		const bool seated = p_view.server_vehicles() != nullptr && p_view.server_vehicles()->seated(slot);
+		// INFERRED: a seated player's current vehicle is a per-slot seat object carrying his soldier's Information, as
+		// host vehicles carry no AI unit. Settle: give each vehicle its own Information.
 		m.seats[s].set_side(team);
 		m.seats[s].place(states[s].position, states[s].yaw, states[s].pose);
 		m.players[s].set_vehicle(seated ? &m.seats[s] : nullptr);
@@ -546,6 +552,8 @@ ai::Vec2 HostAiWorld::world_max() const {
 	return { hi.x, hi.z };
 }
 
+// STAND-IN: inside the combat area means on the bots' main nav island; the CombatAreaTrigger volumes are not tested.
+// Settle: test the mode's combat-area volumes.
 bool HostAiWorld::inside_combat_area(const ai::Vec3 &p_position) const {
 	uint32_t poly = 0;
 	uint32_t island = 0;
@@ -644,6 +652,8 @@ int HostAiWorld::number_of_control_points(int p_side) const {
 	return count;
 }
 
+// INFERRED: the count includes squad 0, so the 32 squads give 33, where OpenBF2
+// Code/BF2/AI/AIInterface/BFKnowledge/BFGame.cpp @c47317b gives 10. Settle: the squad port's index range.
 int HostAiWorld::max_number_of_squads() const {
 	return int(net::kMaxSquads) + 1;
 }
@@ -709,6 +719,8 @@ bool lands_in_created(const SquadTable &p_squads, uint8_t p_slot, uint8_t p_team
 
 }
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIInterface/BFKnowledge/BFSquad.cpp @c47317b (joinSquad and isSquadLeader).
+// STAND-IN: a join creates a squad only as the side's lowest empty one. Settle: BF3's squad create rule.
 bool RulesSquadService::join_squad(int p_squad, const ai::SquadPlayer &p_player) {
 	uint8_t slot = 0;
 	if (!squad_slot(rules_, p_squad, p_player, slot)) {
@@ -730,6 +742,7 @@ bool RulesSquadService::join_squad(int p_squad, const ai::SquadPlayer &p_player)
 	return rules_.request_squad(slot, request) == SquadRefusal::None && squads.squad_of(slot) == squad;
 }
 
+// STAND-IN: the leave is openBF3's own, over the server's squad table. Settle: BF3's squad leave rule.
 bool RulesSquadService::exit_squad(int p_squad, const ai::SquadPlayer &p_player) {
 	uint8_t slot = 0;
 	if (!squad_slot(rules_, p_squad, p_player, slot) || rules_.squads().squad_of(slot) != uint8_t(p_squad)) {
@@ -746,6 +759,7 @@ bool RulesSquadService::is_squad_leader(int p_squad, const ai::SquadPlayer &p_pl
 			rules_.squads().leader(slot);
 }
 
+// WHY: BF3 multiplayer has no commander to ask for an order.
 void RulesSquadService::request_new_commander_order(int p_squad, const ai::SquadPlayer &p_player) {
 	(void)p_squad;
 	(void)p_player;
@@ -978,6 +992,7 @@ bool HostAiBots::player_is_ai(int p_player_id) const {
 	return is_valid_player_id(p_player_id) && impl_->view.bot(uint8_t(p_player_id));
 }
 
+// WHY: the host admits, damages, respawns, names, spots, sides and scores its soldiers, so these game calls do nothing.
 bool HostAiBots::add_bot(int &, int &, std::string &) {
 	return false;
 }
@@ -1016,6 +1031,7 @@ uint32_t HostAiBots::force_information(ai::AiObject &r_object, int p_side, bool)
 	return r_object.information(p_side);
 }
 
+// STAND-IN: a player's camera is his soldier's feet transform facing his yaw. Settle: the soldier's eye and pitch.
 bool HostAiBots::player_camera(int p_player_id, ai::Transform &r_camera) const {
 	const ai::AiObject *const soldier = player_vehicle(p_player_id);
 	if (soldier == nullptr) {

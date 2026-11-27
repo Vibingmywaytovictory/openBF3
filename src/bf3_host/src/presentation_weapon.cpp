@@ -22,6 +22,7 @@ const net::WeaponTimersWire *active_weapon_timers(const net::WeaponsWire &p_wire
 	return p_wire.timers[0].slot == p_wire.active ? &p_wire.timers[0] : nullptr;
 }
 
+// SOURCE: notes Q2 (Dmin kept per update for the crosshair) and R-A0 1 (the sway updates once a 30 Hz tick).
 float held_dispersion(float p_prev_deg, float p_curr_deg, double p_fraction) {
 	return p_fraction < 1.0 ? p_prev_deg : p_curr_deg;
 }
@@ -65,6 +66,8 @@ PresentedWeapon present_weapon(const net::WeaponsWire &p_prev, const net::Weapon
 	const sw::RecoilOffset curr = sw::camera_recoil(def, b->sway, p_sway.zoom);
 	if (same) {
 		const sw::RecoilOffset prev = sw::camera_recoil(def, a->sway, p_sway.zoom);
+		// STAND-IN: the camera recoil is blended between the two ticks while D is held. Settle: a note on how the view
+		// applies the recoil between sway updates.
 		p.recoil.pitch = prev.pitch + (curr.pitch - prev.pitch) * t;
 		p.recoil.yaw = prev.yaw + (curr.yaw - prev.yaw) * t;
 		p.spread_deg = held_dispersion(a->sway.dispersion, b->sway.dispersion, f);

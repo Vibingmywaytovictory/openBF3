@@ -16,6 +16,8 @@
 namespace bf3::host {
 
 inline constexpr size_t kMaxPresentedVehicles = 64;
+// STAND-IN: a vehicle pose is extrapolated past its newest state for at most 6 ticks. Settle: a note on BF3's vehicle
+// ghost extrapolation.
 inline constexpr double kVehicleExtrapolateTicks = 6.0;
 inline constexpr size_t kVehicleWindow = 3;
 inline constexpr size_t kVehicleHistory = 8;

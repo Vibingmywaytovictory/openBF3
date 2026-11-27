@@ -135,6 +135,8 @@ void ServerVehicles::spawn_due(sim::Tick p_tick, const sim::logic::RoundNatives 
 			v.counting = false;
 			continue;
 		}
+		// INFERRED: an AutoSpawn-false spawner spawns only on its Spawn event, at once. Settle: a note on the vehicle
+		// spawner's Spawn event.
 		if (!s.auto_spawn) {
 			if (!requested) {
 				continue;
@@ -142,6 +144,8 @@ void ServerVehicles::spawn_due(sim::Tick p_tick, const sim::logic::RoundNatives 
 			v.counting = true;
 			v.due = p_tick;
 		}
+		// INFERRED: the respawn countdown starts once the wreck explodes and leaves (notes R3-G3 K: the start is not
+		// traced). Settle: a note on when the vehicle respawn countdown starts.
 		if (!v.counting) {
 			v.counting = true;
 			v.due = p_tick +
@@ -228,6 +232,8 @@ std::optional<sim::Vec3> ServerVehicles::use(size_t p_slot, const sim::Command &
 		exit(*seat);
 		return out;
 	}
+	// STAND-IN: Use enters the nearest live vehicle by centre of mass within its entry radius, in its first free seat.
+	// Settle: a note on the vehicle entry choice.
 	float best = INFINITY;
 	std::optional<VehicleSeat> chosen;
 	for (size_t i = 0; i < vehicles_.size(); ++i) {
@@ -406,6 +412,9 @@ void ServerVehicles::refresh_obstacles() {
 	}
 }
 
+// SOURCE: notes R3-G3 I 1 (a destroyed vehicle kills every occupant at once).
+// STAND-IN: no throw of 0.3 x the Explosion's BlastImpulse and no exit for a remote-control seat (both in I 1).
+// Settle: building the note's throw and remote-seat rule.
 void ServerVehicles::kill_crew(size_t p_vehicle, uint8_t p_attacker, uint16_t p_def, sim::weapons::SimTime p_time,
 		std::vector<sim::weapons::DamageEvent> &r_damage) {
 	for (const uint8_t o : vehicles_[p_vehicle].occupants) {
@@ -429,6 +438,8 @@ void ServerVehicles::explode(size_t p_vehicle, sim::Tick p_tick) {
 	ServerVehicle &v = vehicles_[p_vehicle];
 	const uint16_t kind = level_->spawners[p_vehicle].kind;
 	if (kind < kind_explosion_.size() && kind_explosion_[kind]) {
+		// INFERRED: the wreck's explosion is credited to the vehicle's last attacker (the notes name no instigator).
+		// Settle: a note on who a vehicle's explosion is credited to.
 		wrecks_.push_back(WreckBlast{ p_vehicle, v.last_attacker, p_tick, hull_centre(p_vehicle) });
 	}
 	if (level_->spawners[p_vehicle].logic_node != core::gameplay::kNoLogicIndex) {
@@ -470,6 +481,8 @@ void ServerVehicles::step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_
 		in.abandon_applies = spawner.apply_damage_to_abandoned;
 		in.time_until_abandoned = spawner.time_until_abandoned;
 		in.time_until_abandoned_is_destroyed = spawner.time_until_abandoned_is_destroyed;
+		// SOURCE: notes R3-G3 H (abandoned: no occupant, no soldier within KeepAliveRadius, farther than RespawnRange).
+		// INFERRED: RespawnRange always applies and a soldier of any team counts. Settle: the note's unidentified flags.
 		const sim::Vec3 &home = spawner.placement.position;
 		const float hx = s.body.origin[0] - home[0], hy = s.body.origin[1] - home[1], hz = s.body.origin[2] - home[2];
 		bool kept = hx * hx + hy * hy + hz * hz <= spawner.respawn_range * spawner.respawn_range ||
@@ -504,6 +517,8 @@ void ServerVehicles::step_health(sim::Tick p_tick, std::span<const sim::Vec3> p_
 		}
 		if ((o.events & sim::vehicles::vehicle_events::kDestroyed) != 0) {
 			++stats_.destroyed;
+			// SOURCE: notes R3-G3 G (upside-down damage is credited to the driver).
+			// INFERRED: a water death is the driver's too (F names no credit). Settle: a note on water damage credit.
 			const bool rolled =
 					(o.events & sim::vehicles::vehicle_events::kUpsideDownHit) != 0 || o.water_damage > 0.0f;
 			kill_crew(i, rolled ? v.occupants[0] : v.last_attacker, rolled ? sim::weapons::kNoWeapon : v.last_def,
@@ -548,10 +563,13 @@ void ServerVehicles::strike(const VehicleStrike &p_strike, Gunplay &r_gunplay) {
 	parties.attacker_is_player = e.attacker_slot < net::kMaxSlots;
 	parties.attacker_team = parties.attacker_is_player ? r_gunplay.team(attacker) : uint8_t(0);
 	parties.attacker_is_occupant = std::find(v.occupants.begin(), v.occupants.end(), attacker) != v.occupants.end();
+	// INFERRED: a bot occupant counts as the human occupant notes R-G3 4 name. Settle: a note on how BF3 tells a human
+	// occupant.
 	parties.human_occupant =
 			std::any_of(v.occupants.begin(), v.occupants.end(), [](uint8_t o) { return o != net::kNoVehicleOccupant; });
 	parties.friendly_fire = r_gunplay.config().friendly_fire;
 	hit.modifier = sim::vehicles::damage_modifier(kind.damage.armor_multiplier, parties);
+	// SOURCE: notes R3-G3 E (a repair tool hit on a vehicle of team 0 or the shooter's is -StartDamage, no modifiers).
 	const float repair = p_strike.soldier_weapon ? soldier_source_.repair(e.def) : 0.0f;
 	if (repair > 0.0f && parties.attacker_is_player && (v.team == 0 || v.team == parties.attacker_team)) {
 		hit.damage = -repair;
@@ -653,6 +671,8 @@ void ServerVehicles::take_hits(Gunplay &r_gunplay, std::vector<sim::weapons::Dam
 		strike(s, r_gunplay);
 	}
 	const bool friendly_fire = r_gunplay.config().friendly_fire;
+	// WHY: with friendly fire off a teammate's credit would drop the crew kill as team damage, so each occupant is its
+	// own killer instead.
 	for (sim::weapons::DamageEvent &e : crew_kills_) {
 		const uint8_t attacker = uint8_t(std::min<uint32_t>(e.attacker_slot, 255u));
 		const uint8_t team = r_gunplay.team(attacker);
@@ -693,6 +713,8 @@ void ServerVehicles::push(const sim::weapons::ProjectileStepOutput &p_out, const
 			if (core::vec::length(core::vec::sub(b.centre, d.position)) > x.gather_radius()) {
 				continue;
 			}
+			// INFERRED: R-G4 2's body reference point is the hull-box centre (the note does not name it). Settle: a note
+			// on the impulse reference point.
 			const sim::Vec3 impulse = sim::weapons::explosion_impulse(x, d.position, b.centre, b);
 			if (world_->add_impulse(sim::VehicleSlot(i), impulse).ok()) {
 				++stats_.pushes;
@@ -872,6 +894,8 @@ sim::VehicleCommand disabled_command(
 		return std::lround(core::gameplay::apply_input_modifiers(p_modifiers, p_action, p_axis / p_full) * p_full);
 	};
 	sim::VehicleCommand c = p_command;
+	// INFERRED: EIAThrottle scales the forward pedal, EIABrake the back pedal and the brake, EIAYaw the steer.
+	// Settle: a note on how the disabled input modifiers reach the vehicle's pedals.
 	const float throttle = float(std::max<int>(p_command.throttle, -127));
 	c.throttle =
 			int8_t(throttle >= 0.0f ? scaled("EIAThrottle", throttle, 127.0f) : -scaled("EIABrake", -throttle, 127.0f));
@@ -880,6 +904,7 @@ sim::VehicleCommand disabled_command(
 	return c;
 }
 
+// SOURCE: notes R3-G3 C (burning runs while disabled with DecayRate > 0, after DecayDelay).
 bool vehicle_burning(const sim::vehicles::VehicleDamageRule &p_rule, const sim::vehicles::VehicleHealth &p_health) {
 	return p_health.condition == sim::vehicles::VehicleCondition::Disabled && p_rule.decay_rate > 0.0f &&
 			p_health.decay_timer >= p_rule.decay_delay;

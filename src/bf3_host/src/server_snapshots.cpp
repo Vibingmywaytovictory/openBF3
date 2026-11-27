@@ -112,6 +112,8 @@ void SnapshotWriter::send(sim::Tick p_tick, uint64_t p_now_ns, GameServerTickTim
 
 		size_t shot_cut = 0;
 		std::vector<uint8_t> wanted = shot_events(i, snap, net::kMaxDatagramBytes, shot_cut);
+		// STAND-IN: shot events take at most 2/5 of a client's snapshot budget. Settle: a note on how BF3 splits its
+		// per-client budget between ghosts and events.
 		const int64_t reserve = std::min(wire_bytes(wanted.size()), budget * 2 / 5);
 		const int64_t snapshot_room = std::max<int64_t>(budget - reserve - command_header(), 0);
 

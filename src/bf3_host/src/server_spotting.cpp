@@ -27,6 +27,9 @@ sim::commo::Supplies soldier_supplies(const Gunplay &p_gunplay, uint8_t p_slot) 
 	return supplies_of(defs, p_gunplay.level().gadgets);
 }
 
+// SOURCE: notes R-E2 B (low ammo: a counted weapon's 100 x (ammo in weapon + reserve) / (capacity x count) is below
+// OrderNeedAmmoPercentage).
+// INFERRED: the counted weapons are slots 0 and 1, unlimited-ammo weapons skipped. Settle: a note naming the counted ones.
 bool soldier_low_ammo(const Gunplay &p_gunplay, uint8_t p_slot, float p_need_percent) {
 	const sim::weapons::SoldierWeaponsState &w = p_gunplay.weapons(p_slot);
 	const sim::weapons::WeaponTable &table = p_gunplay.table();
@@ -177,6 +180,8 @@ void ServerSpotting::step_bots(double p_clock, float p_dt, std::span<const BotEy
 				break;
 			}
 		}
+		// STAND-IN: a bot presses spot whenever its ray reaches an un-Active enemy in its cone and the press would be
+		// allowed. Settle: a playtest of the bots' spotting.
 		in.pressed = sees && s->ready(in);
 		const SpotterOutput out = s->update(in);
 		if (out.spot) {

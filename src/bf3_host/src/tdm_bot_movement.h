@@ -13,6 +13,7 @@
 
 namespace bf3::host::tdm_bot {
 
+// STAND-IN: the bots' arrive and goal-move distances, this and the two below. Settle: a playtest of the bots' movement.
 inline constexpr float kHuntArriveMetres = 3.0f;
 inline constexpr float kGoalMoveMetres = 8.0f;
 inline constexpr float kSquadGoalMoveMetres = 2.0f;

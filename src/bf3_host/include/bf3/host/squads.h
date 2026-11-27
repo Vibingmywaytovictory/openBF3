@@ -12,6 +12,7 @@
 namespace bf3::host {
 
 inline constexpr uint8_t kSquadTeams = 2;
+// STAND-IN: the squad size when the mode's GameModeSize gives none. Settle: the size data of such a mode.
 inline constexpr uint8_t kDefaultSquadSize = 4;
 inline constexpr int kNoSquadMate = -1;
 

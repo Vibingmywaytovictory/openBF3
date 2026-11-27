@@ -28,6 +28,8 @@ float round_seconds(const Frame &p_frame) {
 	return float(double(std::min<sim::Tick>(end - ms.round_start_tick, kMaxAheadTicks)) / double(sim::kSimHz));
 }
 
+// INFERRED: the end-of-round stages and their bounds from the EorTimeline delays, counted from the unspawn tick.
+// Settle: the stage times on retail footage of a round's end.
 void feed_eor_stage(const Frame &p_frame, ui::HudEndOfRound &r_eor) {
 	r_eor.stage = ui::HudEorStage::None;
 	r_eor.stage_seconds = 0.0f;
@@ -65,6 +67,8 @@ void feed_eor_stats(Frame &r_frame, ui::HudEndOfRound &r_eor) {
 	r_eor.local_player_in_winning_team = r_eor.local_won;
 	r_eor.time_until_level_change = r_eor.seconds_to_next_round;
 	r_eor.total_score = have_own ? model.players[own].score : 0;
+	// STAND-IN: the combat score is the round's whole score and the play time 0, as openBF3 keeps no persistence.
+	// Settle: a score split and a play-time count.
 	r_eor.combat_score = r_eor.total_score;
 	r_eor.kills = int32_t(st.own_kills);
 	r_eor.deaths = int32_t(st.own_deaths);
@@ -80,6 +84,7 @@ void feed_eor_stats(Frame &r_frame, ui::HudEndOfRound &r_eor) {
 			r_eor.best_weapon_info.image_path = item->texture_path;
 		}
 	}
+	// INFERRED: the dog tags taken are the round's knife kills. Settle: retail footage of an end-of-round panel.
 	int32_t dogtags = 0;
 	for (size_t d = 0; d < st.own_weapon_kills.size(); ++d) {
 		const HudStaticRow *row = r_frame.statics.row(uint16_t(d));
@@ -89,6 +94,8 @@ void feed_eor_stats(Frame &r_frame, ui::HudEndOfRound &r_eor) {
 	r_eor.round_duration = round_seconds(r_frame);
 	r_eor.total_playtime = 0.0f;
 	r_eor.kills_per_minute = round_stats_per_minute(double(st.own_kills), r_eor.round_duration);
+	// INFERRED: with no play time kept, SPM is the score over one minute, as footage 18.52's STATS page reads.
+	// Settle: the rule behind BF3's SPM with stats persistence.
 	r_eor.score_per_minute =
 			round_stats_per_minute(double(r_eor.total_score), std::max(60.0, double(r_eor.total_playtime)));
 	r_eor.longest_streak = int32_t(st.longest_streak);

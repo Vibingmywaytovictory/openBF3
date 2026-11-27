@@ -13,6 +13,8 @@ namespace gp = core::gameplay;
 
 namespace {
 
+// INFERRED: the Explosives specialization's weapon classes, read from its description text ID_P_SDESC_Expl. Settle: data
+// naming the classes the specialization reaches.
 bool explosive_class(std::string_view p_class) {
 	return p_class == "wcC4" || p_class == "wcATMine" || p_class == "wcAt";
 }

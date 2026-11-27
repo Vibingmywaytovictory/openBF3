@@ -20,6 +20,8 @@ namespace bf3::host {
 sim::VehiclePlacement vehicle_spawn_placement(const core::level::LevelTransform &p_transform, float p_lift) {
 	sim::VehiclePlacement p;
 	p.position = { p_transform.trans[0], p_transform.trans[1] + p_lift, p_transform.trans[2] };
+	// STAND-IN: a vehicle spawns upright at the spawner's heading; its pitch and roll are dropped.
+	// Settle: spawn at the spawner's full rotation once the hull settles from it.
 	const double heading = std::atan2(double(p_transform.forward[0]), double(p_transform.forward[2]));
 	p.rotation = { 0.0f, float(std::sin(heading / 2.0)), 0.0f, float(std::cos(heading / 2.0)) };
 	return p;
@@ -29,6 +31,8 @@ bool land_jeep(const sim::VehicleModel &p_model) {
 	return p_model.wheel_count == 4;
 }
 
+// INFERRED: a leaving soldier tries the exit points nearest his seat first, as the notes give no exit rule.
+// Settle: a note on BF3's exit point choice.
 std::vector<core::Vec3> vehicle_exit_order(const LevelVehicleKind &p_kind, uint8_t p_seat) {
 	std::vector<core::Vec3> order;
 	if (p_seat >= p_kind.seat_defs.size()) {
@@ -211,6 +215,8 @@ core::Result<std::shared_ptr<const LevelVehicles>> load_level_vehicles(
 			k.hud = def->hud;
 			k.weapons = def->weapons;
 			k.name_sid = def->name_sid;
+			// INFERRED: a vehicle can be entered within the largest of its seats' EntryRadius from its centre.
+			// Settle: a note on the use key's entry test.
 			for (const core::gameplay::VehicleSeatDef &seat : def->seats) {
 				k.entry_radius = std::max(k.entry_radius, std::isfinite(seat.entry_radius) ? seat.entry_radius : 0.0f);
 			}

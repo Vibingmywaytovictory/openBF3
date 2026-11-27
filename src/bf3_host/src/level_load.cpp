@@ -282,6 +282,8 @@ core::Result<std::shared_ptr<const SharedLevel>> load_shared_level(const LevelDa
 		return core::error_at("load_shared_level: EOR camera", eor_camera.error());
 	}
 	shared->eor_camera = *eor_camera;
+	// STAND-IN: one SpawnProtectionRadius for the level, the first enabled spawner's (10 m where none gives one).
+	// Settle: each spawner's own radius, as notes M-CQ3 6 leave the protection rule open.
 	for (const core::level::CharacterSpawnerDef &s : spawns->spawners) {
 		if (s.enabled && std::isfinite(s.protection_radius) && s.protection_radius > 0.0f) {
 			shared->spawn_protection_radius = s.protection_radius;
@@ -460,6 +462,8 @@ uint8_t ebx_team(const core::EbxInstance &p_entity, std::string_view p_field) {
 	return i && (*i == 1 || *i == 2) ? uint8_t(*i) : 0;
 }
 
+// STAND-IN: every value_or fallback below is untraced and stands only where the entity lacks the field.
+// Settle: the field values the install's mode entities hold (bf3dump).
 void read_native_params(const gp::LogicWorld &p_world, const gp::LogicGraph &p_graph, sim::logic::RoundNativeParams &r_params) {
 	using T = gp::LogicTypeId;
 	bool pre = false, human = false, auto_team = false, restriction = false;
@@ -531,6 +535,8 @@ void read_native_params(const gp::LogicWorld &p_world, const gp::LogicGraph &p_g
 	}
 }
 
+// INFERRED: AbortSpawnImmortalityInputs map to the motor's buttons by their EIA names, or by tdm_tuning.cfg's
+// immunity_abort_map where the type info has none. Settle: the EntryInputActionEnum values in the install.
 void set_immunity_abort(const core::level::LoadedLevel &p_level, const TdmTuning &p_tuning, SharedLevel &r_level) {
 	core::Result<gp::SoldierDef> soldier = gp::read_soldier_def(p_level.db());
 	if (!soldier) {

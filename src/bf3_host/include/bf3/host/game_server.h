@@ -81,6 +81,8 @@ struct CarriedSeat {
 
 struct GameServerConfig {
 	std::shared_ptr<const SharedLevel> level;
+	// STAND-IN: a snapshot every 2nd 60 Hz tick (30 Hz). Settle: notes R2-H 1e (by default the lower of
+	// ServerSettings.OutgoingFrequency 15 Hz and ClientSettings.IncomingFrequency 10 Hz).
 	uint8_t snapshot_divisor = 2;
 	uint32_t snapshot_budget_bytes = uint32_t(net::kMaxDatagramBytes);
 	bool ghost_scope = true;

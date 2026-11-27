@@ -115,10 +115,14 @@ ai::WeaponType weapon_type_of(const GunplayLevel &p_gunplay, uint16_t p_defib_de
 	return ai::WeaponType::Default;
 }
 
+// INFERRED: a unit's basic strength is its full health over a soldier's, as BF3 data has no basicTemp.
+// Settle: BF2's basicTemp values against its vehicles' health.
 float vehicle_basic_strength(const LevelVehicleKind &p_kind, float p_soldier_health) {
 	return p_soldier_health > 0.0f ? sim::vehicles::full_vehicle_health(p_kind.damage) / p_soldier_health : 0.0f;
 }
 
+// STAND-IN: a tracked hull is HeavyArmour and a wheeled one LightArmour; openBF3's own split.
+// Settle: a BF3 data field that classes vehicles.
 ai::CombatStrengthType vehicle_strength_type(const LevelVehicleKind &p_kind) {
 	return p_kind.model != nullptr && land_tracked(*p_kind.model) ? ai::CombatStrengthType::HeavyArmour
 																  : ai::CombatStrengthType::LightArmour;
@@ -166,6 +170,8 @@ float hit_damage(const TemplateSource &p_source, uint16_t p_def, const sw::Weapo
 		const StrengthTarget &p_target) {
 	const sw::ProjectileSimDef &p = p_weapon.projectile;
 	const sw::HitZone chest = sw::HitZone::Chest;
+	// STAND-IN: one hit on a soldier is a chest hit at the start damage, with the blast at its centre.
+	// Settle: weigh the hit zones and the damage falloff by the weapon's range.
 	float direct = direct_damage(p);
 	if (p_target.soldier) {
 		direct *= p.zone[size_t(chest)].protection_multiplier;
@@ -215,6 +221,8 @@ float weapon_reach(const sw::WeaponSimDef &p_weapon, bool p_gadget) {
 	const float speed = std::max(p.muzzle_speed, p.max_speed);
 	float reach = float(sw::units_to_seconds(p.time_to_live)) * speed;
 	const float gravity = p_gadget ? sw::kGadgetGravity : std::fabs(p.gravity);
+	// STAND-IN: an unpowered round reaches at most its flat-ground ballistic range v^2 / g.
+	// Settle: a BF3 AI range field per weapon.
 	if (p.engine_acceleration == 0.0f && gravity > 0.0f) {
 		reach = std::min(reach, p.muzzle_speed * p.muzzle_speed / gravity);
 	}
@@ -236,12 +244,15 @@ ai::WeaponTemplate derive_weapon_template(
 	w.max_range = weapon_reach(p_weapon, gadget != nullptr);
 	if (p.explosion.present) {
 		w.explosion_radius = p.explosion.radius;
+		// STAND-IN: the minimum range is the arming distance or the blast radius, the larger. Settle: BF2's minRange rule.
 		const float arming = float(sw::units_to_seconds(p.time_to_arm)) * p.muzzle_speed;
 		w.min_range = std::min(std::max(arming, p.explosion.radius), w.max_range);
 	}
 	const size_t infantry = size_t(ai::CombatStrengthType::Infantry);
 	const ai::WeaponType type = weapon_type_of(level, p_source.defib_def, p_def);
 	std::array<float, ai::kCombatStrengthTypeCount> per_minute{};
+	// STAND-IN: a defibrillator, medkit or ammo bag rates Infantry as revives, full heals or primary magazine refills
+	// per minute. Settle: BF2's shipped templates for its support kits.
 	if (type == ai::WeaponType::Resurrect) {
 		per_minute[infantry] = kStrengthSeconds * rounds_per_second(p_weapon);
 	} else if (type == ai::WeaponType::Heal && gadget != nullptr) {
@@ -335,6 +346,8 @@ core::Result<VehicleSeatArms> derive_seat_arms(const GunplayLevel &p_gunplay, co
 			if (std::all_of(strengths.begin(), strengths.end(), [](float p_s) { return p_s <= 0.0f; })) {
 				continue;
 			}
+			// STAND-IN: a seat's arms take the best of its weapons in stance 0, as BF2's per-seat templates are not
+			// derived. Settle: per-seat templates.
 			SeatArms &arms = seats[seat];
 			const float arming = weapon.projectile.explosion.present
 					? std::min(std::max(float(sw::units_to_seconds(weapon.projectile.time_to_arm)) *
@@ -491,6 +504,7 @@ ai::CombatStrengthType BotWeaponTemplates::vehicle_type(uint8_t p_property) cons
 			return type;
 		}
 	}
+	// STAND-IN: a hull material with no level kind rates as LightArmour. Settle: a class for every hull material.
 	return ai::CombatStrengthType::LightArmour;
 }
 

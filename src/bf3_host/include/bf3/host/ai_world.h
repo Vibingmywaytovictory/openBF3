@@ -31,7 +31,9 @@ struct AiWorldConfig {
 	std::shared_ptr<const BotLevel> level;
 	sim::bots::PerceptionParams perception;
 	float eye_heights[3] = { 1.6f, 1.0f, 0.3f };
+	// STAND-IN: standard gravity for the AI's physics queries. Settle: the gravity BF3's soldier physics uses.
 	float gravity = 9.81f;
+	// STAND-IN: 32 information grid cells a side, as in the BF2 research install. Settle: a size for BF3's map sizes.
 	uint32_t grid_dimension = 32;
 	uint8_t squad_size = kDefaultSquadSize;
 	uint64_t seed = 1;

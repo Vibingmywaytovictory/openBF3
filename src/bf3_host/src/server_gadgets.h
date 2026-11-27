@@ -100,6 +100,8 @@ private:
 
 std::optional<net::OwnLock> own_lock_wire(const sim::weapons::WeaponLockState &p_lock);
 
+// STAND-IN: a client's resting deployables are rechecked against its ghost scope every 30 ticks. Settle: a note on the
+// ghost manager's update rates.
 inline constexpr sim::Tick kDeployableScopeTicks = 30;
 inline constexpr uint32_t kPackShotIndex = 0x80000000u;
 inline constexpr size_t kPackBlastWork = 1u << 16;

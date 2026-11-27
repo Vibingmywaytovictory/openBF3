@@ -83,6 +83,8 @@ void ClientClock::command_sent(uint32_t p_sequence, uint64_t p_now) {
 	sent_times_[p_sequence % kSentTimes] = { p_sequence, p_now };
 }
 
+// STAND-IN: hand-picked RTT smoothing (0.1 a sample) and a 2 s window for the minimum the clock estimate uses.
+// Settle: notes R2-H 2a (BF3 corrects the client tick when the server's feedback differs by more than one tick).
 void ClientClock::rtt_sample(const net::Snapshot &p_snap, uint64_t p_now, uint32_t p_next_sequence) {
 	if (p_next_sequence <= 1) {
 		return;
@@ -123,6 +125,8 @@ std::optional<sim::Tick> ClientClock::buffer_report(const net::Snapshot &p_snap,
 		holdoff_ = false;
 	}
 	const int32_t report = p_snap.command_buffer_ticks;
+	// STAND-IN: the buffer target grows by ceil(2 x mean deviation - 1) of the last 64 reports and the slew follows the
+	// mean of the last 8; hand-picked. Settle: notes R2-H 2a (BF3's tick feedback correction).
 	reports64_.push_back(report);
 	while (reports64_.size() > 64) {
 		reports64_.pop_front();

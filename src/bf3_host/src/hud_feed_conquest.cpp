@@ -80,6 +80,7 @@ void feed_conquest(Frame &r_frame) {
 	if (c.return_by_tick != 0 && in.alive) {
 		const int64_t left = std::max<int64_t>(0, int64_t(c.return_by_tick) - int64_t(in.server_tick));
 		model.combat_area.outside = true;
+		// INFERRED: the out-of-bounds timer shows whole seconds, rounded up. Settle: retail footage of the countdown.
 		model.combat_area.seconds_left = int32_t((left + int64_t(sim::kSimHz) - 1) / int64_t(sim::kSimHz));
 	}
 	if (c.point_count != std::min(params->points.size(), net::kMaxConquestPoints)) {
@@ -96,6 +97,7 @@ void feed_conquest(Frame &r_frame) {
 	tk.enemy_team_tickets = c.tickets[enemy - 1u];
 	tk.friendly_team_max_tickets = c.initial_tickets[my - 1u];
 	tk.enemy_team_max_tickets = c.initial_tickets[enemy - 1u];
+	// INFERRED: MaxTickets is the larger of the two teams' initial tickets. Settle: the ticket counter movie's binding.
 	tk.global_max_tickets = std::max<int32_t>(c.initial_tickets[0], c.initial_tickets[1]);
 
 	std::vector<size_t> order;
@@ -106,6 +108,8 @@ void feed_conquest(Frame &r_frame) {
 	}
 	const std::vector<size_t> flags = conquest_flag_order(*params);
 	order.insert(order.end(), flags.begin(), flags.end());
+	// INFERRED: the HQs are listed first and the flags lettered from A in SpawnMenuListOrdinal order.
+	// Settle: retail footage of a level's flag letters.
 	char letter = 'A';
 	ui::HudSpawnPointList &spawns = model.spawn_points.spawn_points;
 	for (const size_t i : order) {

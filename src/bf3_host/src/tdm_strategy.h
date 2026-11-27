@@ -56,6 +56,8 @@ public:
 
 	sim::Tick game_tick() const override { return tick_; }
 	double tick_seconds() const override { return double(sim::kTickSeconds); }
+	// WHY: the SAI runs on game time, which stands still inside one update, so its 0.95 budget check never cuts a cycle
+	// short and replays are exact.
 	double update_time() const override { return double(tick_) * double(sim::kTickSeconds); }
 
 	float area_heat(const ai::AIStrategicArea &p_area) const override;

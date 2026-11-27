@@ -10,6 +10,8 @@ namespace bf3::host::tdm_bot {
 
 namespace {
 
+// STAND-IN: the target visibility, loss, aim error refresh and pitch share, and blind fire timings below. Settle: a
+// playtest of the bots' aim.
 constexpr uint32_t kVisibleFireTicks = 12;
 constexpr uint32_t kLoseTicks = 90;
 constexpr uint32_t kErrorTicks = 6;

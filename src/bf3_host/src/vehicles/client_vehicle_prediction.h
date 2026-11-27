@@ -19,6 +19,8 @@
 namespace bf3::host {
 
 inline constexpr uint32_t kVehiclePredictionRing = 64;
+// SOURCE: notes R2-H 4b and 4c (the own soldier's blend: none under 0.03 m or over 3 m, a fade over d s, at most 0.25 s).
+// INFERRED: the own vehicle blends by the soldier's rule, as the notes found no vehicle blend. Settle: a vehicle note.
 inline constexpr float kVehicleBlendMinM = 0.03f;
 inline constexpr float kVehicleBlendMaxM = 3.0f;
 inline constexpr float kVehicleBlendLongestS = 0.25f;

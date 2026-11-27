@@ -17,6 +17,8 @@ namespace bf3::host {
 
 namespace {
 
+// STAND-IN: with no objectives (TDM) the strategic areas are farthest-point clusters of the spawn points at 40 m, refined
+// by up to 16 Lloyd rounds. Settle: a playtest of the bots' TDM spread.
 constexpr float kTdmAreaRadiusM = 40.0f;
 constexpr uint32_t kLloydRounds = 16;
 

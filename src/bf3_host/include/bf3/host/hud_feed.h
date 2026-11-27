@@ -32,9 +32,12 @@
 
 namespace bf3::host {
 
+// STAND-IN: every hit shows the indicator 0.3 s at level 1. Settle: notes R2-H 5b (the level from the damage against
+// UIWeaponCompData's Min, Normal and MaxHitIndicatorLimit) and the movie's own timeline for its length.
 inline constexpr double kHitIndicatorSeconds = 0.3;
 inline constexpr float kHitIndicatorLevel = 1.0f;
 
+// STAND-IN: the ammo reads critical under a quarter of the magazine; hand-picked. Settle: the HUD movie's own threshold.
 inline constexpr float kCriticalAmmoFraction = 0.25f;
 
 enum class HudCrosshairKind : uint8_t { None = 0, Rifle = 1, Pistol = 2, Shotgun = 3, Launcher = 4, Grenade = 5, Knife = 6 };
@@ -42,6 +45,7 @@ enum class HudCrosshairKind : uint8_t { None = 0, Rifle = 1, Pistol = 2, Shotgun
 enum class HudFireMode : int8_t { None = -1, Single = 0, SingleBolt = 1, Auto = 2, Burst = 3, HoldAndRelease = 4, Detonated = 5 };
 HudFireMode hud_fire_mode(core::gameplay::FireLogic p_logic);
 
+// INFERRED: the HUD's weapon class number is the class's place in this list plus 1. Settle: the HUD movie's class table.
 inline constexpr std::array<std::string_view, 16> kHudWeaponClassNames{ "wc556x45mmNATO", "wc545x45mmWP", "wc762x51mmNATO", "wc762x54mmR",
 	"wc762x39mmWP", "wc9x19mm", "wc45cal", "wc44mag", "wc12gauge", "wc338Magnum", "wc50cal", "wcHgr", "wcKnife", "wcUgl", "wcRocket",
 	"wcPowerTool" };
@@ -178,9 +182,11 @@ int32_t hud_grenade_count(const net::WeaponsWire &p_weapons, const HudStatic &p_
 
 namespace bf3::host {
 
+// STAND-IN: every killer shows the default dog tags, as openBF3 has no persistence. Settle: per-player dog tags.
 inline constexpr std::string_view kDefaultBasicDogtag = "ui/art/persistence/dogtag/defaulttag_left";
 inline constexpr std::string_view kDefaultAdvancedDogtag = "ui/art/persistence/dogtag/defaulttag_right";
 
+// INFERRED: the deploy screen's five kit items are slots 0, 1, 2, 6 and 7 in that order. Settle: retail footage.
 inline constexpr std::array<uint8_t, core::ui::kHudSpawnKitItems> kHudSpawnSlots{ 0, 1, 2, 6, 7 };
 
 inline constexpr const auto &kHudMenuSids = core::ui::kHudMenuActionSids;

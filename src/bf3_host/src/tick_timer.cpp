@@ -11,6 +11,8 @@
 namespace bf3::host::detail {
 
 TickTimer::TickTimer() {
+	// WHY: a plain sleep wakes on the system timer's coarse period, too late for a 60 Hz tick; the high-resolution
+	// waitable timer does not.
 	timer_ = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
 }
 

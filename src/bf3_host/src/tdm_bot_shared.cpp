@@ -18,6 +18,8 @@ namespace {
 
 namespace sw = sim::weapons;
 
+// STAND-IN: how long a shot is heard and a shooter counts as firing (0.5 s), the heat a shot and a death add, and the heat
+// cap in add_heat. Settle: a playtest of the bots' hearing and heat goals.
 constexpr uint32_t kRingTicks = 30;
 constexpr size_t kMaxRing = 1024;
 constexpr uint32_t kFiringTicks = 30;
@@ -96,6 +98,8 @@ void TdmShared::begin_tick(sim::Tick p_tick) {
 		const StoredOrder o = view.stored_order(uint8_t(s));
 		if (o.serial > order_seen[s]) {
 			order_seen[s] = o.serial;
+			// STAND-IN: a human's RequestHeal stands as a medic call for the bots for the order icon's lifetime. Settle: a
+			// playtest of the bots' support.
 			if (o.type == sim::commo::OrderType::RequestHeal && o.issuer < n && !view.bot(o.issuer)) {
 				ordered_heal_until[o.issuer] = p_tick + sim::seconds_to_ticks(sim::commo::kOrderIconSeconds);
 			}

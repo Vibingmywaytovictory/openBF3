@@ -18,6 +18,8 @@ struct GhostTier {
 	uint8_t required = 1;
 };
 
+// STAND-IN: the scope (enemies to 1,500 m), the tiers' snapshot rates, the 10 degree zoomed cone and the 5 s attacker
+// window below are chosen; notes R2-H 1g and R4-H did not find the ghost priority. Settle: a note on it.
 inline constexpr float kEnemyScopeMetres = 1500.0f;
 inline constexpr std::array<GhostTier, 4> kEnemyTiers{ { { 100.0f, 1, 1 }, { 300.0f, 2, 3 }, { 800.0f, 5, 6 },
 		{ kEnemyScopeMetres, 15, 24 } } };

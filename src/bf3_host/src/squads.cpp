@@ -50,6 +50,7 @@ uint8_t SquadTable::team_of(uint8_t p_slot) const {
 	return p_slot < members_.size() ? members_[p_slot].team : 0;
 }
 
+// STAND-IN: a squad is led by its longest-serving member. Settle: a note on squad leader succession.
 bool SquadTable::leader(uint8_t p_slot) const {
 	const uint8_t squad = squad_of(p_slot);
 	const Squad *s = find(team_of(p_slot), squad);
@@ -104,6 +105,8 @@ uint8_t SquadTable::first_empty(uint8_t p_team) const {
 	return 0;
 }
 
+// STAND-IN: a player joins its team's lowest non-full squad, else the lowest empty one. Settle: a note on BF3's automatic
+// squad assignment.
 uint8_t SquadTable::assign(uint8_t p_slot, uint8_t p_team) {
 	if (p_slot >= members_.size()) {
 		return 0;

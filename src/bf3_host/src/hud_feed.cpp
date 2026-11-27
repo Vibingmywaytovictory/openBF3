@@ -17,6 +17,8 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
+// INFERRED: the crosshair kind from the weapon class, a missile, a multi-pellet shot or the wabsPstl anim set.
+// Settle: the weapon data's own crosshair or UI weapon type field.
 HudCrosshairKind crosshair_kind(const gp::WeaponDef &p_def, const sw::WeaponSimDef &p_sim) {
 	if (p_def.weapon_class == "wcKnife") {
 		return HudCrosshairKind::Knife;
@@ -252,6 +254,7 @@ void fill_hud(const HudFeedInput &p_input, std::span<const PresentEvent> p_drain
 		w.active_weapon_name = row->name_sid_hash;
 		w.active_weapon_index = pw.active_slot;
 		const float spread = std::isfinite(pw.spread_deg) ? std::max(pw.spread_deg, 0.0f) : 0.0f;
+		// INFERRED: both dispersion fields take the spread in degrees. Settle: the crosshair movie's unit for them.
 		w.dispersion = spread;
 		w.absolute_dispersion = spread;
 		w.zoomed = pw.zoomed;
@@ -294,6 +297,7 @@ HudPoint hud_stage_to_window(ui::HudAnchor p_anchor, float p_stage_x, float p_st
 	return p;
 }
 
+// SOURCE: notes R5-UI1 E (Compass = 360 - trunc(view yaw deg)); the compass widget rounds and wraps it.
 float hud_compass_heading_deg(float p_view_yaw_rad) {
 	if (!std::isfinite(p_view_yaw_rad)) {
 		return 0.0f;

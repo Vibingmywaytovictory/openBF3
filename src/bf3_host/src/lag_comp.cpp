@@ -625,6 +625,8 @@ std::span<const sim::weapons::HitTarget> RewindProvider::targets_for(const sim::
 	}
 	++m.stats.rewound_queries;
 	const ShotView &sv = view->view;
+	// STAND-IN: targets rewind to the time the shooter's client drew them, from its own samples; notes Q8 Rewind goes
+	// back the shooter's latency between the two stored snapshots around it. Settle: port Q8's rewind.
 	const int64_t time_q8 = net::rewind_time_q8(p_query.time_start, sv.view_back_q8, m.config.max_rewind_ticks);
 	const double render = double(time_q8) / 256.0;
 	const double max_extra = double(std::max(0.0f, m.config.extrapolate_max_ms)) / kMsPerTick;

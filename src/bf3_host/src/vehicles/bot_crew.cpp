@@ -29,6 +29,7 @@ namespace bf3::host {
 namespace {
 
 constexpr float kAltitudeProbeMetres = 200.0f;
+// STAND-IN: a bot walking to a vehicle repaths when its goal moves 5 m; hand-picked. Settle: BF2's BBPChange approach.
 constexpr float kChangeRepathMetres = 5.0f;
 constexpr float kRpmToRadiansPerSecond = 2.0f * std::numbers::pi_v<float> / 60.0f;
 
@@ -67,6 +68,8 @@ bool allowed_by_bots(const TdmShared &p_shared, const ServerVehicle &p_vehicle, 
 
 constexpr float kDegreesPerRadian = 180.0f / std::numbers::pi_v<float>;
 
+// INFERRED: BF2's seat camera test is the seat's turret yaw and pitch limits about the hull.
+// Settle: BF2's camera test against a BF3 seat's camera data.
 void seat_aim(const LevelVehicleKind &p_kind, uint8_t p_seat, ai::ChangeSeat &r_seat) {
 	if (p_kind.armament == nullptr) {
 		return;
@@ -186,6 +189,8 @@ float counter_scale(const TdmShared &p_shared, KitRole p_kit, uint8_t p_slot, ai
 
 }
 
+// INFERRED: a strength type's unit is the soldier's top speed over the mean strength of its counter, the assault
+// primaries for Infantry and the engineer launchers for the rest (Infantry's where they rate it 0). Settle: BF2 data.
 ai::ChangeStrengths change_strength_scales(const TdmShared &p_shared) {
 	ai::ChangeStrengths out{};
 	if (p_shared.host.gunplay == nullptr || p_shared.weapons == nullptr || !(p_shared.host.soldier_top_speed > 0.0f)) {
@@ -202,6 +207,8 @@ ai::ChangeStrengths change_strength_scales(const TdmShared &p_shared) {
 	return out;
 }
 
+// STAND-IN: a seat in a tracked hull is BF2's Tank class and any other hull's its Car class.
+// Settle: a BF3 data field that classes vehicles.
 ai::EquipmentClass seat_equipment(const TdmShared &p_shared, uint8_t p_slot) {
 	const ServerVehicles *vehicles = p_shared.host.view->server_vehicles();
 	const std::optional<VehicleSeat> seat = vehicles != nullptr ? vehicles->seat_of(p_slot) : std::nullopt;
@@ -236,6 +243,8 @@ ai::ChangeStrengths change_soldier_strengths(const TdmShared &p_shared, uint8_t 
 	return change_strengths(p_shared, out);
 }
 
+// INFERRED: a vehicle's max speed is its top forward gear's speed at the engine's RpmMax over the driven wheels'
+// differential and radius. Settle: a top speed measured on retail footage.
 float change_vehicle_max_speed(const sim::VehicleModel &p_model) {
 	const sim::LandDriveModel &land = p_model.land;
 	if (land.forward_gears == 0) {
@@ -270,6 +279,8 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 		const sim::VehicleState s = p_vehicles.world()->state(sim::VehicleSlot(i));
 		c.kind = ai::ChangeUnitKind::Ground;
 		c.allowed_by_bots = allowed_by_bots(p_shared, v, i);
+		// INFERRED: a vehicle's side is its first occupant's team, else its spawner's, as BF2's object side follows
+		// its crew. Settle: BF2's vehicle side rule.
 		c.side = v.team;
 		for (const uint8_t occupant : v.occupants) {
 			if (occupant != net::kNoVehicleOccupant) {
@@ -341,6 +352,8 @@ ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehi
 	b.player_id = p_slot;
 	b.side = view.team(p_slot);
 	b.position = p_state.position;
+	// STAND-IN: a bot's own move term is the level motor's standing sprint speed, as BF3 data has no AI template
+	// max speed. Settle: BF2's soldier AI max speed against BF3's sprint.
 	b.max_speed = p_shared.host.soldier_top_speed;
 	b.radius = p_shared.nav != nullptr && p_shared.nav->level != nullptr && p_shared.nav->level->nav != nullptr
 			? p_shared.nav->level->nav->params().agent_radius

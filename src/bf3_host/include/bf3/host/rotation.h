@@ -23,6 +23,8 @@ struct RotationConfig {
 	std::shared_ptr<const GameServerConfig> first;
 	RotationLoader load;
 	bool background = true;
+	// STAND-IN: 60 s when the level's end-of-round logic gives no restart delay (Metro TDM's Delay is 60 s). Settle: a
+	// level whose end-of-round logic has no such Delay.
 	uint16_t intermission_s = 60;
 	float intermission_override_s = -1.0f;
 };

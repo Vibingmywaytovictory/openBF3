@@ -269,6 +269,8 @@ std::vector<KitGadgetUnlock> loadout_gadget_unlocks(std::span<const gp::KitDef> 
 	return list;
 }
 
+// STAND-IN: every unlock is offered with no rank, licence or award gating, as openBF3 keeps no persistence.
+// Settle: gate each unlock by its UnlockProgression entry.
 core::Result<LoadoutCatalog> make_loadout_catalog(const core::EbxResolver &p_db,
 		const gp::UnlockProgression &p_progression, std::span<const gp::KitDef> p_kits,
 		std::span<const gp::WeaponDef> p_defs, const KitTable &p_table, gp::WorkBudget *p_budget) {
@@ -489,6 +491,8 @@ uint64_t loadout_catalog_hash(const LoadoutCatalog &p_catalog) {
 	return h;
 }
 
+// INFERRED: CUSTOMIZE's GADGET 1 is the kit item slot where the kit has one, else slot 2, and GADGET 2 the rest; the
+// data gives each slot only its UICategorySid. Settle: retail footage of each kit's CUSTOMIZE labels.
 std::vector<uint8_t> loadout_item_slots(const LoadoutKit &p_kit, LoadoutKitItem p_item) {
 	const bool kit_item = !p_kit.slots[size_t(gp::WeaponSlot::KitItem)].empty();
 	switch (p_item) {

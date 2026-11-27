@@ -8,6 +8,8 @@ namespace bf3::host {
 
 namespace gp = core::gameplay;
 
+// INFERRED: a seat's camera key cycles its first-person cameras before its third-person ones. Settle: a note on the seat
+// camera order.
 std::vector<const gp::VehicleCameraDef *> vehicle_seat_cameras(const gp::VehicleSeatDef &p_seat) {
 	std::vector<const gp::VehicleCameraDef *> out;
 	for (const bool first : { true, false }) {

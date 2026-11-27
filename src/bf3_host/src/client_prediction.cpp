@@ -62,6 +62,8 @@ void OwnPrediction::catch_up(const sim::SoldierState &p_base) {
 	replayed_ticks_ += c.steps;
 }
 
+// STAND-IN: a correction's visual offset decays exponentially over error_decay_ms. Settle: notes R2-H 4b and 4c (no
+// blend under 0.03 m or over 3 m, else a linear fade over min(d, 0.25) s).
 void OwnPrediction::decay(uint64_t p_now) {
 	const double dt_ms = last_tick_ns_ != 0 && p_now > last_tick_ns_ ? double(p_now - last_tick_ns_) / 1e6 : kMsPerTick;
 	last_tick_ns_ = p_now;

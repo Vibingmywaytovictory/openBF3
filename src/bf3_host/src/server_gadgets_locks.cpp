@@ -37,6 +37,8 @@ sw::LockCandidate lock_candidate_of(const LevelVehicleKind &p_kind, uint16_t p_s
 	const sim::Vec3 origin = core::vec::sub(p_com, sim::vehicles::hull_transform(p_rotation, {}).transform_vector(com));
 	c.id = sim::vehicles::kVehicleTargetIdBase + p_spawner;
 	c.team = p_team;
+	// SOURCE: notes R2-G4 A 3 and its checker (a vehicle's lock aim point is its box centre; the near-target test uses the
+	// entity's own transform position).
 	c.position = origin;
 	c.aim = sim::vehicles::hull_transform(p_rotation, origin).transform_point(p_kind.box.centre);
 	c.occupied = p_occupied;

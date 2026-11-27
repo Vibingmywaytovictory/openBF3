@@ -9,6 +9,8 @@
 
 namespace bf3::host {
 
+// STAND-IN: a resting vehicle, or any vehicle for a viewer with no soldier, goes out every 15th snapshot. Settle: a note
+// on the ghost manager's update rates.
 inline constexpr uint8_t kRestingVehicleSnapshots = 15;
 
 struct VehicleScopeCandidate {

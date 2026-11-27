@@ -18,6 +18,8 @@ namespace {
 
 namespace sw = sim::weapons;
 
+// STAND-IN: the bot body's turn rates, cones, revive, knife and throw distances and hold windows below, and the literals
+// in this file's functions, are hand-picked. Settle: a playtest of the bots against human play.
 constexpr float kTurnRateDegS = 540.0f;
 constexpr float kPitchTurnRateDegS = 360.0f;
 constexpr float kMaxPitchDeg = 80.0f;
@@ -354,6 +356,8 @@ void BotBody::aim_target(const BotFrame &p_frame, BotIntent &r_intent) {
 			aimer_target = f.target;
 		}
 		ai::Vec3 dir{};
+		// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/EntryMouseTurretAimAt.cpp @c47317b (accuracy 0.5).
+		// WHY: no shooter velocity is passed, as openBF3's shots do not inherit the shooter's velocity.
 		if (ai::aim_vector(aimer, f.eye, mark, ts.velocity, {}, ai::kSoldierAimAccuracy, d->projectile.drag,
 					d->projectile.muzzle_speed, d->projectile.gravity, double(f.tick) * sim::kTickSeconds, dir)) {
 			const float range = distance(f.eye, mark);
@@ -584,6 +588,7 @@ void BotBody::vehicle_aim(const BotFrame &p_frame, BotIntent &r_intent) {
 			vehicle_aimer_id = a.id;
 		}
 		ai::Vec3 dir{};
+		// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/EntryMouseTurretAimAt.cpp @c47317b (accuracy 0.5).
 		if (ai::aim_vector(vehicle_aimer, f.eye, a.centre, a.velocity, {}, ai::kSoldierAimAccuracy, d->projectile.drag,
 					d->projectile.muzzle_speed, d->projectile.gravity, double(f.tick) * sim::kTickSeconds, dir)) {
 			const float range = distance(f.eye, a.centre);

@@ -71,6 +71,7 @@ struct ServerRules {
 	int kill_limit = 0;
 	float preround_s = -1.0f;
 	int min_players = -1;
+	// STAND-IN: a listen game of 32 players, 31 of them bots, by default. Settle: the owner's server defaults.
 	uint8_t max_players = kListenMaxPlayers;
 	uint32_t bots = 31;
 	std::string bot_tuning_cfg;

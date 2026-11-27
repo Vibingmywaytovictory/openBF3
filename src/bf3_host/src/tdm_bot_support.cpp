@@ -19,6 +19,8 @@ namespace {
 
 namespace sw = sim::weapons;
 
+// STAND-IN: a medic call lives 0.5 s after its last post; the support rules here (the kept mate's half rank, the call
+// block of twice call_s) are openBF3's own. Settle: a playtest of the bots' support.
 constexpr sim::Tick kCallLiveTicks = 30;
 
 bool healing(SupplyNeed p_need) {
@@ -111,6 +113,8 @@ std::optional<uint8_t> nearest_medic(const TdmShared &p_shared, uint8_t p_slot, 
 
 }
 
+// INFERRED: a calling bot asks the nearest medic within PickupOrderDistance, the distance notes R-E2 A give the heal
+// orders, in place of the crosshair choice. Settle: a note on who receives a RequestHeal.
 std::optional<uint8_t> ask_medic(TdmShared &r_shared, uint8_t p_slot) {
 	const TdmShared &p_shared = r_shared;
 	if (p_shared.host.gunplay == nullptr) {

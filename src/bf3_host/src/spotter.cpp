@@ -8,6 +8,8 @@ namespace bf3::host {
 namespace sp = sim::spotting;
 namespace cm = sim::commo;
 
+// INFERRED: a soldier's spot shape is the motor capsule (PhysicalRadius over the pose's height), its middle standing in
+// for the note's bounding-box centre (R-E1 3). Settle: a note on the soldier's spot bounds.
 bool place_spot_body(SpotSubject &r_subject, const core::gameplay::SoldierDef &p_soldier, sim::Pose p_pose,
 		const sim::Vec3 &p_feet) {
 	const core::gameplay::PoseDef *pose = p_soldier.pose(core::gameplay::SoldierPose(p_pose));
@@ -39,6 +41,7 @@ sim::commo::Supplies supplies_of(std::span<const uint16_t> p_defs, std::span<con
 	return out;
 }
 
+// SOURCE: notes R-E1 5 (a ray's hits walked in order, at most 5).
 std::vector<sp::RayHit> spot_ray_hits(const sim::Vec3 &p_from, const sim::Vec3 &p_to,
 		std::span<const SpotSubject> p_subjects, uint8_t p_own_slot, const sim::CollisionWorld *p_world) {
 	float wall = 1.0f;
@@ -67,6 +70,7 @@ std::vector<sp::RayHit> spot_ray_hits(const sim::Vec3 &p_from, const sim::Vec3 &
 	return out;
 }
 
+// SOURCE: notes R-E2 A (the teammate inside the TeamOrderFov cone nearest the crosshair).
 std::optional<uint8_t> order_teammate(const sim::spotting::SpotterDef &p_def, const SpotterInput &p_in) {
 	std::optional<uint8_t> best;
 	float best_cos = 0.0f;
@@ -102,6 +106,8 @@ void Spotter::collect(const SpotterInput &p_in, bool p_crosshair_ray) {
 		if (cone.size() == sp::kMaxSpotTargets) {
 			break;
 		}
+		// INFERRED: the 1.5 x cone widening is for seated soldiers (notes R-E1 3 leave its class unresolved). Settle: a
+		// note naming the widened class.
 		const float fov = def_.fov_deg * (s.seated ? sp::kSeatedConeWidening : 1.0f);
 		if (s.slot != p_in.own_slot && sp::in_spot_cone(p_in.eye, p_in.view, s.centre, fov, def_.distance)) {
 			cone.push_back(&s);
@@ -127,6 +133,7 @@ void Spotter::collect(const SpotterInput &p_in, bool p_crosshair_ray) {
 	}
 }
 
+// SOURCE: notes R-E1 4, 6 and 7 (press with its anti-spam and one-spotted refusals, sending, passive scan).
 SpotterOutput Spotter::update(const SpotterInput &p_in) {
 	SpotterOutput out;
 	const bool is_blocked = blocked(p_in);

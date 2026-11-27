@@ -85,6 +85,7 @@ struct LevelVehicles {
 	std::vector<core::gameplay::WeaponDef> weapons;
 };
 
+// STAND-IN: a vehicle spawns 0.1 m above its spawner; hand-picked. Settle: the spawner's own placement rule.
 inline constexpr float kVehicleSpawnLift = 0.1f;
 
 sim::VehiclePlacement vehicle_spawn_placement(const core::level::LevelTransform &p_transform, float p_lift);
