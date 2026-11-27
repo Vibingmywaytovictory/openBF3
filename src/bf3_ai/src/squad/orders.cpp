@@ -209,7 +209,8 @@ bool SquadOrders::arrived(const SquadCoordinator &p_squad, sim::Tick p_tick, sim
 
 bool SquadOrders::held_until_taken(const SquadCoordinator &p_squad) {
 	const SquadArea *const area = p_squad.squad_strategic_area_assignment();
-	return p_squad.order() == SquadOrder::Attack && area != nullptr && area->is_takeable();
+	return (p_squad.order() == SquadOrder::Attack || p_squad.order() == SquadOrder::Defend) && area != nullptr &&
+			area->is_takeable();
 }
 
 void SquadOrders::pass_down(const SquadCoordinator &p_squad, SquadOrder p_order) {
