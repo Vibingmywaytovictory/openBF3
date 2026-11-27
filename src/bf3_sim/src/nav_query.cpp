@@ -61,6 +61,29 @@ const NavQueryStats &NavQuery::stats() const {
 	return impl_->stats;
 }
 
+bool NavQuery::raycast(NavPolyRef p_start, const Vec3 &p_from, const Vec3 &p_to, Vec3 *r_reached, bool *r_clear) {
+	Impl &m = *impl_;
+	float t = 0.0f;
+	float normal[3] = { 0, 0, 0 };
+	int count = 0;
+	dtPolyRef path[1] = { 0 };
+	if (p_start == 0 ||
+			dtStatusFailed(m.query->raycast(dtPolyRef(p_start), core::to_array(p_from).data(),
+					core::to_array(p_to).data(), &m.filter, &t, normal, path, &count, 1))) {
+		return false;
+	}
+	const bool clear = t >= 1.0f;
+	const float f = clear ? 1.0f : t;
+	if (r_reached != nullptr) {
+		*r_reached = { p_from[0] + (p_to[0] - p_from[0]) * f, p_from[1] + (p_to[1] - p_from[1]) * f,
+			p_from[2] + (p_to[2] - p_from[2]) * f };
+	}
+	if (r_clear != nullptr) {
+		*r_clear = clear;
+	}
+	return true;
+}
+
 bool NavQuery::nearest(const Vec3 &p_point, const Vec3 &p_half_extents, NavPolyRef *r_poly, Vec3 *r_point) {
 	Impl &m = *impl_;
 	const Clock::time_point start = Clock::now();

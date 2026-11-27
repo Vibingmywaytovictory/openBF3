@@ -704,6 +704,19 @@ TEST_SUITE("sim-nav-unit") {
 		CHECK(n >= 1);
 		CHECK(corridor.move_position(query, { pa[0] + 0.5f, pa[1], pa[2] - 0.5f }));
 		CHECK(!corridor.move_position(query, { 64, 0, 200 }));
+		Vec3 reached{};
+		bool clear = false;
+		REQUIRE(query.raycast(a, pa, { pa[0], pa[1], pa[2] - 4.0f }, &reached, &clear));
+		CHECK(clear);
+		CHECK(reached[2] == doctest::Approx(pa[2] - 4.0f));
+		NavPolyRef low = 0;
+		Vec3 plow{};
+		REQUIRE(query.nearest({ 16, 0, 2 }, { 2, 2, 2 }, &low, &plow));
+		REQUIRE(query.raycast(low, plow, { 16, 0, 30 }, &reached, &clear));
+		CHECK_FALSE(clear);
+		CHECK(reached[2] > plow[2]);
+		CHECK(reached[2] < 8.0f);
+		CHECK_FALSE(query.raycast(0, plow, { 16, 0, 30 }, &reached, &clear));
 
 		NavPolyRef top = 0;
 		Vec3 ptop{};

@@ -38,6 +38,8 @@ public:
 
 	bool random_point(uint64_t &r_rng, const NavComponents &p_components, uint32_t p_component, NavPolyRef *r_poly, Vec3 *r_point);
 
+	bool raycast(NavPolyRef p_start, const Vec3 &p_from, const Vec3 &p_to, Vec3 *r_reached, bool *r_clear);
+
 	NavPathStatus begin_path(NavPolyRef p_start, const Vec3 &p_start_point, NavPolyRef p_goal, const Vec3 &p_goal_point);
 	NavPathStatus continue_path(uint32_t p_max_iterations, uint32_t *r_iterations);
 	NavPathStatus finish_path(std::vector<NavPolyRef> &r_polys);
