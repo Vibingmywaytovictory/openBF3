@@ -2295,58 +2295,86 @@ TEST_SUITE("sim-vehicle-handling") {
 		}
 		const VehicleCourse slope = synthetic_vehicle_courses()[size_t(VehicleCourseKind::SlopeIdle)];
 		for (const std::shared_ptr<const VehicleModel> &model : { h->lav_ad, h->m1a2, h->growler }) {
-			std::unique_ptr<VehicleWorld> w = world_at(ground_shapes(true), model, slope.start);
-			settle(*w);
-			const Vec3 at = w->state(0).body.origin;
-			VehicleCommand idle = command(0, 0, 0);
-			idle.flags = vehicle_flags::kDriven;
-			for (uint32_t t = 0; t < 5 * kSimHz; ++t) {
-				step1(*w, idle);
+			for (const bool sloped : { true, false }) {
+				CAPTURE(model->blueprint);
+				CAPTURE(sloped);
+				std::unique_ptr<VehicleWorld> w = sloped ? world_at(ground_shapes(true), model, slope.start)
+														 : world_at(ground_shapes(false), model, placed(0, 0, -300));
+				settle(*w);
+				const Vec3 at = w->state(0).body.origin;
+				VehicleCommand idle = command(0, 0, 0);
+				idle.flags = vehicle_flags::kDriven;
+				std::array<float, 2> planar{};
+				for (uint32_t t = 0; t < 5 * kSimHz; ++t) {
+					step1(*w, idle);
+					const VehicleState s = w->state(0);
+					if (t == 0) {
+						CHECK(s.driver.stand_still_ticks > 0);
+					}
+					if (t + 1 == kSimHz || t + 1 == 5 * kSimHz) {
+						planar[t + 1 == kSimHz ? 0 : 1] =
+								std::hypot(s.body.linear_velocity[0], s.body.linear_velocity[2]);
+					}
+				}
+				const Vec3 to = w->state(0).body.origin;
+				const float moved = std::hypot(to[0] - at[0], to[2] - at[2]);
+				std::printf("sim.vehicle.handling: %s manned and idle 5 s on %s: moved %.4f m, horizontal speed %.5f / "
+							"%.5f m/s at 1 / 5 s\n",
+						model->blueprint.c_str(), sloped ? "the 12 deg slope" : "flat ground", double(moved),
+						double(planar[0]), double(planar[1]));
+				CHECK(model->stand_still_brake);
+				CHECK(moved < 0.1f);
 			}
-			const Vec3 to = w->state(0).body.origin;
-			const float moved = std::hypot(to[0] - at[0], to[2] - at[2]);
-			std::printf("sim.vehicle.handling: %s manned and idle 5 s on the %.0f deg slope: moved %.2f m\n",
-					model->blueprint.c_str(), double(slope.slope_degrees), double(moved));
-			CHECK(model->stand_still_brake);
-			CHECK(moved < 0.1f);
 		}
 	}
 
-	TEST_CASE("sim.vehicle.handling: a manned M1A2 and Growler, driven up a 12 deg slope and left idle, hold still "
-			  "once the "
-			  "stand-still brake's StandStillLowSpeedTimeLimit has run under 1 m/s") {
+	TEST_CASE("sim.vehicle.handling: a manned LAV-AD, M1A2 and Growler, driven up a 12 deg slope and left idle, are "
+			  "taken by the stand-still damping in the first tick that starts under 1 m/s and then hold still "
+			  "(R7-G1-vectors C; no time limit for wheeled or tracked vehicles)") {
 		HandlingModels *h = handling_models();
 		if (h == nullptr) {
 			return;
 		}
 		const VehicleCourse slope = synthetic_vehicle_courses()[size_t(VehicleCourseKind::SlopeIdle)];
-		for (const std::shared_ptr<const VehicleModel> &model : { h->m1a2, h->growler }) {
+		for (const std::shared_ptr<const VehicleModel> &model : { h->lav_ad, h->m1a2, h->growler }) {
 			CAPTURE(model->blueprint);
 			std::unique_ptr<VehicleWorld> w = world_at(ground_shapes(true), model, slope.start);
 			settle(*w);
-			VehicleCommand climb = command(60, 0, 0);
+			VehicleCommand climb = command(127, 0, 0);
 			climb.flags = vehicle_flags::kDriven;
-			for (uint32_t t = 0; t < kSimHz / 2; ++t) {
+			for (uint32_t t = 0; t < 3 * kSimHz / 2; ++t) {
 				step1(*w, climb);
 			}
 			VehicleCommand idle = command(0, 0, 0);
 			idle.flags = vehicle_flags::kDriven;
 			const Vec3 released = w->state(0).body.origin;
-			const uint32_t locked = uint32_t(model->stand_still_ticks) + kSimHz;
-			for (uint32_t t = 0; t < locked; ++t) {
+			std::optional<uint32_t> engaged;
+			Vec3 at{};
+			float fastest_after = 0.0f, fastest_before = 0.0f;
+			for (uint32_t t = 0; t < 5 * kSimHz; ++t) {
 				step1(*w, idle);
+				const VehicleState s = w->state(0);
+				const float planar = std::hypot(s.body.linear_velocity[0], s.body.linear_velocity[2]);
+				if (!engaged && s.driver.stand_still_ticks > 0) {
+					engaged = t;
+					at = s.body.origin;
+				} else if (engaged && t <= *engaged + 2 * kSimHz) {
+					fastest_after = std::max(fastest_after, planar);
+				}
+				if (!engaged) {
+					fastest_before = std::max(fastest_before, planar);
+				}
 			}
-			const Vec3 at = w->state(0).body.origin;
-			for (uint32_t t = 0; t < 2 * kSimHz; ++t) {
-				step1(*w, idle);
-			}
-			const Vec3 to = w->state(0).body.origin;
+			REQUIRE(engaged.has_value());
+			const VehicleState end = w->state(0);
 			const float crept = std::hypot(at[0] - released[0], at[2] - released[2]);
-			const float moved = std::hypot(to[0] - at[0], to[2] - at[2]);
-			std::printf("sim.vehicle.handling: %s driven up the %.0f deg slope and left idle: %.2f m before the "
-						"stand-still brake, then %.2f m in 2 s\n",
-					model->blueprint.c_str(), double(slope.slope_degrees), double(crept), double(moved));
+			const float moved = std::hypot(end.body.origin[0] - at[0], end.body.origin[2] - at[2]);
+			std::printf("sim.vehicle.handling: %s driven up the %.0f deg slope and left idle: stand-still from tick %u "
+						"after %.2f m (fastest %.2f m/s), then at most %.3f m/s and %.3f m to 5 s\n",
+					model->blueprint.c_str(), double(slope.slope_degrees), unsigned(*engaged), double(crept),
+					double(fastest_before), double(fastest_after), double(moved));
 			CHECK(model->stand_still_brake);
+			CHECK(fastest_after < vehicles::kStandStillSpeedLimit);
 			CHECK(moved < 0.1f);
 		}
 	}

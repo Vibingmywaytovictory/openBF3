@@ -16,7 +16,6 @@ inline constexpr float kRadPerSecToRpm = 9.549296f;
 inline constexpr float kMinRpmStep = 1.0f;
 inline constexpr float kStandStillSpeedSquared = 7.71605f;
 inline constexpr float kStandStillInput = 0.25f;
-inline constexpr float kStandStillBrakeSpeed = 1.0f;
 inline constexpr float kSlipClamp = 200.0f;
 inline constexpr float kDriveTorqueShare = 0.075f;
 inline constexpr float kDriveTorqueQuarter = 0.25f;

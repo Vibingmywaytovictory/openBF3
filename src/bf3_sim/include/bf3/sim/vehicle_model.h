@@ -158,6 +158,7 @@ struct VehicleModel {
 	bool down_force = false, down_force_wheel_factor = false;
 	float anti_roll_front = 0, anti_roll_rear = 0;
 	bool stand_still_brake = false;
+	bool stand_still_sleep = false;
 	uint16_t stand_still_ticks = 0;
 	float down_force_base = 0, down_force_per_wheel = 0;
 

@@ -27,6 +27,13 @@ inline constexpr float kHalf = 0.5f;
 inline constexpr float kChassisTickHz = 30.0f;
 inline constexpr float kProgressiveSetting = 1.0f;
 inline constexpr float kDamperClamp = 0.8f;
+inline constexpr float kStandStillSpeedLimit = 1.0f;
+inline constexpr float kStandStillAngularLimit = 0.1f;
+inline constexpr float kStandStillLinearDamping = 150.0f;
+inline constexpr float kStandStillAngularDamping = 10.0f;
+inline constexpr float kStandStillTiltShare = 0.1f;
+inline constexpr uint32_t kStandStillWheelMinimum = 4;
+inline constexpr float kStandStillThrottle = 0.5f;
 
 using CurvePoint = std::array<float, 2>;
 
@@ -77,4 +84,18 @@ float down_force(float p_speed, float p_air_density, float p_base_factor, bool p
 
 std::array<float, 2> anti_roll_loads(float p_load_a, float p_load_b, float p_stiffness);
 
+struct StandStillTest {
+	float speed = 0, angular_speed = 0;
+	uint32_t wheels = 0, grounded = 0;
+	bool drive = false, started = false;
+	float throttle = 0;
+};
+
+bool standing_still(const StandStillTest &p_test);
+
+struct ChassisVelocity {
+	std::array<float, 3> linear{}, angular{};
+};
+
+ChassisVelocity stand_still_damped(const ChassisVelocity &p_velocity, float p_dt);
 }

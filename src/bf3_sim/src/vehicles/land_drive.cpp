@@ -85,6 +85,18 @@ void anti_roll_bars(const VehicleModel &p_model, std::array<float, kMaxVehicleWh
 	bar(order[p_model.wheel_count - 2u], order[p_model.wheel_count - 1u], p_model.anti_roll_rear);
 }
 
+void stand_still_sleep(JPH::Body &r_body, std::array<LandWheelState, kMaxVehicleWheels> &r_states, size_t p_wheels) {
+	const JPH::Vec3 v = r_body.GetLinearVelocity();
+	const JPH::Vec3 w = r_body.GetAngularVelocity();
+	const vehicles::ChassisVelocity damped = vehicles::stand_still_damped(
+			{ { v.GetX(), v.GetY(), v.GetZ() }, { w.GetX(), w.GetY(), w.GetZ() } }, 1.0f / vehicles::kChassisTickHz);
+	r_body.SetLinearVelocity(JPH::Vec3(damped.linear[0], damped.linear[1], damped.linear[2]));
+	r_body.SetAngularVelocity(JPH::Vec3(damped.angular[0], damped.angular[1], damped.angular[2]));
+	for (size_t i = 0; i < p_wheels; ++i) {
+		r_states[i].spin = 0.0f;
+	}
+}
+
 struct WheelGeometry {
 	bool grounded = false;
 	JPH::RVec3 contact;
@@ -160,20 +172,12 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 	const bool tracked = track_steered(m);
 	const float steer_max = vehicles::steer_angle(1.0f, vehicle_steer_sensitivity(m, speed));
 	const bool idle = forward_pedal == 0.0f && back_pedal == 0.0f && (!tracked || steer_axis == 0.0f);
-	const bool held = idle && (p_command.flags & vehicle_flags::kDriven) == 0;
-	bool stand_still = false;
-	if (m.stand_still_brake && m.stand_still_ticks > 0) {
-		if (idle && speed < vehicles::kStandStillBrakeSpeed) {
-			d.stand_still_ticks = uint16_t(std::min<uint32_t>(d.stand_still_ticks + 1u, m.stand_still_ticks));
-		} else {
-			d.stand_still_ticks = 0;
-		}
-		stand_still = d.stand_still_ticks >= m.stand_still_ticks;
-	}
-	const bool hold = held || stand_still;
+	const bool started = (p_command.flags & vehicle_flags::kDriven) != 0;
+	const bool standing = m.stand_still_sleep && d.stand_still_ticks > 0;
+	const bool hold = idle && (!started || standing);
 
 	v.tick = { engine_torque, land_gear_ratio(land, gear), d.throttle_filter, -d.steer_filter,
-		std::max(d.brake_filter, brake_axis), hand_brake ? 1.0f : 0.0f, hold };
+		std::max(d.brake_filter, brake_axis), hand_brake ? 1.0f : 0.0f, hold, started };
 	v.jolt_grip = hold ? 1.0f : 0.0f;
 
 	for (size_t i = 0; i < m.wheel_count; ++i) {
@@ -218,7 +222,7 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 
 void land_wheel_pass(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
 	VehicleWorld::Impl::Vehicle &v = r_world.vehicles[p_slot];
-	if (!v.used || v.tick.hold) {
+	if (!v.used || (v.tick.hold && !v.tick.started)) {
 		return;
 	}
 	JPH::Body &body = *v.constraint->GetVehicleBody();
@@ -235,6 +239,7 @@ void land_wheel_pass(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
 	const uint32_t substeps = vehicles::land_substeps_due(d.substep_clock, start_speed);
 	const float dt = vehicles::land_substep_seconds(start_speed);
 	const JPH::Vec3 handling = rotation * -to_jolt(m.center_of_mass_handling_offset);
+	bool still = false;
 
 	std::array<WheelGeometry, kMaxVehicleWheels> geometry{};
 	std::array<LandWheelState, kMaxVehicleWheels> states{};
@@ -256,6 +261,10 @@ void land_wheel_pass(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
 		g.suspension = rotation * v.wheel_settings[i]->mSuspensionDirection;
 		g.ground_velocity = wheel->GetContactPointVelocity();
 		g.compression = m.wheels[i].suspension_max - wheel->GetSuspensionLength();
+	}
+	uint32_t grounded = 0;
+	for (size_t i = 0; i < m.wheel_count; ++i) {
+		grounded += geometry[i].grounded ? 1u : 0u;
 	}
 
 	for (uint32_t s = 0; s < substeps; ++s) {
@@ -313,6 +322,18 @@ void land_wheel_pass(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
 				body.AddImpulse(impulses[i], geometry[i].applied);
 			}
 		}
+		if (m.stand_still_brake) {
+			still = vehicles::standing_still({ start_speed, body.GetAngularVelocity().Length(), m.wheel_count, grounded,
+					any_drive, v.tick.started, v.tick.throttle });
+			if (still && m.stand_still_sleep) {
+				stand_still_sleep(body, states, m.wheel_count);
+			}
+		}
+	}
+	if (m.stand_still_brake) {
+		d.stand_still_ticks = still
+				? uint16_t(std::min<uint32_t>(d.stand_still_ticks + 1u, std::max<uint32_t>(m.stand_still_ticks, 1u)))
+				: uint16_t(0);
 	}
 
 	for (size_t i = 0; i < m.wheel_count; ++i) {

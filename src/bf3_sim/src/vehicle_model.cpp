@@ -152,6 +152,7 @@ uint64_t digest_of(const VehicleModel &p_m) {
 	d.add(p_m.anti_roll_front);
 	d.add(p_m.anti_roll_rear);
 	d.add(p_m.stand_still_brake);
+	d.add(p_m.stand_still_sleep);
 	d.add(p_m.stand_still_ticks);
 	d.add(p_m.tester);
 	d.add(p_m.max_pitch_roll_angle);
@@ -539,6 +540,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	m->anti_roll_front = ch.anti_roll_front;
 	m->anti_roll_rear = ch.anti_roll_rear;
 	m->stand_still_brake = ch.use_stand_still_brake;
+	m->stand_still_sleep = ch.use_stand_still_sleep;
 	if (!finite(ch.stand_still_low_speed_time_limit) || ch.stand_still_low_speed_time_limit < 0.0f ||
 			ch.stand_still_low_speed_time_limit > 600.0f) {
 		return fail("stand-still time limit outside 0..600 s");

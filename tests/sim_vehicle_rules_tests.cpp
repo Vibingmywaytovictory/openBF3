@@ -729,6 +729,51 @@ TEST_SUITE("sim-vehicle-rules-unit") {
 		CHECK(c1.spin == doctest::Approx(0.937351f).epsilon(1e-4));
 	}
 
+	TEST_CASE("sim.vehicles.land_rules: the stand-still brake (R7-G1-standstill, R7-G1-vectors D): the five release "
+			  "terms and the damping of one call and of three calls") {
+		const StandStillTest m1a2{ 0.4f, 0.02f, 6, 6, false, false, 0.0f };
+		CHECK(standing_still(m1a2));
+		StandStillTest t = m1a2;
+		t.drive = true;
+		CHECK(!standing_still(t));
+		t = m1a2;
+		t.started = true;
+		t.throttle = 0.6f;
+		CHECK(!standing_still(t));
+		t.throttle = 0.5f;
+		CHECK(standing_still(t));
+		t = m1a2;
+		t.grounded = 3;
+		CHECK(!standing_still(t));
+		t.grounded = 4;
+		CHECK(standing_still(t));
+		t = m1a2;
+		t.speed = 1.0f;
+		CHECK(!standing_still(t));
+		t = m1a2;
+		t.angular_speed = 0.1f;
+		CHECK(!standing_still(t));
+		const StandStillTest growler{ 0.4f, 0.02f, 4, 3, false, false, 0.0f };
+		CHECK(!standing_still(growler));
+		const StandStillTest lav_ad_steered{ 0.2f, 0.0f, 8, 8, false, true, 0.0f };
+		CHECK(standing_still(lav_ad_steered));
+
+		const float dt = 1.0f / 30.0f;
+		const ChassisVelocity one = stand_still_damped({ { 0.6f, -0.2f, 0.3f }, { 0.05f, 0.08f, 0.02f } }, dt);
+		CHECK(one.linear[0] == doctest::Approx(0.0040427f).epsilon(1e-4));
+		CHECK(one.linear[1] == -0.2f);
+		CHECK(one.linear[2] == doctest::Approx(0.0020214f).epsilon(1e-4));
+		CHECK(one.angular[0] == doctest::Approx(0.048361f).epsilon(1e-4));
+		CHECK(one.angular[1] == doctest::Approx(0.057322f).epsilon(1e-4));
+		CHECK(one.angular[2] == doctest::Approx(0.019344f).epsilon(1e-4));
+		ChassisVelocity v{ { 0.9f, 0.0f, 0.0f }, {} };
+		const float want[] = { 6.064e-3f, 4.086e-5f, 2.753e-7f };
+		for (const float w : want) {
+			v = stand_still_damped(v, dt);
+			CHECK(v.linear[0] == doctest::Approx(w).epsilon(1e-3));
+		}
+	}
+
 	TEST_CASE("sim.vehicles.land_rules: the shipped wheel step reproduces R7-G1-vectors A (M1A2 throttle 1 on its 6 "
 			  "physics wheels, six substeps, static load 13093.3 N per wheel)") {
 		const bf3::sim::VehicleModel tank = m1a2_road_wheel(6);

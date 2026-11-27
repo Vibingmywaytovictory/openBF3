@@ -98,6 +98,7 @@ struct VehicleWorld::Impl {
 	struct LandTick {
 		float engine_torque = 0, gear_ratio = 0, throttle = 0, yaw = 0, brake = 0, hand_brake = 0;
 		bool hold = true;
+		bool started = false;
 	};
 
 	struct Vehicle {

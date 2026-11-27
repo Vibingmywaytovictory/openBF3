@@ -159,4 +159,18 @@ std::array<float, 2> anti_roll_loads(float p_load_a, float p_load_b, float p_sti
 	return { bar(p_load_a), bar(p_load_b) };
 }
 
+bool standing_still(const StandStillTest &p_test) {
+	return !p_test.drive && !(p_test.started && p_test.throttle > kStandStillThrottle) &&
+			p_test.grounded >= std::min(p_test.wheels, kStandStillWheelMinimum) &&
+			p_test.speed < kStandStillSpeedLimit && p_test.angular_speed < kStandStillAngularLimit;
+}
+
+ChassisVelocity stand_still_damped(const ChassisVelocity &p_velocity, float p_dt) {
+	const float linear = std::exp(-kStandStillLinearDamping * p_dt);
+	const float yaw = std::exp(-kStandStillAngularDamping * p_dt);
+	const float tilt = std::exp(-kStandStillTiltShare * kStandStillAngularDamping * p_dt);
+	const std::array<float, 3> &v = p_velocity.linear;
+	const std::array<float, 3> &w = p_velocity.angular;
+	return { { v[0] * linear, v[1], v[2] * linear }, { w[0] * tilt, w[1] * yaw, w[2] * tilt } };
+}
 }
