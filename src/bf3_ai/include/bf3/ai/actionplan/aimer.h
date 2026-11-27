@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/Aimer.h and Aimer.cpp @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/ai_object.h"
@@ -32,6 +33,8 @@ public:
 	float drag = 0.0f;
 	float gravity = 0.0f;
 	float speed = 1.0f;
+	// STAND-IN: the integration step is the sim tick, where BF2's Aimer steps by its timer's frame increment.
+	// Settle: compare impact predictions at both steps, or a BF3 rule for the bot aim step.
 	float time_step = float(sim::kTickSeconds);
 	bool grenade = false;
 	bool grenade_exact = false;
@@ -47,6 +50,7 @@ private:
 	float angle_step_ = 0.0174533f;
 };
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/EntryMouseTurretAimAt.cpp @c47317b (getAimVec at accuracy 0.5).
 inline constexpr float kSoldierAimAccuracy = 0.5f;
 
 bool aim_vector(Aimer &r_aimer, const Vec3 &p_origin, const Vec3 &p_target, const Vec3 &p_target_velocity,

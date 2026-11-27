@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPathFinding/Cluster/ClusterGraph.cpp and ClusterNodeManager.cpp @c47317b
 #include "bf3/ai/path/cluster_graph.h"
 
 #include <algorithm>
@@ -64,6 +65,8 @@ void ClusterNodeManager::reset() {
 	live_ = 0;
 }
 
+// STAND-IN: the nav cluster builder hands the graph in here, where BF2 reads a baked cluster file. Settle: compare with a
+// BF2 level's cluster file.
 core::Status ClusterGraph::assign(std::vector<Cluster> p_clusters, std::vector<uint32_t> p_cluster_polygons,
 		std::vector<ClusterPortal> p_portals, std::vector<float> p_portal_costs) {
 	if (p_portal_costs.size() != p_portals.size()) {
@@ -109,6 +112,8 @@ float ClusterGraph::portal_cost(uint32_t p_cluster, uint32_t p_portal) const {
 	return portal_costs_[size_t(clusters_[p_cluster].first_portal) + p_portal];
 }
 
+// STAND-IN: a Dijkstra over portal costs times the entered cluster's material cost; BF2's cluster search is not ported.
+// Settle: port BF2's cluster path search.
 float ClusterGraph::shortest_path(uint32_t p_from, uint32_t p_to, const MaterialManager &p_materials,
 		ClusterNodeManager &r_nodes, std::vector<uint32_t> &r_path) const {
 	r_path.clear();

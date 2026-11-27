@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/StrategyManager.h @c47317b (StrategyManager)
 #pragma once
 
 #include "bf3/ai/behaviour/behaviours.h"
@@ -29,6 +30,8 @@ inline constexpr std::string_view kNoPrerequisites = "No Prerequisites";
 inline constexpr std::string_view kNullStrategy = "NULL";
 
 struct StrategyTuning {
+	// STAND-IN: every sai.* default to the order weights is hand-picked (the shipped bot_tuning.cfg repeats them).
+	// Settle: BF2's strategy files for the period and order weights.
 	uint32_t sai_period_ticks = 30;
 	uint32_t squad_updates_per_tick = 2;
 	float hunt_heat = 2.0f;
@@ -145,6 +148,8 @@ struct StrategyStats {
 	uint64_t defence_withheld = 0;
 };
 
+// STAND-IN: the Hunt and Spread decisions are openBF3's own, in place of BF2's scored strategies from its AI files.
+// Settle: port BF2's strategies (AIDefaultStrategies.ai) for each mode.
 class StrategyDecisions final : public SaiDecisions {
 public:
 	StrategyDecisions(StrategyManager &r_manager, SquadManager &r_squads, AIStrategicObjectManager &r_objects,

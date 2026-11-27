@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AIMain.cpp @c47317b
 #include "bf3/ai/main/ai_main.h"
 
 #include <algorithm>
@@ -48,6 +49,8 @@ bool AIMain::action() {
 		services_.squads->update(services_.timer->game_tick());
 	}
 	if (lod_) {
+		// STAND-IN: the LOD manager's players and bots are updated each action once one exists; BF2 never calls them here.
+		// Settle: find BF2's caller of AILODManager's updates.
 		lod_->update_players();
 		lod_->update_bots();
 	}
@@ -150,6 +153,8 @@ void AIMain::new_player_created(bool p_is_ai) {
 	--bot_count_;
 }
 
+// STAND-IN: BF2's removeSquadMember and destroySquadMember are both the squad port's one removal, which sends the game
+// exitSquad. Settle: port destroySquadMember on its own.
 bool AIMain::deactivate_bot(int &r_player_id, int p_side) {
 	if (services_.squads != nullptr) {
 		services_.squads->remove_squad_member(r_player_id, p_side);
@@ -199,6 +204,7 @@ void AIMain::reactivate_bot(int p_player_id) {
 	}
 }
 
+// STAND-IN: the switch also moves the bot's own side field. Settle: BF2's switchSides on a bot's side member.
 void AIMain::switch_sides(int p_side) {
 	AiGame *const game = services_.game;
 	if (game == nullptr) {
@@ -247,6 +253,7 @@ bool AIMain::reset() {
 }
 
 void AIMain::set_ai_system_quotient(double p_quotient) {
+	// WHY: the range test is always true, as shipped in BF2's setAISystemQuotient.
 	if (!(p_quotient < 0.0f) || !(p_quotient > 1.0f)) {
 		ai_system_quotient_ = p_quotient;
 	}

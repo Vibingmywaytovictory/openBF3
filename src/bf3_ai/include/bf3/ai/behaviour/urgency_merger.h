@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/UrgencyMerger.h @c47317b
 #pragma once
 
 #include <vector>

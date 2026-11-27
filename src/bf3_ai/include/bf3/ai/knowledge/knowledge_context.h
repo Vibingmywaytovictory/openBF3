@@ -8,9 +8,11 @@ class InformationFactory;
 class InformationManager;
 class WeaponInfoManager;
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AISettings.cpp @c47317b (6 battle and 2 strategic strengths).
 inline constexpr int kBattleStrengthCount = 6;
 inline constexpr int kStrategicStrengthCount = 2;
 
+// WHY: OpenBF2's timer and information singletons are injected here; game time is in sim ticks, not seconds.
 class AiTimer {
 public:
 	virtual ~AiTimer() = default;

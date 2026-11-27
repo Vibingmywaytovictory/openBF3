@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/SquadFormation.h @c47317b
 #pragma once
 
 #include "bf3/ai/squad/squad_world.h"

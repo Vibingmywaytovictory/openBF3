@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AIRandom.cpp @c47317b
 #include "bf3/ai/main/ai_random.h"
 
 #include "bf3/core/util/splitmix64.h"
@@ -25,6 +26,8 @@ int32_t schrage_step(int32_t p_x, uint32_t p_multiplier) {
 
 AIRandom::AIRandom(int32_t p_seed) : seed_(p_seed), index_(0) {}
 
+// STAND-IN: a seed from the match seed and a slot, where BF2's one AIRandom seeds itself from the timer's wall clock.
+// Settle: whether bot draws must repeat for one match seed.
 int32_t AIRandom::seed_for(uint64_t p_match_seed, uint32_t p_slot) {
 	const uint64_t mixed = core::splitmix64(p_match_seed ^ (uint64_t(p_slot) * core::kSplitmix64Gamma));
 	const int32_t seed = int32_t(mixed & 0x7FFFFFFFu);

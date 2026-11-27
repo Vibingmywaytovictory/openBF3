@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/BAPInterpreter.h, BAPEntry.h and BAPEntries.h @c47317b
 #pragma once
 
 #include "bf3/ai/actionplan/statement.h"

@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotSquad.cpp @c47317b (the has-order checks and joinSquad)
 #include "bf3/ai/bot/bot_main.h"
 #include "bf3/ai/squad/bot_squad.h"
 #include "bf3/ai/squad/squad_manager.h"
@@ -46,6 +47,8 @@ bool BotSquad::join_squad(int p_squad) {
 	return joined;
 }
 
+// STAND-IN: isSquadLeader, issuing, receiving, accepting and declining orders (as order weights) and SquadOrders below are
+// openBF3's own. Settle: port BF2's BotSquad order bodies once its squad radio and orders are built.
 bool BotSquad::is_squad_leader() const {
 	const SquadPlayer *const player = world_->player(bot_->player_id());
 	return player != nullptr && squads_ != nullptr && squad_id_ != 0 && squads_->is_squad_leader(squad_id_, *player);
@@ -185,6 +188,8 @@ BotSquad *SquadOrders::bot_squad(int p_player_id) const {
 	return p_player_id >= 0 && size_t(p_player_id) < bots_.size() ? bots_[size_t(p_player_id)] : nullptr;
 }
 
+// STAND-IN: a mission completes when the leader is within bb.mission_arrive_m and the members are, or the wait ran out.
+// Settle: BF2's mission completion rule.
 bool SquadOrders::arrived(const SquadCoordinator &p_squad, sim::Tick p_tick, sim::Tick &r_since) const {
 	const SquadMember *const leader = p_squad.squad_leader();
 	Vec3 at{};
@@ -207,6 +212,7 @@ bool SquadOrders::arrived(const SquadCoordinator &p_squad, sim::Tick p_tick, sim
 	return true;
 }
 
+// WHY: an attack or defend on a takeable area is not ended by arrival; the coordinator ends it, as in BF2.
 bool SquadOrders::held_until_taken(const SquadCoordinator &p_squad) {
 	const SquadArea *const area = p_squad.squad_strategic_area_assignment();
 	return (p_squad.order() == SquadOrder::Attack || p_squad.order() == SquadOrder::Defend) && area != nullptr &&

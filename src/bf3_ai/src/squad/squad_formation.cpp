@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/SquadFormation.cpp @c47317b (the 50 m leader range, 6 m crumbs, 2 m and 0.2 s
+// movement stamp, 5 m/s idle and x0.9 crowded speed)
 #include "bf3/ai/squad/squad_formation.h"
 
 #include "bf3/ai/squad/squad_coordinator.h"
@@ -79,6 +81,8 @@ void SquadFormation::select_formation() {
 	formation_ = Formation::Line;
 }
 
+// STAND-IN: the forward vector, slot positions, closest slots, member wait, trailing, member removal and leader handover
+// are openBF3's own bodies. Settle: compare with the pinned SquadFormation bodies.
 void SquadFormation::update_formation_forward_vector() {
 	const SquadMember *const anchor = member_at(0);
 	if (anchor == nullptr) {
@@ -490,6 +494,8 @@ void SquadFormation::set_formation() {
 	}
 }
 
+// STAND-IN: an occupied slot is spaced by twice its vehicle radius, where BF2 spreads it by three times its own and its
+// reference slot's radius. Settle: port setLineFormation's spread.
 void SquadFormation::set_line_formation() {
 	bool positive_side = true;
 	int reference_slot = 0;

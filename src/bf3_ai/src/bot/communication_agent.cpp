@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/CommunicationAgent.cpp @c47317b
 #include "bf3/ai/bot/communication_agent.h"
 
 namespace bf3::ai {

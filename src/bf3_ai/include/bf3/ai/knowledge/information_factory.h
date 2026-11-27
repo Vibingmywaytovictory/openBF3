@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIKnowledge/InformationFactory.h and Main/InformationManager.h @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/handle_pool.h"

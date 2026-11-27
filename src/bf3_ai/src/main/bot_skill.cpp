@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/EntryTrigger.cpp, AIBotBehaviourPattern/BBPFireInfantery.cpp (1.5
+// s, 0.3) and OpenBF2 Code/BF2/AI/AIInterface/BFKnowledge/WeaponObject.cpp (setBotSkill's deviation) @c47317b
 #include "bf3/ai/main/bot_skill.h"
 
 #include <algorithm>

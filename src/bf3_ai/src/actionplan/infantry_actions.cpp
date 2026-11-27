@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/BAPATrigger.cpp and BAPASense.cpp @c47317b
 #include "bf3/ai/actionplan/infantry_actions.h"
 
 namespace bf3::ai {

@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIKnowledge/ IPIPhysical, IPIUnit, IPICover, IPIControlInfo, IPIMobile and
+// IPIArmament .h, and the Real and Known forms of IPIPhysical, IPIMobile and IPIArmament @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/information.h"
@@ -168,6 +170,8 @@ private:
 	std::vector<Vec2> outline_;
 };
 
+// STAND-IN: it hands out the object's AiObjectControlInfo where BF2's IPIControlInfo forwards each getter. Settle: port
+// the forwarding getters if a caller needs a value other than the object's.
 class IPIControlInfo final : public InformationPlugIn {
 public:
 	explicit IPIControlInfo(Information *p_information) : InformationPlugIn(p_information) {}

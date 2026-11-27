@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/BAPTypes.h, BAPStatement.h, BAPAction.h and BAPCondition.h,
+// and AIPlanInterpreter/PlanInterpreter.h @c47317b
 #pragma once
 
 #include "bf3/ai/main/bot.h"

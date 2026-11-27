@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIStrategic/SAI.cpp @c47317b
 #include "bf3/ai/strategic/sai.h"
 
 #include "bf3/ai/knowledge/information_factory.h"
@@ -204,6 +205,7 @@ void Sai::add_bot(Bot *p_bot) {
 	added_.push_back(p_bot);
 }
 
+// STAND-IN: removing a bot also removes its squad member, openBF3's own. Settle: BF2's caller of removeSquadMember.
 void Sai::remove_bot(Bot *p_bot) {
 	if (p_bot == nullptr) {
 		return;
@@ -226,6 +228,8 @@ void Sai::set_bot_is_dead(int p_bot_id) {
 	handle_dead_bot(p_bot_id);
 }
 
+// STAND-IN: the dead bot's spawn kit is recorded with no spawn-group reset, as openBF3 players have no spawn group.
+// Settle: port the reset if players get spawn groups.
 void Sai::handle_dead_bot(int p_bot_id) {
 	BotInfo *info = p_bot_id >= 0 && size_t(p_bot_id) < bots_.size() ? bots_[size_t(p_bot_id)].get() : nullptr;
 	if (info == nullptr) {
@@ -282,6 +286,8 @@ void Sai::handle_changing_bot(int p_bot_id) {
 	occupy(*info, *current, *closest);
 }
 
+// STAND-IN: a released unit frees itself, where BF2 frees the next one in the set. Settle: BF2's releaseUnitFromObject on
+// a set of several units.
 bool Sai::release_unit_from_object(int p_object, std::set<int>::iterator &r_it) {
 	AIStrategicObject *target = object(p_object);
 	if (target == nullptr || r_it == target->assigned_units(side_).end()) {
@@ -624,6 +630,8 @@ bool Sai::is_player_commander(int p_side) const {
 	return p_side == side_ && player_commander_;
 }
 
+// STAND-IN: the owned-control-point checks below are openBF3's own. Settle: compare with the pinned SAI.cpp's
+// haveAnyOwnedCps and haveAnyOwnedAndTakeableCps.
 bool Sai::have_any_owned_control_points(int p_side) const {
 	if (services_.objects == nullptr) {
 		return false;
@@ -811,6 +819,7 @@ void Sai::update(double p_budget) {
 				return;
 			}
 			[[fallthrough]];
+		// STAND-IN: the artillery check, teleports and the spawn-group search are left out. Settle: port them with artillery.
 		case SaiStage::Artillery:
 			stage_ = SaiStage::Done;
 			++completed_;

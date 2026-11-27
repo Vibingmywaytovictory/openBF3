@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/WPEmpty.cpp, WPMoveTo.cpp, WPCloseTo.cpp, WPPatrol.cpp,
+// WPAltitudeCloseTo.cpp, WPAltitudeMoveTo.cpp and WPAltitudePatrol.cpp @c47317b
 #include "bf3/ai/bot/waypoints.h"
 
 #include "bf3/ai/knowledge/information.h"
@@ -238,6 +240,7 @@ float WPAltitudeCloseTo::urgency(const Vec3 &p_position, const WaypointBot &) {
 	}
 	const float dx = info->position().x - p_position.x;
 	const float dz = info->position().z - p_position.z;
+	// WHY: the product dx^2 * dz^2, not a sum, is as shipped in BF2's WPAltitudeCloseTo.
 	if (radius_ * radius_ > dx * dx * (dz * dz) && ceiling_ > p_position.y) {
 		changed_ = true;
 		return 0.0f;

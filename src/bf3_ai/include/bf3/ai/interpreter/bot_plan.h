@@ -18,6 +18,7 @@ struct PlanArgs {
 	SenseFocus focus = SenseFocus::Target;
 };
 
+// WHY: a behaviour's steps run in one never-finishing parallel combiner, as BotScript is only the statement root.
 class BotPlan final : public PlanBot {
 public:
 	explicit BotPlan(InfantryBody &r_body, const PlanInterpreter &p_interpreter = infantry_interpreter());

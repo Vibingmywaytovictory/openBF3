@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/ BAPCombiner*, BAPFlowC*, BAPWrapperFinished, BAPInfoWrapper,
+// BAPAIdle and BAPAEvaluateCondition .cpp @c47317b
 #include "bf3/ai/actionplan/flow_control.h"
 
 namespace bf3::ai {

@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviour/UrgeCurve.cpp, AIUtils/CustomCurve.cpp and AIUtils/SCurve.cpp
+// @c47317b (the three 101-entry tables)
 #include "bf3/ai/behaviour/curves.h"
 
 #include <algorithm>
@@ -354,6 +356,8 @@ float SCurve::calculate(float p_x) {
 	return table_value(kSCurveValues, p_x);
 }
 
+// STAND-IN: NaN reads 0 and x == 1 the last entry, where BF2's JCurve has no NaN guard and reads one entry past its
+// table at a weight of 0. Settle: BF2's result for a NaN input.
 float JCurve::calculate(float p_x) {
 	if (std::isnan(p_x)) {
 		return 0.0f;
@@ -370,6 +374,8 @@ float JCurve::calculate(float p_x) {
 	return table_value(kJCurveValues, p_x);
 }
 
+// STAND-IN: NaN reads 0 and x == 1 the last entry, where BF2's curve has no NaN guard and reads one entry past its
+// table at a weight of 0. Settle: BF2's result for a NaN input.
 float DecliningSlopeCurve::calculate(float p_x) {
 	if (std::isnan(p_x)) {
 		return 0.0f;

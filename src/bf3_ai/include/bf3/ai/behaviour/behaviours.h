@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviour/BotBehaviour.h and BotBehaviour.cpp @c47317b
 #pragma once
 
 #include "bf3/ai/behaviour/curves.h"
@@ -64,6 +65,8 @@ struct BehaviourTuning {
 	std::array<BehaviourRow, kEquipmentClassCount> class_weights{};
 	std::array<std::array<BehaviourRow, kBotBehaviourCount>, kEquipmentClassCount> binding_rows = unit_binding_rows();
 	bool change = false;
+	// STAND-IN: every bb.* default from here to order_detour_m is hand-picked (the shipped bot_tuning.cfg repeats them).
+	// Settle: values from BF2's AI files or retail bot footage.
 	float squad_far_m = 15.0f;
 	float squad_arrive_m = 3.0f;
 	float mission_arrive_m = 10.0f;

@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviour/BBChange.cpp and AIBotBehaviourPattern/BBPChange.cpp @c47317b
 #include "bf3/ai/vehicle/vehicle_change.h"
 
 #include "bf3/ai/behaviour/curves.h"
@@ -59,6 +60,8 @@ float change_driver_modifier(const ChangeVehicle &p_vehicle, bool p_current, dou
 	return 1.0f;
 }
 
+// STAND-IN: left out are borrowed-armament seats, static emplacements, radio pickups, artillery zones, ordered changes,
+// team locks, runways, air and naval cases and a driver's drive to another vehicle. Settle: port them with those units.
 ChangeChoice choose_change(const ChangeBot &p_bot, std::span<const ChangeVehicle> p_vehicles) {
 	ChangeChoice out;
 	const ChangeTarget equipment{ p_bot.vehicle, p_bot.seat };

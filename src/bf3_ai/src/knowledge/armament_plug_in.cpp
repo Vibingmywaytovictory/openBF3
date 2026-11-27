@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIKnowledge/IPIArmament.cpp and IPIArmamentReal.cpp @c47317b
 #include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/knowledge/plug_ins.h"
 #include "bf3/ai/knowledge/weapon_info.h"

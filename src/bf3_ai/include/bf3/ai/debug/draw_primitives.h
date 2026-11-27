@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/DrawPrimitives/ and AIInterface/BFKnowledge/DebugRenderer.h @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/knowledge_context.h"

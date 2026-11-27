@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/ EntryInfanteryMoveTo, EntryInfanteryMoveToObject,
+// EntrySoldierPose, EntryTrigger and EntrySense .cpp @c47317b
 #include "bf3/ai/interpreter/infantry_entries.h"
 
 #include "bf3/ai/actionplan/infantry_actions.h"
@@ -14,6 +16,8 @@ bool without_body(bool &r_ok, bool &r_finished) {
 
 }
 
+// STAND-IN: the entries below drive the host's InfantryBody where BF2's write PlayerInput and run the move actions.
+// Settle: port the BF2 bodies once a bot's input is a PlayerInput.
 bool EntryInfanteryMoveTo::execute(BAPStatement &r_statement, PlanBot &r_bot, bool &r_ok, bool &r_finished) const {
 	InfantryBody *const body = r_bot.infantry();
 	if (body == nullptr) {
@@ -63,6 +67,7 @@ bool EntryTrigger::execute(BAPStatement &r_statement, PlanBot &r_bot, bool &r_ok
 	}
 	if (!trigger.started() || !trigger.release_after_press()) {
 		if (trigger.start_condition()->evaluate(r_bot)) {
+			// WHY: there is no release call; the body's intent starts unpressed each tick, as BF2's zeroed input does.
 			body->trigger(trigger.input());
 			trigger.set_started(true);
 			r_ok = true;

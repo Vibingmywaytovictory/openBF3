@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviour/BBChange.h and AIBotBehaviourPattern/BBPChange.h @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/ai_object.h"
@@ -10,6 +11,8 @@
 namespace bf3::ai {
 
 inline constexpr size_t kMaxChangeSeats = 8;
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/ @c47317b, the 6 below: AIKnowledge/BFInformationEnvironment.cpp (75 m),
+// Main/AIMain.cpp (-1000 s), AIBotBehaviour/VehicleUrgencyCalculator.cpp (15 s, 8 m) and BBChange.cpp (0.01, 10000).
 inline constexpr float kHardwareRadius = 75.0f;
 inline constexpr double kPossessionWindowSeconds = 15.0;
 inline constexpr double kNeverPossessedSeconds = -1000.0;
@@ -19,6 +22,8 @@ inline constexpr float kGetOutUrgency = 10000.0f;
 inline constexpr size_t kChangeStrengthCount = 6;
 inline constexpr int kChangeInfantryStrength = 0;
 inline constexpr int kChangeLightArmourStrength = 1;
+// INFERRED: a unit's basic strength is its full health over a soldier's, so a soldier's is 1; BF3 data has no basicTemp.
+// Settle: a BF3 field that ranks unit worth.
 inline constexpr float kSoldierBasicStrength = 1.0f;
 
 using ChangeStrengths = std::array<float, kChangeStrengthCount>;
@@ -38,6 +43,8 @@ struct ChangeSeat {
 	float min_range = 0.0f;
 	float max_range = 0.0f;
 	float aim_yaw_deg = 0.0f;
+	// STAND-IN: a seat the host gives no turret limits turns all the way round and pitches -90 to 90 degrees. Settle: the
+	// seat's turret limits from its BF3 data.
 	float yaw_min_deg = -180.0f;
 	float yaw_max_deg = 180.0f;
 	float pitch_min_deg = -90.0f;
@@ -85,6 +92,7 @@ struct ChangeBot {
 	float max_speed = 0.0f;
 	float health = 1.0f;
 	double now_s = 0.0;
+	// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/BotManager.cpp @c47317b (the vehicle bail value 0.3).
 	float bail_value = 0.3f;
 	bool stuck = false;
 	bool close_to_non_owned_target = false;
@@ -115,6 +123,7 @@ struct ChangeChoice {
 	bool get_out = false;
 	float best = 0.0f;
 	float current = 0.0f;
+	// WHY: the urgency comes back before the behaviour weight, which BotMain applies when it merges.
 	float urgency = 0.0f;
 };
 

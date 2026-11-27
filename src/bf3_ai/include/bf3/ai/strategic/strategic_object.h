@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIStrategicEntity/ AIStrategicObject, AIStrategicArea, AIStrategicObjectManager and
+// SAWayPoint (.h and .cpp), AreaDistanceInfo.h and AIStrategic/StatusMap.h @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/ai_object.h"
@@ -330,6 +332,7 @@ private:
 	void validate_distances(int p_side, int p_group);
 	void find_distances(int p_side, GroupDistances &r_group, int p_group_mask) const;
 	void insert_unit_distances(int p_side, int p_group);
+	// STAND-IN: one vehicle group, as openBF3 defines none. Settle: vehicle groups from the level's AI areas.
 	int vehicle_group_count() const { return services_.vehicle_groups > 0 ? services_.vehicle_groups : 1; }
 
 	StrategicServices services_;

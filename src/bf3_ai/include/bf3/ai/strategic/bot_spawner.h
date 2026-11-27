@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIStrategicMap/BotSpawner.h and OpenBF2
+// Code/BF2/AI/AIInterface/BFKnowledge/BFGame.h @c47317b
 #pragma once
 
 #include "bf3/ai/squad/squad_world.h"
@@ -14,6 +16,9 @@ class AIRandom;
 class InformationManager;
 class SquadManager;
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIStrategicMap/BotSpawner.cpp @c47317b (BF2's 13 kit bins, 13 for none).
+// INFERRED: bins 4, 5 and 6 are engineer, medic and anti-tank, mapped to BF3 kits by the SpawnGame. Settle: BF2's kit
+// template table.
 inline constexpr int kKitTypeCount = 13;
 inline constexpr int kKitNone = 13;
 inline constexpr int kKitEngineer = 4;

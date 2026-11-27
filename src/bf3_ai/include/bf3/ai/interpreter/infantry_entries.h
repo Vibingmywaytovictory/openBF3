@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/ EntryInfanteryMoveTo, EntryInfanteryMoveToObject,
+// EntryInfanteryMoveToDirection, EntryCarMoveToDirection, EntrySoldierPose, EntryTrigger and EntrySense .h @c47317b
 #pragma once
 
 #include "bf3/ai/interpreter/bap_interpreter.h"
@@ -16,6 +18,7 @@ public:
 	BAPStatementType target_id() const override { return BAPStatementType::MoveToObject; }
 };
 
+// STAND-IN: the two direction-move entries run nothing; no plan issues a direction move. Settle: port their bodies.
 class EntryInfanteryMoveToDirection final : public BAPEntry {
 public:
 	bool execute(BAPStatement &, PlanBot &, bool &, bool &) const override { return true; }

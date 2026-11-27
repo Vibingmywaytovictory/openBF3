@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/StrategyManager.cpp @c47317b (StrategyManager; the StrategyDecisions bodies
+// are openBF3's)
 #include "bf3/ai/strategic/strategy.h"
 
 #include "bf3/ai/squad/squad_coordinator.h"
@@ -425,6 +427,8 @@ void StrategyDecisions::send(Sai &r_sai, SquadCoordinator &r_squad, size_t p_are
 	++stats_.missions;
 }
 
+// STAND-IN: no defence goes out while the enemy holds a takeable point, as BF2's SquadCoordinator::update would drop such
+// a Defend at once. Settle: BF2's SAI defence on a map with contested points.
 void StrategyDecisions::distribute_defence(Sai &r_sai) {
 	const int side = r_sai.side();
 	if (r_sai.have_any_owned_and_takeable_control_points(3 - side)) {

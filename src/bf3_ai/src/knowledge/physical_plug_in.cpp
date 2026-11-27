@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIKnowledge/IPIPhysicalReal.cpp @c47317b
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/knowledge/plug_ins.h"
 

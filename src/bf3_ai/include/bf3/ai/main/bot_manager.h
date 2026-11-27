@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/BotManager.h and BotManager.cpp @c47317b (the schedule defaults below)
 #pragma once
 
 #include "bf3/ai/knowledge/knowledge_context.h"

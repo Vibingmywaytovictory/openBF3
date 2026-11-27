@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/DrawPrimitives/ (DPManager, DrawPrimitive and the DPStatic* files) @c47317b
 #include "bf3/ai/debug/draw_primitives.h"
 
 namespace bf3::ai {
@@ -82,6 +83,7 @@ DPStaticCircle *DPManager::create_static_circle(float p_life_time, uint32_t p_co
 
 DPStaticLine *DPManager::create_static_line(
 		float p_life_time, uint32_t p_colour, const Vec3 &p_start, const Vec3 &p_end, float p_width) {
+	// WHY: the end point is pushed twice, as BF2's two-point DPStaticLine constructor does (DPStaticLine.cpp @c47317b).
 	return create_static_line(p_life_time, p_colour, std::vector<Vec3>{ p_start, p_end, p_end }, p_width);
 }
 

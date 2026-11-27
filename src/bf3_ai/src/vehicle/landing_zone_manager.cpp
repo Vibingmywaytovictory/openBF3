@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AILandingZoneManager.cpp @c47317b (the inactive-zone name)
 #include "bf3/ai/vehicle/landing_zone_manager.h"
 
 namespace bf3::ai {
@@ -10,6 +11,8 @@ void AILandingZoneManager::reset() {
 	active_zone_name_ = kNoActiveLandingZone;
 }
 
+// STAND-IN: the create, find, activate and reset bodies are openBF3's own; a zone has no corners, beach or approach.
+// Settle: port BF2's createLandingZone (corner-based) with air AI.
 AILandingZone *AILandingZoneManager::create_landing_zone(
 		const std::string &p_name, const Vec3 &p_position, int p_direction) {
 	if (zones_by_name_.count(p_name) != 0) {

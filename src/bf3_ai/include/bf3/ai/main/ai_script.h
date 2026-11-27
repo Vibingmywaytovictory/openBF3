@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AIConsole.h and OpenBF2 Code/BF2/AI/AIInterface/BFKnowledge/WeaponTemplate.h
+// @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/ai_object.h"
@@ -48,6 +50,7 @@ enum class CombatStrengthType : uint8_t {
 };
 inline constexpr size_t kCombatStrengthTypeCount = 6;
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIInterface/BFKnowledge/WeaponTemplate.cpp @c47317b (the constructor's defaults below).
 struct WeaponTemplate {
 	bool indirect = false;
 	bool is_thrown = false;

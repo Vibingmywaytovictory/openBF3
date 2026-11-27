@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviour/BBMedicAssist.cpp, AIBotBehaviourPattern/BBPMedicAssist.cpp and
+// BBPFireInfantery.cpp @c47317b
 #include "bf3/ai/behaviour/vehicle_gadgets.h"
 
 #include "bf3/ai/behaviour/curves.h"

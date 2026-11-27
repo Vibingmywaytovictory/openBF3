@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/CarControl.h, EntryCarMoveTo.h and AIBot/BotNavigation.h @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/ai_object.h"
@@ -7,6 +8,8 @@
 
 namespace bf3::ai {
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/ @c47317b: AIPlanInterpreter/CarControl.cpp (666 arrived), CommonControls.cpp (9999
+// no slow-down) and AIBot/BotNavigation.cpp (the 0.5 s angle test), the 3 below.
 inline constexpr float kCarArrivedMode = 666.0f;
 inline constexpr float kCarNoSlowDown = 9999.0f;
 inline constexpr double kCarAngleTestSeconds = 0.5;

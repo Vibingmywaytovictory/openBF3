@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotMain.cpp and BotMemory.cpp @c47317b
 #include "bf3/ai/bot/bot_main.h"
 
 #include "bf3/ai/knowledge/information.h"
@@ -16,6 +17,7 @@ inline constexpr float kRearmPercent = 0.125f;
 
 }
 
+// WHY: Change joins the merge as behaviour 10 only when the loaded config binds it, so a config without it keeps ten.
 BotMain::BotMain(uint32_t p_bot_id, int p_player_id, int p_side, InfantryBody &r_body, const BehaviourTuning &p_tuning,
 		const float *p_personality) :
 		bot_id_(p_bot_id), player_id_(p_player_id), side_(p_side), body_(r_body), tuning_(p_tuning),
@@ -68,6 +70,9 @@ void BotMain::set_personality(const float *p_weights) {
 
 void BotMain::calculate_mods() {
 	for (size_t i = 0; i < behaviour_count_; ++i) {
+		// STAND-IN: the vehicle mods of the equipment class are folded into basic_weights_, where BF2 multiplies a separate
+		// per-bot row in. Settle: keep BF2's four factors if a class's mods and basic weights must differ.
+		// WHY: the strategies' order weights cover the ten infantry behaviours only.
 		if (taking_orders_ && current_orders_ != nullptr && i < kInfantryBehaviourCount) {
 			behaviour_urgencies_[i] = current_orders_[i] * basic_weights_[i] * personality_[i];
 		} else {
@@ -143,6 +148,8 @@ void BotMain::see(double) {
 	body_.see();
 }
 
+// STAND-IN: a plan whose senses changed counts as a default plan, so the unplanned queue takes the bot; BF2's
+// updateSensing only forwards to the senses. Settle: port BotSenses and SensingAgent.
 void BotMain::update_sensing(double) {
 	body_.update_sensing();
 	if (!plan_invalid_ && body_.senses() != decided_senses_) {
@@ -150,6 +157,8 @@ void BotMain::update_sensing(double) {
 	}
 }
 
+// STAND-IN: the queues' time-slice ageing is left out (game time stands still inside one update), and the held input is
+// kept until the new plan's first run, where BF2 resets all controls. Settle: port both and compare decisions.
 int BotMain::decision_making(double) {
 	const sim::Tick tick = body_.tick();
 	const double now = double(tick) * sim::kTickSeconds;
@@ -180,6 +189,8 @@ int BotMain::decision_making(double) {
 		winner = static_cast<BotBehaviour *>(merger_->chosen_generator());
 		float urgency = merger_->active_urgency(this);
 		if (winner == nullptr) {
+			// STAND-IN: with every urgency 0 the bot idles, where BF2 uses the merger's choice without a null check. Settle: BF2's
+			// behaviour when no urgency is positive.
 			winner = behaviours_[size_t(InfantryBehaviour::Idle)].get();
 			urgency = 0.0f;
 		}
@@ -195,6 +206,8 @@ int BotMain::decision_making(double) {
 			++stats_.chosen[size_t(winner->kind())];
 			break;
 		}
+		// STAND-IN: a behaviour whose plan is refused re-merges without it, where BF2's generatePlan returns no plan and
+		// marks the plan invalid. Settle: port the behaviour patterns' plan generation.
 		winner->refuse(tick);
 		winner->calculate_urgency(this, modifiers[size_t(winner->kind())]);
 		merge = true;
@@ -206,6 +219,8 @@ int BotMain::decision_making(double) {
 	return 1;
 }
 
+// STAND-IN: the plan-execution body is openBF3's own; a failed plan releases the body's held input as BF2's
+// resetAllControls does. Settle: port planExecution once the BAP actions drive PlayerInput.
 void BotMain::plan_execution(double) {
 	if (plan_invalid_) {
 		return;
@@ -220,6 +235,8 @@ void BotMain::plan_execution(double) {
 	}
 }
 
+// STAND-IN: only the stalled-plan count; BF2's releases of lie, fire, alt-fire and reload after 15 stalled ticks are
+// left out. Settle: port them once a plan can run out of budget.
 void BotMain::update_player_action(bool p_stalled) {
 	stalled_plan_ticks_ = p_stalled ? stalled_plan_ticks_ + 1 : 0;
 }
@@ -247,6 +264,8 @@ void BotMain::rearm(const Information &p_equipment, const WeaponInfoManager &p_w
 	rearm_timer_ = 0.0;
 }
 
+// STAND-IN: updateBotVehicle and updateBot are cut to the plan, memory and behaviour resets; the host gives the
+// equipment. Settle: port them once the host's vehicles carry AI objects.
 bool BotMain::update_bot_vehicle() {
 	plan_invalid_ = true;
 	has_default_plan_ = false;

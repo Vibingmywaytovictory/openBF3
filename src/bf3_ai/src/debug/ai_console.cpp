@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AIConsole.cpp and Main/AIModuleConsole.inc @c47317b (the command names)
 #include "bf3/ai/debug/ai_console.h"
 
 #include "bf3/ai/main/ai_main.h"

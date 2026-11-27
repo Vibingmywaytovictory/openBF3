@@ -20,6 +20,7 @@ public:
 	virtual void report() = 0;
 };
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotMain.h @c47317b (its Bot base: the calls BotManager makes on a bot)
 class Bot {
 public:
 	virtual ~Bot() = default;

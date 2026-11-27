@@ -53,6 +53,7 @@ enum class PoseRequest : uint8_t { Crouch, NearCorpse };
 enum class TriggerKind : uint8_t { Aimed, Blind, Grenade, Defib, Medkit, AmmoBag, CallMedic, VehicleWeapon, Repair };
 enum class SenseFocus : uint8_t { Target, BlindPoint, Threat, ShotOrigin, Around, Vehicle, Repair };
 
+// WHY: BotSenses, SensingAgent, SensedObject and CoverDetection are not ported; the host's perception answers here.
 class InfantryBody {
 public:
 	virtual ~InfantryBody() = default;

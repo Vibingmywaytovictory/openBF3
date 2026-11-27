@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/BF2AI.cpp @c47317b (cut to the ported parts)
 #include "bf3/ai/main/ai_main.h"
 
 namespace bf3::ai {

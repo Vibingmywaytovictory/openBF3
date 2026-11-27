@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/SquadManager.cpp @c47317b
 #include "bf3/ai/squad/squad_manager.h"
 
 namespace bf3::ai {
@@ -74,6 +75,8 @@ void SquadManager::join(SquadCoordinator &r_squad, SquadPlayer &r_player) {
 	r_squad.update_squad_leader();
 }
 
+// STAND-IN: the third-member split and member removal are openBF3's own bodies; removal sends the game exitSquad.
+// Settle: compare with the pinned SquadManager bodies.
 void SquadManager::add_squad_member(int p_player_id, int p_side) {
 	if (services_.world == nullptr || p_side < 1 || p_side > 2) {
 		return;

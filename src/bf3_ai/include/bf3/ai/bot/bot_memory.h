@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotMemory.h @c47317b
 #pragma once
 
 namespace bf3::ai {

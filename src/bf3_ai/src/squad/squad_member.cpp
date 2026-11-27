@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/SquadMember.cpp @c47317b (9 s path check, 0.01, 30 m formation distance,
+// radius squared + 5)
 #include "bf3/ai/squad/squad_member.h"
 
 #include "bf3/ai/squad/squad_coordinator.h"
@@ -97,6 +99,8 @@ bool SquadMember::is_allowed_in_formation() const {
 	return vehicle != nullptr && vehicle == player_->soldier();
 }
 
+// STAND-IN: position and movement come from the player's current vehicle and FormationTuning's moving speed. Settle: BF2's
+// SquadMember position update.
 void SquadMember::update_member_pos() {
 	const AiObject *const vehicle = player_->current_vehicle();
 	position_valid_ = false;
@@ -129,6 +133,8 @@ void SquadMember::hand_goal(const SquadGoal &p_goal) {
 	}
 }
 
+// STAND-IN: a member hands its bot a SquadGoal (the squad target or its slot) where BF2 drives the bot's waypoints.
+// Settle: port BF2's member movement once bots take waypoint lists.
 void SquadMember::move_with_formation() {
 	const SquadFormation &formation = squad_->formation();
 	SquadGoal goal;

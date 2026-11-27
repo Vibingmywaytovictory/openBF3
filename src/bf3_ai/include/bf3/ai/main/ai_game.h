@@ -11,8 +11,11 @@ namespace bf3::ai {
 
 class Bot;
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/BotManager.cpp @c47317b (256 player-to-bot entries).
 inline constexpr int kMaxPlayerIds = 256;
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIInterface/BFKnowledge/BFGame.h @c47317b for isPlaying, getMaxNumberOfPlayers,
+// getRecomendedViewDistance and enemySpottedByAI; the other calls are openBF3's.
 class AiGame {
 public:
 	virtual ~AiGame() = default;

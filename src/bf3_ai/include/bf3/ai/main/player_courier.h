@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIInterface/IAIPlayerCourier.h @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/ai_object.h"

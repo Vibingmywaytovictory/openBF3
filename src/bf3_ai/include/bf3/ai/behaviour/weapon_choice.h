@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviourPattern/WeaponChoice.h @c47317b
 #pragma once
 
 #include <cstdint>

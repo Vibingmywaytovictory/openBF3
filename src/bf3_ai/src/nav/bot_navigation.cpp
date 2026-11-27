@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotNavigation.cpp @c47317b (reset and progress)
 #include "bf3/ai/nav/bot_navigation.h"
 
 #include "bf3/ai/squad/squad_world.h"
@@ -30,6 +31,8 @@ const ClusterPortal *portal_between(const ClusterGraph &p_graph, uint32_t p_from
 
 BotNavigation::BotNavigation(uint32_t p_slot, const BotNavigationParams &p_params) : slot_(p_slot), params_(p_params) {}
 
+// STAND-IN: the cluster search, the time-sliced polygon searches a few clusters ahead, the corridor corners, arrival and
+// the stuck check are openBF3's own over Detour. Settle: port BF2's quadtree path search.
 bool BotNavigation::init_pathfinding(
 		const BotNavigationWorld &p_world, const Vec3 &p_from, const Vec3 &p_to, sim::Tick p_now) {
 	reset();
@@ -145,6 +148,7 @@ void BotNavigation::update(const BotNavigationWorld &p_world, const Vec3 &p_posi
 	check_progress(p_position, p_now);
 }
 
+// STAND-IN: arrival also needs the height within twice the arrive distance. Settle: BF2's arrival test.
 bool BotNavigation::check_arrived_at_point(const Vec3 &p_position, float p_distance) const {
 	return horizontal_sq(p_position, goal_) < p_distance * p_distance &&
 			std::fabs(p_position.y - goal_.y) < 2.0f * p_distance;

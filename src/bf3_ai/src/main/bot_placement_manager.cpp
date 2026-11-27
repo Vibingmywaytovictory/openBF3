@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/BotPlacementManager.cpp @c47317b
 #include "bf3/ai/main/bot_placement_manager.h"
 
 #include "bf3/ai/main/bot_manager.h"
@@ -6,8 +7,10 @@ namespace bf3::ai {
 
 namespace {
 
+// WHY: spawnBot, as shipped, spends a placement and only renames the last created bot to this placeholder.
 const std::string kPlaceholderName = "FIXME";
 
+// STAND-IN: an unknown team is refused where BF2 indexes past its two lists. Settle: BF2's result for a team not 1 or 2.
 bool valid_team(int p_team) {
 	return p_team == 1 || p_team == 2;
 }

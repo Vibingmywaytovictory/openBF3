@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/BotManager.cpp @c47317b
 #include "bf3/ai/main/bot_manager.h"
 
 #include "bf3/ai/bot/communication_agent.h"
@@ -691,6 +692,7 @@ void BotManager::set_bot_is_dead(int p_player_id) {
 		return;
 	}
 	for (auto it = vehicle_bots_.begin(); it != vehicle_bots_.end(); ++it) {
+		// WHY: the map holds bot ids but is searched for the player id, as shipped in BF2's setBotIsDead.
 		if (it->second == uint32_t(p_player_id)) {
 			vehicle_bots_.erase(it);
 			break;

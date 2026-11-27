@@ -18,6 +18,7 @@ struct SquadCommanderStats {
 
 SquadOrder squad_order_of(CommanderOrder p_order);
 
+// WHY: BF3 has no commander; BFCommander's orders are assigned straight to the named squad and area.
 class SquadCommanderGame final : public CommanderGame {
 public:
 	SquadCommanderGame(SquadManager &r_squads, const StrategyDecisions &p_decisions) :

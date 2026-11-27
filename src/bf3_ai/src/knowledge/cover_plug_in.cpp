@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIKnowledge/IPICover.cpp @c47317b
 #include "bf3/ai/knowledge/plug_ins.h"
 
 namespace bf3::ai {

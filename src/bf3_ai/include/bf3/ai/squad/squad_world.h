@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIInterface/BFKnowledge/AIPlayer.h, BFSquad.h and BFGame.h @c47317b (cut to the calls used)
 #pragma once
 
 #include "bf3/ai/knowledge/ai_object.h"
@@ -90,6 +91,9 @@ public:
 	virtual bool is_valid_position(const Vec3 &p_position) const = 0;
 };
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/SquadFormation.cpp @c47317b (setLineFormation's spacing 1.0).
+// INFERRED: 0.5 m/s is BF2's 0.25 squared-speed test on the anchor. Settle: compare with BF2's 3-D speed test.
+// STAND-IN: trailing while moving and the 10 s member wait are hand-picked. Settle: BF2's arrival-based member wait.
 struct FormationTuning {
 	float line_spacing_m = 1.0f;
 	float moving_speed_mps = 0.5f;

@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/SquadCoordinator.h and SquadCoordinator.cpp @c47317b (10 s, 60 s and 20 s)
 #pragma once
 
 #include "bf3/ai/squad/squad_formation.h"

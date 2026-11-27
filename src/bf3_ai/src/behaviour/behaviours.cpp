@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviour/BotBehaviour.cpp, BBFireInfantery.cpp and BBMedicAssist.cpp @c47317b
 #include "bf3/ai/behaviour/behaviours.h"
 
 #include "bf3/ai/interpreter/bot_plan.h"
@@ -13,6 +14,8 @@ namespace {
 using core::KeyDef;
 using core::KeyKind;
 
+// STAND-IN: the fire and cover situation values below are hand-picked; BF2's come from its behaviour patterns.
+// Settle: port BBPFireInfantery's and BBPTakeCoverInfantry's urgencies.
 constexpr float kFireThrowing = 1.0f;
 constexpr float kFireSight = 0.55f;
 constexpr float kFireThrow = 0.4f;
@@ -169,6 +172,8 @@ void BotBehaviour::reset(Bot *) {
 	refused_tick_ = UINT32_MAX;
 }
 
+// STAND-IN: urgency is the situation times the modifier, a stand-in for each BF2 behaviour's own calculateUrgency.
+// Settle: port the per-behaviour calculateUrgency bodies.
 float BotBehaviour::calculate_urgency(Bot *, float p_modifier) {
 	situation_ = refused_tick_ == body_.tick() ? 0.0f : situation();
 	const float u = situation_ > 0.0f ? situation_ * p_modifier : 0.0f;
@@ -178,6 +183,8 @@ float BotBehaviour::calculate_urgency(Bot *, float p_modifier) {
 	return urgency_;
 }
 
+// STAND-IN: the infantry behaviours' situations and plans below are openBF3's own over the host body's senses, where
+// BF2's come from behaviour patterns and sensing agents. Settle: port the AIBotBehaviourPattern plans.
 float BBRevive::situation() {
 	return body_.senses().revive_target ? 1.0f : 0.0f;
 }

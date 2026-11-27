@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIInterface/BFKnowledge/IAIObject.h, IAIObjectPlugIn.h, IWeapon.h, SoldierPose.h and
+// InformationType.h @c47317b
 #pragma once
 
 #include "bf3/core/math.h"
@@ -122,6 +124,8 @@ public:
 	virtual bool projectile_speed(Vec3 &r_out) const = 0;
 };
 
+// STAND-IN: openBF3's own numbering of the 33 inputs the AI names; BF2's io::PlayerInputMap numbers them differently
+// (PIFire 8, PILie 37). Settle: BF2's numbering if a script or control mask needs its values.
 enum class PlayerInputMap : uint8_t {
 	Yaw = 0,
 	Pitch = 1,

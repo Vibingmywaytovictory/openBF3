@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/BAPVariable.h and AIPlanInterpreter/BAPContext.h @c47317b
 #pragma once
 
 #include <cstddef>

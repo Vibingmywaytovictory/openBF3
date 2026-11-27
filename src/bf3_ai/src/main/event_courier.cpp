@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AIEventCourier.cpp @c47317b
 #include "bf3/ai/main/event_courier.h"
 
 #include "bf3/ai/debug/draw_primitives.h"

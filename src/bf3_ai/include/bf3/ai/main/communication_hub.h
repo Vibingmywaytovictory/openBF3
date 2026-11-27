@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/CommunicationHub.h and CommunicationHub.cpp @c47317b (-1000 s, strength type
+// 6)
 #pragma once
 
 #include "bf3/ai/bot/communication_agent.h"

@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPathFinding/Material/Material.cpp (the material ids, NumberOfMaterials 9) and
+// MaterialManager.h @c47317b
 #pragma once
 
 #include <array>

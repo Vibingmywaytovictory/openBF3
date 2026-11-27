@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIKnowledge/WeaponInfo.cpp, WeaponInfoReal.cpp, WeaponInfoKnown.cpp and
+// AIUtils/WeaponInfoManager.cpp @c47317b
 #include "bf3/ai/knowledge/weapon_info.h"
 
 #include "bf3/ai/behaviour/curves.h"

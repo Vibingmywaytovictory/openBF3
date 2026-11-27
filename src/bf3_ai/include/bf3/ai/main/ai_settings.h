@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AISettings.h and AISettings.cpp @c47317b (the constructor's defaults and
+// armour class values)
 #pragma once
 
 #include "bf3/ai/knowledge/knowledge_context.h"

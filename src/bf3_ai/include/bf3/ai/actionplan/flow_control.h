@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/ BAPCombiner*, BAPFlowC*, BAPWrapperFinished, BAPInfoWrapper,
+// BAPAIdle and BAPAEvaluateCondition @c47317b
 #pragma once
 
 #include "bf3/ai/actionplan/statement.h"

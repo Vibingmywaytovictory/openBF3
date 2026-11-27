@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/BAPInterpreter.cpp @c47317b
 #include "bf3/ai/interpreter/bap_interpreter.h"
 
 #include "bf3/ai/interpreter/infantry_entries.h"
@@ -12,6 +13,8 @@ namespace {
 using T = BAPStatementType;
 using D = AiDomain;
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AIConsole.cpp @c47317b (the 42 entries in its registration order).
+// STAND-IN: the domain and body columns are openBF3's; only the 7 marked entries have a body. Settle: port the rest.
 constexpr PlanEntryKind kKinds[] = {
 	{ "EntryTankMoveTo", T::MoveTo, D::Vehicle },
 	{ "EntryTankMoveToObject", T::MoveToObject, D::Vehicle },
@@ -57,6 +60,9 @@ constexpr PlanEntryKind kKinds[] = {
 	{ "EntryHeliMoveAwayFromObject", T::MoveAwayFromObject, D::Air },
 };
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/ @c47317b: the ten ported statements whose hasDefault is true.
+// INFERRED: all ten are active at Full from the start, as BF2's .ai settings are taken to activate them.
+// Settle: the activation lines of BF2's AI .ai files.
 constexpr BAPStatementType kDefaultTypes[] = { T::Parallel, T::Serial, T::PlanEnd, T::If, T::Wait, T::While, T::Idle,
 	T::InfoWrapper, T::FinishedWrapper, T::EvaluateCondition };
 

@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIKnowledge/IPIMobile.cpp, IPIMobileReal.cpp and IPIMobileKnown.cpp @c47317b
 #include "bf3/ai/knowledge/information_factory.h"
 #include "bf3/ai/knowledge/plug_ins.h"
 

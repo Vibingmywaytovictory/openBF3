@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/CommunicationAgent.h and AIInterface/BFKnowledge/BFRadioComm.h @c47317b
 #pragma once
 
 #include <array>
@@ -10,6 +11,8 @@
 
 namespace bf3::ai {
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/CommunicationAgent.cpp @c47317b (18 types; callForMedic's types 3 and 4,
+// channels 0 and 6, priority 5) for the 6 constants below.
 inline constexpr size_t kRadioMessageTypes = 18;
 inline constexpr int kRadioCallForMedic = 3;
 inline constexpr int kRadioCallForRepair = 4;
@@ -30,6 +33,8 @@ public:
 	virtual bool settings(int p_type, RadioMessageSettings &r_settings) const = 0;
 };
 
+// STAND-IN: only the call for a medic is voiced, its time to live and send period both bb.call_s and its modifier 1,
+// in place of BF2's AIRadioMessages.ai. Settle: values from BF2's AIRadioMessages.ai or retail radio timings.
 class CallRadioVoices final : public RadioVoices {
 public:
 	explicit CallRadioVoices(float p_call_seconds) : call_seconds_(p_call_seconds) {}

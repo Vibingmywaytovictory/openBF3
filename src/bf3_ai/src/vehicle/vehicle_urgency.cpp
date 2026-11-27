@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviour/VehicleUrgencyCalculator.cpp @c47317b
 #include "bf3/ai/vehicle/vehicle_change.h"
 
 #include "bf3/ai/squad/squad_world.h"
@@ -195,6 +196,8 @@ float fire_strength(const ChangeBot &p_bot, std::span<const ChangeVehicle> p_veh
 
 }
 
+// INFERRED: the camera test is the seat's yaw and pitch turret limits about the hull axes. Settle: BF2's camera validity
+// test for a seat.
 bool change_camera_valid(const ChangeVehicle &p_vehicle, uint8_t p_seat, const Vec3 &p_direction) {
 	const ChangeSeat &seat = p_vehicle.seat[p_seat];
 	const auto dot = [&](const Vec3 &p_axis) {

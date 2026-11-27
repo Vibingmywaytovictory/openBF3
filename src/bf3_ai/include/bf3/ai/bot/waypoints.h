@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/WaypointList.h and the WPEmpty, WPMoveTo, WPCloseTo, WPPatrol,
+// WPAltitudeCloseTo, WPAltitudeMoveTo and WPAltitudePatrol .h and .cpp files @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/ai_object.h"

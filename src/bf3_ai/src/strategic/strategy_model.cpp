@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIStrategic/ Strategy, StrategyCondition, StrategyPrerequisite, SCConstant,
+// SCHomogeneous, SCHeterogeneous and SCArea .cpp, and AIStrategicMap/TemperatureTreeModifiers.cpp @c47317b
 #include "bf3/ai/strategic/strategy_model.h"
 
 #include <cmath>
@@ -222,6 +224,8 @@ float Strategy::calculate_prerequisite(
 	if (!prohibited_preceding_.empty() && prohibited_preceding_.contains(p_previous)) {
 		return 0.0f;
 	}
+	// STAND-IN: a strategy with no prerequisite scores 0 and one with no abort condition answers its abort level, where BF2
+	// reads through null. Settle: a BF2 strategy file with a strategy lacking either.
 	if (prerequisite_ == nullptr) {
 		return 0.0f;
 	}

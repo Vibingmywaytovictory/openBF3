@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotNavigation.h @c47317b
 #pragma once
 
 #include "bf3/ai/nav/nav_clusters.h"
@@ -10,8 +11,13 @@
 namespace bf3::ai {
 
 struct BotNavigationParams {
+	// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotNavigation.cpp @c47317b (the constructor's 2.0 arrive distance and second
+	// 2.0).
+	// INFERRED: the second 2.0 is the point distance. Settle: BF2's reader of that field.
 	float arrive_distance_m = 2.0f;
 	float point_distance_m = 2.0f;
+	// STAND-IN: the search horizon, progress window (180 ticks, 1 m), off-path distance and search extents are hand-picked.
+	// Settle: BF2's values once its cluster and polygon searches are ported.
 	uint32_t clusters_ahead = 4;
 	sim::Tick progress_ticks = 180;
 	float progress_m = 1.0f;

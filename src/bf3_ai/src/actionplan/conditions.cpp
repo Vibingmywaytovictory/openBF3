@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/ BAPConAnd, BAPConNot, BAPConTime and BAPConSharedCondition.cpp,
+// and AIPlanInterpreter/BAPContext.cpp @c47317b
 #include "bf3/ai/actionplan/conditions.h"
 
 namespace bf3::ai {

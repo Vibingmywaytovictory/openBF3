@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/Aimer.cpp and BAPAAimAtObject.cpp (getAimVec) @c47317b
 #include "bf3/ai/actionplan/aimer.h"
 
 #include <algorithm>
@@ -31,6 +32,8 @@ void push_root(double p_root, double p_a, double p_b, double p_c, double p_d, st
 
 }
 
+// STAND-IN: an own cubic solver (closed form, two Newton steps) in place of BF2's Polynom::findRoots, engine math
+// outside Code/BF2/AI. Settle: compare its roots with Polynom::findRoots on the same polynomials.
 void cubic_roots(float p_c0, float p_c1, float p_c2, float p_c3, std::vector<float> &r_roots) {
 	r_roots.clear();
 	const double a = p_c3, b = p_c2, c = p_c1, d = p_c0;
@@ -402,6 +405,7 @@ bool Aimer::nearest_impact_point(const Vec3 &p_direction, Vec3 &r_out, double &r
 	return found;
 }
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/BAPAAimAtObject.cpp @c47317b (the core of getAimVec).
 bool aim_vector(Aimer &r_aimer, const Vec3 &p_origin, const Vec3 &p_target, const Vec3 &p_target_velocity,
 		const Vec3 &p_own_velocity, float p_accuracy, float p_drag, float p_speed, float p_gravity, double p_time,
 		Vec3 &r_direction) {

@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotMemory.cpp @c47317b (modifyBehaviourUrgency)
 #include "bf3/ai/bot/bot_memory.h"
 
 #include "bf3/ai/behaviour/behaviours.h"

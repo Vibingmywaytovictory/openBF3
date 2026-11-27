@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AIConsole.h @c47317b
 #pragma once
 
 #include <functional>

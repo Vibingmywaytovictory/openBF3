@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/SquadManager.h and SquadManager.cpp @c47317b (the split at 3 members)
 #pragma once
 
 #include "bf3/ai/main/ai_game.h"

@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPathFinding/AerialHeightMap/AerialHeightMap.cpp @c47317b
 #include "bf3/ai/vehicle/aerial_height_map.h"
 
 #include <algorithm>
@@ -58,6 +59,7 @@ void AerialHeightMap::create_height_map(
 	}
 }
 
+// STAND-IN: a cell keeps the ceiling of its highest sample over an even sample grid. Settle: BF2's per-cell height rule.
 uint16_t AerialHeightMap::compute_height_at(
 		const AerialHeightSource &p_source, int p_cell_x, int p_cell_z, int p_samples_per_axis) const {
 	const int samples = std::max(p_samples_per_axis, 1);
@@ -74,6 +76,7 @@ uint16_t AerialHeightMap::compute_height_at(
 	return uint16_t(std::clamp(std::ceil(highest), 0.0f, 65535.0f));
 }
 
+// WHY: the bytes go to the caller's cache, as openBF3 writes nothing into the level folder.
 std::vector<uint8_t> AerialHeightMap::serialize() const {
 	std::vector<uint8_t> out;
 	out.reserve(kHeaderBytes + heights_.size() * sizeof(uint16_t));

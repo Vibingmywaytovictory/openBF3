@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPathFinding/AerialHeightMap/AerialHeightMap.h and AerialHeightMap.cpp @c47317b
+// (16 m cells, 9999)
 #pragma once
 
 #include "bf3/ai/knowledge/ai_object.h"
@@ -11,6 +13,8 @@ namespace bf3::ai {
 
 inline constexpr float kMissingGroundHeight = 9999.0f;
 
+// STAND-IN: the map samples this source where BF2 queries its collision world. Settle: compare with a collision-ray
+// sampler on a level.
 class AerialHeightSource {
 public:
 	virtual ~AerialHeightSource() = default;

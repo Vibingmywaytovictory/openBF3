@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AIMain.h, AIMain.cpp (the quotients 0.15, 0.875, 0.125) and BF2AI.h @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/information_factory.h"

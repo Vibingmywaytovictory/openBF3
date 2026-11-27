@@ -12,6 +12,8 @@ namespace bf3::ai {
 inline constexpr uint32_t kNoCluster = UINT32_MAX;
 
 struct NavClusterOptions {
+	// STAND-IN: a cluster grows to 400 m2 or 64 polygons, hand-picked; BF2 reads its clusters from a baked file.
+	// Settle: cluster sizes from a BF2 level's cluster file.
 	float target_area_m2 = 400.0f;
 	uint32_t max_polygons = 64;
 };

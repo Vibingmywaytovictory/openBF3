@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/SquadMember.h and SquadMember.cpp @c47317b (formation distance 900, 30 m
+// squared)
 #pragma once
 
 #include "bf3/ai/squad/squad_world.h"

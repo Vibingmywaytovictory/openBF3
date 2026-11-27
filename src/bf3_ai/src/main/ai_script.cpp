@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AIConsole.cpp and AIModuleConsole.inc, and the AIInterface files
+// Module/BFConsole.cpp, BFKnowledge/WeaponTemplate.cpp and BFKnowledge/SoldierPose.cpp @c47317b
 #include "bf3/ai/main/ai_script.h"
 
 #include "bf3/ai/behaviour/behaviours.h"
@@ -132,6 +134,8 @@ constexpr std::array<std::string_view, kCombatStrengthTypeCount> kStrengthTypeNa
 constexpr std::array<std::string_view, 5> kSoldierPoseNames{ "NotAvailable", "Standing", "Crouching", "Lying",
 	"Swimming" };
 
+// STAND-IN: the 33 inputs the AI tree names, in openBF3's own PlayerInputMap order, not BF2's io::PlayerInputMap
+// numbering. Settle: BF2's numbering if a script or control mask needs its values.
 constexpr std::array<std::pair<std::string_view, PlayerInputMap>, 33> kPlayerInputNames{ {
 		{ "PIYaw", PlayerInputMap::Yaw },
 		{ "PIPitch", PlayerInputMap::Pitch },
@@ -363,6 +367,8 @@ const Command kCommands[] = {
 				find_named(c.given_modifiers, c.active_modifiers)->at(size_t(id)) = true;
 				return core::Status::success();
 			} },
+	// STAND-IN: a set that gives a behaviour no modifier is refused (complete_set), where BF2 zero-fills it. Settle: BF2 AI
+	// files that leave a modifier unset.
 	{ "aiSettings.setBasicBotWeights", 1, 1,
 			[](Args a, AiConfig &c) -> core::Status {
 				BF3_TRY(complete_set(c, a[0]));
@@ -393,6 +399,8 @@ const Command kCommands[] = {
 				c.settings.standard_personality[size_t(side - 1)] = *set;
 				return core::Status::success();
 			} },
+	// STAND-IN: it runs while max bots is -1, where BF2's AIConsole returns at once; its pattern name is unread. Settle: BF2
+	// with the shipped AIDefault.ai's max bots of -1, which would drop every line.
 	{ "aiSettings.setVehicleBehaviour", 7, 7,
 			[](Args a, AiConfig &c) -> core::Status {
 				VehicleBehaviour b;
@@ -648,6 +656,8 @@ std::filesystem::path level_strategic_areas_script(const std::filesystem::path &
 	return level_ai_script(p_root, p_level).parent_path() / kStrategicAreasScript;
 }
 
+// STAND-IN: a bad line (unknown command, argument count, number) fails the whole script and changes nothing, where BF2's
+// console skips it. Settle: load BF2's shipped AI files unchanged and compare.
 core::Status run_ai_script(std::string_view p_text, std::string_view p_name, AiConfig &r_config) {
 	const std::string name(p_name);
 	if (p_text.size() > kMaxAiScriptBytes) {
@@ -821,6 +831,8 @@ void add_generated_weapon_templates(const WeaponTemplateMap &p_generated, AiConf
 	}
 }
 
+// INFERRED: AIDefault.ai, AIBehaviours.ai, then the level's StrategicAreas.ai and AI.ai, in BF2's level-load order; the
+// Weapons/*.ai files, derived areas and generated templates are openBF3's. Settle: BF2's load order per mode.
 core::Result<AiConfig> load_level_ai_config(const std::filesystem::path &p_root, std::string_view p_level,
 		std::string_view p_derived_areas, const WeaponTemplateMap &p_generated_weapons) {
 	AiConfig config;
@@ -895,10 +907,14 @@ core::Status apply_behaviour_weights(const AiConfig &p_config, BehaviourTuning &
 			if (row != nullptr) {
 				std::copy_n(row->begin(), std::min(row->size(), into.size()), into.begin());
 			}
+			// INFERRED: a declared class weighs 0 for a behaviour it does not bind, as AIConsole::setVehicleBehaviour registers a
+			// class's behaviours one by one. Settle: BF2's vehicle behaviour table for an unbound slot.
 			tuning.class_weights[k][i] = !binds ? 0.0f
 					: own != nullptr			? p_config.settings.basic_bot_weights[i] * own[i]
 												: out.weight;
 		}
+		// STAND-IN: a memory curve must be a UCConstant or UCLinear; BotMain keeps one UCLinear a behaviour. Settle: a UCXInverse
+		// memory curve in BF2's AI files.
 		if (curve.kind == UrgeCurveDef::Kind::Linear) {
 			out.slope = curve.values[0];
 			out.offset = curve.values[1];

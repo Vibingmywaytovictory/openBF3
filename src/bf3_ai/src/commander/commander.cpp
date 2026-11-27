@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIInterface/BFKnowledge/BFCommander.cpp and AIDLL/AI/AIStrategic/SAI.cpp @c47317b
 #include "bf3/ai/commander/commander.h"
 
 namespace bf3::ai {

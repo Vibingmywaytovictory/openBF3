@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviourPattern/WeaponChoice.cpp @c47317b (choseWeapon)
 #include "bf3/ai/behaviour/weapon_choice.h"
 
 namespace bf3::ai {

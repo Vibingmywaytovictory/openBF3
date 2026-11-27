@@ -1,9 +1,13 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviour/BBMedicAssist.h, AIBotBehaviourPattern/BBPMedicAssist.h and
+// BBPFireInfantery.h @c47317b
 #pragma once
 
 #include <cstdint>
 
 namespace bf3::ai {
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviour/BBMedicAssist.cpp @c47317b (75 m, 0.75, 0.99, x2, x10) and
+// AIBotBehaviourPattern/BBPFireInfantery.cpp (back off to 30 m, 9 m clear, 0.7 s) for the 8 constants below.
 inline constexpr float kAssistRadiusMetres = 75.0f;
 inline constexpr float kAssistHealth = 0.75f;
 inline constexpr float kAssistHumanHealth = 0.99f;
@@ -29,6 +33,8 @@ struct PlacedExplosiveCheck {
 	bool charges_out = false;
 };
 
+// STAND-IN: BBPFireInfantery's placed-explosive plan becomes one phase step the host body calls. Settle: port the plan's
+// statements once the BAP actions drive a bot.
 ExplosivePhase placed_explosive_next(ExplosivePhase p_phase, const PlacedExplosiveCheck &p_check);
 
 }

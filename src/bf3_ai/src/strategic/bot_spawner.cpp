@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIStrategicMap/BotSpawner.cpp @c47317b
 #include "bf3/ai/strategic/bot_spawner.h"
 
 #include "bf3/ai/knowledge/information_factory.h"
@@ -25,6 +26,8 @@ constexpr float kDistanceWeight = 0.1f;
 constexpr float kAreaBoxScale = 3.0f;
 constexpr float kInfantryPressure = 1.5f;
 constexpr float kDamagedHealth = 0.5f;
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIStrategicMap/BotSpawner.cpp @c47317b (bits 7 and 21, ITNaval and ITSoldier, skip
+// a unit).
 constexpr uint32_t kFlagNoSpawnUnitA = 0x80u;
 constexpr uint32_t kFlagNoSpawnUnitB = 0x200000u;
 
@@ -282,6 +285,8 @@ int BotSpawner::find_suitable_kit(const SpawnObjective *p_object, int p_side, Sp
 
 	const Vec2 centre = p_object->centre();
 	const Vec2 position = p_object->position(p_side);
+	// STAND-IN: the scan box spans the far corner and the objective's position, sorted into min and max, and the
+	// assigned-squad equipment scan is left out. Settle: port getBoxMaxCorner and the squad scan.
 	const Vec2 far_corner{ centre.x - (position.x - centre.x) * kAreaBoxScale,
 		centre.y - (position.y - centre.y) * kAreaBoxScale };
 	const Vec2 box_min{ std::min(far_corner.x, position.x), std::min(far_corner.y, position.y) };

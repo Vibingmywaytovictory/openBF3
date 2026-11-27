@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/ BAPAMoveTo, BAPAMoveToObject, BAPASoldierPose, BAPATrigger,
+// BAPConIsTriggered and BAPASense @c47317b
 #pragma once
 
 #include "bf3/ai/actionplan/statement.h"
@@ -8,8 +10,13 @@
 
 namespace bf3::ai {
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/BAPASoldierPose.cpp @c47317b (bits 37 and 38, BF2's PILie and
+// PICrouch).
+// WHY: the bits are in BF2's input numbering, not PlayerInputMap's.
 inline constexpr uint64_t kSoldierPoseControls = 0x6000000000ull;
 
+// STAND-IN: the move and object actions carry the host walker's goal kind and point, where BF2's carry information
+// handles and the soldier inputs. Settle: port BF2's action bodies once the host's objects carry AI handles.
 class BAPAMoveTo final : public BAPAction {
 public:
 	BAPAMoveTo(MoveGoal p_goal, const Vec3 &p_point, int p_pattern_id) :

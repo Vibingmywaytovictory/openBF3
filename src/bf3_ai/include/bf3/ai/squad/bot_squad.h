@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotSquad.h @c47317b
 #pragma once
 
 #include "bf3/ai/squad/squad_coordinator.h"
@@ -71,6 +72,7 @@ private:
 };
 
 inline constexpr size_t kCohesionBins = 128;
+// WHY: cohesion is sampled only once the leader has left his spawn point, as a squad still on it proves nothing.
 inline constexpr float kCohesionLeaderWalkedNears = 2.0f;
 
 struct SquadCohesion {

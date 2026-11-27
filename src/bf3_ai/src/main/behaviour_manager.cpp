@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/BotBehaviourManager.cpp @c47317b (the 26 create functions in its registration
+// order)
 #include "bf3/ai/main/behaviour_manager.h"
 
 #include "bf3/ai/interpreter/bap_interpreter.h"
@@ -11,6 +13,7 @@ namespace {
 
 using D = AiDomain;
 
+// STAND-IN: each kind's domain (vehicle and air ones off unless enabled) is openBF3's. Settle: port the create functions.
 constexpr BehaviourKind kKinds[] = {
 	{ "BBAvoid", D::Any },
 	{ "BBMoveTo", D::Any },

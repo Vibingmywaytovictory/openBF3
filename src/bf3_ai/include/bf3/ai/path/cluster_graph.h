@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPathFinding/Cluster/Cluster.h, ClusterGraph.h and ClusterNodeManager.h @c47317b
+// (313 buckets)
 #pragma once
 
 #include "bf3/ai/knowledge/ai_object.h"
@@ -11,6 +13,7 @@
 namespace bf3::ai {
 
 struct Cluster {
+	// INFERRED: a cluster's first 8 bytes, unread by BF2, are its polygon range. Settle: BF2's cluster file layout.
 	uint32_t first_polygon = 0;
 	uint32_t number_of_polygons = 0;
 	uint32_t first_portal = 0;
@@ -20,6 +23,7 @@ struct Cluster {
 
 struct ClusterPortal {
 	Vec3 position{};
+	// INFERRED: a portal's unread field is the cluster it leads to. Settle: BF2's cluster file layout.
 	uint32_t to_cluster = 0;
 };
 

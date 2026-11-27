@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPathFinding/Material/Material.cpp and MaterialManager.cpp @c47317b
 #include "bf3/ai/path/material.h"
 
 #include "bf3/core/util/text.h"
@@ -25,6 +26,8 @@ constexpr float kDangerCost = 1000.0f;
 
 }
 
+// STAND-IN: an unknown name parses to none where BF2 raises a debug error and assigns nothing. Settle: BF2's result for an
+// unknown material name.
 std::optional<MaterialId> parse_material(std::string_view p_token) {
 	for (const auto &[name, id] : kMaterialNames) {
 		if (core::iequals_ascii(p_token, name)) {

@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIKnowledge/WeaponInfo.h, WeaponInfoReal.h, WeaponInfoKnown.h and
+// AIUtils/WeaponInfoManager.h @c47317b
 #pragma once
 
 #include "bf3/ai/knowledge/handle_pool.h"

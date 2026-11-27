@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotMain.h and BotOrder.h @c47317b
 #pragma once
 
 #include "bf3/ai/behaviour/behaviours.h"
@@ -17,6 +18,7 @@
 
 namespace bf3::ai {
 
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotMain.cpp @c47317b (decisionMaking's hasChanged(bot, 0.87f, 1.15f)).
 inline constexpr float kQuotientLow = 0.87f;
 inline constexpr float kQuotientHigh = 1.15f;
 
@@ -64,6 +66,8 @@ public:
 	BotLodLevel lod_level() const override { return lod_level_; }
 	uint32_t current_equipment() const override { return current_equipment_; }
 	void set_current_equipment(uint32_t p_handle) override { current_equipment_ = p_handle; }
+	// STAND-IN: a bot the host keeps out of squads counts as having its squad member, as every BF2 bot is in a squad.
+	// Settle: a squads-off rule from BF2's BotManager, or always give a bot its member.
 	bool has_squad_member() const override { return squad_member_ != nullptr || !takes_squads_; }
 	int decision_making(double p_slice) override;
 	void plan_execution(double p_slice) override;
@@ -75,9 +79,12 @@ public:
 	void set_bot_stuck(bool p_stuck) override { bot_stuck_ = p_stuck; }
 	void see(double p_slice) override;
 	void update_sensing(double p_slice) override;
+	// STAND-IN: event_heardObject is dropped, as BotSenses is not ported. Settle: port BotSenses.
 	void heard_object(uint32_t) override {}
 	void update_communication() override;
 	CommunicationAgent *communication() const override { return communication_.get(); }
+	// STAND-IN: the path search and navigation calls below do nothing; the host's walker paths the bot's plan.
+	// Settle: run BotNavigation through BotMain.
 	bool path_search_pending() const override { return false; }
 	void update_obstacles() override {}
 	bool navigation_active() const override { return false; }

@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIStrategicEntity/AIStrategicArea.cpp @c47317b
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/commander/commander.h"
 #include "bf3/ai/knowledge/information_factory.h"
@@ -65,6 +66,8 @@ void AIStrategicArea::post_load_init() {
 		centre_ = { flat.x - radius, flat.y - radius };
 		height_ = point.y;
 		internal_constructor_call(flat);
+		// STAND-IN: a control point's map offsets start at its point, so the order position becomes its nav point. Settle: BF2's
+		// order position for a control-point area.
 		for (MapData &data : map_data_) {
 			data.offset = point;
 		}
@@ -365,6 +368,8 @@ bool AIStrategicArea::is_inside(const Vec2 &p_point) const {
 	return centre_.x <= p_point.x && p_point.x <= maximum.x && centre_.y <= p_point.y && p_point.y <= maximum.y;
 }
 
+// STAND-IN: the take-over counter and takeable check ask the StrategicGame for any area with a control point, where BF2
+// asks only areas flagged ControlPoint; openBF3 sets no type flags. Settle: set the type flags from the level.
 float AIStrategicArea::control_point_take_over_counter() const {
 	if (control_point_ != kNoControlPoint && services_.game != nullptr) {
 		return services_.game->control_point_take_over_counter(control_point_);

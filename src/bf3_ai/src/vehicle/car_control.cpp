@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/CarControl.cpp, EntryCarMoveTo.cpp and AIBot/BotNavigation.cpp
+// (checkProgress) @c47317b
 #include "bf3/ai/vehicle/car_control.h"
 
 #include <algorithm>
@@ -75,6 +77,8 @@ CarControls car_control_towards_direction(
 	}
 	out.turn = std::clamp(angle * 3.0f, -1.0f, 1.0f);
 	float speed = p_speed * p_command.mode;
+	// INFERRED: the angular velocity is in the hull frame (z roll, x pitch). Settle: BF2's frame for the vehicle's rotational
+	// speed.
 	const float tilt = std::max(std::fabs(p_rotational_speed[2]), std::fabs(p_rotational_speed[0]));
 	if (tilt > 0.15f) {
 		speed = (1.0f - std::min((tilt - 0.15f) / 0.7f, 1.0f) * 0.8f) * speed;
@@ -114,6 +118,8 @@ float car_approach_factor(float p_remaining, float p_smallest_radius) {
 	return std::max(gap * gap / 225.0f, 0.2f);
 }
 
+// STAND-IN: no obstacle list (CommonControls' collision, avoid-side and slow-down checks are not ported), so the
+// collided-object statuses fall back to 0. Settle: port CommonControls.
 CarCommand car_action_status(int &r_status, const CarSituation &p_situation) {
 	CarCommand out;
 	const CarSituation &s = p_situation;

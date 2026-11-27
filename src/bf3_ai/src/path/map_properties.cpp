@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPathFinding/NavMesh/MapProperties.cpp @c47317b
 #include "bf3/ai/path/map_properties.h"
 
 #include <algorithm>

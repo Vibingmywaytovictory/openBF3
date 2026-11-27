@@ -24,6 +24,8 @@ bool linked(const sim::NavPolyGraph &p_graph, uint32_t p_from, uint32_t p_to) {
 
 }
 
+// STAND-IN: walk, crouch and drop navmesh areas are Ground and every other area is invalid; no Road or water material.
+// Settle: a mapping from BF3 ground materials to BF2's path materials.
 MaterialId nav_area_material(uint8_t p_area) {
 	switch (p_area) {
 		case sim::kNavAreaWalk:
@@ -40,6 +42,8 @@ uint32_t NavClusterMap::cluster_of(const sim::NavWorld &p_world, sim::NavPolyRef
 	return index < poly_cluster.size() ? poly_cluster[index] : kNoCluster;
 }
 
+// STAND-IN: clusters grow breadth-first over two-way Detour links, so each is strongly connected; a cluster's centre is
+// the polygon nearest its area-weighted mean. Settle: BF2's cluster builder (its graph is read from a file).
 core::Result<NavClusterMap> build_nav_clusters(const sim::NavPolyGraph &p_graph, const NavClusterOptions &p_options) {
 	const size_t n = p_graph.polys.size();
 	if (p_graph.first_link.size() != n + 1 || (n > 0 && p_graph.first_link[n] != p_graph.links.size())) {
@@ -132,6 +136,7 @@ core::Result<NavClusterMap> build_nav_clusters(const sim::NavPolyGraph &p_graph,
 				if (to == kNoCluster || to == c) {
 					continue;
 				}
+				// STAND-IN: a portal costs the distance from one centre through the portal to the other. Settle: BF2's portal costs.
 				const float cost = distance(out.centres[c], link.portal) + distance(link.portal, out.centres[to]);
 				const auto found = best.find(to);
 				if (found == best.end() || cost < found->second.second) {

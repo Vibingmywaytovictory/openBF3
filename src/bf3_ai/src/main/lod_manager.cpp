@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AILODManager.cpp @c47317b
 #include "bf3/ai/main/lod_manager.h"
 
 #include "bf3/ai/knowledge/information_factory.h"

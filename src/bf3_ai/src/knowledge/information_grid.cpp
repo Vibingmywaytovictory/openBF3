@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIKnowledge/AIInformationGrid.cpp @c47317b
 #include "bf3/ai/knowledge/information_grid.h"
 
 #include "bf3/ai/knowledge/information_factory.h"
@@ -10,6 +11,8 @@ namespace bf3::ai {
 
 namespace {
 
+// STAND-IN: the cell index divides by the grid's extent where BF2's divides by its max corner, so a grid with a negative
+// min corner indexes right. Settle: index a BF2 level with a negative minimum corner both ways.
 int cell_index(float p_offset, int p_dim, float p_extent) {
 	if (!(p_extent > 0.0f) || std::isnan(p_offset)) {
 		return 0;

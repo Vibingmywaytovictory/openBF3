@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIStrategicEntity/AIStrategicObject.cpp, AIStrategicObjectManager.cpp,
+// SAWayPoint.cpp and AIStrategic/SAI.cpp @c47317b
 #include "bf3/ai/strategic/strategic_object.h"
 
 #include "bf3/ai/main/ai_random.h"

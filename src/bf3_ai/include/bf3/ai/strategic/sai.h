@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIStrategic/SAI.h and SAI.cpp @c47317b
 #pragma once
 
 #include "bf3/ai/commander/commander.h"
@@ -41,6 +42,8 @@ public:
 	virtual int spawn_kit(int p_player_id) const = 0;
 };
 
+// STAND-IN: a mode's SaiDecisions replace BF2's strategy choice, temperatures and distribution where it gives them (TDM
+// and Conquest do). Settle: run BF2's own stages with BF2-style strategy files per mode.
 class SaiDecisions {
 public:
 	virtual ~SaiDecisions() = default;
@@ -228,6 +231,8 @@ private:
 	int side_mask_ = 0;
 	int enemy_mask_ = 0;
 	SaiStage stage_ = SaiStage::Done;
+	// STAND-IN: -992 s where the pinned SAI.cpp constructor stores -1000; nothing moves it, so the prepare stage runs
+	// every cycle. Settle: the pin's -1000 and BF2's SAI update timing.
 	double last_update_ = -992.0;
 	bool player_commander_ = false;
 	std::vector<std::unique_ptr<BotInfo>> bots_;

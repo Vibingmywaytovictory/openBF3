@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIInterface/BFKnowledge/ BFGame.h, BFTimer.h, BFPhysics.h, BFTerrain.h,
+// BFObjectEnvironment.h, BFCollisionHandler.h and BFGraphCreator.h @c47317b (cut to the calls with a body)
 #pragma once
 
 #include "bf3/ai/knowledge/knowledge_context.h"
@@ -36,6 +38,8 @@ public:
 	virtual bool collide_line_with_world(const Vec3 &p_from, const Vec3 &p_to, Vec3 *r_hit) const = 0;
 };
 
+// STAND-IN: the host's recent shots stand in for BF2's per-projectile fire and damage calls of IBFCollisionHandler.
+// Settle: port those calls once the host forwards each projectile to the AI.
 struct AiShot {
 	int player_id = -1;
 	Vec3 origin{};

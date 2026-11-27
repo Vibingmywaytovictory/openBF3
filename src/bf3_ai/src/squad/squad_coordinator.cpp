@@ -1,3 +1,4 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/SquadCoordinator.cpp @c47317b
 #include "bf3/ai/squad/squad_coordinator.h"
 
 #include "bf3/ai/knowledge/information_factory.h"

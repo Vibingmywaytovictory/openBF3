@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIStrategic/ Strategy (.h and .cpp), StrategyCondition, StrategyPrerequisite,
+// SCConstant, SCHomogeneous, SCHeterogeneous and SCArea .h, and AIStrategicMap/TemperatureTreeModifiers.h @c47317b
 #pragma once
 
 #include "bf3/ai/strategic/strategic_object.h"

@@ -1,3 +1,5 @@
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/EntryTrigger.h and OpenBF2
+// Code/BF2/AI/AIInterface/BFKnowledge/WeaponObject.h @c47317b
 #pragma once
 
 #include "bf3/ai/main/ai_script.h"
