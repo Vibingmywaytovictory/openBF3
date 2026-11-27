@@ -15,6 +15,8 @@
 
 namespace bf3::anim {
 
+// INFERRED: an Ant tick is 1/60 s (FPS 30 and NumTicks = 2 x EndFrame, research/probes/ant-animation-probe.md 5),
+// and move group velocities are metres per tick. Settle: a note on the Ant tick rate.
 inline constexpr float kAntTicksPerSecond = 60.0f;
 inline constexpr uint32_t kMaxAntRouteDepth = 8;
 inline constexpr uint32_t kMaxMoveGroupDirections = 16;
@@ -22,6 +24,8 @@ inline constexpr uint32_t kMaxMoveGroupEntries = 8;
 inline constexpr uint32_t kMaxMoveGroupClips = 32;
 inline constexpr size_t kMaxMoveGroupTerms = 4;
 inline constexpr float kMaxMoveGroupAngle = 25.2f;
+// STAND-IN: a moving entry's speed is its clip's measured root speed times ItemSpeed, not the entry's X.
+// Settle: a note on what the speed entries' X measures.
 inline constexpr bool kMoveGroupVelocityFromRoot = true;
 
 enum class AntWeaponType : uint8_t { Rifle = 0, Hand = 1, Bags = 2, LMG = 3, AT = 4, Pistol = 5, SniperRifle = 6, Shotgun = 7, Unarmed = 8 };

@@ -16,6 +16,8 @@ struct LocoClipInfo {
 	Vec3 root_dir{};
 };
 
+// STAND-IN: hand-picked block: idle below 0.2 m/s, full cycles from 1 m/s, playback rate held to 0.5..1.6.
+// Settle: the stance's 3P graph node.
 struct LocoParams {
 	float idle_speed = 0.2f;
 	float full_speed = 1.0f;

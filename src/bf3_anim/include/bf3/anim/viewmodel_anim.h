@@ -17,6 +17,8 @@
 
 namespace bf3::anim {
 
+// STAND-IN: 0.1 s crossfades between 1p actions, and a shot cuts a reload in as fast. Settle: the 1p weapon graph's
+// transition times.
 inline constexpr float kViewmodelCrossfadeSeconds = 0.1f;
 
 enum class VmClip : uint8_t {
@@ -54,6 +56,7 @@ struct VmClipRef {
 	std::span<const VmReachTag> reach;
 };
 
+// STAND-IN: hand-picked spring defaults for the presentation springs below. Settle: retail footage of the 1p weapon.
 struct SpringParams {
 	float stiffness = 120.0f;
 	float damping = 22.0f;
@@ -71,6 +74,8 @@ bool spring_at_rest(const SpringParams &p_params, float p_target, const SpringSt
 
 float spring_impulse_for_peak(const SpringParams &p_params, float p_peak);
 
+// STAND-IN: every default in this block is a hand-tuned presentation value (viewmodel_tuning.cfg sets them).
+// Settle: retail footage of the 1p weapon's sway, bob, kick, sprint and ADS.
 struct ViewmodelTuning {
 	SpringParams sway;
 	float sway_scale = 0.02f;
@@ -250,6 +255,8 @@ ViewAngles camera_view_angles(double p_view_yaw, double p_view_pitch, float p_re
 
 namespace bf3::anim {
 
+// INFERRED: 1P_RunSpeed_ESIG (OutMovementSpeed / 0.06) and OutMovementSpeed_EBOOL (> 0.0015) are in metres per
+// 60 Hz Ant tick, so rate 1 is 3.6 m/s and moving starts at 0.09 m/s. Settle: a note on OutMovementSpeed's unit.
 inline constexpr float kVmRunSpeedUnit = 0.06f * 60.0f;
 inline constexpr float kVmMovingSpeed = 0.0015f * 60.0f;
 

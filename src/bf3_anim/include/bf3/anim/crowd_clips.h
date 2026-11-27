@@ -33,6 +33,8 @@ constexpr size_t kCrowdClips = size_t(CrowdClip::Count);
 
 constexpr uint32_t kMaxCrowdRigJoints = 1024;
 
+// STAND-IN: the 3p idle, run and aim clips are picked by these fixed rifle controller names for every weapon, not
+// chosen through the soldier's 3P Ant graph. Settle: route them through the graph by weapon type.
 struct CrowdClipNames {
 	std::string package = "b_basicassetsmp";
 	std::array<std::string, kCrowdClips> controllers{ "Rifle_StandIdle_Pose", "Rifle_RunFwd", "Rifle_RunBwd", "Rifle_RunLeft1", "Rifle_RunRight1",
@@ -105,6 +107,8 @@ enum class CrowdMoveClip : uint8_t {
 };
 inline constexpr size_t kCrowdMoveClips = size_t(CrowdMoveClip::Count);
 
+// STAND-IN: the crouch and prone moves and the crouch fire are picked by fixed rifle controller names for every
+// weapon. Settle: route them through the 3P Ant graph by weapon type.
 struct CrowdMoveClipNames {
 	std::array<std::string, kCrowdMoveClips> controllers{ "Rifle_SneakFwd", "Rifle_SneakBwdLeft45", "Rifle_SneakBwdRight45", "Rifle_SneakLeft1",
 		"Rifle_SneakRight1", "Rifle_CrawlFwd", "Rifle_CrawlBwd", "Rifle_CrawlLeft", "Rifle_CrawlRight", "Rifle_CrouchFire", "Death_StandChest",
@@ -136,6 +140,8 @@ namespace bf3::anim {
 enum class CrowdMoveGroupRole : uint8_t { Run, Sprint, Sneak, Count };
 inline constexpr size_t kCrowdMoveGroupRoles = size_t(CrowdMoveGroupRole::Count);
 
+// STAND-IN: the run, sprint and crouch move groups are named here, not reached through the 3P graph's movement nodes.
+// Settle: route them from the graph.
 struct CrowdMoveGroupNames {
 	std::array<std::string, kCrowdMoveGroupRoles> groups{ "MP_RunMoveGroup_PC", "MP_SprintMoveGroup", "MP_SneakMoveGroup_PC" };
 	ChooserIndices indices;
@@ -143,6 +149,8 @@ struct CrowdMoveGroupNames {
 
 inline constexpr std::string_view kCrowdLeftFoot = "LeftFoot";
 inline constexpr std::string_view kCrowdRightFoot = "RightFoot";
+// STAND-IN: a foot touches down on the first frame after its swing within 2 cm of its lowest height.
+// Settle: foot tags on the 3p move group clips.
 inline constexpr float kCrowdFootContactM = 0.02f;
 
 struct CrowdFootPlants {
@@ -178,6 +186,8 @@ core::Result<CrowdClipData> load_route_clip(const CrowdClipSet &p_set, const cor
 		const AntClipRoute &p_route, const std::string &p_where);
 
 inline constexpr std::string_view kCrowdThrowMaskArray = "FullBody_ThrowBlendMaskArray";
+// INFERRED: the throw mask array's value 0 is the moving mask and 1 the standing-still one. Settle: a note on the
+// signal that drives FullBody_ThrowBlendMaskArray.
 inline constexpr float kCrowdMaskMoving = 0.0f;
 inline constexpr float kCrowdMaskStill = 1.0f;
 

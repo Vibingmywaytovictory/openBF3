@@ -21,6 +21,7 @@ using core::ant::GdStruct;
 
 namespace {
 
+// SOURCE: research/PORTING-RESEARCH.md 3.3 (AntRef.AssetId is 0x15480000 | the s_BasicAssets guid index & 0xFFFF).
 constexpr uint32_t kAntRefHigh = 0x15480000u;
 constexpr uint32_t kMaxRefHops = 16;
 constexpr uint32_t kMaxChooserDepth = 8;
@@ -737,6 +738,8 @@ core::Result<BoneMask> read_blend_mask(
 				return core::make_error(where + ": " + std::string(name) + " mask value is not finite");
 			}
 			const bool rotation = name.substr(dot) == ".q";
+			// STAND-IN: one weight per joint, its rotation slot's value winning over its translation's.
+			// Settle: per-DOF masks.
 			if (rotation || !rotation_set[size_t(joint)]) {
 				out.weight[size_t(joint)] = std::clamp(w, 0.0f, 1.0f);
 				rotation_set[size_t(joint)] = rotation_set[size_t(joint)] || rotation;
@@ -862,6 +865,8 @@ core::Result<CrowdMoveGroupSet> load_crowd_move_groups(const CrowdClipSet &p_set
 			out.notes.push_back(where + ": no moving clip with root motion (the stance keeps its cycles)");
 			continue;
 		}
+		// WHY: the data does not state the sign of a direction's X, so the sign is the one that puts the moving clips'
+		// measured root headings on their directions' X.
 		const int s = err[1] <= err[0] ? 1 : 0;
 		g.x_sign = s == 0 ? 1.0f : -1.0f;
 		g.worst_direction_deg = worst[s] * 57.2957795f;

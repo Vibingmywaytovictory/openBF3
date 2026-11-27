@@ -9,6 +9,8 @@ namespace bf3::anim {
 
 using bf3::core::fmt;
 
+// INFERRED: the graph's RagdollBlend (notes R5-DT1 E) is the largest RagdollBlendValue tag of the playing death clip.
+// Settle: a note on how the death clips drive RagdollBlend.
 float CrowdDeathClip::ragdoll_target(float p_seconds) const {
 	const float tick = p_seconds * kAntTicksPerSecond;
 	float target = 0.0f;
@@ -18,6 +20,8 @@ float CrowdDeathClip::ragdoll_target(float p_seconds) const {
 	return std::clamp(target, 0.0f, 1.0f);
 }
 
+// INFERRED: DeathNode takes its first transition, in data order, whose one required signal is set.
+// Settle: a note on StateFlow transition priority.
 CrowdDeathNode CrowdDeathClips::node(const CrowdDeathChoice &p_choice) const {
 	for (const CrowdDeathNode n : order) {
 		if ((n == CrowdDeathNode::Explosion && p_choice.explosion) || (n == CrowdDeathNode::Prone && p_choice.prone) ||
@@ -33,6 +37,8 @@ uint8_t CrowdDeathClips::choose(const CrowdDeathChoice &p_choice) const {
 		case CrowdDeathNode::Prone:
 			return prone;
 		case CrowdDeathNode::Crouch: {
+			// INFERRED: the crouch chooser takes the last Threshold at or below RandomValue, else its first entry.
+			// Settle: a note on LinearSignalChooserPolicyAsset.
 			uint8_t chosen = crouch.empty() ? kNoCrowdDeathClip : crouch.front().second;
 			for (const auto &[threshold, clip] : crouch) {
 				if (threshold <= p_choice.random_value) {
@@ -42,6 +48,8 @@ uint8_t CrowdDeathClips::choose(const CrowdDeathChoice &p_choice) const {
 			return chosen;
 		}
 		default:
+			// STAND-IN: the explosion and stand nodes play no clip (their ContextDatabases are not evaluated).
+			// Settle: a note on how a ContextDatabase matches.
 			return kNoCrowdDeathClip;
 	}
 }
@@ -139,6 +147,8 @@ core::Result<RagdollRig> RagdollRig::make(
 			return core::make_error("ragdoll rig: joint " + p_bones[b] + " carries two bodies");
 		}
 		out.joints.push_back(j);
+		// INFERRED: a ragdoll body sits on its rig joint offset by minus the joint pivot, with the joint's rotation.
+		// Settle: the RagdollResource body frames (notes R5-DT2 A).
 		out.bone_to_body.push_back(Xform{ Quat{}, vec_scale(p_pivots[b], -1.0f) });
 	}
 	return out;

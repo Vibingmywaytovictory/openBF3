@@ -24,15 +24,21 @@ enum class FarPolicy : uint8_t {
 struct TemporalLodTable {
 	static constexpr size_t kTiers = 6;
 
+	// SOURCE: bf3dump of default/settings_win32's GameAnimationSettings (the six TemporalLodding distances and delta
+	// times, TemporalLoddingFarDistance 208, ClientEnable true): the tiers, far_distance and client_enable below.
 	std::array<TemporalLodTier, kTiers> tiers{ { { 2.0f, 0.02f }, { 30.0f, 0.04f }, { 60.0f, 0.06f }, { 90.0f, 0.08f }, { 120.0f, 0.10f },
 			{ 150.0f, 0.12f } } };
 	float far_distance = 208.0f;
+	// INFERRED: beyond TemporalLoddingFarDistance the pose is frozen, not updated at the last tier's rate.
+	// Settle: retail footage of a soldier past 208 m.
 	FarPolicy far_policy = FarPolicy::Freeze;
 	bool client_enable = true;
 };
 
 core::Result<TemporalLodTable> read_game_animation_settings(const core::EbxPartition &p_partition);
 
+// INFERRED: a tier's delta time applies at and beyond its distance (camera distance), nearer than the first every
+// frame. Settle: a note on GameAnimationSettings' temporal lodding.
 inline float temporal_lod_interval(const TemporalLodTable &p_table, float p_distance) {
 	if (!p_table.client_enable || !(p_distance >= p_table.tiers[0].distance)) {
 		return 0.0f;

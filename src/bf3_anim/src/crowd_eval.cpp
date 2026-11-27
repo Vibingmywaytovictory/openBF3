@@ -194,6 +194,7 @@ void CrowdEvaluator::Impl::evaluate(uint32_t p_i) {
 		s.pose.joints[size_t(clips->root_joint)].t = rig.bone(size_t(clips->root_joint)).rest.t;
 	}
 
+	// WHY: the run and aim clips leave the Wep_* joints undriven, so those joints take the weapon mesh's bind layout.
 	if (team.weapon_joints != nullptr && !team.weapon_local.empty()) {
 		const size_t m = std::min(s.pose.joints.size(), team.weapon_joints->size());
 		for (size_t j = 0; j < m; ++j) {
@@ -711,6 +712,8 @@ core::Result<std::unique_ptr<CrowdEvaluator>> CrowdEvaluator::make(const CrowdCl
 			if (c.mask.size() != rig.size()) {
 				continue;
 			}
+			// INFERRED: an aim clip's last frame is its full-pitch additive, scaled by the aim weight.
+			// Settle: a note on how the 3P graph samples the aim clips.
 			if (!core::ant::sample_clip(c.clip, float(c.tracks.end_frame), scratch)) {
 				return core::make_error("crowd: an aim clip does not sample");
 			}
@@ -1021,6 +1024,8 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 				LocalPose &dst = s.sample[cycles];
 				if (c == size_t(LocoClip::Bwd) && p_st.cycle_bwd2 != nullptr) {
 
+					// STAND-IN: the crouched backward cycle is an even blend of the two backward diagonals.
+					// Settle: the crouch move group's backward entries.
 					const CrowdClipData &c2 = *p_st.cycle_bwd2;
 					sample_pose(rig, clip.clip, clip.tracks, s.phase * float(clip.tracks.end_frame), xs.extra, s.scratch);
 					sample_pose(rig, c2.clip, c2.tracks, s.phase * float(c2.tracks.end_frame), xs.extra2, s.scratch);
@@ -1053,6 +1058,8 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 				sample_pose(rig, clip->clip, clip->tracks, tr * float(clip->tracks.end_frame), r_out, s.scratch);
 			} else {
 
+				// STAND-IN: a stance change without its transition clip blends the two stance idles by the progress.
+				// Settle: the transition clip for that pair.
 				++xs.fallbacks;
 				blend_poses(*x.stances[from].idle, *x.stances[to].idle, tr, r_out);
 			}
@@ -1109,10 +1116,13 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 		const size_t root = size_t(clips->root_joint);
 		s.pose.joints[root].t = rig.bone(root).rest.t;
 		if (vault_clip != nullptr && s.input.vault < kVaultAnimKinds) {
+			// INFERRED: the body rises by the clip's own trajectory rise over the height the vault began from (the Ant
+			// graph's PreVaultGroundHeight and DisableForceSetYPosition signals). Settle: a note on those two signals.
 			s.pose.joints[root].t.y += vault_w * (xs.extra.joints[root].t.y - vault_clip->root_start.y);
 		}
 	}
 
+	// WHY: the clips leave the Wep_* joints undriven, so those joints take the weapon mesh's bind layout.
 	if (weapon_joints != nullptr && !weapon_local.empty()) {
 		const size_t m = std::min(s.pose.joints.size(), weapon_joints->size());
 		for (size_t j = 0; j < m; ++j) {
@@ -1194,6 +1204,8 @@ void CrowdEvaluator::Impl::evaluate_combat(uint32_t p_i) {
 				}
 			}
 		} else if (fire_age < double(kCrowdFireKickSeconds)) {
+			// STAND-IN: outside the crouch a shot plays no fire clip, only the aim-pitch kick. Settle: the 3P weapon graph's
+			// fire nodes per stance.
 			kick = kCrowdFireKickDeg * core::kDegToRadF * (1.0f - float(fire_age) / kCrowdFireKickSeconds);
 			xs.firing = true;
 		}
@@ -1489,6 +1501,8 @@ bool phase_crossed(float p_from, float p_advance, float p_at) {
 	return d > 0.0f && d <= p_advance;
 }
 
+// WHY: the 3p move groups' clip controllers carry no foot tags, so the plants are the leading clip's measured
+// touchdowns.
 void foot_plants_crossed(const CrowdMoveGroup &p_group, const MoveGroupWeights &p_w, float p_from, float p_advance,
 		CrowdMoveStats &r_stats) {
 	const MoveGroupTerm *lead = nullptr;
@@ -1561,6 +1575,8 @@ bool crowd_move_pose(CrowdMoveRun &r_run, uint32_t p_i, size_t p_stance, const C
 		ws = move_group_weights(sprint_group.def, sprint_group.timing, move_group_x(local, sprint_group.x_sign), speed, opt);
 	}
 
+	// INFERRED: run and sprint share one phase, advanced at the sprint weight's blend of the two groups' cycle rates.
+	// Settle: a note on how the 3P graph blends the run and sprint move groups.
 	float cps = wa.cycles_per_second;
 	if (sw > 0.0f) {
 		const float b = ws.cycles_per_second;

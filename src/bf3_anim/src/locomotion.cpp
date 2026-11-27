@@ -19,6 +19,8 @@ float heading_of(float p_x, float p_z) {
 
 }
 
+// STAND-IN: a made-up run blend for stances without a move group: the idle fades out linearly with speed, the two
+// cycles around the heading blend by angle and play at speed / root speed. Settle: that stance's 3P graph node.
 LocoWeights locomotion_weights(const std::array<LocoClipInfo, kLocoClips> &p_clips, const Vec3 &p_local, const LocoParams &p_params) {
 	LocoWeights out;
 	float x = p_local.x, z = p_local.z;
@@ -74,6 +76,7 @@ LocoWeights locomotion_weights(const std::array<LocoClipInfo, kLocoClips> &p_cli
 	}
 	float t = n == 1 || span <= 0.0f ? 0.0f : std::clamp(into / span, 0.0f, 1.0f);
 
+	// STAND-IN: a heading within 2 % of a cycle plays that cycle alone. Settle: that stance's 3P graph node.
 	constexpr float kSnap = 0.02f;
 	t = t < kSnap ? 0.0f : (t > 1.0f - kSnap ? 1.0f : t);
 	const float moving = 1.0f - idle;

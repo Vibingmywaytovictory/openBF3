@@ -396,6 +396,8 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 			const Placement &p = placed[c];
 			CapsuleLocal &e = r_out[c];
 			e = p_inputs.standin[p_stance][c];
+			// INFERRED: a capsule's Offset is in the rig's bind frame, carried by the joint's turn since bind, and its
+			// length runs along BoneAxis toward the joint's longest child. Settle: a note on hit capsule placement.
 			if (p.joint >= 0) {
 				const Xform &x = p_model[size_t(p.joint)];
 				const Vec3 a = vec_add(x.t, quat_rotate(quat_mul(x.q, p.bind_inverse), p.offset));
@@ -466,6 +468,8 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 		for (size_t f = 0; f < kCapsuleTransitionFractions && ok; ++f) {
 			const float frame = capsule_transition_fraction(f) * float(clip.tracks.end_frame);
 			for (size_t pb = 0; pb < kCapsulePitchBuckets; ++pb) {
+				// INFERRED: a stance transition aims with its from stance's aim clips. Settle: the 3P graph's aim layer
+				// during a stance change.
 				if (!evaluate(clip, frame, &up_delta[from], &down_delta[from], from, t.pitch_deg[pb], model)) {
 					ok = false;
 					break;
@@ -473,6 +477,8 @@ core::Result<CapsulePoseTable> build_capsule_pose_table(const Skeleton &p_rig, c
 				place(model, from, &t.transition[t.transition_index(r, f, pb)]);
 			}
 		}
+		// STAND-IN: a transition without its clip is the lerp of the two stance rows, and a stance without its clips the
+		// caller's stand-in layout. Settle: the missing clips.
 		if (!ok) {
 			report.notes.push_back(std::string("transition ") + std::to_string(r) + " (" + kStance[from] + " -> " + kStance[to] +
 					"): stand-in (a lerp of the two stance rows)");

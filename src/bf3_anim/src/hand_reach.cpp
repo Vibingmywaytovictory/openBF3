@@ -109,12 +109,16 @@ float elbow_angle(float p_upper, float p_lower, float p_span) {
 	return std::acos(std::clamp(c, -1.0f, 1.0f));
 }
 
+// STAND-IN: an analytic shoulder, elbow and arm-swing solve stands in for the rig's ParticleIK feature solver.
+// Settle: a note on ParticleIKFeatureAsset.
 void reach_arm(const Skeleton &p_rig, const HandReachArm &p_arm, const std::vector<Xform> &p_held, LocalPose &r_pose,
 		std::vector<Xform> &r_model) {
 	const float w = std::clamp(std::isfinite(p_arm.reach) ? p_arm.reach : 0.0f, 0.0f, 1.0f);
 	if (!(w > 0.0f)) {
 		return;
 	}
+	// INFERRED: JointToEffector holds the hand where the action layers put it relative to its effector joint, before
+	// the run and sprint deltas. Settle: a note on JointToEffectorFeatureAsset.
 	const Xform place = xform_mul(r_model[size_t(p_arm.effector)],
 			xform_mul(xform_inverse(p_held[size_t(p_arm.effector)]), p_held[size_t(p_arm.hand)]));
 	const Vec3 c0 = r_model[size_t(p_arm.hand)].t;
@@ -263,6 +267,7 @@ core::Result<HandReach> read_hand_reach(
 		}
 		GdGuid g;
 		const GdStruct reach = reaches.read_guid(i, g) && !g.is_null() ? p_library.resolve(*stat, g) : GdStruct();
+		// INFERRED: an arm's reach weight is its ReachFloats signal's Default. Settle: a note on that signal's runtime value.
 		float value = 0.0f;
 		if (!reach.valid() || !reach.read_float("Default", value) || !std::isfinite(value)) {
 			return core::make_error(where + ": effector " + std::to_string(i) + " has no reach float with a Default");

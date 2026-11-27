@@ -66,8 +66,12 @@ struct CrowdConfig {
 	bool temporal_lod = true;
 	TemporalLodTable lod;
 	LocoParams loco;
+	// INFERRED: the aim clips are additives post-multiplied in each joint's local frame.
+	// Settle: a note on the Ant additive blend order.
 	AdditiveOrder aim_order = AdditiveOrder::LocalPost;
 
+	// INFERRED: an aim clip's weight is |pitch| over the barrel pitch Rifle_StandAimUp and Rifle_StandAimDwn reach at
+	// weight 1 (measure_aim). Settle: the 3P graph's pitch-to-aim mapping.
 	float aim_up_full_pitch_deg = 78.1f;
 	float aim_down_full_pitch_deg = 60.7f;
 	bool run_noise = false;
@@ -190,9 +194,15 @@ static_assert(kMaxCrowdWeapons < kNoCrowdWeapon);
 
 struct ServerPoseClips;
 
+// STAND-IN: a dead soldier is hidden after 3 s unless corpse_seconds is set; notes R5-DT2 D keep the corpse for
+// VeniceSoldierHealthModuleData.TimeForCorpse. Settle: always pass TimeForCorpse.
 inline constexpr float kCrowdDeathHideSeconds = 3.0f;
+// STAND-IN: a 3 deg aim-pitch kick decaying over 0.05 s per shot (the next two constants). Settle: the 3P weapon
+// graph's fire nodes.
 inline constexpr float kCrowdFireKickSeconds = 0.05f;
 inline constexpr float kCrowdFireKickDeg = 3.0f;
+// STAND-IN: the reload, throw and crouch-fire layers ramp in and out over 0.15 s, not the transitions' blend assets
+// (BezierBlend). Settle: read the 3P weapon graph's blends.
 inline constexpr float kCrowdLayerRampSeconds = 0.15f;
 
 struct CrowdStanceSet {
@@ -229,6 +239,7 @@ struct CrowdCombatStats {
 
 namespace bf3::anim {
 
+// SOURCE: notes R5-DT2 D (the corpse stays VeniceSoldierHealthModuleData.TimeForCorpse, 15 s on the MP soldier).
 inline constexpr float kCrowdCorpseSeconds = 15.0f;
 
 }
@@ -241,6 +252,8 @@ inline constexpr float kCrowdMaxCorpseSeconds = 3600.0f;
 
 namespace bf3::anim {
 
+// STAND-IN: the 3p sprint and the idle-to-move weights ramp over 0.2 s (this and the next constant). Settle: the 3P
+// graph's move group transition times.
 inline constexpr float kCrowdSprintBlendSeconds = 0.2f;
 inline constexpr float kCrowdMoveBlendSeconds = 0.2f;
 

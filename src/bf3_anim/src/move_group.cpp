@@ -22,6 +22,7 @@ constexpr float kTwoPi = 6.28318530718f;
 constexpr uint32_t kMaxChooserEntries = 64;
 constexpr uint32_t kMaxSignals = 16;
 
+// SOURCE: research/PORTING-RESEARCH.md 3.3 (AntRef.AssetId is 0x15480000 | the s_BasicAssets guid index & 0xFFFF).
 constexpr uint32_t kAntRefHigh = 0x15480000u;
 
 std::string hex(uint32_t p_v) {
@@ -79,6 +80,8 @@ bool read_flag(const GdStruct &p_s, std::string_view p_name, bool &r_value) {
 	return true;
 }
 
+// INFERRED: only the weapon type and specific weapon enums are driven; every other chooser signal takes its data
+// Default, as its runtime value is not data. Settle: a note on which game state drives each Ant enum.
 int64_t driven_index(const GdStruct &p_driver, int64_t p_default, const ChooserIndices &p_indices) {
 	if (p_driver.name() == "WeaponType_EnumGamestate") {
 		return int64_t(p_indices.weapon_type);
@@ -400,6 +403,8 @@ core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPack
 			if (!entries.valid() || entries.empty() || entries.size() > kMaxChooserEntries) {
 				return core::make_error(label(cur) + ": " + std::to_string(entries.size()) + " entries (1.." + std::to_string(kMaxChooserEntries) + ")");
 			}
+			// INFERRED: a signal chooser takes the first entry whose signals' data Defaults match. Settle: a note on the
+			// signals' runtime values.
 			GdGuid chosen;
 			for (uint32_t e = 0; e < entries.size() && chosen.is_null(); ++e) {
 				if (core::Status s = r_budget.charge(1); !s.ok()) {
@@ -459,6 +464,8 @@ core::Result<AntClipRoute> route_from(const AntLibrary &p_library, const AntPack
 			}
 			continue;
 		}
+		// STAND-IN: a layers controller follows its master layer only, a sequence its first actor, and an actor its first
+		// track's first anim. Settle: play every layer and track.
 		if (type == "LayersControllerAsset") {
 			uint32_t master = 0;
 			const GdArray layers = cur.array("ControllerAssets");
@@ -834,6 +841,8 @@ core::Result<AntThrowFlow3p> read_throw_flow_3p(
 				p_array.read_guid("BlendSignal", sg) && !sg.is_null() ? p_library.resolve(stat, sg) : GdStruct();
 		const GdStruct blend =
 				p_array.read_guid("BlendArray", ag) && !ag.is_null() ? p_library.resolve(stat, ag) : GdStruct();
+		// INFERRED: the blend array plays the item at its BlendSignal's DefaultFloat. Settle: a note on that signal's
+		// runtime value.
 		float at = 0.0f;
 		if (!signal.valid() || !signal.read_float("DefaultFloat", at) || !blend.valid()) {
 			return core::make_error(where + ": " + label(p_array) + " has no BlendSignal DefaultFloat or BlendArray");
@@ -1040,6 +1049,8 @@ float move_group_x(const Vec3 &p_local, float p_x_sign) {
 	return p_x_sign * heading(p_local.x, p_local.z);
 }
 
+// INFERRED: from the data's shape: linear blends across the directions' X and the speed entries, one phase offset by
+// ItemStartPhase / MasterLength, end entries sped up by OneToOneSpeed. Settle: a note on StreetMoveGroup evaluation.
 MoveGroupWeights move_group_weights(const MoveGroupDef &p_def, std::span<const MoveGroupClipTiming> p_timing, float p_x, float p_speed,
 		const MoveGroupOptions &p_options) {
 	MoveGroupWeights out;
@@ -1176,6 +1187,8 @@ MoveGroupWeights move_group_weights(const MoveGroupDef &p_def, std::span<const M
 	return out;
 }
 
+// INFERRED: SplineRaw is 0..255 samples of Value spread evenly over Duration, read linearly, and Value holds after
+// the window. Settle: a note on FloatGameStateTag's spline.
 float AntFloatStateTag::at(float p_tick) const {
 	if (!(p_tick >= tick)) {
 		return 0.0f;
@@ -1190,6 +1203,8 @@ float AntFloatStateTag::at(float p_tick) const {
 	return value * ((1.0f - u) * float(spline[i]) + u * float(spline[j])) / 255.0f;
 }
 
+// INFERRED: the last entry whose Threshold is at or below the signal wins, and a signal below every threshold takes
+// the first. Settle: a note on LinearSignalChooserPolicyAsset.
 const AntLinearPick *linear_pick(std::span<const AntLinearPick> p_picks, float p_signal) {
 	const AntLinearPick *chosen = nullptr;
 	for (const AntLinearPick &p : p_picks) {

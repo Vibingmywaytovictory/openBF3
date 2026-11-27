@@ -40,6 +40,8 @@ enum class ServerPoseClip : uint8_t {
 inline constexpr size_t kServerPoseClips = size_t(ServerPoseClip::Count);
 static_assert(size_t(ServerPoseClip::ProneToCrouch) - size_t(ServerPoseClip::StandToCrouch) + 1 == core::gameplay::kCapsuleTransitions);
 
+// STAND-IN: the hit capsules are posed from these fixed rifle idle, aim and stance-change clips for every weapon.
+// Settle: route them through the 3P Ant graph by weapon type.
 struct ServerPoseClipNames {
 	std::string package = "b_basicassetsmp";
 	std::array<std::string, kServerPoseClips> controllers{ "Rifle_StandIdle_Pose", "Rifle_StandAimUp", "Rifle_StandAimDwn", "Rifle_CrouchIdle_Pose",

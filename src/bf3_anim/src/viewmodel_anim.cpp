@@ -338,6 +338,8 @@ float smoothstep01(float p_x) {
 }
 
 bool ads_allowed(uint8_t p_phase, bool p_sprinting) {
+	// STAND-IN: the shown zoom is refused while deploying or sprinting; notes R2-A3 (checker B) refuse it while sprinting,
+	// in the sprint recovery window and in two character states, naming no deploy rule. Settle: port R2-A3 B's zoom rule.
 	return p_phase != kVmPhaseDeploying && !p_sprinting;
 }
 
@@ -384,9 +386,15 @@ AdsFrame AdsCamera::step(const AdsParams &p_params, bool p_zoomed, float p_dt) {
 	f.zoomed = zoomed;
 	f.fov_progress = fov_progress_;
 	f.blend = smoothstep01(blend_progress_);
+	// STAND-IN: the world FOV follows a smoothstep of its progress with no FovDelayTime; notes R-C3 B move it linearly
+	// in degrees after the delay. Settle: port R-C3 B.
 	const float fov_ease = smoothstep01(fov_progress_);
 	f.world_fov = p_params.hip_fov + (p_params.zoom_fov - p_params.hip_fov) * fov_ease;
+	// STAND-IN: the 1p FOV follows the eased aim blend; notes R2-C3 C2 and C3 blend RenderFov to ZoomRenderFov
+	// linearly by the FOV countdown. Settle: port R2-C3 C.
 	f.viewmodel_fov = p_params.zoom_render_fov > 0.0f ? p_params.render_fov + (p_params.zoom_render_fov - p_params.render_fov) * f.blend : p_params.render_fov;
+	// INFERRED: the look speed moves between the two levels' LookSpeedMultiplier with the FOV progress.
+	// Settle: a note on when LookSpeedMultiplier applies.
 	f.look_scale = p_params.look_speed_hip + (p_params.look_speed_zoom - p_params.look_speed_hip) * fov_ease;
 	last_ = f;
 	return f;
@@ -600,6 +608,8 @@ struct ViewmodelAnimator::Impl {
 		}
 	}
 
+	// STAND-IN: a deploy, reload, bolt, throw or knife without a decoded clip drops and turns the weapon by the
+	// hand-picked distances and angles below. Settle: decode the role's 1p clip (VBR).
 	void procedural_offset(const Action &p_a, double p_t, float p_w, float &r_dy, float &r_dz, float &r_pitch, float &r_roll) {
 		if (!p_a.active || !p_a.procedural || p_a.seconds <= 0.0f || p_w <= 0.0f) {
 			return;
@@ -639,6 +649,8 @@ struct ViewmodelAnimator::Impl {
 		}
 	}
 
+	// INFERRED: inside a reach tag's frames the arm's reach moves to the tag's value by the action's weight.
+	// Settle: a note on how the reach FloatGameStateTags drive the JointToEffector reach.
 	void tag_reach(double p_t, float p_ads) {
 		tagged_reach.arms = hand_reach.arms;
 		for (const Action *a : { &prev, &cur }) {
@@ -777,6 +789,8 @@ struct ViewmodelAnimator::Impl {
 				kick_pitch.v += spring_impulse_for_peak(tuning.kick, tuning.kick_pitch_deg * kick_scale);
 				cam_pitch.v += spring_impulse_for_peak(tuning.camera_recoil, tuning.camera_kick_pitch_deg);
 
+				// STAND-IN: an extra camera kick per shot from the tuning springs, its yaw a quarter of its pitch and its side
+				// from a hash of the shot count. Settle: retail footage of one shot's view kick against notes Q5's recoil.
 				const float yaw_sign = ((shots * 2654435761u) >> 31) ? 1.0f : -1.0f;
 				cam_yaw.v += spring_impulse_for_peak(tuning.camera_recoil, 0.25f * tuning.camera_kick_pitch_deg * yaw_sign);
 				if (fire_clip) {
@@ -862,9 +876,13 @@ struct ViewmodelAnimator::Impl {
 			base_clip = uint32_t(zoom_role);
 			if (ads_clip_ok && has_clip(zoom_role) && !zr.stand_in) {
 
+				// INFERRED: the zoom clip is sampled at the aim blend's progress, so it plays over ZoomTransitionTime.
+				// Settle: a note on the 1p zoom clip's playback rate.
 				const float progress = ads_dir > 0 ? ads : 1.0f - ads;
 				apply_clip_frame(zoom_role, progress * float(zr.tracks->end_frame), base);
 			} else {
+				// STAND-IN: without a decoded zoom clip, or on a reversal mid-transition, the pose blends from the idle to
+				// the zoom idle. Settle: decode the VBR zoom clips and the graph's reversal rule.
 				blend_poses(idle, zoom, ads, base);
 			}
 		} else if (ads >= 1.0f) {
@@ -898,6 +916,8 @@ struct ViewmodelAnimator::Impl {
 			}
 			float w = weight_of(*a, t);
 			if (a->role == VmClip::Fire || a->role == VmClip::FireSingle) {
+				// STAND-IN: an aimed shot plays no fire clip, only the procedural kick. Settle: the 1p weapon graph's
+				// zoomed fire nodes.
 				w *= 1.0f - ads;
 			}
 			if (w <= 0.0f) {
@@ -912,6 +932,8 @@ struct ViewmodelAnimator::Impl {
 			}
 		}
 		if (!sprint_clip && sprint_w > 0.0f) {
+			// STAND-IN: without a sprint pose the weapon is lowered and turned by hand-picked amounts. Settle: the
+			// weapon's sprint clip.
 			const float s = smoothstep01(sprint_w);
 			dy -= 0.05f * s;
 			yaw += 25.0f * core::kDegToRadF * s;
@@ -932,6 +954,8 @@ struct ViewmodelAnimator::Impl {
 		}
 
 		const float speed = std::max(0.0f, finite_or(p_input.speed, 0.0f));
+		// STAND-IN: the weapon sways with the view rate and bobs with speed (full at 4 m/s, capped at 1.5, a figure
+		// eight) through the tuning springs. Settle: retail footage of the 1p weapon while turning and walking.
 		sway_tx = std::clamp(finite_or(p_input.view_yaw_rate, 0.0f) * tuning.sway_scale, -tuning.sway_max, tuning.sway_max);
 		sway_ty = std::clamp(-finite_or(p_input.view_pitch_rate, 0.0f) * tuning.sway_scale, -tuning.sway_max, tuning.sway_max);
 		step_spring(tuning.sway, sway_tx, dt, sway_x);
@@ -1126,6 +1150,8 @@ bool vm_loco_apply(VmDeltaLoco &r_loco, const ViewmodelFrameInput &p_input, floa
 	r_loco.move_w = std::clamp(r_loco.move_w + (moving ? ramp : -ramp), 0.0f, 1.0f);
 	const float sprint_w = std::clamp(std::isfinite(p_sprint_w) ? p_sprint_w : 0.0f, 0.0f, 1.0f);
 	const float ads = std::clamp(std::isfinite(p_ads) ? p_ads : 0.0f, 0.0f, 1.0f);
+	// STAND-IN: the run delta ramps in over the sprint blend time and fades with the aim blend and the sprint weight.
+	// Settle: the 1P_MovementStateFlow's zoomed and transition nodes.
 	const float run_w = r_loco.run_ok ? r_loco.move_w * (1.0f - sprint_w) * (1.0f - ads) : 0.0f;
 	const float spr_w = r_loco.sprint_ok ? sprint_w : 0.0f;
 	const float run_from = r_loco.run_frame, sprint_from = r_loco.sprint_frame;

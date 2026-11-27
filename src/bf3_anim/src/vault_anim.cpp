@@ -101,6 +101,8 @@ core::Result<VaultControllers> find_vault_controllers(const AntLibrary &p_librar
 		return core::make_error(fmt("vault controllers: %u %s objects in the static package (must be exactly one)",
 				owners, std::string(kVaultSignalOwner).c_str()));
 	}
+	// INFERRED: the node a vault trigger gates on entry is the 1p vault; the node a transition on the trigger or its
+	// out signal leads to is the 3p one. Settle: a note on the 1p and 3p vault graphs.
 	std::array<std::vector<uint32_t>, kVaultAnimKinds> first, third;
 	for (size_t i = 0; i < stat->object_count(); ++i) {
 		if (core::Status s = budget.charge(1); !s.ok()) {
@@ -152,6 +154,8 @@ core::Result<VaultControllers> find_vault_controllers(const AntLibrary &p_librar
 	return out;
 }
 
+// INFERRED: a sequence plays its StartInTime..EndInTime window at Scale clip ticks per tick, and a clip frame is
+// FPSScale ticks. Settle: a note on ActorControllerAsset timing.
 core::Result<VaultPlay> vault_play_of(const AntClipRoute &p_route) {
 	VaultPlay p;
 	p.frames_per_tick = core::finite(p_route.fps_scale) && p_route.fps_scale > 0.0f ? p_route.fps_scale : 0.5f;
@@ -272,6 +276,8 @@ bool vm_vault_apply(VmVaultRun &r_run, const Skeleton &p_rig, double p_time_s, u
 	if (camera) {
 		model_pose(p_rig, r_pose, r_run.before);
 	}
+	// INFERRED: the 1p vault clip is a full-weight additive, and the camera follows its CameraJoint's change (notes
+	// R3-C5 B1 blend the view toward an animation camera bone). Settle: port R3-C5 B1's camera bone weight.
 	apply_additive(r_pose, r_run.delta, r_run.masks[k], 1.0f, AdditiveOrder::LocalPost);
 	if (camera) {
 		model_pose(p_rig, r_pose, r_run.after);
