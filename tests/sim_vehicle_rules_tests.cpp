@@ -405,17 +405,17 @@ TEST_SUITE("sim-vehicle-rules-unit") {
 namespace {
 
 constexpr float kM1a2Load = 5000.0f * 9.82f * 1.6f / 14.0f;
+constexpr float kM1a2PhysicsWheelLoad = 5000.0f * 9.82f * 1.6f / 6.0f;
 constexpr float kGrowlerFrontLoad = 2782.0f;
 
 TyreCurveRule retail_tyre() {
 	return { 5.002381f, 0.053606f, 5.39649f, 0.176533f, false };
 }
 
-bf3::sim::VehicleModel m1a2_road_wheel() {
+bf3::sim::VehicleModel m1a2_road_wheel(uint8_t p_wheels) {
 	bf3::sim::VehicleModel m;
 	m.mass = 5000.0f;
-	m.wheel_count = 1;
-	m.wheel_list = 18;
+	m.wheel_count = p_wheels;
 	bf3::sim::VehicleWheelModel &w = m.wheels[0];
 	w.radius = 0.4f;
 	w.width = 0.15f;
@@ -466,8 +466,7 @@ bf3::sim::VehicleModel m1a2_road_wheel() {
 bf3::sim::VehicleModel growler_front_wheel() {
 	bf3::sim::VehicleModel m;
 	m.mass = 800.0f;
-	m.wheel_count = 1;
-	m.wheel_list = 4;
+	m.wheel_count = 4;
 	bf3::sim::VehicleWheelModel &w = m.wheels[0];
 	w.radius = 0.4f;
 	w.width = 0.3f;
@@ -679,7 +678,7 @@ TEST_SUITE("sim-vehicle-rules-unit") {
 
 	TEST_CASE("sim.vehicles.land_rules: the shipped wheel step reproduces R6-G1-vectors A (M1A2 throttle 1, six "
 			  "substeps), B (pivot, first substeps) and C (Growler throttle, first substeps)") {
-		const bf3::sim::VehicleModel tank = m1a2_road_wheel();
+		const bf3::sim::VehicleModel tank = m1a2_road_wheel(18);
 		bf3::sim::LandWheelState s;
 		float hull = 0.0f;
 		const float spin_a[] = { 0.431063f, 0.848946f, 1.25570f, 1.65284f, 2.04152f, 2.42173f };
@@ -728,5 +727,34 @@ TEST_SUITE("sim-vehicle-rules-unit") {
 		CHECK(c1.slip_ratio == doctest::Approx(0.0095f).epsilon(1e-4));
 		CHECK(c1.force == doctest::Approx(198.66f).epsilon(1e-3));
 		CHECK(c1.spin == doctest::Approx(0.937351f).epsilon(1e-4));
+	}
+
+	TEST_CASE("sim.vehicles.land_rules: the shipped wheel step reproduces R7-G1-vectors A (M1A2 throttle 1 on its 6 "
+			  "physics wheels, six substeps, static load 13093.3 N per wheel)") {
+		const bf3::sim::VehicleModel tank = m1a2_road_wheel(6);
+		bf3::sim::LandWheelState s;
+		float hull = 0.0f;
+		const float spin_a[] = { 0.431063f, 0.830047f, 1.20250f, 1.55244f, 1.88289f, 2.19420f };
+		const float force_a[] = { 0.0f, 862.06f, 1537.22f, 2078.1f, 2519.5f, 2954.3f };
+		const float hull_a[] = { 0.0f, 0.0114941f, 0.0319903f, 0.0596983f, 0.0932916f, 0.132682f };
+		CHECK(kM1a2PhysicsWheelLoad == doctest::Approx(13093.3f).epsilon(1e-5));
+		for (size_t i = 0; i < 6; ++i) {
+			const ReducedRun r = reduced_substep(tank, kM1a2PhysicsWheelLoad, 6, 627.0f, 1.5f, 0.0f, hull, s);
+			hull = r.hull;
+			CAPTURE(i);
+			CHECK(r.drive == doctest::Approx(77.5913f).epsilon(1e-5));
+			CHECK(r.force == doctest::Approx(force_a[i]).epsilon(1e-4));
+			CHECK(r.spin == doctest::Approx(spin_a[i]).epsilon(1e-4));
+			CHECK(hull == doctest::Approx(hull_a[i]).epsilon(1e-4));
+			if (i == 1) {
+				CHECK(r.resistance == doctest::Approx(-1.35785f).epsilon(1e-4));
+				CHECK(r.slip_ratio == doctest::Approx(0.0086213f).epsilon(1e-4));
+				CHECK(s.grip == TyreGrip::Grip);
+			}
+			if (i == 2) {
+				CHECK(r.resistance == doctest::Approx(-2.67499f).epsilon(1e-4));
+				CHECK(r.slip_ratio == doctest::Approx(0.0164317f).epsilon(1e-4));
+			}
+		}
 	}
 }

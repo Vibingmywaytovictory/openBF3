@@ -145,7 +145,6 @@ struct VehicleModel {
 
 	std::array<VehicleWheelModel, kMaxVehicleWheels> wheels{};
 	uint8_t wheel_count = 0;
-	uint8_t wheel_list = 0;
 
 	std::array<std::array<float, 2>, kMaxModelCurvePoints> steer_sensitivity{};
 	uint8_t steer_points = 0;

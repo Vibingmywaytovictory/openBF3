@@ -63,12 +63,12 @@ LandWheelDrive land_wheel_drive(const VehicleModel &p_model, size_t p_wheel, con
 	}
 	if (w.rolling_resistance != 0) {
 		out.resistance -= vehicles::rolling_resistance(
-				r_state.spin, w.rolling_base, w.rolling_velocity_kmh, w.width, w.mass, p_model.wheel_list);
+				r_state.spin, w.rolling_base, w.rolling_velocity_kmh, w.width, w.mass, p_model.wheel_count);
 	}
 	if (w.driven != 0 && p_contact.grounded) {
 		out.resistance -= against(p_contact.longitudinal_speed) *
 				vehicles::transmission_loss_resistance(curve(land.transmission_loss, land.transmission_loss_points),
-						p_step.planar_speed, 1.0f, p_model.mass, p_model.wheel_list);
+						p_step.planar_speed, 1.0f, p_model.mass, p_model.wheel_count);
 		if (w.engine_brake != 0 && out.drive == 0.0f && p_contact.longitudinal_speed != 0.0f) {
 			out.resistance -= against(p_contact.longitudinal_speed) *
 					vehicles::engine_brake_resistance(p_model.mass, p_step.planar_speed);
@@ -123,7 +123,7 @@ LandWheelForce land_wheel_apply(const VehicleModel &p_model, size_t p_wheel, con
 	out.applied = true;
 	if (vehicles::wheel_spin_gate(p_any_drive, p_step.planar_speed)) {
 		const float reaction = vehicles::wheel_reaction_torque(longitudinal, p_step.forward_up, p_model.mass,
-				p_model.wheel_list, w.radius, w.fx_torque_multiplier, w.diff_gear_ratio);
+				p_model.wheel_count, w.radius, w.fx_torque_multiplier, w.diff_gear_ratio);
 		r_state.spin = vehicles::wheel_spin_step(r_state.spin, torque - reaction, p_step.dt, w.inertia);
 	}
 	return out;

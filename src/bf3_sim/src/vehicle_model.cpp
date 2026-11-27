@@ -66,7 +66,6 @@ uint64_t digest_of(const VehicleModel &p_m) {
 		d.add(p.convex_radius);
 	}
 	d.add(p_m.wheel_count);
-	d.add(p_m.wheel_list);
 	for (size_t i = 0; i < p_m.wheel_count; ++i) {
 		const VehicleWheelModel &w = p_m.wheels[i];
 		d.add(w.attachment);
@@ -195,9 +194,9 @@ float land_balance_speed_kmh(const VehicleModel &p_model) {
 				: vehicles::wheel_drive_torque(torque, ratio, w->diff_gear_ratio, land.transmission_efficiency, 1.0f);
 		const float rolling = w->rolling_resistance != 0
 				? vehicles::rolling_resistance(
-						  spin, w->rolling_base, w->rolling_velocity_kmh, w->width, w->mass, p_model.wheel_list)
+						  spin, w->rolling_base, w->rolling_velocity_kmh, w->width, w->mass, p_model.wheel_count)
 				: 0.0f;
-		if (vehicles::transmission_loss_resistance(loss, v, 1.0f, p_model.mass, p_model.wheel_list) + rolling >=
+		if (vehicles::transmission_loss_resistance(loss, v, 1.0f, p_model.mass, p_model.wheel_count) + rolling >=
 				drive) {
 			return kmh;
 		}
@@ -304,7 +303,6 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		return fail(std::to_string(physics_wheels.size()) + " physics wheels (at most " + std::to_string(kMaxVehicleWheels) + ")");
 	}
 	m->wheel_count = uint8_t(physics_wheels.size());
-	m->wheel_list = uint8_t(std::min<size_t>(p_def.wheels.size(), 255));
 	const uint32_t wheel_count = m->wheel_count;
 	const float standing_substep_factor = vehicles::spring_substep_factor(vehicles::chassis_substeps(0.0f, true));
 	const core::gameplay::WheelConfigDef *steering_config = nullptr;

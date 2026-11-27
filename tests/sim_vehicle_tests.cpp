@@ -18,6 +18,7 @@
 #include "bf3/sim/vehicle_types.h"
 #include "bf3/sim/vehicle_world.h"
 #include "bf3/sim/vehicles/chassis_rules.h"
+#include "bf3/sim/vehicles/land_wheel.h"
 #include "bf3/sim/vehicles/tracked_rules.h"
 #include "bf3/sim/vehicles/tyre_rules.h"
 #include "bf3/sim_harness/vehicle_course.h"
@@ -1843,7 +1844,6 @@ TEST_SUITE("sim-vehicle-handling") {
 		}
 		const VehicleModel &g = *h->growler;
 		REQUIRE(g.wheel_count == 4);
-		CHECK(g.wheel_list == 4);
 		CHECK(g.wheels[0].spring_constant == doctest::Approx(14766.9f).epsilon(1e-4));
 		const LandDriveModel &gl = g.land;
 		const float growler_torque =
@@ -1860,7 +1860,6 @@ TEST_SUITE("sim-vehicle-handling") {
 
 		const VehicleModel &t = *h->m1a2;
 		REQUIRE(t.wheel_count == 6);
-		CHECK(t.wheel_list == 18);
 		const LandDriveModel &tl = t.land;
 		const float tank_torque =
 				vehicles::torque_curve_at(0.0f, std::span<const float>(tl.rpm_points.data(), tl.curve_points),
@@ -1868,10 +1867,10 @@ TEST_SUITE("sim-vehicle-handling") {
 				tl.power_multiplier;
 		CHECK(vehicles::track_forward_term(tank_torque, land_gear_ratio(tl, 1)) == doctest::Approx(77.59125f));
 		const std::span<const vehicles::CurvePoint> loss(tl.transmission_loss.data(), tl.transmission_loss_points);
-		CHECK(vehicles::transmission_loss_resistance(loss, 10.0f, 1.0f, t.mass, t.wheel_list) ==
-				doctest::Approx(10.598f).epsilon(1e-3));
-		CHECK(vehicles::transmission_loss_resistance(loss, 58.0f / 3.6f, 1.0f, t.mass, t.wheel_list) ==
-				doctest::Approx(55.556f).epsilon(1e-3));
+		CHECK(vehicles::transmission_loss_resistance(loss, 10.0f, 1.0f, t.mass, t.wheel_count) ==
+				doctest::Approx(31.79f).epsilon(1e-3));
+		CHECK(vehicles::transmission_loss_resistance(loss, 58.0f / 3.6f, 1.0f, t.mass, t.wheel_count) ==
+				doctest::Approx(166.667f).epsilon(1e-3));
 		CHECK(t.wind_resistance);
 		CHECK(vehicles::wind_drag(t.wind, 15.0f) == doctest::Approx(124.03f).epsilon(1e-3));
 		CHECK(vehicles::wind_drag(t.wind, 40.0f) == doctest::Approx(1829.0f).epsilon(1e-3));
@@ -1884,6 +1883,50 @@ TEST_SUITE("sim-vehicle-handling") {
 		for (size_t i = 0; i < t.wheel_count; ++i) {
 			CHECK(t.wheels[i].steers == 0);
 		}
+	}
+
+	TEST_CASE("sim.vehicle.handling: the shipped wheel step on MP_007's M1A2 shares its rolling resistance and "
+			  "TransmissionLoss over its 6 physics wheels (R7-G1-wheels: 26.25 at 10 rad/s and 31.79 at 10 m/s)") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		const VehicleModel &t = *h->m1a2;
+		REQUIRE(t.wheel_count == 6);
+		LandSubstep step;
+		step.dt = 1.0f / 90.0f;
+		step.gear_ratio = land_gear_ratio(t.land, 1);
+		step.planar_speed = 10.0f;
+		LandWheelContact contact;
+		contact.grounded = true;
+		contact.load = 5000.0f * vehicles::kChassisGravity * 1.6f / 6.0f;
+		contact.longitudinal_speed = 10.0f;
+		LandWheelState s;
+		s.spin = 10.0f;
+		const LandWheelDrive d = land_wheel_drive(t, 0, step, contact, s);
+		const float engine_brake =
+				t.wheels[0].engine_brake != 0 ? vehicles::engine_brake_resistance(t.mass, step.planar_speed) : 0.0f;
+		std::printf("sim.vehicle.handling: M1A2 track wheel at 10 rad/s and 10 m/s, no throttle: drive %.4f, "
+					"resistance %.3f (engine brake %.3f)\n",
+				double(d.drive), double(d.resistance), double(engine_brake));
+		CHECK(d.drive == 0.0f);
+		CHECK(d.resistance == doctest::Approx(-(26.25f + 31.79f) - engine_brake).epsilon(1e-3));
+
+		std::unique_ptr<VehicleWorld> w = world_at(ground_shapes(false), h->m1a2, placed(0, 0, -300));
+		settle(*w);
+		std::array<float, 3> speeds{};
+		for (uint32_t tick = 1; tick <= 5 * kSimHz; ++tick) {
+			step1(*w, command(127, 0, 0));
+			const Vec3 &v = w->state(0).body.linear_velocity;
+			for (const auto &[seconds, slot] : { std::pair{ 1u, 0u }, std::pair{ 2u, 1u }, std::pair{ 5u, 2u } }) {
+				if (tick == seconds * kSimHz) {
+					speeds[slot] = std::hypot(v[0], v[2]);
+				}
+			}
+		}
+		std::printf("sim.vehicle.handling: M1A2 throttle 1 from rest on flat ground: %.2f / %.2f / %.2f m/s at 1 / 2 / "
+					"5 s (R7-G1-vectors A's reduced model, inferred: 5.03 / 8.71 / 11.02)\n",
+				double(speeds[0]), double(speeds[1]), double(speeds[2]));
 	}
 
 	TEST_CASE("sim.vehicle.handling: on flat ground the Growler's front wheels turn pi x 0.28 at full steer, its yaw "
@@ -2109,8 +2152,8 @@ TEST_SUITE("sim-vehicle-handling") {
 			for (size_t i = 0; i < held.wheel_count; ++i) {
 				const VehicleWheelModel &w = model->wheels[i];
 				const float torque = vehicles::track_forward_term(peak, land_gear_ratio(land, 1)) +
-						w.rolling_base * vehicles::kRollingClamp * w.width * w.mass / float(model->wheel_list) +
-						model->mass * loss_max / float(model->wheel_list) / vehicles::kLossDivisor +
+						w.rolling_base * vehicles::kRollingClamp * w.width * w.mass / float(model->wheel_count) +
+						model->mass * loss_max / float(model->wheel_count) / vehicles::kLossDivisor +
 						w.longitudinal_force_max * model->mass * w.radius * w.fx_torque_multiplier /
 								(vehicles::kReactionDivisor * w.diff_gear_ratio);
 				one_substep += torque * kTickSeconds / w.inertia;
@@ -2158,7 +2201,7 @@ TEST_SUITE("sim-vehicle-handling") {
 						unsigned(t.slip_ratio_samples), unsigned(t.grip));
 				const VehicleWheelModel &wm = h->m1a2->wheels[i];
 				const float slope = vehicles::wheel_reaction_torque(0.0f, forward_up, h->m1a2->mass,
-						h->m1a2->wheel_list, wm.radius, wm.fx_torque_multiplier, wm.diff_gear_ratio);
+						h->m1a2->wheel_count, wm.radius, wm.fx_torque_multiplier, wm.diff_gear_ratio);
 				CHECK(s.wheels[i].angular_velocity ==
 						doctest::Approx(sign * (pivot ? 0.026667f : 0.431063f) - slope / 90.0f / wm.inertia)
 								.epsilon(1e-3));
