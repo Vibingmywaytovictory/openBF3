@@ -33,6 +33,8 @@ float gain_to_db(float p_gain) {
 	return 20.0f * std::log10(g);
 }
 
+// STAND-IN: textbook biquads (shelf slope 1) stand in for the EA filter plugins' own coefficient maths, which no note
+// gives. Settle: a note on the IIR2 and shelf plugins' designs.
 BiquadCoefficients BiquadCoefficients::design(BiquadShape p_shape, float p_rate, float p_frequency, float p_q, float p_gain_db) {
 	BiquadCoefficients c;
 	if (p_shape == BiquadShape::Bypass || !(p_rate > 0.0f)) {
@@ -126,6 +128,8 @@ void Biquad::process(float *r_samples, uint32_t p_frames, const BiquadCoefficien
 		const float db0 = p_target.b0 - c.b0, db1 = p_target.b1 - c.b1, db2 = p_target.b2 - c.b2;
 		const float da1 = p_target.a1 - c.a1, da2 = p_target.a2 - c.a2;
 		for (uint32_t i = 0; i < p_frames; ++i) {
+			// WHY: each sample's coefficients are taken from the block start, as accumulated steps drift outside the
+			// stability triangle for cutoffs near 10 Hz.
 			const float along = float(i + 1) * inv;
 			b0 = c.b0 + db0 * along;
 			b1 = c.b1 + db1 * along;
@@ -255,6 +259,7 @@ void apply_gain_ramp(float *r_samples, uint32_t p_frames, float p_from, float p_
 	}
 }
 
+// SOURCE: notes R3-D5 A1 and A2 (pan distance max(d, 2.5) - 2.5 m; the azimuth only while that is above 0, else 0).
 PanInput positional_pan_input(float p_distance_m, float p_azimuth_rad) {
 	const float d = std::isfinite(p_distance_m) ? p_distance_m : 0.0f;
 	const float pan_distance = std::max(d, kPanNearZoneMetres) - kPanNearZoneMetres;
@@ -264,11 +269,14 @@ PanInput positional_pan_input(float p_distance_m, float p_azimuth_rad) {
 	return PanInput{ p_azimuth_rad * 180.0f / kPi, pan_distance };
 }
 
+// SOURCE: notes R3-D5 A4 (a flat output pans at angle 0 and distance 100 cos |Angle|).
 PanInput flat_pan_input(float p_angle_deg) {
 	const float a = std::isfinite(p_angle_deg) ? std::fabs(p_angle_deg) * kPi / 180.0f : 0.0f;
 	return PanInput{ 0.0f, kPanFlatDistance * std::cos(a) };
 }
 
+// SOURCE: notes R3-D5 B for a mono source on stereo (diffuse spread below rho 1, pairwise gains on the +-30 deg pair
+// with the rear folded onto it, constant power when rho < 1).
 StereoGains pan2d_stereo(const PanInput &p_input) {
 	const float angle = std::isfinite(p_input.angle_deg) ? p_input.angle_deg : 0.0f;
 	const float distance = std::isfinite(p_input.distance) ? std::max(p_input.distance, 0.0f) : 0.0f;

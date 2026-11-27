@@ -21,8 +21,11 @@ inline constexpr uint32_t kIrPartitionFrames = 512;
 inline constexpr uint32_t kIrFftSize = 2 * kIrPartitionFrames;
 inline constexpr uint32_t kIrBins = kIrPartitionFrames + 1;
 inline constexpr uint32_t kIrChannels = 2;
+// SOURCE: IrReverbControllerNodeData has two slots, Reverb0 and Reverb1 with Amplitude0 and Amplitude1 (bf3dump of
+// sound/master).
 inline constexpr uint32_t kIrSlots = 2;
 inline constexpr uint32_t kIrLanes = 4;
+// INFERRED: a slot change crossfades its old and new response over 8 blocks. Settle: a note on the reverb's switch.
 inline constexpr uint32_t kIrCrossfadeBlocks = 8;
 inline constexpr uint32_t kNoImpulse = UINT32_MAX;
 

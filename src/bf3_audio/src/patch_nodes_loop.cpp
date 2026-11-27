@@ -25,6 +25,9 @@ double piece_seconds(const ca::WaveVariation &p_variation) {
 
 }
 
+// SOURCE: notes R4-D2 loop player (each new piece goes on the next of the alternating slots, crossfaded over
+// CrossFadeLength).
+// INFERRED: a piece is one variation of the wave played whole. Settle: a note on what the loop player divides.
 bool PatchInstance::State::start_loop_piece(
 		LoopPlayerState &r_loop, uint64_t p_frame, float p_offset_seconds, uint32_t p_fade_frames) {
 	const ca::WaveId id = wave_ids[r_loop.wave_index];
@@ -94,6 +97,8 @@ void PatchInstance::State::loop_player_events(uint32_t p_node_index, const Sound
 			l.current = UINT32_MAX;
 			l.piece = 0;
 			float offset = 0.0f;
+			// INFERRED: StartAtRandomPosition starts at a random piece and a random offset clear of two crossfades.
+			// Settle: a note on StartAtRandomPosition.
 			if (n.flags & ca::kFlagStartAtRandomPosition) {
 				l.piece = std::min(pieces - 1,
 						uint32_t(uniform01(seed, p_node_index | kLoopDrawNode, l.draws++) * double(pieces)));
@@ -106,6 +111,7 @@ void PatchInstance::State::loop_player_events(uint32_t p_node_index, const Sound
 		}
 	}
 
+	// STAND-IN: Stop fades the playing pieces out over CrossFadeLength. Settle: a note on the loop player's Stop.
 	if (on(read(port(n, cp::DlpStop))) && l.running) {
 		l.running = false;
 		const float frames = float(std::max<uint32_t>(crossfade, 1));
@@ -134,6 +140,8 @@ void PatchInstance::State::loop_player_events(uint32_t p_node_index, const Sound
 		return;
 	}
 	const uint32_t pieces = wave_variations[l.wave_index].second;
+	// INFERRED: FreezeSegment repeats the piece, SwvsSequential steps in order and any other Selection draws a different
+	// piece. Settle: a note on the loop player's piece choice.
 	if (!on(read(port(n, cp::DlpFreezeSegment))) && pieces > 1) {
 		if (bank->waves()[playing.wave].selection == kSequentialSelection) {
 			l.piece = (l.piece + 1) % pieces;
@@ -149,6 +157,8 @@ void PatchInstance::State::loop_player_events(uint32_t p_node_index, const Sound
 		l.running = false;
 		return;
 	}
+	// STAND-IN: linear fades, where notes R4-D2 fade both slots LinearPower (gain sqrt(t / T) in, sqrt(1 - t / T) out).
+	// Settle: build R4-D2's LinearPower crossfade.
 	if (fade > 0 && l.current != outgoing) {
 		SlotState &old = slots[samplers[l.samplers_begin + outgoing].slots_begin];
 		if (old.play.active) {

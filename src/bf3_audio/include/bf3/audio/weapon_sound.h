@@ -9,6 +9,8 @@
 
 namespace bf3::audio {
 
+// SOURCE: notes R5-VS3 names (Fire 2088671869, ShotFired 1968287961 held by kHashStep, IsFirstPerson 824639024,
+// Reload 3294210644).
 inline constexpr uint32_t kHashFire = 2088671869u;
 inline constexpr uint32_t kHashStep = 1968287961u;
 inline constexpr uint32_t kHashIsFirstPerson = 824639024u;

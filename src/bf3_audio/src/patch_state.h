@@ -28,6 +28,8 @@ using core::splitmix64;
 double uniform01(uint64_t p_seed, uint32_t p_node, uint32_t p_draw);
 bool condition(ca::ConditionOp p_op, float x, float y);
 
+// STAND-IN: a register at 0.5 or above counts as set; registers hold floats where BF3 events carry a value bit and a
+// changed bit (notes R-D1 4). Settle: a note on how a float port feeds an event input.
 inline bool on(float p_v) {
 	return p_v >= 0.5f;
 }
@@ -280,6 +282,8 @@ struct PatchInstance::State {
 		}
 		return p_port.reg == core::audio::kNoRegister ? p_port.constant : previous[p_port.reg];
 	}
+	// INFERRED: start-type inputs fire on a rising edge (off at the previous evaluation, on at this one), from Metro's
+	// ConditionGroups that a level reading would retrigger every block. Settle: a note on how an event port reads a level.
 	bool rose(const core::audio::SoundPort &p_port) const {
 		return read(p_port) >= 0.5f && !(read_previous(p_port) >= 0.5f);
 	}

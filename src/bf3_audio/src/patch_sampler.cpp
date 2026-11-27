@@ -17,6 +17,8 @@ using ca::SoundNode;
 
 namespace {
 
+// STAND-IN: 4-point Catmull-Rom resampling stands in for the voice player's interpolation, which no note gives.
+// Settle: a note on the player's resampler.
 float catmull_rom(float p0, float p1, float p2, float p3, float t) {
 	return p1 + 0.5f * t * (p2 - p0 + t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 + t * (3.0f * (p1 - p2) + p3 - p0)));
 }
@@ -125,6 +127,7 @@ bool take_input_frame(SlotPlay &r_play, float &r_left, float &r_right) {
 	} else {
 		r_left = x[0];
 		r_right = x[1];
+		// STAND-IN: channels past the second fold into left and right at half gain. Settle: a note on multichannel waves.
 		for (uint32_t c = 2; c < r_play.channels; ++c) {
 			(c & 1 ? r_right : r_left) += 0.5f * x[c];
 		}
@@ -132,6 +135,8 @@ bool take_input_frame(SlotPlay &r_play, float &r_left, float &r_right) {
 	return true;
 }
 
+// STAND-IN: a segment that nothing follows fades into its last sample over step_crossfade_ms; no data field says how a
+// segment ends and the footstep waves end on non-zero samples. Settle: a note on how the voice player ends a segment.
 void fade_into_segment_end(SlotPlay &r_play, uint32_t p_got, uint32_t p_fade) {
 	const uint32_t total = r_play.decoder.header().total_frames;
 	const uint32_t end = r_play.decoder.position();
@@ -250,6 +255,9 @@ bool PatchInstance::State::sampler_busy(const SamplerState &p_sampler) const {
 
 namespace {
 
+// SOURCE: notes Q12 1 to 3 and R5-AU2 A4 to A6 (head, loop window F..L, tail; LtForward loops until released).
+// STAND-IN: heads, LtNone segments and LtRelease tails play in order, where Q12 and R5-AU2 draw one head and one tail
+// uniformly. Settle: follow Q12 and R5-AU2.
 NextSegment next_segment(const SamplerState &s, uint32_t p_slot, uint16_t p_segment) {
 	const int32_t seg = p_segment, fl = s.first_loop, ll = s.last_loop, count = s.segments;
 	if (s.cut) {
@@ -289,6 +297,8 @@ NextSegment next_segment(const SamplerState &s, uint32_t p_slot, uint16_t p_segm
 	return { true, kNoSegment, SamplerTraceKind::Advance };
 }
 
+// SOURCE: notes Q12 2 (round robin through F..L, or with ShuffleSegments a uniform pick in F..L).
+// STAND-IN: the shuffle never repeats the last segment, where Q12 allows repeats. Settle: follow Q12.
 uint16_t pick_loop_segment(PatchInstance::State &st, SamplerState &s) {
 	const int32_t fl = s.first_loop, ll = s.last_loop;
 	const int32_t size = ll - fl + 1;
@@ -315,6 +325,8 @@ uint16_t pick_loop_segment(PatchInstance::State &st, SamplerState &s) {
 
 }
 
+// STAND-IN: a cut fades the playing slots out over release_fade_ms, where notes R5-AU2 A3 and A6 stop the voice with no
+// sampler ramp and leave the player's de-click open. Settle: a note on whether the player de-clicks a stop.
 void PatchInstance::State::cut_slots(SamplerState &r_sampler) {
 	const float frames = std::max(1.0f, tuning.release_fade_ms * 0.001f * float(mix_rate));
 	for (uint32_t k = 0; k < r_sampler.slots_count; ++k) {
@@ -329,11 +341,14 @@ void PatchInstance::State::cut_slots(SamplerState &r_sampler) {
 
 void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode &n, uint64_t p_frame) {
 	SamplerState &s = samplers[nodes[p_node_index].index];
+	// SOURCE: notes R5-AU1 Rule 1 (pitch = BasePitch x the patch master pitch x the Pitch port).
+	// STAND-IN: no doppler factor (notes R-D5 doppler). Settle: apply R-D5's smoothed doppler pitch.
 	const float pitch = s.pitch = [&] {
 		const double v = double(flt(n, cp::SmpBasePitch)) * read(port(n, cp::SmpPitch)) * program->master_pitch;
 		return std::isfinite(v) && v > 0.0 ? float(std::clamp(v, 1.0 / 64.0, 64.0)) : 1.0f;
 	}();
 	const ca::SoundPort &amplitude = port(n, cp::SmpAmplitude);
+	// SOURCE: notes R5-AU1 Rule 1 and R5-AU2 A7 (gain = Amplitude x its UnconnectedValue when the port is connected).
 	const float amp = read(amplitude) * (amplitude.connected() ? amplitude.constant : 1.0f);
 	s.amplitude = std::isfinite(amp) ? std::clamp(amp, 0.0f, 16.0f) : 0.0f;
 	const bool trigger = rose(port(n, cp::SmpTrigger));
@@ -365,6 +380,8 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 			const ca::SoundWaveInfo &wave = bank->waves()[id];
 			const ca::SoundPort &variation_port = port(n, cp::SmpVariation);
 			uint32_t v = 0;
+			// STAND-IN: an unconnected Variation is a uniform draw per trigger, where notes R5-AU1 step a per-wave cursor
+			// through a shuffled order shared by every user of the wave. Settle: build that cursor.
 			if (variation_port.connected()) {
 				const float f = std::floor(read(variation_port));
 				v = f <= 0.0f ? 0u : std::min(uint32_t(f), range.second - 1);
@@ -384,6 +401,8 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 			s.stepped = s.step_connected && on(read(port(n, cp::SmpEnableStep)));
 			s.released = false;
 			s.cut = false;
+			// SOURCE: notes R5-AU2 A3 (a Trigger while busy cuts every voice and starts afresh on the first slot, Delay later).
+			// STAND-IN: the new start does not wait for the cut voices to report idle. Settle: follow R5-AU2 A3.
 			cut_slots(s);
 			if (s.segments > 0) {
 				const uint32_t slot = 0;
@@ -399,6 +418,8 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 			}
 		}
 	}
+	// STAND-IN: a Step queues the next loop segment on the other slot, so steps overlap; notes Q12 2 only say Step forces
+	// an advance and leave its timing rule partly read. Settle: a note on the Step rule.
 	if (step && s.active && s.stepped && !s.released && s.first_loop >= 0) {
 		const uint16_t seg = pick_loop_segment(*this, s);
 		const uint32_t slot = (s.last_slot + 1) % s.slots_count;
@@ -414,6 +435,10 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 	if (release && s.active && !s.released) {
 		s.released = true;
 		graph_entry(p_frame, s.node, GraphTraceKind::Release);
+		// SOURCE: notes R5-AU2 A6 (LtNone and LtForward cut with no tail; LtInstantRelease cuts and starts one uniform
+		// tail at once on the second slot; LtRelease queues a tail after the current segment).
+		// INFERRED: a Release in the same evaluation as the Trigger lets that start play out (R5-AU2 leaves it open).
+		// Settle: a note on Trigger and Release in one update.
 		const bool cut_on_release = s.loop == ca::SamplerLoop::None || s.loop == ca::SamplerLoop::Forward;
 		if (s.loop == ca::SamplerLoop::InstantRelease || (cut_on_release && !trigger)) {
 			s.cut = true;
@@ -453,8 +478,11 @@ void PatchInstance::State::sampler_events(uint32_t p_node_index, const SoundNode
 			}
 		}
 	}
+	// STAND-IN: Finished pulses for one evaluation, where notes R5-AU2 A9 hold it at 1 while the sampler is inactive.
+	// Settle: follow R5-AU2 A9.
 	write(port(n, cp::SmpFinished), s.finished_pulse ? 1.0f : 0.0f);
 	s.finished_pulse = false;
+	// STAND-IN: Buffered always reads 1, as every wave is resident before it plays. Settle: a note on Buffered.
 	write(port(n, cp::SmpBuffered), 1.0f);
 	const SlotState &latest = slots[s.slots_begin + std::min<uint32_t>(s.last_slot, s.slots_count ? s.slots_count - 1 : 0)];
 	write(port(n, cp::SmpPosition), s.slots_count && latest.play.active ? float(latest.play.frames_out) / float(mix_rate) : 0.0f);
@@ -562,6 +590,8 @@ void PatchInstance::State::render_slot(SamplerState &s, uint32_t p_slot, float *
 		PendingStart pend = slot.pending;
 		slot.pending.armed = false;
 		const bool takeover = play.active;
+		// STAND-IN: a slot taken over while it sounds fades its old play out over step_crossfade_ms as the new one fades
+		// in; notes Q12 4 queue with no fade. Settle: a note on whether the player de-clicks a stop.
 		if (takeover) {
 			++stats.slot_takeovers;
 			const float crossfade = tuning.step_crossfade_ms * 0.001f * float(mix_rate);

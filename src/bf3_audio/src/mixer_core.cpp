@@ -165,6 +165,7 @@ struct MixerCore::Impl {
 	float limit_gain = 1.0f;
 	std::array<float, 2 * kBlockFrames> limit_g{};
 	std::array<float, 4 * kBlockFrames> limit_ext{};
+	// WHY: the output is delayed by the limiter's attack, so its gain is down before a peak that lands on a block edge.
 	uint32_t limit_lookahead_frames() const {
 		return std::clamp<uint32_t>(config.limit_attack_frames, 1, kBlockFrames);
 	}
@@ -308,6 +309,8 @@ InstanceSlot *find_slot(std::vector<InstanceSlot> &r_slots, InstanceHandle p_han
 
 }
 
+// WHY: BF3 keeps one patch handle per weapon while it plays (notes R5-VS3 2), so a burst takes over its shooter's
+// sounding instance of the same patch instead of opening a second one.
 bool MixerCore::Impl::join(const MixerCommand &p_start, uint64_t p_frame, MixerStats &stats) {
 	InstanceSlot *s = find_slot(instances, p_start.join);
 	if (s == nullptr || s->pending || s->fade_mode != 0 || &s->instance->program() != &p_start.instance->program()) {
@@ -691,6 +694,7 @@ uint32_t MixerCore::mix(float *r_interleaved_stereo, uint32_t p_frames) {
 	Impl &m = *impl_;
 #if OPENBF3_HAVE_MXCSR
 	const unsigned int saved_csr = _mm_getcsr();
+	// WHY: flush-to-zero and denormals-are-zero, so decaying filter and reverb tails do not slow the mix thread.
 	_mm_setcsr(saved_csr | 0x8040);
 #endif
 	const auto now = std::chrono::steady_clock::now();
@@ -791,6 +795,7 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 		v = CullVoice{};
 		v.handle = s.handle;
 		v.loudness_db = info.loudness_db;
+		// SOURCE: notes R2-D4 (a voice slot's priority starts at 1.0 and BF3 never reads it back).
 		v.priority = 1.0f;
 		v.scope = s.scope;
 		v.position[0] = info.position.x;
@@ -844,6 +849,8 @@ void MixerCore::Impl::a3_block(MixerStats &stats, uint64_t p_first) {
 				s.starting = false;
 				live += cull_voices[k].voices;
 				if (cull_voices[k].hdr) {
+					// STAND-IN: the window follows the loudest kept voice, where notes R-D3 1 and 2 follow the power sum of
+					// every output's level with its VU term. Settle: build R-D3's power sum.
 					loudest = std::max(loudest, cull_voices[k].loudness_db);
 				}
 				break;

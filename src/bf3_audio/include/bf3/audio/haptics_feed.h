@@ -10,6 +10,7 @@
 
 namespace bf3::audio {
 
+// SOURCE: notes R-C1 A and B (each write sets life 0.5 s; weight 2 x life x ShakeFactor), the 2 constants below.
 inline constexpr float kShakeLifeSeconds = 0.5f;
 inline constexpr float kShakeWeightPerLife = 2.0f;
 inline constexpr size_t kMaxShakeSources = 32;

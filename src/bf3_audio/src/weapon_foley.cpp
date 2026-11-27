@@ -274,6 +274,8 @@ FoleyEvent trace_foley_event(const ca::SoundProgram &p_p, uint32_t p_hash) {
 				}
 				ev.samplers.push_back(unit.node_index);
 			}
+			// WHY: a group passes only while the distance is under its FadeEnd (notes R5-AU1 Rule 1), so past the largest
+			// FadeEnd of a distance gate on the trigger path the event plays nothing and is not started.
 			if (n.type == ca::SoundNodeType::MultiCrossfader) {
 				const uint16_t start = port_reg(p_p, n, cp::McfStart);
 				const uint16_t control = port_reg(p_p, n, cp::McfControl);
@@ -298,6 +300,8 @@ FoleyEvent trace_foley_event(const ca::SoundProgram &p_p, uint32_t p_hash) {
 	std::sort(ev.samplers.begin(), ev.samplers.end());
 	ev.reach_m = gated ? reach : kFoleyUngated;
 
+	// INFERRED: the other event that feeds a reload sampler's Release is the one that cancels the reload.
+	// Settle: a note on the reload-cancel event.
 	for (uint32_t s : ev.samplers) {
 		const ca::SoundNode &n = p_p.nodes[s];
 		const uint16_t rel = port_reg(p_p, n, cp::SmpRelease);

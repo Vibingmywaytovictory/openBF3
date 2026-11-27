@@ -201,6 +201,8 @@ OnsetSpacing onset_spacing(std::span<const uint64_t> p_onsets, BurstWindow p_win
 }
 
 double integrated_loudness_lufs(std::span<const float> p_interleaved_stereo) {
+	// WHY: the constants are ITU-R BS.1770's K-weighting filters at 48 kHz, its 400 ms blocks on a 100 ms hop and its
+	// -70 LUFS and -10 LU gates.
 	constexpr double kShelfB[3] = { 1.53512485958697, -2.69169618940638, 1.19839281085285 };
 	constexpr double kShelfA[2] = { -1.69065929318241, 0.73248077421585 };
 	constexpr double kHighB[3] = { 1.0, -2.0, 1.0 };

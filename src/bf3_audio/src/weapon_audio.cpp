@@ -299,6 +299,7 @@ bool OneShotPool::start(MixerCore &r_mixer, std::shared_ptr<const ca::SoundProgr
 		++failed_;
 		return false;
 	}
+	// STAND-IN: a full pool kills its oldest one-shot. Settle: notes R-D3's count cutoff in place of the pool limit.
 	if (live_.size() >= limit_) {
 
 		auto oldest = std::min_element(live_.begin(), live_.end(), [](const Entry &a, const Entry &b) { return a.start_frame < b.start_frame; });
@@ -677,6 +678,7 @@ struct WeaponAudioRouter::Impl {
 		}
 	}
 
+	// STAND-IN: a full router kills its farthest released voice. Settle: notes R-D3's count cutoff.
 	bool make_room(float p_distance) {
 		if (voices.size() < config.max_weapon_voices) {
 			return true;
@@ -822,6 +824,8 @@ struct WeaponAudioRouter::Impl {
 		}
 		r_v.held = false;
 		const uint64_t last = r_v.round_frame(r_v.last_round);
+		// STAND-IN: the stop event lands half a shot interval after an automatic burst's last round, where notes R5-VS3 2
+		// post FireStopped in the update after the fire end once every ShotFired is out. Settle: follow R5-VS3 2.
 		uint64_t stop = r_v.single ? last + 1 : last + uint64_t(std::llround(0.5 * r_v.interval_s * double(config.mix_rate)));
 		stop = std::max(stop, mixer.earliest_frame());
 		r_v.stop_frame = stop;
@@ -844,6 +848,8 @@ struct WeaponAudioRouter::Impl {
 		}
 	}
 
+	// STAND-IN: in first person the own weapon sounds at the listener, where notes R5-VS3 2 put the handle at the
+	// weapon's transform. Settle: the first-person weapon's transform.
 	EmitterState own_emitter(const present::PresentEvent &p_e) const {
 		EmitterState e;
 		if (own_first_person) {
@@ -975,6 +981,8 @@ struct WeaponAudioRouter::Impl {
 			return;
 		}
 		Voice *v = t.held != kNoInstance ? voice(t.held) : nullptr;
+		// INFERRED: a remote shot continues the held burst when it falls within half an interval of the burst's round grid
+		// and within the hold of its last evidence; clients see shots, not the trigger. Settle: R5-VS3's remote fire end.
 		if (v != nullptr && v->def == p_e.def && !v->single && v->have_id && p_e.id > v->first_id) {
 
 			const sw::SimTime iu = interval_units(*v);
@@ -1501,6 +1509,8 @@ struct WeaponAudioRouter::Impl {
 		r_cue.kind = FoleyCueKind::Reload;
 
 		uint32_t param = 0;
+		// SOURCE: notes R5-VS3 1 (IsShortReload from the weapon's short-reload answer, inferred there as rounds left).
+		// STAND-IN: not ANDed with IsFirstPerson as R5-VS3 1 reads. Settle: follow R5-VS3 1.
 		if (d->foley.short_reload_param && p_magazine >= 0) {
 			param = kHashIsShortReload;
 			r_cue.short_reload = p_magazine > 0 ? 1 : 0;

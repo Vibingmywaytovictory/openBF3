@@ -12,6 +12,8 @@
 
 namespace bf3::audio {
 
+// STAND-IN: the centre and the surrounds fold into stereo at 0.7071 when the plan has more than 2 speakers.
+// Settle: a note on the output's stereo fold-down.
 inline constexpr float kStereoDownmix = 0.70710678f;
 
 struct MasterMixStats {

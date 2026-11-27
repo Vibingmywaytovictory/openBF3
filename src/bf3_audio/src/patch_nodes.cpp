@@ -14,6 +14,8 @@ using core::finite_or_zero;
 
 namespace detail {
 
+// STAND-IN: per-instance hashed draws stand in for the audio system's generator (notes R3-D7 E: s = 630360016 s mod
+// 2^31 - 1, seeded 1973272912). Settle: draw from that generator in BF3's call order.
 double uniform01(uint64_t p_seed, uint32_t p_node, uint32_t p_draw) {
 	const uint64_t h = splitmix64(splitmix64(p_seed ^ (uint64_t(p_node) << 32)) ^ uint64_t(p_draw));
 	return double(h >> 11) * (1.0 / 9007199254740992.0);
@@ -24,8 +26,12 @@ double uniform01(uint64_t p_seed, uint32_t p_node, uint32_t p_draw) {
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
+// STAND-IN: Equal and the case values match within 0.001, where notes R5-AU1 1 and R5-AU2 B compare exactly.
+// Settle: compare exactly as the notes read.
 constexpr float kCaseTolerance = 0.001f;
 
+// STAND-IN: the Cosine fade is a raised cosine and a group fades in by 1 minus the previous group's fade-out, where
+// notes R-D2 use cos and sin of round(90 t) degrees. Settle: build R-D2's quantised equal-power law.
 float fade_out(ca::FaderType p_type, float p_t) {
 	const float t = std::clamp(p_t, 0.0f, 1.0f);
 	if (p_type == ca::FaderType::Cosine) {
@@ -45,6 +51,7 @@ float band_t(float p_control, float p_begin, float p_end) {
 
 namespace detail {
 
+// SOURCE: notes R5-AU2 B (Less X < Y, Greater X > Y, LessOrEqual, GreaterOrEqual, Equal X = Y).
 bool condition(ca::ConditionOp p_op, float x, float y) {
 	switch (p_op) {
 		case ca::ConditionOp::And:
@@ -94,6 +101,9 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				}
 				break;
 			case SoundNodeType::Physics:
+				// SOURCE: notes R5-AU1 data fields (PhysicsNodeData.Distance is the listener distance, R2-D5).
+				// INFERRED: Azimuth and Elevation in radians, Velocity the emitter speed, RelativeVelocity the closing
+				// speed along the line. Settle: a note on the Physics node's other outputs.
 				write(port(n, cp::PhysDistance), geometry.distance);
 				write(port(n, cp::PhysAzimuth), geometry.azimuth);
 				write(port(n, cp::PhysElevation), geometry.elevation);
@@ -101,6 +111,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				write(port(n, cp::PhysRelativeVelocity), geometry.relative_velocity);
 				break;
 			case SoundNodeType::Delta:
+				// SOURCE: notes R5-VS1 Rule 10 (each DeltaGroup with both ports gives In minus the previous update's, 0 first).
 				for (uint16_t g = 0; g < n.children_count; ++g) {
 					const SoundNode &e = child(n, g);
 					if (!port(e, cp::DeltaGroupIn).connected() || !port(e, cp::DeltaGroupDelta).connected()) {
@@ -112,11 +123,15 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				}
 				break;
 			case SoundNodeType::Orientation:
+				// INFERRED: ListenerRelativeYaw and Pitch in degrees of the emitter's forward in the listener's frame, Roll 0.
+				// Settle: a note on the Orientation node.
 				write(port(n, cp::OriYaw), geometry.relative_yaw_deg);
 				write(port(n, cp::OriPitch), geometry.relative_pitch_deg);
 				write(port(n, cp::OriRoll), 0.0f);
 				break;
 			case SoundNodeType::MultiCrossfader: {
+				// SOURCE: notes R5-AU1 Rule 1 and the R-D2 checker (in range when prevBegin < x < FadeEnd, -1e7 first; a
+				// node Start re-fires every group in range; unlocked groups start on entry only while the node is started).
 				const bool start = rose(port(n, cp::McfStart));
 				const bool stop = on(read(port(n, cp::McfStop)));
 				const float live = read(port(n, cp::McfControl));
@@ -163,6 +178,9 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::Adsr: {
+				// SOURCE: notes R-D1 Adsr (linear attack to 1 over A, decay to S over D, release to 0 over R, Finished at 0).
+				// STAND-IN: a re-trigger and a release start from the current value, where R-D1 restarts at 0 and releases
+				// from S after A + D. Settle: follow R-D1's stages.
 				const float a = read(port(n, cp::AdsrA)), d = read(port(n, cp::AdsrD)), sus = std::clamp(read(port(n, cp::AdsrS)), 0.0f, 1.0f);
 				const float r = read(port(n, cp::AdsrR));
 				float finished = s.pulse ? 1.0f : 0.0f;
@@ -178,6 +196,8 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 					s.value = sus;
 					s.mode = uint8_t(AdsrPhase::Sustain);
 				}
+				// INFERRED: with no Release input a held Trigger level sustains and the release starts once it reads off,
+				// where notes R-D1 3 release right after A + D. Settle: a note on an Adsr triggered by a held level.
 				const bool gate_closed = !port(n, cp::AdsrRelease).connected() && !on(read(port(n, cp::AdsrTrigger))) &&
 						s.mode == uint8_t(AdsrPhase::Sustain);
 				if ((on(read(port(n, cp::AdsrRelease))) || gate_closed) && s.mode != uint8_t(AdsrPhase::Idle) &&
@@ -196,6 +216,8 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::Lfo: {
+				// STAND-IN: a sine between Min and Max scaled by Amplitude at Hz; the Lfo law is not in the notes (R5-VS1).
+				// Settle: a note on the Lfo node.
 				const float mn = flt(n, cp::LfoMin), mx = flt(n, cp::LfoMax);
 				const double mid = 0.5 * (double(mn) + mx), half = 0.5 * (double(mx) - mn);
 				const double amp = read(port(n, cp::LfoAmplitude));
@@ -203,6 +225,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::NumberGenerator:
+				// SOURCE: notes R5-AU1 Rule 1 (on Trigger, Y = uniform(Min, Max); Y holds otherwise).
 				if (rose(port(n, cp::NumTrigger))) {
 					const float mn = flt(n, cp::NumMin), mx = flt(n, cp::NumMax);
 					s.value = finite_or_zero(mn + (double(mx) - mn) * uniform01(seed, ni, s.draws++));
@@ -211,6 +234,7 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			case SoundNodeType::ParameterFilterLinear: {
 				const float in = read(port(n, cp::PflIn));
+				// STAND-IN: the first evaluation sets Out to In; the notes give no starting Out. Settle: a note on the starting Out.
 				if (!s.mode) {
 					s.value = in;
 					s.mode = 1;
@@ -219,6 +243,8 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::Timer: {
+				// STAND-IN: Start restarts, Stop halts, Tick when the time reaches Period (once for SingleShot); the Timer
+				// law is not in the notes (R5-VS1). Settle: a note on the Timer node.
 				float tick = s.pulse ? 1.0f : 0.0f;
 				s.pulse = 0;
 				if (rose(port(n, cp::TimerStart))) {
@@ -234,6 +260,8 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::EventGate: {
+				// INFERRED: an In edge passes while Enable is on and CoolDownTime has run out; the law is not in the notes.
+				// Settle: a note on the EventGate node.
 				bool out = false;
 				if (rose(port(n, cp::GateIn)) && on(read(port(n, cp::GateEnable))) && s.value <= 0.0f) {
 					out = true;
@@ -251,12 +279,17 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				write(port(n, cp::StZ), ca::simple_transform(n.option, read(port(n, cp::StX)), read(port(n, cp::StY))));
 				break;
 			case SoundNodeType::Crossfader2: {
+				// STAND-IN: linear outputs 1 - c and c, where notes R-D2 give cos and sin of round(90 c) degrees.
+				// Settle: build R-D2's Crossfader2 table.
 				const float c = std::clamp(read(port(n, cp::Cf2Ctrl)), 0.0f, 1.0f);
 				write(port(n, cp::Cf2Out1), 1.0f - c);
 				write(port(n, cp::Cf2Out2), c);
 				break;
 			}
 			case SoundNodeType::SimpleValueSelector: {
+				// SOURCE: notes R5-AU1 Rule 1 (Out = OutValues[index], an index past the end gives the last entry).
+				// STAND-IN: floor in place of truncation, and an index at or below -1 gives the first entry where the R5-AU1
+				// checker gives the last. Settle: follow the R5-AU1 checker.
 				const uint32_t count = n.floats_count;
 				float out = 0.0f;
 				if (count > 0) {
@@ -268,6 +301,8 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::Switcher: {
+				// SOURCE: notes R5-AU1 Rule 1 (on Trigger, the CaseTrigger of the entry whose CaseValue equals Value fires).
+				// STAND-IN: with no case matched the Default value is tried. Settle: a note on the Switcher's Default.
 				const bool trigger = rose(port(n, cp::SwTrigger));
 				const float value = read(port(n, cp::SwValue));
 				int32_t hit = -1;
@@ -288,6 +323,8 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::ValueSelector: {
+				// STAND-IN: the entry whose CaseValue matches Value, else Default, else 0; the law is not in the notes.
+				// Settle: a note on the ValueSelector node.
 				const float value = read(port(n, cp::VsValue));
 				float out = 0.0f;
 				bool found = false;
@@ -306,6 +343,9 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::DeMux: {
+				// SOURCE: notes R5-AU1 Rule 1 (output trunc(Value) fires on Trigger; WrapValue takes it mod the outputs).
+				// STAND-IN: floor, and without WrapValue a past-end index fires the last output where R5-AU1 fires none.
+				// Settle: follow R5-AU1.
 				const bool trigger = rose(port(n, cp::DeMuxTrigger));
 				int64_t hit = -1;
 				if (trigger && n.children_count > 0) {
@@ -323,6 +363,8 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::LogicalExpression: {
+				// INFERRED: the inputs read as levels; notes R5-AU1 1 give only Or, as firing when a changed input is 1.
+				// Settle: a note on And, Nand and Nor.
 				const ca::LogicalOp op = ca::LogicalOp(n.option);
 				bool all = n.children_count > 0, any = false;
 				for (uint16_t c = 0; c < n.children_count; ++c) {
@@ -357,6 +399,9 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				}
 				break;
 			case SoundNodeType::WaveSwitcher: {
+				// SOURCE: notes R5-AU1 Rule 1 (the Index port picks the wave, truncated).
+				// STAND-IN: floor, a past-end index gives the last wave where R5-AU1 gives DefaultIndex, and Advance (IsRandom
+				// never repeats) is not in the notes. Settle: follow R5-AU1 and a note on Advance.
 				const uint32_t count = n.waves_count;
 				bool changed = false;
 				if (count > 0) {
@@ -383,6 +428,8 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 				break;
 			}
 			case SoundNodeType::CameraShake:
+				// SOURCE: notes R-C1 A (the node hands Pitch, Yaw and Roll to the camera, one entry per playing instance).
+				// STAND-IN: several shake nodes of one instance add, where R-C1's entry keeps the last write. Settle: follow R-C1.
 				haptics.shake_pitch += read(port(n, cp::ShakePitch));
 				haptics.shake_roll += read(port(n, cp::ShakeRoll));
 				haptics.shake_yaw += read(port(n, cp::ShakeYaw));
@@ -411,11 +458,14 @@ void PatchInstance::State::evaluate_program(uint64_t p_frame) {
 		const ca::SoundOutput &out = p.outputs[o];
 		const float metres = geometry.distance;
 		float d = metres;
+		// STAND-IN: the curve is read at max(d, MinDistance), where notes R2-D5 2 read it at max(0, d - MinDistance) and
+		// ignore a curve of fewer than 2 points. Settle: follow R2-D5.
 		if (metres < out.min_distance) {
 			d = metres + (out.min_distance - metres) * tuning.min_distance_clamp;
 		}
 		outputs[o].curve_gain_db = out.attenuation.evaluate(d * tuning.curve_x_metres) + out.gain_db;
 		float cone = 0.0f;
+		// SOURCE: notes R-D5 cone (full angles clamped to 0..360; OutsideGain x (1 - cone), linear between Inner and Outer).
 		if (out.kind == ca::OutputKind::Cone) {
 			const SoundNode &n = p.nodes[out.node];
 			const float inner = std::clamp(read(port(n, cp::ConeInnerAngle)), 0.0f, 360.0f) * 0.5f;
@@ -490,6 +540,8 @@ void PatchInstance::State::advance(double p_seconds) {
 				}
 				break;
 			case SoundNodeType::ParameterFilterLinear: {
+				// SOURCE: notes R5-VS1 Rule 10 and R5-AU1 Rule 1 (Out moves toward In by at most AttackSpeed or
+				// ReleaseSpeed x dt per update).
 				const float in = read(port(n, cp::PflIn));
 				if (in > s.value) {
 					const float up = std::max(0.0f, read(port(n, cp::PflAttack)));

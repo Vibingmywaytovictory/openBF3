@@ -133,6 +133,8 @@ core::Result<ImpulseBank> load_impulse_bank(const core::EbxDb &p_db, const core:
 	return bank;
 }
 
+// STAND-IN: the two loudest distinct responses fill the slots, each slot keeping its response while it stays among
+// the two; how the engine feeds Reverb0/1 is not in the notes. Settle: a note on the reverb controller's inputs.
 std::array<IrSlot, kIrSlots> IrReverbController::choose(std::span<const IrZone> p_zones) {
 	std::array<IrSlot, kIrSlots> best{};
 	for (uint32_t b = 0; b < kIrSlots; ++b) {
@@ -296,6 +298,8 @@ void IrReverb::push_input(const float *p_left, const float *p_right, bool p_sile
 	split_packed(work_re_.data(), work_im_.data(), l_re, l_im, r_re, r_im);
 }
 
+// INFERRED: each response channel convolves its own input channel to its own speaker. Settle: a note on the reverb
+// plugin's channel routing.
 void IrReverb::render_lane(const Lane &p_lane, float *r_left, float *r_right) {
 	const PreparedImpulse &h = *p_lane.impulse;
 	const uint32_t count = std::min(h.partitions, partitions_);

@@ -37,6 +37,8 @@ struct Culler {
 
 	bool kept(size_t i) const { return out[i] == CullVerdict::Keep; }
 
+	// STAND-IN: a culled loop parks and a culled one-shot is dropped at once, where notes R4-D3 pause an inaudible sound
+	// and release it after 4 s. Settle: build R4-D3's suspend timers.
 	void cull(size_t i, CullVerdict p_drop) {
 		if (v[i].looping) {
 			if (i < park.size()) {
@@ -85,6 +87,9 @@ struct Culler {
 		}
 	}
 
+	// SOURCE: notes R4-D4 DuplicateSpawn (a new sound within Distance of a kept spawn younger than Time is rejected).
+	// STAND-IN: one key per scope (GroupTypes not applied), equality counts as near, and only live sounds are remembered
+	// where R4-D4 keeps every spawn for Time. Settle: follow R4-D4.
 	void duplicates(uint16_t p_scope, const SoundScope &p_s, uint32_t p_mix_rate) {
 		const size_t n = v.size();
 		const double window = double(p_s.duplicate_time_s) * double(p_mix_rate);
@@ -161,6 +166,8 @@ void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes
 			if (sc.duplicate_radius_m > 0.0f && sc.duplicate_time_s > 0.0f) {
 				c.duplicates(s, sc, p_mix_rate);
 			}
+			// SOURCE: notes R-D4 scope strategies (ClosestInstances keeps the Count nearest, ties to the earlier one,
+			// and MaxInstances keeps the first Count with KeepOldest, else the last Count).
 			if (sc.closest > 0) {
 				c.keep_best(
 						sc.closest, member,
@@ -189,6 +196,8 @@ void cull_voices(std::span<const CullVoice> p_voices, const ScopeTable *p_scopes
 		total += c.kept(i) ? held(i) : 0;
 		margin = std::max<uint64_t>(margin, c.kept(i) ? std::min<uint32_t>(p_voices[i].resume_margin, kMaxCullVoices) : 0u);
 	}
+	// STAND-IN: over the voice cap the quietest voices go, ranked by loudness plus the hold, where notes R-D3 6 cut the
+	// outputs past the MaxAudibleSoundCount loudest. Settle: build R-D3's count cutoff.
 	if (total + margin > p_max_voices) {
 		const auto score = [&](size_t k) {
 			const float s = (p_voices[k].loudness_db + (std::isfinite(p_voices[k].hold_db) ? p_voices[k].hold_db : 0.0f)) * p_voices[k].priority;
@@ -229,6 +238,8 @@ MixerA3Assets load_mixer_a3(const core::EbxResolver &p_db, std::span<const std::
 	} else {
 		out.notes += "A3: no HDR window (fixed window kept): " + hdr.error().message + "\n";
 	}
+	// STAND-IN: the Default sound state's low-pass is the only state applied (no round-end, menu or out-of-bounds state).
+	// Settle: drive SoundStateEntityData's states.
 	const core::Result<float> low_pass = core::audio::read_sound_state_low_pass(p_db, "Default");
 	const core::Result<core::ui::ProfileOptions> options = core::ui::read_profile_options(p_db);
 	const core::ui::ProfileOption *system = options ? options->find("YourSoundSystem") : nullptr;

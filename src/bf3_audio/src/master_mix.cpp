@@ -10,6 +10,8 @@ namespace ca = core::audio;
 namespace {
 
 constexpr uint32_t kMaxFrames = 512;
+// WHY: the biquad design clamps a cutoff to 0.45 of the rate, so a low-pass at or above it (the open 24000 Hz) is
+// bypassed instead of filtering.
 constexpr float kOpenLowPassShare = 0.45f;
 
 float smoothing(float p_ms, uint32_t p_rate) {
@@ -76,6 +78,7 @@ void MasterMixer::process(
 		const float g = p_bus_gain[size_t(bus)];
 		RoleBuffer &b = buffers_[v];
 		const bool mono = plan_->voices[v].channels == 1;
+		// STAND-IN: a mono master voice takes the mean of the bus's left and right. Settle: a note on a bus into a mono voice.
 		if (mono) {
 			float *m = b[size_t(ca::SpeakerRole::Mono)].data();
 			for (uint32_t i = 0; i < frames; ++i) {
@@ -151,6 +154,9 @@ void MasterMixer::process(
 					break;
 				}
 				case ca::MasterStepKind::Compressor: {
+					// INFERRED: values 0 to 3 are the threshold in dB, the ratio, and the attack and release in ms.
+					// Settle: a note on the compressor plugin.
+					// STAND-IN: a peak compressor with one-pole attack and release. Settle: a note on the compressor plugin.
 					const float threshold = s.values[0];
 					const float slope = 1.0f - 1.0f / std::max(1.0f, s.values[1]);
 					const float attack = smoothing(s.values[2], rate_), release = smoothing(s.values[3], rate_);
@@ -216,6 +222,8 @@ void MasterMixer::process(
 					break;
 				}
 				case ca::MasterStepKind::MatrixPan: {
+					// STAND-IN: the live inputs are averaged to one signal and spread by the attribute gain of each speaker
+					// role. Settle: a note on the MatrixPanner plugin.
 					std::array<float, kMaxFrames> m{};
 					uint32_t inputs = 0;
 					for (size_t r = 0; r < ca::kSpeakerRoles; ++r) {
@@ -273,6 +281,7 @@ void MasterMixer::process(
 	const auto role = [&](ca::SpeakerRole p_role, uint32_t p_i) {
 		return live[size_t(p_role)] ? out[size_t(p_role)][p_i] : 0.0f;
 	};
+	// STAND-IN: the LFE role reaches no stereo speaker in the fold-down. Settle: a note on the output's stereo fold-down.
 	const bool stereo = plan_->speakers <= 2;
 	for (uint32_t i = 0; i < frames; ++i) {
 		float l = role(ca::SpeakerRole::L, i), r = role(ca::SpeakerRole::R, i);

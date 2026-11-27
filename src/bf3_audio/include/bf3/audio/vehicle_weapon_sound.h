@@ -10,6 +10,8 @@
 
 namespace bf3::audio {
 
+// SOURCE: notes R5-VS3 names (the event and input hashes below; #3520090073, #3576779520, #4198762218 and #636551541
+// unnamed there).
 inline constexpr uint32_t kHashShotFired = kHashStep;
 inline constexpr uint32_t kHashFireStopped = 1920007028u;
 inline constexpr uint32_t kHashReloadEnd = 1864262363u;
@@ -23,6 +25,8 @@ inline constexpr uint32_t kHashOwnerSameTeam = 3576779520u;
 inline constexpr uint32_t kHashOwnerLocal = 4198762218u;
 inline constexpr uint32_t kHashWeaponFlag = 636551541u;
 
+// SOURCE: notes R5-VS3 1 and its constants (FireLogicType starts at 2, #636551541 reads 1, action 6 changes the fire
+// mode and action 1 the zoom), the 4 constants below.
 inline constexpr uint8_t kInitialFireLogicType = 2;
 inline constexpr float kDefaultWeaponFlag = 1.0f;
 inline constexpr uint8_t kFireModeAction = 6;
@@ -71,6 +75,8 @@ struct VehicleWeaponOp {
 };
 static_assert(std::is_trivially_copyable_v<VehicleWeaponOp>);
 
+// SOURCE: notes R5-VS3 Rule 1 (the callbacks' state) and Rule 2 (the per-update order, one ShotFired per update,
+// FireStopped once every ShotFired is out, release unless local, detach on destruction).
 class WeaponSoundState {
 public:
 	void fire_start(const WeaponSoundOwner &p_owner);

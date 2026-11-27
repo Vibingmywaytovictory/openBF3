@@ -38,6 +38,8 @@ struct StereoGains {
 	float left = 0.0f, right = 0.0f;
 };
 
+// SOURCE: notes R3-D5 A and B (near zone 2.5 m, front pair at +-30 deg, rho snap 0.999, diffuse snap 0.0005, flat
+// output scale 100), the 5 constants below.
 inline constexpr float kPanNearZoneMetres = 2.5f;
 inline constexpr float kPanFrontSpeakerDeg = 30.0f;
 inline constexpr float kPanRhoSnap = 0.999f;

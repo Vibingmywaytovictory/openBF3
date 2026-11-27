@@ -17,7 +17,10 @@
 
 namespace bf3::audio {
 
+// STAND-IN: the mixer renders and evaluates patch graphs on a 512-frame grid (10.7 ms), where notes R2-D1 run the
+// graphs once per rendered frame with the frame dt. Settle: drive the graphs from the frame dt.
 inline constexpr uint32_t kBlockFrames = 512;
+// SOURCE: AudioSystemAsset.SampleRate of sound/audiosystem is 48000 (bf3dump).
 inline constexpr uint32_t kMixRate = 48000;
 
 struct MixerConfig {
@@ -25,12 +28,17 @@ struct MixerConfig {
 	uint32_t max_instances = 64;
 	uint32_t command_capacity = 1024;
 	float output_gain_db = 0.0f;
+	// STAND-IN: a 2-block lead of a new sound ahead of the mix clock. Settle: the retail delay from a shot to its sound.
 	uint32_t schedule_lead_blocks = 2;
 
 	std::optional<core::audio::HdrSetting> hdr;
+	// STAND-IN: a cap on busy sampler slots; BF3 has no global voice cap (notes R4-D4) and limits the count by
+	// AudioSettings.MaxAudibleSoundCount (notes R-D3 6). Settle: cull by that count as R-D3.
 	uint32_t max_voices = 128;
 	std::shared_ptr<const core::audio::ScopeTable> scopes;
 
+	// STAND-IN: the members from here to limit_release_ms but master, master_iir2_q and impulses are hand-picked (cut
+	// fade, cap hold, resume margin, peak limiter). Settle: a note on how BF3 cuts a voice and clips its output.
 	uint32_t cut_fade_frames = 512;
 
 	float cap_hold_db = 3.0f;
@@ -39,6 +47,7 @@ struct MixerConfig {
 	uint32_t resume_margin = 8;
 
 	std::shared_ptr<const core::audio::MasterMixData> master;
+	// INFERRED: a Butterworth Q for the master patch's IIR2 filters, which carry no Q. Settle: a note on those plugins' Q.
 	float master_iir2_q = 0.70710678f;
 	std::shared_ptr<const ImpulseBank> impulses;
 

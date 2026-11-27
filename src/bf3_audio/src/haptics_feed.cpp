@@ -64,6 +64,9 @@ void HapticsFeed::note(const MixerFeedback &p_feedback) {
 	peak_ = std::max({ peak_, std::fabs(h.shake_pitch), std::fabs(h.shake_yaw), std::fabs(h.shake_roll) });
 }
 
+// SOURCE: notes R-C1 B (per entry yaw, then pitch, then roll as matrix products; removed once its life before the
+// update is below 0).
+// INFERRED: the values are radians and the axes are y, x and z, as R-C1 infers. Settle: retail footage of a fly-by.
 CameraShake HapticsFeed::step(float p_dt, float p_shake_factor) {
 	CameraShake out;
 	Matrix m{ 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };

@@ -88,6 +88,8 @@ bool MovementFoley::start(
 	return true;
 }
 
+// STAND-IN: only the own soldier plays the Movement patch, from spawn to death, where notes R-D2 and R2-D2 start and
+// stop each soldier's on SoldierSoundData.MovementThreshold and its states. Settle: follow R2-D2's gate per soldier.
 void MovementFoley::step(MixerCore &r_mixer, const FootstepSoldier *p_own, const ListenerState &p_listener) {
 	const bool alive = p_own != nullptr && p_own->mode != sim::MoveMode::Dead && core::finite(p_own->position) &&
 			core::finite(p_own->velocity);
@@ -97,6 +99,8 @@ void MovementFoley::step(MixerCore &r_mixer, const FootstepSoldier *p_own, const
 	if (!alive || !program_) {
 		return;
 	}
+	// SOURCE: notes R5-AU2 D1 (Speed is the length of the 3-D velocity).
+	// STAND-IN: not clamped to the current maximum speed as D1 reads. Settle: clamp to the pose's speed as R5-AU2 D1.
 	const float speed = speed_of(p_own->velocity);
 	stats_.peak_speed = std::max(stats_.peak_speed, speed);
 	if (handle_ == kNoInstance) {
@@ -106,6 +110,8 @@ void MovementFoley::step(MixerCore &r_mixer, const FootstepSoldier *p_own, const
 	MixerCommand em;
 	em.type = MixerCommandType::SetEmitter;
 	em.handle = handle_;
+	// STAND-IN: the sound sits at the soldier's position without notes R5-AU2 D9's 0.2 offset in first person.
+	// Settle: apply D9's offset.
 	em.emitter.position = p_own->position;
 	if (!r_mixer.push(em)) {
 		++stats_.push_failures;
@@ -124,6 +130,8 @@ void MovementFoley::step(MixerCore &r_mixer, const FootstepSoldier *p_own, const
 			push(r_mixer, MixerCommandType::PostEvent, kJump, 0.0f)) {
 		++stats_.jumps;
 	}
+	// INFERRED: Vault is posted on entering the animation-controlled mode (notes R5-AU2 D4 post it once per vault flag).
+	// Settle: a note on when the vault flag is raised.
 	if (p_own->mode == sim::MoveMode::AnimationControlled && mode_ != sim::MoveMode::AnimationControlled &&
 			push(r_mixer, MixerCommandType::PostEvent, kVault, 0.0f)) {
 		++stats_.vaults;

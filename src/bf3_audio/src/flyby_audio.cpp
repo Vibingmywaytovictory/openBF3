@@ -26,6 +26,8 @@ float closest_fraction(const Vec3 &p_from, const Vec3 &p_to, const Vec3 &p_point
 	return std::clamp(vec::dot(vec::sub(p_point, p_from), d) / len2, 0.0f, 1.0f);
 }
 
+// SOURCE: notes R-D6 2 to 6 (skip on dt 0 or radius 0; closest point strictly inside the step, nearer than the radius
+// and both ends; step length over its time at least FlyBySoundSpeed; no angle test, no cool-down).
 FlyByCheck check_fly_by_step(const Vec3 &p_from, const Vec3 &p_to, double p_seconds, const Vec3 &p_listener,
 		float p_radius_m, float p_min_speed) {
 	FlyByCheck c;
@@ -124,6 +126,8 @@ struct FlyByAudio::Impl {
 	void pass(Track &r_track, const present::PresentedBullet &p_b, const FlyBySound &p_sound, Vec3 p_from,
 			sw::SimTime p_from_time, uint64_t p_match_seed, SimMixerClock &r_clock) {
 		const Vec3 to = core::to_vec3(p_b.position);
+		// INFERRED: the step is the bullet's path between two presented frames, where notes R-D6 test each bullet update
+		// step. Settle: test the client's bullet update steps.
 		r_track.last = to;
 		r_track.last_time = p_b.time;
 		if (r_track.done || !finite(listener.position)) {
@@ -156,6 +160,8 @@ struct FlyByAudio::Impl {
 				r_track.done = true;
 				break;
 		}
+		// STAND-IN: a round whose Hit names the own soldier plays no fly-by; notes R-D6 1 skip only a flagged shooter
+		// (inferred there as the local player). Settle: a note on that flag.
 		if (hit_own(r_track.key)) {
 			++stats.own_hits;
 			return;
@@ -176,6 +182,8 @@ struct FlyByAudio::Impl {
 		const uint64_t seed = present::impact_seed(
 				present::effect_seed(p_match_seed, p_b.slot, p_b.shot_index), p_b.pellet, kFlyByOrdinal);
 		OneShotOptions o;
+		// STAND-IN: only fly-by instances feed the camera shake, where notes R-C1 A let every patch's CameraShake node
+		// shake the camera. Settle: feed every instance's shake.
 		o.shakes_camera = true;
 		if (!pool.start(mixer, p_sound.program, bank, tuning, seed, em, listener,
 					r_clock.frame_of(when, present::PresentTimeline::Render), o)) {

@@ -37,6 +37,7 @@ uint16_t track_key(const FootstepSoldier &p_s) {
 
 }
 
+// STAND-IN: soldiers past the patch's last attenuation point get no steps. Settle: notes R-D3's culling of quiet sounds.
 float audible_radius(const ca::SoundProgram &p_program) {
 	float r = 0.0f;
 	for (const ca::SoundOutput &o : p_program.outputs) {
@@ -111,6 +112,7 @@ FootstepScheduler::FootstepScheduler(const FootstepParams &p_params) : params_(p
 void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const Vec3 &p_listener, double p_dt,
 		std::vector<FootstepPost> &r_out) {
 	++frame_;
+	// STAND-IN: dt held to 0.25 s, where notes R4-D1 clamp the audio dt to 2/30 s through ClampTicks. Settle: R4-D1.
 	const double dt = std::isfinite(p_dt) ? std::clamp(p_dt, 0.0, 0.25) : 0.0;
 	for (const FootstepSoldier &s : p_soldiers) {
 		if (!finite(s.position) || !finite(s.velocity) || s.mode == sim::MoveMode::Dead) {
@@ -123,6 +125,8 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 		const uint16_t key = track_key(s);
 		auto it = std::find_if(tracks_.begin(), tracks_.end(), [key](const Track &t) { return t.key == key; });
 		const float speed = speed_of(s.velocity);
+		// INFERRED: CurrentVelocityNormalized is the 3-D speed over the blueprint's MathOp scale (50), from the patch's
+		// ScaleClamps at the 5.5 m/s run threshold. Settle: a note on CurrentVelocityNormalized.
 		const float normalized = params_.speed_scale > 0.0f ? speed / params_.speed_scale : 0.0f;
 		const auto post_as = [&](FootstepEvent p_event, uint32_t p_hash, float p_speed) {
 			r_out.push_back(FootstepPost{ s.slot, p_event, p_hash, p_speed, d, false, false });
@@ -143,6 +147,8 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 		}
 		Track &t = *it;
 		t.seen = frame_;
+		// INFERRED: OnJump on entering Jumping, OnLand on landing with the speed before it, OnEnterAir on leaving the
+		// ground without a jump; notes R4-D2 leave the state-to-event pairing open. Settle: a note on that pairing.
 		if (s.mode == sim::MoveMode::Jumping && t.mode != sim::MoveMode::Jumping) {
 			post(FootstepEvent::Jump);
 		} else if (s.mode == sim::MoveMode::OnGround && airborne(t.mode)) {
@@ -170,6 +176,8 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 		}
 		const bool gated = s.local_player && params_.local_player_closes_period;
 		const bool remote_animated = !s.local_player && s.animated;
+		// STAND-IN: an animated remote soldier plants on its clip's measured foot touchdowns in place of notes R2-D2 4's
+		// foot contact records (the 3p clips carry no foot tags). Settle: a note on the foot contact records.
 		if (remote_animated && s.mode == sim::MoveMode::OnGround) {
 			for (const auto &[bit, event] : { std::pair{ kFootPlantLeftBit, FootstepEvent::Left },
 						 std::pair{ kFootPlantRightBit, FootstepEvent::Right } }) {
@@ -179,10 +187,13 @@ void FootstepScheduler::step(std::span<const FootstepSoldier> p_soldiers, const 
 				}
 			}
 		}
+		// STAND-IN: the timer restarts off the ground and in contact mode, where notes R2-D2 keep it. Settle: follow R2-D2.
 		if ((gated && s.animated) || remote_animated || s.mode != sim::MoveMode::OnGround) {
 			t.phase = 0.0f;
 			continue;
 		}
+		// SOURCE: notes R2-D2 3, its checker and R4-D2 (3-D speed strictly above the walk threshold, RunPeriod strictly
+		// above the run threshold, the timer frozen below, a step past the period, then 0; the left foot first).
 		if (!(speed > params_.walk_threshold)) {
 			continue;
 		}
@@ -237,6 +248,8 @@ struct FootstepDriver::Impl {
 		o.set_first_person = true;
 		o.first_person = p_soldier.first_person;
 		const uint64_t material_key = uint64_t(std::clamp(std::lround(id), 0l, 255l));
+		// STAND-IN: a step joins the soldier's sounding instance of the same material, pose and person, standing in for
+		// the one footstep sound entity the blueprint feeds every event (notes R2-D2). Settle: one instance per soldier.
 		o.join_key = kFootstepJoinTag | (uint64_t(p_soldier.slot) << 16) | (material_key << 8) |
 				(uint64_t(p_soldier.pose) << 1) | uint64_t(p_soldier.first_person);
 		o.before_start = [id, pose, speed, input = params.speed_input](PatchInstance &r_instance, InstanceHandle) {

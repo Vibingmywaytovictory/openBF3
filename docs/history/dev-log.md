@@ -3672,3 +3672,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Comments, bf3_present: 5 INFERRED on 3 files; Comment lines only: no code line is added, removed or changed.
 * Comments, bf3_ai: 11 INFERRED, 144 SOURCE, 79 STAND-IN, 17 WHY on 132 files; Comment lines only: no code line is added, removed or changed.
 * Comments, bf3_render: 76 INFERRED, 24 SOURCE, 79 STAND-IN, 12 WHY on 44 files; Comment lines only: no code line is added, removed or changed.
+* Comments, bf3_audio: 34 INFERRED, 55 SOURCE, 91 STAND-IN, 10 WHY on 33 files; Comment lines only: no code line is added, removed or changed.

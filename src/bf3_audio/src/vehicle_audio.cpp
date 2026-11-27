@@ -165,6 +165,9 @@ void VehicleAudio::step(
 			continue;
 		}
 		bool activated = s.running;
+		// SOURCE: notes R5-VS1 Rule 1 b to d (the handle is made and Start posted on activation, Stop on deactivation, a
+		// re-activation re-posts Start on the same handle, which lives until its patch stops playing).
+		// WHY: our mixer can cull, refuse or drop an instance BF3 would keep, so while the seat is taken it is made again.
 		if (s.kind == VehicleSoundKind::Engine) {
 			auto a = std::find_if(
 					activations_.begin(), activations_.end(), [&](const Activation &p_a) { return p_a.key == s.key; });
@@ -180,6 +183,8 @@ void VehicleAudio::step(
 		auto it = std::find_if(voices_.begin(), voices_.end(),
 				[&](const Voice &v) { return v.handle != kNoInstance && v.key == s.key && v.program == s.program; });
 		const float rpm = s.params[size_t(VehicleSoundParam::Rpm)];
+		// SOURCE: notes R5-VS1 Rule 7 (a spin sound starts when the rpm rises to SoundEffectStartRpm and posts Stop when it
+		// falls below SoundEffectStopRpm).
 		if (it == voices_.end()) {
 			const bool spin_up = s.kind == VehicleSoundKind::Spin && rpm >= s.previous_rpm && rpm >= s.start_rpm;
 			if ((s.kind == VehicleSoundKind::Engine && activated) || spin_up) {

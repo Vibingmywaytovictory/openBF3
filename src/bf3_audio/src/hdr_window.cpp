@@ -8,6 +8,8 @@ namespace bf3::audio {
 namespace {
 
 constexpr float kEpsilonDb = 1.0e-3f;
+// STAND-IN: a new sound more than 3 dB under the window bottom is not started. Settle: notes R4-D3's start and
+// suspend rule (a new sound gets 3 s before it may be suspended).
 constexpr float kPrecullMarginDb = 3.0f;
 
 float finite_or(float p_v, float p_fallback) {
@@ -36,6 +38,8 @@ void HdrWindow::reset() {
 	ramp_seconds_ = ramp_elapsed_ = 0.0f;
 }
 
+// STAND-IN: the release time grows with the drop over WindowSize and the release curve shapes the ramp, where notes
+// R-D3 3 pick it from the curve over an energy integrator (DischargeFactor, MaxAllowedEnergy). Settle: build R-D3 3.
 float HdrWindow::release_seconds(float p_drop_db) const {
 	const float size = std::max(setting_.window_size_db, 1.0e-3f);
 	const float f = std::clamp(finite_or(p_drop_db, 0.0f) / size, 0.0f, 1.0f);
@@ -52,6 +56,8 @@ float HdrWindow::release_shape(float p_x) const {
 	return std::clamp(finite_or((y - curve_y1_) / span, 1.0f - x), 0.0f, 1.0f);
 }
 
+// STAND-IN: the top and the bottom move in linear ramps over the attack and release times, where notes R-D3 3 and 4
+// step them by min(1, dt / time) of the remaining gap. Settle: build R-D3's steps.
 void HdrWindow::step(float p_loudest_db, uint32_t p_frames) {
 	const float dt = float(p_frames) / float(mix_rate_);
 	const float target = std::max(setting_.window_min_top_db, finite_or(p_loudest_db, setting_.window_min_top_db));
@@ -106,11 +112,15 @@ void HdrWindow::step(float p_loudest_db, uint32_t p_frames) {
 	}
 }
 
+// SOURCE: notes R-D3 per-output gain (min(P - top, AllowedOvershoot) - Headroom).
+// STAND-IN: CompressFactor is taken as 1. Settle: multiply by HdrSetting.CompressFactor as R-D3.
 float HdrWindow::gain_db(float p_loudness_db) const {
 	const float l = std::min(finite_or(p_loudness_db, -200.0f), top_db_ + setting_.allowed_overshoot_db);
 	return l - top_db_ - setting_.headroom_db;
 }
 
+// STAND-IN: a voice under the window bottom is muted at once, where notes R-D3 7 test against max(bottom, the
+// MaxAudibleSoundCount cutoff) and R4-D3 suspends after the 2 s and 3 s grace timers. Settle: build R4-D3's timers.
 bool HdrWindow::suspended(float p_loudness_db) const {
 	return !(p_loudness_db >= bottom_db_);
 }

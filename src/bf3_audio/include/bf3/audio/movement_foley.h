@@ -15,6 +15,8 @@
 
 namespace bf3::audio {
 
+// STAND-IN: Speed is sent when it moves by 0.01 m/s or more, where notes R5-AU2 D writes it every update.
+// Settle: send it every update.
 inline constexpr float kMovementSpeedStep = 0.01f;
 
 struct MovementFoleyStats {

@@ -73,6 +73,7 @@ core::Result<WeaponSoundBinding> bind_weapon_sound(std::shared_ptr<const ca::Sou
 			}
 		}
 	}
+	// SOURCE: notes R5-VS3 2 (every shot posts one ShotFired), where the graph reads it and no Sampler steps on it.
 	if (p.start_event != kHashStep && b.step_event != kHashStep && event_reaches_graph(p, kHashStep)) {
 		b.shot_event = kHashStep;
 	}
@@ -85,6 +86,8 @@ WeaponSoundDriver::WeaponSoundDriver(const WeaponSoundBinding &p_binding, Weapon
 
 void WeaponSoundDriver::prepare(PatchInstance &r_instance, bool p_first_person) const {
 	r_instance.set_parameter(kHashIsFirstPerson, p_first_person ? 1.0f : 0.0f);
+	// INFERRED: the input behind a Sampler's EnableStep reads 0 in single fire and 1 in burst and automatic fire.
+	// Settle: a note on that input (R5-VS3 does not list it).
 	if (binding_.enable_step_parameter) {
 		r_instance.set_parameter(*binding_.enable_step_parameter, mode_ == WeaponFireMode::Single ? 0.0f : 1.0f);
 	}
@@ -114,6 +117,8 @@ bool WeaponSoundDriver::trigger_down(MixerCore &r_mixer, uint64_t p_first_frame)
 }
 
 bool WeaponSoundDriver::round_fired(MixerCore &r_mixer, uint32_t p_round) {
+	// INFERRED: the first round is the start event alone, so a stepped patch gets its Step from the second round; notes
+	// R5-VS3 2 post a ShotFired per shot and leave a Step in the Trigger's update open. Settle: a note on the first shot.
 	if (p_round == 0) {
 		return true;
 	}
@@ -130,6 +135,8 @@ uint32_t WeaponSoundDriver::round_event() const {
 
 bool WeaponSoundDriver::trigger_up(MixerCore &r_mixer, uint64_t p_frame) {
 	held_ = false;
+	// WHY: a stop event that is also the start or round event fires the patch again (the MK11's DefaultStartEvent and
+	// DefaultStopEvent are both ShotFired).
 	if (binding_.stop_event == 0 || binding_.stop_event == binding_.start_event ||
 			binding_.stop_event == round_event()) {
 		return true;

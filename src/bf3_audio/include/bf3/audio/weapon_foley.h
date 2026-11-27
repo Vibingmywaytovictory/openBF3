@@ -9,11 +9,14 @@
 
 namespace bf3::audio {
 
+// SOURCE: notes R5-VS3 names (IsShortReload 45329532, Action 2484178491, ActionType 1114728387, Bolt 2088812592).
 inline constexpr uint32_t kHashIsShortReload = 45329532u;
 inline constexpr uint32_t kHashAction = 2484178491u;
 inline constexpr uint32_t kHashActionType = 1114728387u;
 inline constexpr uint32_t kHashBolt = 2088812592u;
 
+// SOURCE: notes R5-VS3 1 (ActionType 1 is the zoom change and 6 the fire-mode change).
+// INFERRED: 0 deploy, 2 dry fire, 3 and 4 bipod, 5 light, from the patches' ActionType waves. Settle: a note on them.
 enum class FoleyAction : uint8_t {
 	Deploy = 0,
 	Zoom = 1,

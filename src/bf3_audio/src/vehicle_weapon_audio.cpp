@@ -100,12 +100,16 @@ void VehicleWeaponAudio::on_shot(const present::PresentEvent &p_event, uint8_t p
 		w->vehicle = seat != nullptr ? seat->vehicle : 0;
 		w->def = p_event.def;
 		w->sound = d;
+		// INFERRED: the handle takes the def's FireLogicType when it is made, where notes R5-VS3 1 start at 2 and change
+		// it on a fire-mode action, which clients do not see. Settle: a note on remote fire-mode actions.
 		if (d->fire_logic <= 5) {
 			w->state.set_fire_logic(d->fire_logic);
 		}
 		w->magazine = d->magazine;
 	}
 	w->slot = p_event.slot;
+	// SOURCE: notes R5-VS3 1 (IsFirstPerson for the local player's weapon seen in first person, #3576779520 the same
+	// team, #4198762218 the local player's weapon).
 	WeaponSoundOwner owner;
 	owner.local = p_event.slot == p_own_slot;
 	owner.first_person = owner.local && p_own_first_person;
@@ -144,6 +148,8 @@ void VehicleWeaponAudio::heat_to(Weapon &r_w, sw::SimTime p_time) {
 	}
 }
 
+// INFERRED: clients see only shots, so a single-fire shot is a fire start, a shot and a fire end, OverheatLevel is the
+// server's overheat rule run on the shots seen, and the empty shot schedules the reload. Settle: a note on remote fire.
 void VehicleWeaponAudio::fire(Weapon &r_w, const Due &p_due) {
 	heat_to(r_w, p_due.time);
 	(void)sim::vehicles::overheat_shot(r_w.heat, r_w.sound->heat);
@@ -174,6 +180,8 @@ void VehicleWeaponAudio::fire(Weapon &r_w, const Due &p_due) {
 	}
 }
 
+// SOURCE: notes R-A3 F (AlwaysAutoReload at magazine 0; an empty magazine waits ReloadDelay, then the reload time).
+// INFERRED: Reload a shot interval after the emptying shot and ReloadEnd reload_s later. Settle: a note on the timing.
 void VehicleWeaponAudio::reload(Weapon &r_w, const present::PresentClock &p_now) {
 	if (!p_now.render_valid) {
 		return;
@@ -191,6 +199,7 @@ void VehicleWeaponAudio::reload(Weapon &r_w, const present::PresentClock &p_now)
 	}
 }
 
+// SOURCE: notes R5-VS3 2 steps 10 and 12 (the handle sits at the weapon's transform, its velocity the movement over dt).
 void VehicleWeaponAudio::follow(Weapon &r_w, const present::PresentClock &p_now) {
 	if (!r_w.crewed) {
 		return;
@@ -329,6 +338,8 @@ void VehicleWeaponAudio::destroy(Weapon &r_w) {
 	apply(r_w, ops_);
 }
 
+// STAND-IN: Bolt, LockOn and Action are not driven (no MP_007 vehicle weapon is bolt-action or locks on, and notes
+// R5-VS3 do not identify action types 0 and 2 to 5). Settle: drive them from the vehicle weapon's fire logic.
 void VehicleWeaponAudio::step(const present::PresentClock &p_now, const ListenerState &p_listener) {
 	++updates_;
 	for (size_t i = 0; i < weapons_.size();) {
@@ -344,6 +355,8 @@ void VehicleWeaponAudio::step(const present::PresentClock &p_now, const Listener
 			fire(w, w.due[done]);
 		}
 		w.due.erase(w.due.begin(), w.due.begin() + std::ptrdiff_t(done));
+		// INFERRED: an automatic pull ends when no shot follows within its shot interval plus a tick. Settle: a note on
+		// how a client sees a remote fire end.
 		if (w.pulling && p_now.render_valid &&
 				p_now.render - w.last_shot > shot_units(*w.sound) + sw::kTimeUnitsPerTick) {
 			w.state.trigger_release();

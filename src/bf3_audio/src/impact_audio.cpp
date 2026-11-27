@@ -14,6 +14,7 @@ namespace {
 
 constexpr size_t kMaxImpactPatches = 4096;
 
+// STAND-IN: impacts and effect sounds past 400 m are not started. Settle: notes R-D3's culling of inaudible sounds.
 constexpr float kMaxImpactDistanceM = 400.0f;
 
 using bf3::core::finite;
@@ -48,6 +49,7 @@ core::Result<std::shared_ptr<const ImpactSoundCache>> ImpactSoundCache::build(co
 		}
 
 		core::Result<std::shared_ptr<const ca::SoundProgram>> prog = compile_patch(p_db, name);
+		// STAND-IN: a patch with node types that are not built plays without them. Settle: build those node types.
 		if (!prog) {
 			ca::CompileOptions lenient;
 			lenient.allow_unimplemented = true;

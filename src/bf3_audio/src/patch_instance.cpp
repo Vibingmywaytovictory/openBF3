@@ -94,6 +94,7 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 			if (!id || !st.bank->resident(*id)) {
 				continue;
 			}
+			// STAND-IN: localised waves always play their English variations. Settle: the game's language setting.
 			const std::optional<std::pair<uint32_t, uint32_t>> range = ca::playable_variations(st.bank->waves()[*id], "English");
 			if (!range || range->second == 0) {
 				continue;
@@ -106,6 +107,8 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 	st.groups.assign(p.child_nodes.size(), GroupState{});
 
 	st.plugins.assign(p.plugins.size(), PluginState{});
+	// STAND-IN: the attribute values set below (gain 1, low-pass and shelf 24000 Hz, band and peak 1000 Hz, Q 0.7071)
+	// hold until a port drives them; no note gives the plugins' defaults. Settle: a note on the plugin defaults.
 	for (size_t g = 0; g < p.plugins.size(); ++g) {
 		PluginState &ps = st.plugins[g];
 		const uint32_t id = p.plugins[g].id;
@@ -194,6 +197,7 @@ Result<std::unique_ptr<PatchInstance>> PatchInstance::create(std::shared_ptr<con
 		NodeState &s = st.nodes[ni];
 		switch (n.type) {
 			case SoundNodeType::NumberGenerator:
+				// STAND-IN: Y reads Min before the first Trigger. Settle: a note on the NumberGenerator's first output.
 				s.value = st.flt(n, cp::NumMin);
 				break;
 			case SoundNodeType::Lfo:
@@ -327,6 +331,8 @@ void PatchInstance::post_event(uint32_t p_name_hash, uint32_t p_frame_in_block) 
 	++st.stats.unknown_inputs;
 }
 
+// STAND-IN: a parked instance's queued events keep only the last per input, all at the resume's first frame; BF3
+// pauses and resumes a sound (notes R4-D3) with no such rule given. Settle: a note on events posted to a paused sound.
 uint32_t PatchInstance::coalesce_events() {
 	State &st = *state_;
 	std::array<PendingEvent, kMaxEventsPerBlock> kept{};
@@ -374,6 +380,8 @@ void PatchInstance::set_geometry(const EmitterState &p_emitter, const ListenerSt
 	Geometry &g = st.geometry;
 	const Vec3 d = sub(p_emitter.position, p_listener.position);
 	g.distance = length(d);
+	// SOURCE: notes R3-D5 A2 (azimuth from the source's side and forward components in the listener frame).
+	// INFERRED: positive azimuth is on the right (forward x up), as R3-D5 infers. Settle: a stereo capture of retail.
 	const Vec3 right = cross(p_listener.forward, p_listener.up);
 	if (g.distance > 1e-6f) {
 		const Vec3 n{ d.x / g.distance, d.y / g.distance, d.z / g.distance };
@@ -381,6 +389,7 @@ void PatchInstance::set_geometry(const EmitterState &p_emitter, const ListenerSt
 		g.elevation = std::asin(std::clamp(dot(n, p_listener.up) / std::max(1e-6f, length(p_listener.up)), -1.0f, 1.0f));
 		g.relative_velocity = dot(sub(p_emitter.velocity, p_listener.velocity), n);
 		const float fl = length(p_emitter.forward);
+		// SOURCE: notes R-D5 cone (the angle between the emitter's forward and the direction to the listener).
 		if (fl > 1e-6f) {
 			const float c = std::clamp(-dot(n, p_emitter.forward) / fl, -1.0f, 1.0f);
 			g.cone_angle_deg = std::acos(c) * 180.0f / kPi;
@@ -529,6 +538,7 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					break;
 				}
 				case PluginRole::BandPass: {
+					// INFERRED: attribute 0 is the centre in Hz and attribute 1 the bandwidth in Hz. Settle: a note on the band-pass plugin.
 					const float f = ps.attribute(0), bw = ps.attribute(1);
 					const float q = bw > 0.0f ? f / bw : 0.70710678f;
 					const BiquadCoefficients c = BiquadCoefficients::design(BiquadShape::BandPass, rate, f, q, 0.0f);
@@ -536,12 +546,15 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					break;
 				}
 				case PluginRole::Peaking: {
+					// INFERRED: attribute 0 is the centre in Hz, 1 a linear gain and 2 the Q. Settle: a note on the peaking plugin.
 					const BiquadCoefficients c =
 							BiquadCoefficients::design(BiquadShape::Peaking, rate, ps.attribute(0), ps.attribute(2), gain_to_db(std::max(0.0f, ps.attribute(1))));
 					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c);
 					break;
 				}
 				case PluginRole::HighShelf: {
+					// INFERRED: the HighShelfIir2 node's plugin is a high shelf at attribute 0 Hz with attribute 1 as a linear
+					// gain. Settle: a note on the shelf plugin.
 					const BiquadCoefficients c = BiquadCoefficients::design(BiquadShape::HighShelf, rate,
 							ps.attribute(0), st.tuning.iir2_q, gain_to_db(std::max(0.0f, ps.attribute(1))));
 					process_biquad_pair(ps.biquad, ch[0], ch[1], p_frames, c);
@@ -553,6 +566,8 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					}
 					float *line = st.delay_pool.data() + ps.delay_begin;
 					const uint32_t len = ps.delay_frames;
+					// INFERRED: attribute 0 is the delay in seconds and attribute 1 the feedback (held under 0.95).
+					// Settle: a note on the Delay plugin.
 					const float t = std::isfinite(ps.attribute(0)) ? ps.attribute(0) : 0.0f;
 					const uint32_t d = std::clamp<uint32_t>(uint32_t(std::max(0.0f, t) * rate), 1u, len - 1);
 					const float fb = std::isfinite(ps.attribute(1)) ? std::clamp(ps.attribute(1), 0.0f, 0.95f) : 0.0f;
@@ -567,6 +582,8 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					}
 					break;
 				}
+				// STAND-IN: the output low-pass passes the signal unfiltered; notes R-D5 and R3-D5 C give its cutoff chain
+				// (cone, obstruction, occlusion, distance). Settle: build that chain.
 				case PluginRole::Damping:
 					break;
 				case PluginRole::Pan: {
@@ -586,6 +603,8 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 					const float block = float(std::max(p_offset + p_frames, std::min(r_buses.frames, kMaxSubBlock)));
 					const float dl = gl - ps.pan_from[0], dr = gr - ps.pan_from[1];
 					float peak = 0.0f;
+					// STAND-IN: a stereo voice is summed to mono before it is panned; notes R3-D5 B give the panner for a mono
+					// source only. Settle: a note on the panner's multichannel input.
 					for (uint32_t i = 0; i < p_frames; ++i) {
 						const float m = 0.5f * (ch[0][i] + ch[1][i]);
 						const float t = float(p_offset + i + 1) / block;
@@ -611,6 +630,8 @@ void PatchInstance::render(uint64_t p_frame, uint32_t p_offset, uint32_t p_frame
 						} else {
 							target = db_to_gain(o.curve_gain_db + o.cone_db + window_db);
 						}
+						// SOURCE: notes R-D5 reverb send (ReverbGain dB times the output's linear gain).
+						// STAND-IN: without R-D5's 0.25 dB per metre fall-off. Settle: apply the fall-off as R-D5.
 						if (ps.reverb_send) {
 							target *= db_to_gain(p.outputs[ps.output].reverb_gain_db);
 						}
@@ -723,6 +744,8 @@ void PatchInstance::process_block(BusBuffers &r_buses) {
 		for (uint16_t r : st.event_registers) {
 			st.registers[r] = 0.0f;
 		}
+		// WHY: start-type inputs read rising edges, so an event still on from the previous evaluation gets one at 0 first,
+		// as BF3's changed bit fires it again in the next update (notes R-D1 4).
 		if (st.events_repeat(ei, pos)) {
 			st.evaluate_program(first + pos);
 			++st.stats.evaluations;
@@ -997,6 +1020,8 @@ VoiceCullInfo PatchInstance::cull_info() const {
 	if (live == 0) {
 		live = st.loudness_hint != 0 ? st.loudness_hint : ~uint64_t(0);
 	}
+	// STAND-IN: the cull loudness is Loudness plus the loudest live output's curve, Gain and cone, with no VU term
+	// (notes R-D3 1) and the curve at max(d, MinDistance) (R2-D5 2 differs). Settle: R-D3's P with R2-D5's distance.
 	const auto loudest_of = [&](uint64_t p_mask) {
 		float loudest = -std::numeric_limits<float>::infinity();
 		for (size_t o = 0; o < p.outputs.size(); ++o) {
@@ -1215,6 +1240,9 @@ void PatchInstance::skip_stop_event() {
 	state_->stop_seen = true;
 }
 
+// SOURCE: notes R-D3 per-output gain (min(P - top, AllowedOvershoot) - Headroom, P with no VU term here).
+// STAND-IN: CompressFactor taken as 1, and BypassHeadroom tops the window at the output's own loudness where R-D3 drops
+// the Headroom term. Settle: R-D3's gain rule.
 float PatchInstance::State::hdr_send_gain(const detail::OutputState &p_o, float p_hdr_window_db) const {
 	const ca::SoundProgram &p = *program;
 	const float level = p.loudness_db + p_o.curve_gain_db + p_o.cone_db;

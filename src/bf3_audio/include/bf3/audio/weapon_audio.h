@@ -45,6 +45,7 @@ GameMixerSizes game_mixer_sizes(const AudioTuning &p_tuning, uint32_t p_max_voic
 
 MixerConfig game_mixer_config(const AudioTuning &p_tuning, const GameMixerSizes &p_sizes, uint32_t p_command_capacity);
 
+// SOURCE: notes R5-VS3 names (Melee 210357473).
 inline constexpr uint32_t kHashMelee = 210357473u;
 
 constexpr uint64_t sound_seed(uint32_t p_entity, uint32_t p_burst_seq) {
@@ -134,6 +135,8 @@ struct WeaponSoundSource {
 
 core::Result<WeaponAudioTable> load_weapon_audio(const core::EbxResolver &p_db, std::span<const WeaponSoundSource> p_defs, uint32_t p_mix_rate);
 
+// STAND-IN: a patch with no DefaultStartEvent gets one event per shot, the first of Fire, Step and Melee its graph
+// reads, in place of notes R5-VS3 2's Fire, ShotFired and FireStopped stream. Settle: drive it with R5-VS3's events.
 inline constexpr std::array<uint32_t, 3> kOneShotEvents{ kHashFire, kHashStep, kHashMelee };
 
 bool event_reaches_graph(const core::audio::SoundProgram &p_program, uint32_t p_hash);
@@ -154,6 +157,8 @@ constexpr uint64_t one_shot_join_key(uint8_t p_slot, bool p_first_person) {
 	return (uint64_t(p_first_person) << 8) | uint64_t(p_slot) | (uint64_t(1) << 63);
 }
 
+// STAND-IN: a one-shot gets its Stop 3 s after it starts and is killed after 20 s. Settle: notes R4-D3's release of
+// a sound that stays inaudible.
 inline constexpr double kOneShotStopAfterSeconds = 3.0;
 inline constexpr double kOneShotForgetSeconds = 20.0;
 
@@ -214,6 +219,8 @@ struct MuzzlePoint {
 };
 static_assert(std::is_trivially_copyable_v<MuzzlePoint>);
 
+// STAND-IN: the distances, holds and times of this struct are hand-picked (no shot sound past 1000 m, burst ends after
+// the holds, a 0.5 m muzzle, 15 s to forget). Settle: R5-VS3's fire end per weapon and R-D3's culling.
 struct WeaponAudioConfig {
 	uint32_t max_weapon_voices = kTuningVoices;
 	float max_weapon_distance_m = 1000.0f;
