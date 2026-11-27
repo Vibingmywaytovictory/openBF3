@@ -170,6 +170,8 @@ struct PartRiders {
 	std::vector<uint16_t> unheld;
 };
 
+// INFERRED: a HealthStateData's PartIndex is the main mesh's part index, as the M1A2's and T-90's turret parts
+// sit at their turrets' pivots. Settle: a note on HealthStateData.PartIndex.
 void ride_turrets(WorkBudget &r_budget, const EbxResolver &p_db, const EbxInstance &p_container, int p_turret,
 		bool p_held, size_t p_depth, std::span<const std::pair<EbxInstance, int>> p_turrets, PartRiders &r_out) {
 	if (p_depth > kMaxVehicleComponentDepth) {

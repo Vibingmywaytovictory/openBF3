@@ -828,6 +828,8 @@ core::Result<std::unique_ptr<ViewmodelSet>> load_viewmodel_set(ViewmodelSources 
 		if (!def) {
 			return core::error_at(spec.unlock, def.error());
 		}
+		// STAND-IN: a camouflage only swaps the meshes' variation materials; its Camo texture is not drawn.
+		// Settle: the weapon shader's programs translated.
 		item.weapon.variation_hash = weapon_camo_hash(lib, spec.accessories, def->blueprint);
 		item.render_fov = def->render_fov;
 		item.zoom_render_fov = def->zoom_render_fov;

@@ -976,6 +976,8 @@ void Bf3LevelSession::try_done() {
 	if (scene_ && upload_.begun() && upload_.finished() && timings_.upload_us == 0) {
 		timings_.upload_us = now_us();
 		if (upload_.world_bounds()) {
+			// INFERRED: with no environment ViewDistance, the far plane is the diagonal of the placed instances' and
+			// terrain's boxes, and an area blends from it. Settle: a note on the engine's default view distance.
 			drawn_diagonal_ = upload_.world_bounds()->get_size().length();
 			const float view_distance = look_.built() ? look_.view_distance(drawn_diagonal_) : drawn_diagonal_;
 			cameras_.set_view_distance(view_distance);

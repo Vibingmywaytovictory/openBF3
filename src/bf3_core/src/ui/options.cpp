@@ -22,6 +22,8 @@ constexpr OptionSource kSources[] = {
 			"ID_M_OPTIONS_INVERT" },
 	{ -1726867587, "MouseSensitivity", "MouseSensitivity", OptionValue::Profile, {}, {} },
 	{ 745800453, "MouseSensitivityVehicle", "MouseSensitivityVehicle", OptionValue::Profile, {}, {} },
+	// STAND-IN: MouseRawInput is stored and not applied; the look always reads Godot's captured relative motion.
+	// Settle: a raw mouse input path for the look.
 	{ -2059361310, "MouseRawInput", "MouseRawInput", OptionValue::Profile, kOff, kOn },
 	{ -875263044, "Sensitivity", "Scheme0Sensitivity", OptionValue::Profile, {}, {} },
 	{ -1557825949, "Vibration", "Vibration", OptionValue::Profile, kOff, kOn },

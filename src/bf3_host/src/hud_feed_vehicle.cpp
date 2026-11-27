@@ -48,6 +48,7 @@ float yaw_deg(const core::Vec3 &p_forward) {
 	return std::atan2(p_forward[0], p_forward[2]) / core::kDegToRadF;
 }
 
+// INFERRED: a pitch is asin of the forward's up component, positive up. Settle: footage of a raised gun's elevation.
 float pitch_deg(const core::Vec3 &p_forward) {
 	return std::asin(std::clamp(p_forward[1], -1.0f, 1.0f)) / core::kDegToRadF;
 }
@@ -96,6 +97,8 @@ void fill_vehicle_views(const HudFeedInput &p_input, const PresentedVehicle &p_v
 	for (size_t k = 0; k < angles && k < state.bodies.size(); ++k) {
 		state.bodies[k].angle = std::isfinite(turret_angles[k]) ? turret_angles[k] : 0.0f;
 	}
+	// INFERRED: the pitch angles take the first WCPrimary and WCSecondary of all the vehicle's weapons.
+	// Settle: a note on which weapons UIVehicleComp's weapon pitch angles read.
 	for (size_t w = 0; w < p_kind.weapons.size() && w < p_kind.armament->weapons.size(); ++w) {
 		const std::string &kind = p_kind.weapons[w].classification;
 		// SOURCE: notes R5-UI1 E (weapon elevation = weapon pitch - hull pitch + 90 deg; the screen widget adds the 90).

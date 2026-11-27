@@ -706,6 +706,8 @@ size_t GadgetField::owner_gone(uint8_t p_owner, Tick p_tick) {
 	return removed;
 }
 
+// INFERRED: a death leaves the owner no longer valid, so his packs orphan and a revive does not give them
+// back. Settle: a note on the pack owner's validity after a death (R2-G4 C).
 size_t GadgetField::orphan_packs(uint8_t p_owner, Tick p_tick) {
 	size_t orphaned = 0;
 	for (Deployable &d : live_) {

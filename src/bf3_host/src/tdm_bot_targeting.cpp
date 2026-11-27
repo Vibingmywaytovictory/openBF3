@@ -79,6 +79,8 @@ void BotTargeting::choose(TdmShared &r_shared, const BotAwareness &p_awareness, 
 	target_ = best;
 	target_since_ = p_tick;
 	err_next_ = p_tick;
+	// STAND-IN: every weapon's first shot waits, without BBPFireInfantery's test that its max range exceeds 10 m.
+	// Settle: port that test with BBPFireInfantery's fire plan.
 	react_at_ = fresh ? p_tick + sim::seconds_to_ticks(ai::fire_delay_s(p_skill, unit(r_rng))) : p_tick;
 	loss_handled_ = false;
 	lost_target_ = -1;

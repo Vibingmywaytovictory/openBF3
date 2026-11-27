@@ -366,6 +366,8 @@ float advance_progress(float p_progress, bool p_target, float p_in_seconds, floa
 
 }
 
+// INFERRED: the FieldOfView option sets the hip FOV only and leaves each ADS zoom level's own FOV, as no option
+// scales ADS. Settle: retail footage of ADS at two FieldOfView settings.
 AdsParams with_hip_fov(const AdsParams &p_params, float p_hip_fov_deg) {
 	AdsParams p = p_params;
 	if (std::isfinite(p_hip_fov_deg) && p_hip_fov_deg > 0.0f) {
@@ -755,6 +757,8 @@ struct ViewmodelAnimator::Impl {
 					return;
 				case VmCue::Kind::ReloadStarted:
 					if (cur.active && cur.flow_release && cur.fade_out_start < 0) {
+						// INFERRED: a reload started in the release queues Deploy: BulletsLeftInGun on that transition
+						// is read as a grenade left. Settle: a note on the release-to-deploy transition's condition.
 						next_pending = true;
 					} else {
 						start_action(VmClip::Deploy, t, false);

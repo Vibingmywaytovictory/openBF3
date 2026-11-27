@@ -526,6 +526,8 @@ core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTab
 	return core::Status::success();
 }
 
+// INFERRED: a seated soldier's own weapons hold their state and only their tick moves; the data gives no seated
+// weapon rule. Settle: a note on a seated soldier's infantry weapons.
 void hold_soldier_weapons(SoldierWeaponsState &r_state, Tick p_tick) {
 	r_state.tick = p_tick;
 	r_state.events = 0;

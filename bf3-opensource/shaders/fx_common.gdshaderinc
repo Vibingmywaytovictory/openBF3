@@ -142,6 +142,8 @@ void fragment() {
 	ALBEDO = rgb * emissive_scale;
 #endif
 #ifdef FX_OPAQUE
+	// STAND-IN: an Opaque emitter alpha-tests at 0.5 with no soft-particle fade; the data names no threshold.
+	// Settle: a note on the Opaque emitter pass.
 	ALPHA_SCISSOR_THRESHOLD = 0.5;
 #endif
 	ALPHA = a;

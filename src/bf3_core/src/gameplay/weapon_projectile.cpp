@@ -167,6 +167,8 @@ void read_projectile(Fields &r_f, const EbxInstance &p_projectile, ProjectileDef
 			}
 			if (const std::optional<EbxInstance> c =
 							r_f.follow(p, "LockingController", "LockingControllerData", false)) {
+				// STAND-IN: the missile's own LockingController is read but not run; run as read, it drops a
+				// top-attack target in the climb. Settle: a note on the missile's lock controller.
 				read_locking_controller(r_f, *c, r_projectile.guidance.controller);
 			}
 			if (const std::optional<EbxInstance> e = r_f.follow(p, "DudExplosion", "ExplosionEntityData", false)) {

@@ -6,6 +6,8 @@ uniform sampler2D lit_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
 uniform sampler2D flow_tex : filter_linear_mipmap, repeat_disable;
 uniform sampler2D mask_tex : filter_linear_mipmap, repeat_disable;
+// INFERRED: the combine and its speeds (the graph has no values): Perlin drifts warp both layers inside Flow_01's
+// red and green and lift 01_D over 02_D, unlit, times the mask. Settle: charbackdrop_01's compiled shader program.
 uniform float flow_speed = 0.02;
 uniform float noise_scale = 1.5;
 uniform float warp = 0.012;

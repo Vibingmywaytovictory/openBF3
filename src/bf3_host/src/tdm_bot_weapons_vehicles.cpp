@@ -364,6 +364,8 @@ void BotVehicleWeapons::explosive_step(TdmShared &r_shared, const BotArms &p_arm
 	const int32_t rounds = p_arms.rounds(s);
 	const sw::SoldierWeaponsState &ws = *p_arms.weapons();
 	ai::PlacedExplosiveCheck c;
+	// STAND-IN: the gap is the distance to the hull surface, no radii added, and the walk-up reach the blast inner
+	// radius, as the C4 is thrown, not attached. Settle: BBPFireInfantery's placed reach for a BF3 C4.
 	c.gap = enemy_.surface;
 	c.reach = d->projectile.explosion.inner_radius;
 	c.loaded = rounds > 0;

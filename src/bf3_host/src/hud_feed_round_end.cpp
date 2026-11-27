@@ -144,6 +144,8 @@ void feed_round_end(Frame &r_frame) {
 			pre.counting_down ? seconds_until(now_tick, in.match.countdown_end_tick, state.bad_inputs) : 0.0f;
 	pre.input_restricted = match && in.match.restrict_until_tick != 0 && now_tick < in.match.restrict_until_tick;
 	pre.players_needed = pre.visible && match ? int32_t(in.match.players_needed) : 0;
+	// INFERRED: CountLeft is the players needed, then the countdown's seconds rounded up, as footage 18.57 counts
+	// 10..1 to the round start at 35.4 s. Settle: a note on UIPreRoundComp's CountLeft.
 	pre.count_left = pre.counting_down ? int32_t(std::ceil(pre.seconds_left)) : pre.players_needed;
 
 	ui::HudEndOfRound &eor = model.end_of_round;

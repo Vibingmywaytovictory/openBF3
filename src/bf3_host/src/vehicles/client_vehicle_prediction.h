@@ -37,6 +37,7 @@ struct VehicleBlend {
 
 using CommandAt = std::function<const sim::Command *(sim::Tick)>;
 
+// SOURCE: notes R-H 2 (the client predicts its own vehicle, rewinds to a received correction and re-simulates).
 class ClientVehiclePrediction final : public sim::SeatSource {
 public:
 	core::Status init(const SharedLevel &p_level);

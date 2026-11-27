@@ -190,6 +190,8 @@ inline constexpr std::string_view kDefaultAdvancedDogtag = "ui/art/persistence/d
 inline constexpr std::array<uint8_t, core::ui::kHudSpawnKitItems> kHudSpawnSlots{ 0, 1, 2, 6, 7 };
 
 inline constexpr const auto &kHudMenuSids = core::ui::kHudMenuActionSids;
+// STAND-IN: the retail footage shows text 0x5e4fd483 "Team Deathmatch" here, whose SID no data names; this SID
+// reads TEAM DEATHMATCH. Settle: a field or note naming the SID of text 0x5e4fd483.
 inline constexpr std::string_view kHudTdmModeSid = "ID_M_GAMEMODE_TEAMDEATHMATCH";
 
 struct HudTdmFeedState {

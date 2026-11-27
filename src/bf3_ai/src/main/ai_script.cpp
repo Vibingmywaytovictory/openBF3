@@ -181,6 +181,8 @@ std::string_view player_input_name(PlayerInputMap p_input) {
 	return "PINone";
 }
 
+// STAND-IN: a strength type outside the six is refused, where BF2's weaponTemplate setter writes past its array.
+// Settle: BF2's result for an out-of-range strength type.
 core::Status read_strength_type(std::string_view p_arg, CombatStrengthType &r_out) {
 	for (size_t i = 0; i < kStrengthTypeNames.size(); ++i) {
 		const std::string_view name = kStrengthTypeNames[i];

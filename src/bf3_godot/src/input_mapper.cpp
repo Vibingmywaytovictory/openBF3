@@ -692,6 +692,8 @@ void InputMapper::weapon_frame(const bf3::host::PresentationFrame &p_frame, uint
 	if (!hold_to_zoom) {
 		weapon_.held[size_t(WeaponAction::Ads)] = weapon_.ads_latched;
 	}
+	// INFERRED: while the rose is open the fire key fires nothing, and a fire key held into it waits for its release.
+	// Settle: retail footage of fire held while the commo rose opens.
 	if (tdm_.rose_open) {
 		weapon_.swallow_fire = true;
 	}
@@ -863,6 +865,8 @@ void InputMapper::script_press(TdmAction p_action) {
 			break;
 		case TdmAction::WeaponLight:
 			if (!tdm_.spawn_screen) {
+				// INFERRED: the light toggle is the client's own and is kept across lives.
+				// Settle: retail footage of a respawn after switching the flashlight off.
 				tdm_.weapon_light = !tdm_.weapon_light;
 			}
 			break;

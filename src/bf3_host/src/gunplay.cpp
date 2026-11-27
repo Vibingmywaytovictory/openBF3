@@ -839,6 +839,8 @@ void Gunplay::step_soldier(uint8_t p_slot, const sim::Command &p_command, const 
 			m.world);
 	sw::step_weapons_with_rules(*m.table, s.weapons, p_command, ctx, m.match_seed, s.spawn_tick, s.out);
 	s.out_tick = p_command.tick;
+	// INFERRED: a remote detonator fires on its owner's Zoom input with it in hand. Settle: a note on the
+	// HasRemoteDetonator input.
 	m.gadgets->detonator(p_slot, s.weapons.current().def, (p_command.buttons & sim::buttons::kZoom) != 0);
 	if ((s.out.events & sw::weapon_events::kSwitchRefused) != 0) {
 		++m.stats.slot_select_empty;

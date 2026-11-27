@@ -23,6 +23,8 @@ std::optional<double> field(const core::gameplay::SoldierDef &p_soldier, std::st
 
 }
 
+// STAND-IN: the lag terms, the shooter's UI flag and explosions' IsCausingSuppression are not applied.
+// Settle: notes Q9 D (lag), Q9 A 7 (the UI flag) and a note on explosions' IsCausingSuppression.
 core::Result<SuppressionDef> make_suppression_def(const core::gameplay::SoldierDef &p_soldier) {
 	SuppressionDef out;
 	const std::optional<double> radius = field(p_soldier, "SuppressionSphereRadius");

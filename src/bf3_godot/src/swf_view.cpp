@@ -1853,6 +1853,8 @@ struct Bf3SwfView::Impl {
 				}
 				continue;
 			}
+			// STAND-IN: gradient fills are not drawn; none of the 434 retail UI movies has one.
+			// Settle: a gradient fill renderer if a retail movie needs one.
 			if (fill.kind != ui::SwfFillKind::Bitmap) {
 				r_rec.counts.unsupported_fills++;
 				warn_once(std::string("fill kind ") + ui::swf_fill_kind_name(fill.kind) + " in " + p_node.path);

@@ -34,6 +34,8 @@ constexpr Row kSpawnerRows[] = {
 	{ T::Unknown, D::EventOut, id("OnSpawned"), M::OnSpawned, "OnSpawned" },
 	{ T::Unknown, D::EventOut, id("OnDestroyed"), M::OnDestroyed, "OnDestroyed" },
 	{ T::Unknown, D::EventOut, id("OnPlayerEnter"), M::OnPlayerEnter, "OnPlayerEnter" },
+	// INFERRED: the spawner property-out Conquest flag logic negates into Enabled is never published,
+	// so it reads false. Settle: the port's name and its writer.
 	{ T::Unknown, D::PropertyOut, native_id::kSpawnerUnknownOut, M::Recorded, "" },
 };
 

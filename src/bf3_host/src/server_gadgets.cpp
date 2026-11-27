@@ -234,6 +234,8 @@ void ServerGadgets::detonate_packs(sim::Tick p_tick, std::span<const sim::Soldie
 	const sw::SimTime now = sw::tick_end(p_tick);
 	for (const sw::Deployable &d : field_.take_detonating()) {
 		PendingBlast b;
+		// INFERRED: a pack's detonation runs its explosion's SpawnDelay later (the notes name SpawnDelay only for
+		// the client's shockwave). Settle: a note on SpawnDelay on the server.
 		b.event.time = now + (d.def < table_->defs.size() ? table_->defs[d.def].projectile.explosion.spawn_delay : 0);
 		b.event.position = core::vec::add(d.position, core::vec::scale(d.normal, sw::kBlastEyeLift));
 		b.event.normal = d.normal;

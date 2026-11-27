@@ -68,6 +68,8 @@ inline constexpr sim::Tick kWreckWireTicks = 6;
 
 struct ServerVehicle {
 	bool live = false;
+	// INFERRED: a hull keeps its spawner's team while someone drives it; M-CQ4 lists SetTeamOnSpawn, its effect
+	// not traced. Settle: a note on whether a hull takes its driver's team.
 	uint8_t team = 0;
 	uint8_t generation = 0;
 	uint32_t spawned = 0;

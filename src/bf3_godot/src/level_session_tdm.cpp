@@ -391,6 +391,8 @@ void Bf3LevelSession::tdm_ui_input(const Ref<InputEvent> &p_event) {
 		for (const bf3::core::ui::UiInputConcept c : router.concepts_of_key(idk)) {
 			const uint64_t found = screens->stats().concepts_found;
 			screens->input_concept(int32_t(c), k->is_pressed());
+			// INFERRED: a press stops at the first concept the flow takes (Escape: Deactivate, else Menu).
+			// Settle: a note on the UI manager's key routing.
 			if (k->is_pressed() && screens->stats().concepts_found > found) {
 				break;
 			}

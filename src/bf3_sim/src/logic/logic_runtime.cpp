@@ -785,6 +785,8 @@ struct LogicRuntime::State {
 			if (st.flag && st.start == local) {
 				continue;
 			}
+			// INFERRED: a ClientAndServer Sequence that a ghost starts after the previous ghost fires OnStarted on the
+			// client; a late joiner's first ghost resumes it silently. Settle: a note on ghost-started Sequences.
 			const bool live = !st.flag && ghost_seen && start > *ghost_seen;
 			sequence_resume(node, local);
 			if (live) {

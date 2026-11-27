@@ -622,6 +622,8 @@ void ServerVehicles::run_over(sim::Tick p_tick, size_t p_slot, std::span<const s
 				if (p_hull >= vehicles_.size() || !vehicles_[p_hull].live) {
 					return std::nullopt;
 				}
+				// INFERRED: the run-over relation is the hull's MaterialPair against the soldier's
+				// body zone property. Settle: a note naming R2-A5 C4's pair.
 				const core::gameplay::DamageRelation relation = materials_->relation(
 						hull_property(p_hull), materials_->zone_property(sim::weapons::HitZone::Body));
 				if (!relation.present) {
@@ -790,6 +792,8 @@ core::Status ServerVehicles::step(sim::Tick p_tick, uint64_t p_weapon_seed, cons
 				if (v.seen[k] == v.occupants[k]) {
 					continue;
 				}
+				// INFERRED: a seat is the object its player left; a death, disconnect or seat switch is a leave
+				// and the bot flag is read on entry. Settle: the BF2 engine's calls of setPlayerExitedVehicle.
 				if (v.seen[k] != net::kNoVehicleOccupant && !v.seen_bot[k]) {
 					v.player_left[k] = p_tick;
 				}
@@ -876,6 +880,8 @@ std::optional<sim::Vec3> ServerVehicles::exit_position(size_t p_slot, const sim:
 			return at;
 		}
 	}
+	// INFERRED: with no exit point clear of the level and the hulls he is put out at the nearest, as the notes give
+	// no exit rule. Settle: a note on BF3's exit point choice.
 	return world_point(order.front());
 }
 
