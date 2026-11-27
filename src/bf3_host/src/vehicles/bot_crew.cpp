@@ -29,7 +29,6 @@ namespace bf3::host {
 namespace {
 
 constexpr float kAltitudeProbeMetres = 200.0f;
-constexpr float kNavProbeHeight = 8.0f;
 constexpr float kChangeRepathMetres = 5.0f;
 constexpr float kRpmToRadiansPerSecond = 2.0f * std::numbers::pi_v<float> / 60.0f;
 

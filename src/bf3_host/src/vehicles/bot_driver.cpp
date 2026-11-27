@@ -2,6 +2,7 @@
 
 #include "../tdm_bot_movement.h"
 #include "../tdm_bot_shared.h"
+#include "bf3/core/math.h"
 #include "bf3/host/bot_fill.h"
 #include "bf3/host/level_vehicles.h"
 #include "bf3/host/server_view.h"
@@ -17,30 +18,9 @@ namespace bf3::host {
 
 namespace {
 
-constexpr float kNavProbeHeight = 8.0f;
-constexpr float kAxis = 127.0f;
-
-int8_t axis(float p_value) {
-	return int8_t(std::lround(std::clamp(p_value, -1.0f, 1.0f) * kAxis));
-}
-
 ai::Vec2 flat(const sim::Vec3 &p_v) {
 	const float length = std::hypot(p_v[0], p_v[2]);
 	return length > 0.0f ? ai::Vec2{ p_v[0] / length, p_v[2] / length } : ai::Vec2{};
-}
-
-float dot3(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
-	return p_a[0] * p_b[0] + p_a[1] * p_b[1] + p_a[2] * p_b[2];
-}
-
-sim::Vec3 along(const sim::Vec3 &p_origin, const sim::Vec3 &p_direction, float p_length) {
-	return { p_origin[0] + p_direction[0] * p_length, p_origin[1] + p_direction[1] * p_length,
-		p_origin[2] + p_direction[2] * p_length };
-}
-
-sim::Vec3 unit3(const sim::Vec3 &p_v) {
-	const float length = std::sqrt(dot3(p_v, p_v));
-	return length > 0.0f ? sim::Vec3{ p_v[0] / length, p_v[1] / length, p_v[2] / length } : sim::Vec3{};
 }
 
 struct Trace {
@@ -52,21 +32,22 @@ Trace trace(sim::NavQuery &r_query, sim::NavPolyRef p_poly, const sim::Vec3 &p_o
 		float p_length) {
 	Trace t;
 	sim::Vec3 reached{};
-	if (!r_query.raycast(p_poly, p_origin, along(p_origin, p_direction, p_length), &reached, &t.clear)) {
+	if (!r_query.raycast(p_poly, p_origin, core::vec::add(p_origin, core::vec::scale(p_direction, p_length)), &reached,
+				&t.clear)) {
 		return t;
 	}
-	const sim::Vec3 d{ reached[0] - p_origin[0], reached[1] - p_origin[1], reached[2] - p_origin[2] };
-	t.distance = std::sqrt(dot3(d, d));
+	const sim::Vec3 d = core::vec::sub(reached, p_origin);
+	t.distance = core::vec::length(d);
 	return t;
 }
 
 ai::CarSpace car_space(sim::NavQuery &r_query, sim::NavPolyRef p_poly, const sim::Vec3 &p_origin,
 		const sim::Vec3 &p_ahead, const sim::Vec3 &p_right, float p_width, float p_length, float p_reach) {
 	ai::CarSpace s;
-	const sim::Vec3 front_left =
-			unit3({ p_length * p_ahead[0] - p_right[0] * p_width, 0.0f, p_length * p_ahead[2] - p_right[2] * p_width });
-	const sim::Vec3 front_right =
-			unit3({ p_length * p_ahead[0] + p_right[0] * p_width, 0.0f, p_length * p_ahead[2] + p_right[2] * p_width });
+	const sim::Vec3 front_left = core::vec::normalize(
+			{ p_length * p_ahead[0] - p_right[0] * p_width, 0.0f, p_length * p_ahead[2] - p_right[2] * p_width });
+	const sim::Vec3 front_right = core::vec::normalize(
+			{ p_length * p_ahead[0] + p_right[0] * p_width, 0.0f, p_length * p_ahead[2] + p_right[2] * p_width });
 	const auto back = [](const sim::Vec3 &p_v) { return sim::Vec3{ -p_v[0], -p_v[1], -p_v[2] }; };
 	s.front = trace(r_query, p_poly, p_origin, p_ahead, p_reach).distance;
 	for (const sim::Vec3 &d : { front_left, front_right }) {
@@ -108,7 +89,7 @@ void BotDriver::new_life() {
 
 void BotDriver::release(float p_forward_speed, sim::Command &r_cmd) {
 	r_cmd.move_right = 0;
-	r_cmd.move_forward = axis(ai::car_reset_throttle(p_forward_speed));
+	r_cmd.move_forward = sim::quantize_axis(ai::car_reset_throttle(p_forward_speed));
 }
 
 void BotDriver::request(
@@ -143,17 +124,16 @@ bool BotDriver::drive(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, con
 	const ai::Vec2 forward = flat(hull.forward);
 	const ai::Vec2 normal = flat({ -hull.right[0], -hull.right[1], -hull.right[2] });
 	const sim::Vec3 &velocity = state.body.linear_velocity;
-	const float forward_speed = dot3(velocity, hull.forward);
+	const float forward_speed = core::vec::dot(velocity, hull.forward);
 	const double now = seconds_at(p_tick);
-	const float radius = std::sqrt(dot3(kind.box.half, kind.box.half));
+	const float radius = core::vec::length(kind.box.half);
 	if (!p_goal) {
 		stuck_ = false;
 		following_ = false;
 		release(forward_speed, r_cmd);
 		return true;
 	}
-	if (!path_goal_ ||
-			std::hypot((*path_goal_)[0] - (*p_goal)[0], (*path_goal_)[2] - (*p_goal)[2]) > tdm_bot::kGoalMoveMetres) {
+	if (!path_goal_ || core::vec::horizontal_distance(*path_goal_, *p_goal) > tdm_bot::kGoalMoveMetres) {
 		path_goal_ = p_goal;
 		progress_.clear(now);
 		status_ = 0;
@@ -171,7 +151,7 @@ bool BotDriver::drive(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, con
 			requested_ = false;
 		}
 	}
-	const float to_goal = std::hypot((*p_goal)[0] - position[0], (*p_goal)[2] - position[2]);
+	const float to_goal = core::vec::horizontal_distance(*p_goal, position);
 	if (!following_ || to_goal <= p_arrive_m) {
 		stuck_ = false;
 		release(forward_speed, r_cmd);
@@ -179,7 +159,7 @@ bool BotDriver::drive(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, con
 	}
 	if (stuck_) {
 		release(forward_speed, r_cmd);
-		stuck_ = !progress_.check(now, position, float(r_cmd.move_forward) / kAxis, 0.0f);
+		stuck_ = !progress_.check(now, position, sim::axis_value(r_cmd.move_forward), 0.0f);
 		return true;
 	}
 	if (!corridor_.move_position(query, position)) {
@@ -200,7 +180,7 @@ bool BotDriver::drive(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, con
 	const sim::Vec3 &target = points[0];
 	const sim::Vec3 to_target{ target[0] - position[0], 0.0f, target[2] - position[2] };
 	const float target_distance = std::hypot(to_target[0], to_target[2]);
-	const float speed = std::sqrt(dot3(velocity, velocity));
+	const float speed = core::vec::length(velocity);
 	const float largest = angles_.largest(now, position, forward, speed, std::span(points.data(), count));
 	const float turn_factor = ai::car_turn_factor(speed, largest);
 
@@ -229,13 +209,14 @@ bool BotDriver::drive(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, con
 	}
 	const float smallest = std::min(kind.box.half[0], kind.box.half[2]);
 	const float approach = ai::car_approach_factor(target_distance, smallest);
-	const sim::Vec3 rotational{ dot3(state.body.angular_velocity, hull.right),
-		dot3(state.body.angular_velocity, hull.up), dot3(state.body.angular_velocity, hull.forward) };
+	const sim::Vec3 rotational{ core::vec::dot(state.body.angular_velocity, hull.right),
+		core::vec::dot(state.body.angular_velocity, hull.up),
+		core::vec::dot(state.body.angular_velocity, hull.forward) };
 	const ai::CarControls controls = ai::car_control_towards_direction(ai::Vec2{ velocity[0], velocity[2] }, rotational,
 			std::min(turn_factor, approach) * situation.max_speed, command);
 	stuck_ = !progress_.check(now, position, controls.throttle, controls.turn);
-	r_cmd.move_forward = axis(controls.throttle);
-	r_cmd.move_right = axis(controls.turn);
+	r_cmd.move_forward = sim::quantize_axis(controls.throttle);
+	r_cmd.move_right = sim::quantize_axis(controls.turn);
 	return true;
 }
 

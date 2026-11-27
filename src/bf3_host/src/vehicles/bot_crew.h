@@ -14,6 +14,8 @@
 
 namespace bf3::host {
 
+inline constexpr float kNavProbeHeight = 8.0f;
+
 class ServerVehicles;
 struct TdmShared;
 

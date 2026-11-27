@@ -3663,3 +3663,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * godot.bot_vehicles (new window row): Caspian CQS with 16 shipped bots frames the first vehicle a bot sits in, saves a capture, then follows it until it has moved more than 4 m and saves a second; run under the quiet lock: a bot in a Growler after 2.2 s, driven 4.1 m in 3.1 s.
 * Docs: the bots row's four "vehicles are off" reasons now read that the host's vehicles carry no AI objects, as bots board and drive them.
 * Cost: host.tdm.conquest_vehicles.seed2 back to 18 s; with seated members out of formation its first get-out comes at 30 s of game time and the row runs in 13 s.
+* BotDriver uses core's dot, normalize, add, scale, sub and horizontal_distance and sim's quantize_axis and axis_value instead of its own copies; kNavProbeHeight lives once in bot_crew.h.
