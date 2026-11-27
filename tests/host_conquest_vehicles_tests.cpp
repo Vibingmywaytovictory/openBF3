@@ -23,7 +23,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -64,97 +63,12 @@ struct JeepRun {
 	uint64_t stuck_marks = 0;
 	sim::Tick first_exit = 0;
 	uint64_t get_outs = 0;
+	uint64_t class_switches = 0;
 	host::ServerVehicleStats vehicles;
 };
 
 sim::Tick take_limit() {
 	return sim::seconds_to_ticks(kTakeSeconds);
-}
-
-std::vector<std::string> words(const std::string &p_line) {
-	std::istringstream in(p_line);
-	std::vector<std::string> out;
-	for (std::string w; in >> w;) {
-		out.push_back(w);
-	}
-	return out;
-}
-
-struct ChangeScript {
-	std::string text;
-	bool declared_here = false;
-};
-
-std::vector<std::string> script_lines(const std::string &p_text) {
-	std::istringstream in(p_text);
-	std::vector<std::string> out;
-	for (std::string line; std::getline(in, line);) {
-		if (!line.empty() && line.back() == '\r') {
-			line.pop_back();
-		}
-		out.push_back(line);
-	}
-	return out;
-}
-
-ChangeScript declare_change(const std::string &p_behaviours) {
-	const std::vector<std::string> lines = script_lines(p_behaviours);
-	for (const std::string &line : lines) {
-		const std::vector<std::string> w = words(line);
-		if (w.size() == 3 && w[0] == "aiSettings.setBehaviour" && w[2] == "Change") {
-			return { p_behaviours, false };
-		}
-	}
-	std::ostringstream out;
-	for (const std::string &line : lines) {
-		const std::vector<std::string> w = words(line);
-		if (w.size() == 2 && w[0] == "aiSettings.setMaxNumberOfBehaviours") {
-			REQUIRE(std::stoul(w[1]) == ai::kInfantryBehaviourCount);
-			out << w[0] << ' ' << ai::kBotBehaviourCount << '\n';
-			out << "aiSettings.setBehaviour " << ai::kInfantryBehaviourCount << " Change\n";
-			continue;
-		}
-		out << line << '\n';
-		if (w.size() == 3 && w[0] == "aiSettings.setBehaviourModifier" && w[1] == "MoveTo") {
-			out << w[0] << " Change " << w[2] << '\n';
-		}
-		if (w.size() == 8 && w[0] == "aiSettings.setVehicleBehaviour" && w[1] == "Infantry" && w[2] == "MoveTo") {
-			out << w[0] << " Infantry Change BBChange BBPChange " << w[5] << ' ' << w[6] << ' ' << w[7] << '\n';
-		}
-	}
-	return { out.str(), true };
-}
-
-ai::AiConfig change_declared_config(ChangeScript &r_script) {
-	const std::filesystem::path root = OPENBF3_AI_DIR;
-	ai::AiConfig config;
-	REQUIRE(ai::run_ai_script(gp::read_text(root / ai::kAiDefaultScript), ai::kAiDefaultScript, config).ok());
-	r_script = declare_change(gp::read_text(root / ai::kAiBehavioursScript));
-	REQUIRE(ai::run_ai_script(r_script.text, ai::kAiBehavioursScript, config).ok());
-	const std::filesystem::path level = ai::level_ai_script(root, "MP_007");
-	REQUIRE(ai::run_ai_script(gp::read_text(level), level.string(), config).ok());
-	return config;
-}
-
-void use_change_declared_ai(host::TdmBotConfig &r_bots) {
-	REQUIRE(host::load_bot_tuning(OPENBF3_BOT_TUNING_CFG, r_bots).ok());
-	ChangeScript script;
-	const ai::AiConfig config = change_declared_config(script);
-	ai::BehaviourTuning tuning = r_bots.behaviours;
-	const core::Status st = ai::apply_behaviour_weights(config, tuning);
-	REQUIRE_MESSAGE(st.ok(), (st.ok() ? std::string() : st.error().message));
-	REQUIRE(tuning.change);
-	REQUIRE(config.behaviour_id("Change") == int(ai::InfantryBehaviour::Change));
-	if (script.declared_here) {
-		CHECK(tuning.curves[size_t(ai::InfantryBehaviour::Change)].weight ==
-				tuning.curves[size_t(ai::InfantryBehaviour::MoveTo)].weight);
-	}
-	std::printf("host.tdm.conquest_vehicles: Change %s, weight %.3f\n",
-			script.declared_here ? "declared by the row at MoveTo's modifier"
-								 : "declared by the shipped AIBehaviours.ai",
-			double(tuning.curves[size_t(ai::InfantryBehaviour::Change)].weight));
-	r_bots.behaviours = tuning;
-	r_bots.ai = config.settings;
 }
 
 JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
@@ -186,7 +100,7 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	c.after_round_ticks = 0;
 	c.hashes = false;
 	c.configure_bots = [&](host::TdmBotConfig &r_bots) {
-		use_change_declared_ai(r_bots);
+		CHECK(r_bots.behaviours.change);
 		r_bots.stats = stats;
 	};
 	c.on_tick = [&](sim::Tick p_tick, host::GameServer &r_server, tt::ScriptedPeer *) {
@@ -248,6 +162,7 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	out.drive_ticks = stats->vehicle_drive_ticks.load();
 	out.stuck_marks = stats->vehicle_stuck_marks.load();
 	out.get_outs = stats->vehicle_get_outs.load();
+	out.class_switches = stats->vehicle_class_switches.load();
 	if (out.foot_decisions > 0) {
 		out.foot_stay = double(stats->vehicle_foot_stay_milli.load()) / 1000.0 / double(out.foot_decisions);
 	}
@@ -314,14 +229,15 @@ void check_jeeps(tt::TdmLevel *p_level, uint64_t p_seed) {
 	CHECK(run.get_outs > 0u);
 	const float sprint = sim::sprint_speed(level->shared->motor);
 	std::printf("host.tdm.conquest_vehicles: seed %llu: soldier sprint speed %.2f m/s; %llu decisions on foot, mean "
-				"staying-on-foot urgency %.3f; Change won %llu decisions\n",
+				"staying-on-foot urgency %.3f; Change won %llu decisions; %llu equipment class switches\n",
 			(unsigned long long)p_seed, double(sprint), (unsigned long long)run.foot_decisions, run.foot_stay,
-			(unsigned long long)run.change_won);
+			(unsigned long long)run.change_won, (unsigned long long)run.class_switches);
 	CHECK(sprint > 0.0f);
 	CHECK(run.foot_decisions > 0u);
 	CHECK(run.foot_stay > 0.0);
 	CHECK(run.foot_stay > 10.0 * double(sprint));
 	CHECK(run.change_won > 0u);
+	CHECK(run.class_switches > 0u);
 }
 }
 
@@ -429,15 +345,10 @@ TEST_SUITE("host-vehicles-possession") {
 }
 
 TEST_SUITE("host-tdm-conquest-vehicles-unit") {
-	TEST_CASE("the jeep rows' config declares Change once: on a script that declares it the helper changes nothing") {
-		ChangeScript first;
-		const ai::AiConfig config = change_declared_config(first);
-		ai::BehaviourTuning tuning;
-		REQUIRE(ai::apply_behaviour_weights(config, tuning).ok());
-		CHECK(tuning.change);
-		CHECK(config.behaviour_id("Change") == int(ai::InfantryBehaviour::Change));
-		const ChangeScript again = declare_change(first.text);
-		CHECK_FALSE(again.declared_here);
-		CHECK(again.text == first.text);
+	TEST_CASE("the jeep rows run the shipped bots, whose AIBehaviours.ai declares Change") {
+		host::TdmBotConfig bots;
+		test::use_shipped_bot_ai(bots);
+		CHECK(bots.behaviours.change);
+		CHECK(bots.behaviours.curves[size_t(ai::InfantryBehaviour::Change)].weight > 0.0f);
 	}
 }

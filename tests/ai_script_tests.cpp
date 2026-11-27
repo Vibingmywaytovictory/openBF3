@@ -58,11 +58,12 @@ TEST_SUITE("ai-script") {
 			CHECK(config->scripts.back() ==
 					"derived:" + level_strategic_areas_script(kShipped, level).generic_string());
 			AiSettings expected;
-			expected.vehicles = { "Infantry" };
+			expected.vehicles = { "Infantry", "Tank", "Car" };
 			expected.sides = 2;
-			expected.behaviour_count = int32_t(kInfantryBehaviourCount);
+			expected.behaviour_count = int32_t(kBotBehaviourCount);
 			expected.basic_bot_weights = config->behaviour_modifiers.at("Unit");
-			expected.vehicle_mods = { config->behaviour_modifiers.at("Default") };
+			expected.vehicle_mods = { config->behaviour_modifiers.at("Default"),
+				config->behaviour_modifiers.at("Default"), config->behaviour_modifiers.at("Default") };
 			CHECK(config->settings == expected);
 			CHECK(config->strategic_areas.size() == 2u);
 			BehaviourTuning tuning;
@@ -73,11 +74,14 @@ TEST_SUITE("ai-script") {
 			want.squad_far_m = 99.0f;
 			const UrgeCurveDef &memory = config->urge_curves.at("Memory");
 			REQUIRE(memory.kind == UrgeCurveDef::Kind::Linear);
-			for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+			want.change = true;
+			for (size_t i = 0; i < kBotBehaviourCount; ++i) {
 				want.curves[i] = { expected.basic_bot_weights[i] * expected.vehicle_mods[0][i], memory.values[0],
 					memory.values[1] };
 				for (size_t k = 0; k < kEquipmentClassCount; ++k) {
-					want.class_weights[k][i] = want.curves[i].weight;
+					const bool bound = k == size_t(EquipmentClass::Infantry) ||
+							i == size_t(InfantryBehaviour::Change) || i == size_t(InfantryBehaviour::MoveTo);
+					want.class_weights[k][i] = bound ? want.curves[i].weight : 0.0f;
 				}
 			}
 			CHECK(tuning == want);
@@ -86,27 +90,28 @@ TEST_SUITE("ai-script") {
 	}
 
 	TEST_CASE("a declared vehicle class weighs only the behaviours its setVehicleBehaviour lines bind, as BF2's "
-			  "AIConsole::setVehicleBehaviour registers a class's behaviours one by one; an undeclared class keeps "
-			  "Infantry's") {
+			  "AIConsole::setVehicleBehaviour registers a class's behaviours one by one: the shipped Car binds "
+			  "MoveTo and Change, a Tank given a Random binding weighs Random, MoveTo and Change") {
 		core::Result<AiConfig> config = load_level_ai_config(kShipped, "MP_007", kTwoAreas);
 		REQUIRE_MESSAGE(config.ok(), (config.ok() ? std::string() : config.error().message));
-		REQUIRE(config->settings.vehicle("Tank") < 0);
-		const core::Status st =
-				run_ai_script("aiSettings.setVehicle Tank\n"
-							  "aiSettings.setVehicleMods Tank Default\n"
-							  "aiSettings.setVehicleBehaviour Tank Random BBRandom BBPRandom 0 Memory Unit\n",
-						"tank", *config);
+		REQUIRE(config->settings.vehicle("Tank") >= 0);
+		const core::Status st = run_ai_script(
+				"aiSettings.setVehicleBehaviour Tank Random BBRandom BBPRandom 0 Memory Unit\n", "tank", *config);
 		REQUIRE_MESSAGE(st.ok(), message(st));
 		BehaviourTuning tuning;
 		REQUIRE(apply_behaviour_weights(*config, tuning).ok());
 		const std::array<float, kBotBehaviourCount> &tank = tuning.class_weights[size_t(EquipmentClass::Tank)];
 		const std::array<float, kBotBehaviourCount> &car = tuning.class_weights[size_t(EquipmentClass::Car)];
-		for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+		for (size_t i = 0; i < kBotBehaviourCount; ++i) {
+			const bool own = InfantryBehaviour(i) == InfantryBehaviour::Change ||
+					InfantryBehaviour(i) == InfantryBehaviour::MoveTo;
 			const bool random = InfantryBehaviour(i) == InfantryBehaviour::Random;
-			CHECK(tank[i] == (random ? tuning.curves[i].weight : 0.0f));
-			CHECK(car[i] == tuning.curves[i].weight);
+			CHECK(tank[i] == (random || own ? tuning.curves[i].weight : 0.0f));
+			CHECK(car[i] == (own ? tuning.curves[i].weight : 0.0f));
 		}
 		CHECK(tank[size_t(InfantryBehaviour::Random)] > 0.0f);
+		CHECK(car[size_t(InfantryBehaviour::Change)] > 0.0f);
+		CHECK(car[size_t(InfantryBehaviour::MoveTo)] > 0.0f);
 	}
 
 	TEST_CASE("a level's own files override: its StrategicAreas.ai replaces the derived areas, its AI.ai runs last "
@@ -117,7 +122,7 @@ TEST_SUITE("ai-script") {
 								 "aiSettings.createBehaviourModifiers Own\n"
 								 "aiSettings.setBehaviourModifier Revive 3\n"
 								 "aiSettings.setBehaviourModifier Idle 9\n";
-		for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+		for (size_t i = 0; i < kBotBehaviourCount; ++i) {
 			const InfantryBehaviour b = InfantryBehaviour(i);
 			if (b != InfantryBehaviour::Revive && b != InfantryBehaviour::Idle) {
 				own_script +=

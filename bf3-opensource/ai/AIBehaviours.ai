@@ -1,4 +1,4 @@
-aiSettings.setMaxNumberOfBehaviours 10
+aiSettings.setMaxNumberOfBehaviours 11
 aiSettings.setBehaviour 0 Revive
 aiSettings.setBehaviour 1 FireInfantery
 aiSettings.setBehaviour 2 TakeCoverInfantry
@@ -9,6 +9,7 @@ aiSettings.setBehaviour 6 Idle
 aiSettings.setBehaviour 7 MedicAssist
 aiSettings.setBehaviour 8 CallForMedic
 aiSettings.setBehaviour 9 Resupply
+aiSettings.setBehaviour 10 Change
 
 aiSettings.createUCLinear Memory 0 1
 
@@ -23,6 +24,7 @@ aiSettings.setBehaviourModifier Idle 0.5
 aiSettings.setBehaviourModifier MedicAssist 2.5
 aiSettings.setBehaviourModifier CallForMedic 5.5
 aiSettings.setBehaviourModifier Resupply 2.4
+aiSettings.setBehaviourModifier Change 1.75
 
 aiSettings.createBehaviourModifiers Unit
 aiSettings.setBehaviourModifier Revive 1
@@ -35,8 +37,11 @@ aiSettings.setBehaviourModifier Idle 1
 aiSettings.setBehaviourModifier MedicAssist 1
 aiSettings.setBehaviourModifier CallForMedic 1
 aiSettings.setBehaviourModifier Resupply 1
+aiSettings.setBehaviourModifier Change 1
 
 aiSettings.setVehicleMods Infantry Default
+aiSettings.setVehicleMods Tank Default
+aiSettings.setVehicleMods Car Default
 
 aiSettings.setVehicleBehaviour Infantry Revive BBRevive BBPRevive 0 Memory Unit
 aiSettings.setVehicleBehaviour Infantry FireInfantery BBFireInfantery BBPFireInfantery 0 Memory Unit
@@ -48,4 +53,9 @@ aiSettings.setVehicleBehaviour Infantry Idle BBIdle BBPIdle 0 Memory Unit
 aiSettings.setVehicleBehaviour Infantry MedicAssist BBMedicAssist BBPMedicAssist 0 Memory Unit
 aiSettings.setVehicleBehaviour Infantry CallForMedic BBCallForMedic BBPCallForMedic 0 Memory Unit
 aiSettings.setVehicleBehaviour Infantry Resupply BBResupply BBPResupply 0 Memory Unit
+aiSettings.setVehicleBehaviour Infantry Change BBChange BBPChange 0 Memory Unit
+aiSettings.setVehicleBehaviour Tank MoveTo BBMoveTo BBPGotoWaypoint2d 0 Memory Unit
+aiSettings.setVehicleBehaviour Tank Change BBChange BBPChange 0 Memory Unit
+aiSettings.setVehicleBehaviour Car MoveTo BBMoveTo BBPGotoWaypoint2d 0 Memory Unit
+aiSettings.setVehicleBehaviour Car Change BBChange BBPChange 0 Memory Unit
 aiSettings.setBasicBotWeights Unit

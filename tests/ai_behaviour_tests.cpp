@@ -11,6 +11,7 @@
 #include "bf3/ai/bot/communication_agent.h"
 #include "bf3/ai/bot/waypoints.h"
 #include "bf3/ai/squad/squad_world.h"
+#include "bf3/ai/vehicle/vehicle_change.h"
 
 #include <algorithm>
 #include <vector>
@@ -658,6 +659,49 @@ TEST_SUITE("ai-behaviour") {
 			REQUIRE(set != config.behaviour_modifiers.end());
 			CAPTURE(b.modifiers);
 			CHECK(std::all_of(set->second.begin(), set->second.end(), [](float p_m) { return p_m == 1.0f; }));
+		}
+	}
+
+	TEST_CASE("the shipped Change weight is the Fire weight times BBFireInfantery's peak urgency over BBChange's "
+			  "saturated urgency before its possession, get-out and hurt factors") {
+		const AiConfig config = bf3::test::shipped_ai_config();
+		const BehaviourTuning tuning = bf3::test::shipped_behaviour_tuning();
+		REQUIRE(tuning.change);
+		REQUIRE(config.behaviour_id("Change") == int(InfantryBehaviour::Change));
+		const UCLinear unit(0.0f, 1.0f);
+		float fire_peak = 0.0f;
+		for (int senses = 0; senses < 32; ++senses) {
+			FakeBody body;
+			body.s.grenade_running = (senses & 1) != 0;
+			body.s.enemy_visible = (senses & 2) != 0;
+			body.s.vehicle_visible = (senses & 4) != 0;
+			body.s.blind_fire = (senses & 8) != 0;
+			body.throw_possible = (senses & 16) != 0;
+			BBFireInfantery fire(unit, body);
+			fire.reset(nullptr);
+			fire_peak = std::max(fire_peak, fire.calculate_urgency(nullptr, 1.0f));
+		}
+		ChangeBot bot;
+		bot.player_id = 1;
+		bot.side = 1;
+		bot.radius = 0.5f;
+		bot.max_speed = 1.0f;
+		bot.now_s = 100.0;
+		ChangeVehicle jeep;
+		jeep.side = 1;
+		jeep.position = { 5.0f, 0.0f, 0.0f };
+		jeep.radius = 2.0f;
+		jeep.max_speed = 1000.0f;
+		jeep.seats = 1;
+		const ChangeVehicle vehicles[] = { jeep };
+		const ChangeChoice choice = choose_change(bot, vehicles);
+		REQUIRE(choice.change);
+		const float fire = tuning.curves[size_t(InfantryBehaviour::FireInfantery)].weight;
+		CHECK(tuning.curves[size_t(InfantryBehaviour::Change)].weight ==
+				doctest::Approx(fire * fire_peak / choice.urgency));
+		for (size_t k = 0; k < kEquipmentClassCount; ++k) {
+			CHECK(tuning.class_weights[k][size_t(InfantryBehaviour::Change)] ==
+					tuning.curves[size_t(InfantryBehaviour::Change)].weight);
 		}
 	}
 
