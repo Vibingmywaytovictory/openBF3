@@ -34,6 +34,7 @@ namespace gp = bf3::test::gunplay;
 namespace {
 
 constexpr float kTakeSeconds = 30.0f;
+constexpr float kExitSeconds = 600.0f;
 constexpr uint32_t kM4Jeeps = 4;
 constexpr uint32_t kM4Taken = 3;
 
@@ -46,6 +47,8 @@ struct JeepSeen {
 	sim::Tick taken = 0;
 	uint8_t taker = net::kNoVehicleOccupant;
 	uint32_t bots_at_end = 0;
+	sim::Vec3 taken_at{};
+	float moved_m = 0.0f;
 };
 
 struct JeepRun {
@@ -57,6 +60,10 @@ struct JeepRun {
 	uint64_t foot_decisions = 0;
 	double foot_stay = 0.0;
 	uint64_t change_won = 0;
+	uint64_t drive_ticks = 0;
+	uint64_t stuck_marks = 0;
+	sim::Tick first_exit = 0;
+	uint64_t get_outs = 0;
 	host::ServerVehicleStats vehicles;
 };
 
@@ -173,7 +180,9 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	c.rules.revive = true;
 	c.rules.preround_override_s = 0.0f;
 	c.rules.max_players = 32;
-	c.max_ticks = sim::seconds_to_ticks(tt::latest_initial_delay(vehicles)) + take_limit() + sim::kSimHz;
+	const sim::Tick take_end = sim::seconds_to_ticks(tt::latest_initial_delay(vehicles)) + take_limit() + sim::kSimHz;
+	c.max_ticks = take_end + sim::seconds_to_ticks(kExitSeconds);
+	c.until = [&](sim::Tick p_tick) { return p_tick >= take_end && stats->vehicle_get_outs.load() > 0; };
 	c.after_round_ticks = 0;
 	c.hashes = false;
 	c.configure_bots = [&](host::TdmBotConfig &r_bots) {
@@ -190,6 +199,9 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 			return;
 		}
 		out.vehicles = live->stats();
+		if (out.first_exit == 0 && stats->vehicle_get_outs.load() > 0) {
+			out.first_exit = p_tick;
+		}
 		for (JeepSeen &j : out.jeeps) {
 			const host::ServerVehicle &v = live->vehicles()[j.spawner];
 			j.bots_at_end = 0;
@@ -200,8 +212,12 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 				j.live = p_tick;
 			}
 			const sim::Vec3 at = live->world()->state(sim::VehicleSlot(j.spawner)).body.com_position;
+			const bool in_window = p_tick <= std::max(j.live, out.in_round) + take_limit();
+			if (j.taken != 0) {
+				j.moved_m = std::max(j.moved_m, tt::distance(j.taken_at, at));
+			}
 			const std::span<const sim::SoldierState> states = view.states();
-			for (uint8_t slot = 0; j.taken == 0 && slot < states.size() && !j.near_team; ++slot) {
+			for (uint8_t slot = 0; in_window && j.taken == 0 && slot < states.size() && !j.near_team; ++slot) {
 				j.near_team = view.bot(slot) && view.alive(slot) && view.team(slot) == v.team &&
 						tt::distance(states[slot].position, at) <= ai::kHardwareRadius;
 			}
@@ -213,6 +229,7 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 				if (j.taken == 0) {
 					j.taken = p_tick;
 					j.taker = occupant;
+					j.taken_at = at;
 				}
 			}
 		}
@@ -228,6 +245,9 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	}
 	out.foot_decisions = stats->vehicle_foot_decisions.load();
 	out.change_won = stats->vehicle_change_won.load();
+	out.drive_ticks = stats->vehicle_drive_ticks.load();
+	out.stuck_marks = stats->vehicle_stuck_marks.load();
+	out.get_outs = stats->vehicle_get_outs.load();
 	if (out.foot_decisions > 0) {
 		out.foot_stay = double(stats->vehicle_foot_stay_milli.load()) / 1000.0 / double(out.foot_decisions);
 	}
@@ -256,21 +276,25 @@ JeepCount count_jeeps(const tt::TdmLevel &p_level, const JeepRun &p_run, uint64_
 		const host::LevelVehicleKind &kind = vehicles.kinds[vehicles.spawners[j.spawner].kind];
 		std::printf("host.tdm.conquest_vehicles: seed %llu: jeep spawner %zu %s (top speed %.1f m/s) team %u, %s, "
 					"initial delay %.1f s: live at tick %u, taken at tick %u by slot %u (%.2f s), %u bots "
-					"aboard at the end\n",
+					"aboard at the end, moved up to %.1f m from where it was taken\n",
 				(unsigned long long)p_seed, j.spawner, kind.blueprint.c_str(),
 				host::change_vehicle_max_speed(*kind.model), unsigned(j.team),
 				j.near_team ? "a team bot within 75 m" : "no team bot within 75 m", j.initial_delay, unsigned(j.live),
 				unsigned(j.taken), unsigned(j.taker),
-				j.taken != 0 ? double(j.taken - from) * double(sim::kTickSeconds) : -1.0, j.bots_at_end);
+				j.taken != 0 ? double(j.taken - from) * double(sim::kTickSeconds) : -1.0, j.bots_at_end,
+				double(j.moved_m));
 	}
 	std::printf("host.tdm.conquest_vehicles: seed %llu: %u of the %u jeeps with a team bot within 75 m and %u of all "
 				"%zu jeeps taken by bots "
 				"within %.0f s; %llu entries, %llu exits, %llu seat switches; %llu change choices, mean change "
-				"urgency before its weight %.3f, mean winning weighted urgency %.3f\n",
+				"urgency before its weight %.3f, mean winning weighted urgency %.3f; %llu driving ticks, %llu stuck "
+				"marks; %llu water throw-outs; %llu bot get-outs, the first at tick %u\n",
 			(unsigned long long)p_seed, n.near_taken, n.near, n.taken, p_run.jeeps.size(), double(kTakeSeconds),
 			(unsigned long long)p_run.vehicles.entries, (unsigned long long)p_run.vehicles.exits,
 			(unsigned long long)p_run.vehicles.seat_switches, (unsigned long long)p_run.choices, p_run.change_urgency,
-			p_run.winner_urgency);
+			p_run.winner_urgency, (unsigned long long)p_run.drive_ticks, (unsigned long long)p_run.stuck_marks,
+			(unsigned long long)p_run.vehicles.water_throw_outs, (unsigned long long)p_run.get_outs,
+			unsigned(p_run.first_exit));
 	return n;
 }
 
@@ -286,6 +310,8 @@ void check_jeeps(tt::TdmLevel *p_level, uint64_t p_seed) {
 	const JeepCount n = count_jeeps(*level, run, p_seed);
 	CHECK(n.near >= kM4Jeeps);
 	CHECK(n.near_taken * kM4Jeeps >= n.near * kM4Taken);
+	CHECK(run.vehicles.entries > 0u);
+	CHECK(run.get_outs > 0u);
 	const float sprint = sim::sprint_speed(level->shared->motor);
 	std::printf("host.tdm.conquest_vehicles: seed %llu: soldier sprint speed %.2f m/s; %llu decisions on foot, mean "
 				"staying-on-foot urgency %.3f; Change won %llu decisions\n",

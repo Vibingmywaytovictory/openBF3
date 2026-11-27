@@ -33,6 +33,7 @@ ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehi
 ai::ChangeStrengths change_strength_scales(const TdmShared &p_shared);
 ai::EquipmentClass seat_equipment(const TdmShared &p_shared, uint8_t p_slot);
 ai::ChangeStrengths change_soldier_strengths(const TdmShared &p_shared, uint8_t p_slot);
+void ban_vehicle(TdmShared &r_shared, uint8_t p_slot);
 
 class BotCrew {
 public:

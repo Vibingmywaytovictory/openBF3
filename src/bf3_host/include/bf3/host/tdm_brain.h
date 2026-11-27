@@ -120,6 +120,9 @@ struct TdmBotStats {
 	std::atomic<uint64_t> vehicle_foot_stay_milli{ 0 };
 	std::atomic<uint64_t> vehicle_change_won{ 0 };
 	std::atomic<uint64_t> vehicle_class_switches{ 0 };
+	std::atomic<uint64_t> vehicle_drive_ticks{ 0 };
+	std::atomic<uint64_t> vehicle_stuck_marks{ 0 };
+	std::atomic<uint64_t> vehicle_get_outs{ 0 };
 
 	std::atomic<uint64_t> last_perception_ns{ 0 };
 	std::atomic<uint64_t> last_brains_ns{ 0 };

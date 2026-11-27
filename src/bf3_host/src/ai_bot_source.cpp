@@ -9,6 +9,7 @@
 #include "tdm_bot_support.h"
 #include "tdm_strategy.h"
 #include "vehicles/bot_crew.h"
+#include "vehicles/bot_driver.h"
 
 #include <optional>
 
@@ -53,6 +54,8 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 	BotIntent intent;
 	BotIntent held;
 	BotCrew crew;
+	BotDriver driver;
+	std::optional<sim::Vec3> drive_goal;
 	TdmBotActivity planned = TdmBotActivity::Roam;
 	bool lost = false;
 	sim::Tick plan_tick = UINT32_MAX;
@@ -133,9 +136,13 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		if (state == nullptr) {
 			return {};
 		}
-		const ai::ChangeChoice c = crew.evaluate(*body.shared, body.slot, bot->bot_id(), *state, bot->bot_stuck(),
+		const bool stuck = bot->bot_stuck();
+		const ai::ChangeChoice c = crew.evaluate(*body.shared, body.slot, bot->bot_id(), *state, stuck,
 				bot->behaviour() == ai::InfantryBehaviour::Idle, body.awareness.perception(),
 				body.vehicles.sensed_enemy(*body.shared));
+		if (stuck && bot->equipment() != ai::EquipmentClass::Infantry) {
+			bot->set_bot_stuck(false);
+		}
 		if (!c.change) {
 			return {};
 		}
@@ -178,6 +185,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		body.activity = planned;
 		intent = body.begin_plan(planned);
 		lost = false;
+		drive_goal.reset();
 	}
 
 	bool move_to(ai::MoveGoal p_goal, const ai::Vec3 &p_point) override {
@@ -195,6 +203,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 				body.medkit_or_hold(f(), intent);
 				break;
 			case ai::MoveGoal::Squad:
+				drive_goal = p_point;
 				body.navigation.set_goal(
 						*body.shared, now, p_point, body.cfg().behaviours.squad_arrive_m, false, kSquadGoalMoveMetres);
 				body.walk_facing(f(), intent);
@@ -347,6 +356,8 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		if (s.life != body.life) {
 			body.new_life(p_tick, s);
 			crew.new_life(*body.shared, body.slot);
+			driver.new_life();
+			drive_goal.reset();
 			sensed = ai::InfantrySenses{};
 			planned = TdmBotActivity::Roam;
 			release();
@@ -398,6 +409,18 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 			return cmd;
 		}
 		if (crew.command(body, *frame, cmd)) {
+			if (!crew.target() &&
+					driver.drive(
+							*body.shared, body.slot, p_tick, drive_goal, body.cfg().behaviours.squad_arrive_m, cmd)) {
+				if (cmd.move_forward != 0) {
+					body.shared->count(&TdmBotStats::vehicle_drive_ticks);
+				}
+				if (driver.stuck()) {
+					body.shared->count(&TdmBotStats::vehicle_stuck_marks);
+					bot->set_bot_stuck(true);
+					ban_vehicle(*body.shared, body.slot);
+				}
+			}
 			return cmd;
 		}
 		if (bot->has_plan()) {

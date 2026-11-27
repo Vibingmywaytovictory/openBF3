@@ -35,6 +35,12 @@ struct RecentShot {
 
 }
 
+struct VehicleBan {
+	bool banned = false;
+	uint8_t generation = 0;
+	sim::Tick at = 0;
+};
+
 struct TdmShared {
 	TdmBrainHost host;
 	std::shared_ptr<const TdmBotConfig> config;
@@ -57,6 +63,7 @@ struct TdmShared {
 	std::array<float, tdm_bot::kHeatCells * tdm_bot::kHeatCells> heat{};
 	std::array<sim::Tick, tdm_bot::kHeatCells * tdm_bot::kHeatCells> heat_tick{};
 	std::vector<std::array<uint8_t, net::kMaxVehicleSeats>> vehicle_bookings;
+	std::vector<VehicleBan> vehicle_bans;
 
 	sim::Tick time_tick = UINT32_MAX;
 	uint64_t perception_ns = 0, brains_ns = 0;

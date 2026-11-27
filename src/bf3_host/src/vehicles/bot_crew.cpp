@@ -54,6 +54,18 @@ bool live_vehicle(const ServerVehicles &p_vehicles, int p_id) {
 			p_vehicles.vehicles()[size_t(p_id)].health.condition != sim::vehicles::VehicleCondition::Destroyed;
 }
 
+bool allowed_by_bots(const TdmShared &p_shared, const ServerVehicle &p_vehicle, size_t p_index) {
+	if (p_index >= p_shared.vehicle_bans.size()) {
+		return true;
+	}
+	const VehicleBan &ban = p_shared.vehicle_bans[p_index];
+	if (!ban.banned || ban.generation != p_vehicle.generation) {
+		return true;
+	}
+	return std::any_of(p_vehicle.player_left.begin(), p_vehicle.player_left.end(),
+			[&](const std::optional<sim::Tick> &p_left) { return p_left && *p_left > ban.at; });
+}
+
 constexpr float kDegreesPerRadian = 180.0f / std::numbers::pi_v<float>;
 
 void seat_aim(const LevelVehicleKind &p_kind, uint8_t p_seat, ai::ChangeSeat &r_seat) {
@@ -258,6 +270,7 @@ std::vector<ai::ChangeVehicle> change_vehicles(
 		const LevelVehicleKind &kind = p_vehicles.level()->kinds[p_vehicles.level()->spawners[i].kind];
 		const sim::VehicleState s = p_vehicles.world()->state(sim::VehicleSlot(i));
 		c.kind = ai::ChangeUnitKind::Ground;
+		c.allowed_by_bots = allowed_by_bots(p_shared, v, i);
 		c.side = v.team;
 		for (const uint8_t occupant : v.occupants) {
 			if (occupant != net::kNoVehicleOccupant) {
@@ -352,6 +365,21 @@ ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehi
 		b.enemy_types = sai->enemy_counts();
 	}
 	return b;
+}
+
+void ban_vehicle(TdmShared &r_shared, uint8_t p_slot) {
+	const ServerVehicles *const vehicles = r_shared.host.view->server_vehicles();
+	const std::optional<VehicleSeat> seat = vehicles != nullptr ? vehicles->seat_of(p_slot) : std::nullopt;
+	if (!seat) {
+		return;
+	}
+	if (r_shared.vehicle_bans.size() <= seat->vehicle) {
+		r_shared.vehicle_bans.resize(size_t(seat->vehicle) + 1);
+	}
+	VehicleBan &ban = r_shared.vehicle_bans[seat->vehicle];
+	ban.banned = true;
+	ban.generation = vehicles->vehicles()[seat->vehicle].generation;
+	ban.at = r_shared.host.view->tick();
 }
 
 void BotCrew::new_life(TdmShared &r_shared, uint8_t p_slot) {
@@ -456,6 +484,7 @@ bool BotCrew::command(tdm_bot::BotBody &r_body, const tdm_bot::BotFrame &p_frame
 		case ai::ChangeStep::GetOut:
 			if (press_use()) {
 				r_cmd.buttons |= sim::buttons::kUse;
+				sh.count(&TdmBotStats::vehicle_get_outs);
 			}
 			return true;
 		case ai::ChangeStep::Approach:

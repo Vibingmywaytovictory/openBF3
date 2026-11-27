@@ -194,6 +194,7 @@ struct TdmRunConfig {
 
 	std::function<void(sim::Tick, host::GameServer &, ScriptedPeer *)> on_tick;
 	std::function<void(const host::GameServer &, std::span<const host::OutDatagram>)> on_out;
+	std::function<bool(sim::Tick)> until;
 };
 
 struct TdmRunResult {
@@ -913,6 +914,9 @@ inline core::Result<TdmRunResult> run_tdm(const TdmLevel &p_level, const TdmRunC
 		}
 		if (p_config.on_tick) {
 			p_config.on_tick(now, *server, peer.get());
+		}
+		if (p_config.until && p_config.until(now)) {
+			break;
 		}
 		if (!r.round_over && rules->phase() == net::MatchPhase::RoundOver) {
 			r.round_over = true;
