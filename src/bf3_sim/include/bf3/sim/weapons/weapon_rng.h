@@ -8,6 +8,8 @@ namespace bf3::sim::weapons {
 
 using core::splitmix64;
 
+// STAND-IN: splitmix64 streams per shot for the draws BF3's sway generator does not make (pellets, fuses, delays).
+// Settle: a note on how BF3 draws pellet directions and fuse variation.
 constexpr uint64_t shot_seed(uint64_t p_match_seed, uint32_t p_player_slot, uint32_t p_shot_index) {
 	return splitmix64(splitmix64(p_match_seed ^ (uint64_t(p_player_slot) << 32)) ^ uint64_t(p_shot_index));
 }
@@ -30,6 +32,7 @@ constexpr float unit_float(uint64_t p_bits) {
 	return float(uint32_t(p_bits >> 40)) * (1.0f / 16777216.0f);
 }
 
+// SOURCE: notes Q2 randomness (31-bit Lehmer generator, x 24112 then x 26143 mod 2^31 - 1, a zero state taken as 1).
 inline constexpr uint32_t kSwayRngModulus = 0x7FFFFFFFu;
 inline constexpr uint32_t kSwayRngFirstFactor = 24112u;
 inline constexpr uint32_t kSwayRngSecondFactor = 26143u;
@@ -44,6 +47,7 @@ constexpr uint32_t sway_rng_next(uint32_t p_state) {
 	return uint32_t((once * kSwayRngSecondFactor) % kSwayRngModulus);
 }
 
+// SOURCE: notes Q2 randomness (the unit draw from the state, in (0, 1] in steps of 2^-24).
 constexpr float sway_rng_unit(uint32_t p_state) {
 	return float(((p_state | 128u) >> 7) + 1u) * (1.0f / 16777216.0f);
 }

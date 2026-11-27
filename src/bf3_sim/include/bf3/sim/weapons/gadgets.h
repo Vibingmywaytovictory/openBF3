@@ -113,11 +113,15 @@ struct GadgetDef {
 core::Result<AmmoPickupDef> read_ammo_pickup(const core::EbxResolver &p_db, std::string_view p_weapon);
 core::Result<GadgetDef> read_gadget_def(const core::EbxResolver &p_db, std::string_view p_weapon);
 
+// STAND-IN: a thrown bag falls at 9.81 m/s^2 and is lost after 10 s in flight. Settle: a note on the supply bag's flight.
 inline constexpr float kGadgetGravity = 9.81f;
 inline constexpr Tick kGadgetFlightTicks = 10u * kSimHz;
 inline constexpr size_t kMaxDeployables = 512;
+// STAND-IN: hand-picked lifts off a slide contact and above a pack for its blast. Settle: a note on the bag's
+// slide and the pack blast origin.
 inline constexpr float kGadgetSlideLift = 0.01f;
 inline constexpr float kBlastEyeLift = 0.05f;
+// SOURCE: notes R2-G4 C (pack checks each once its timer passes 0.2 s; a soldier within 1e-6 m trips a claymore).
 inline constexpr double kPackCheckInterval = 0.2;
 inline constexpr float kPackCloseTrigger = 1e-6f;
 inline constexpr uint8_t kNoPackDriver = 0xFF;

@@ -14,6 +14,8 @@ class CollisionWorld;
 
 namespace bf3::sim::bots {
 
+// STAND-IN: hand-picked bot perception defaults (every field of this struct). Settle: OpenBF2's sensing values
+// (OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotSenses.cpp and SensingAgent.cpp @c47317b) or the per-map AI configs.
 struct PerceptionParams {
 	float fov_h_deg = 160.0f;
 	float fov_v_deg = 90.0f;
@@ -68,6 +70,7 @@ struct PerceptionInput {
 	std::span<const sim::vehicles::VehicleTarget> vehicles;
 	uint64_t seed = 0;
 
+	// STAND-IN: eye heights until the caller gives the pose eye heights. Settle: pass the soldier's CharacterPoseData.
 	float eye_heights[3] = { 1.6f, 1.0f, 0.3f };
 	uint32_t ray_mask = 0;
 	uint32_t elapsed_ticks = 0;

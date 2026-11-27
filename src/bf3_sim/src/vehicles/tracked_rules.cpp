@@ -7,14 +7,17 @@
 
 namespace bf3::sim::vehicles {
 
+// SOURCE: notes R5-G1-5 (track-steer wheels: SteeringType 2 and DrivingType 1).
 bool track_steer_wheel(int p_steering_type, int p_driving_type) {
 	return p_steering_type == 2 && p_driving_type == 1;
 }
 
+// SOURCE: notes R5-G1-5 1 (no DiffGearRatio, efficiency or differential share).
 float track_forward_term(float p_engine_torque, float p_gear_ratio) {
 	return p_engine_torque * p_gear_ratio * kTrackForwardQuarter * kTrackForwardShare * kTankForward;
 }
 
+// SOURCE: notes R5-G1-5 2 (d flips in a reverse gear with throttle; side +1 for a wheel at negative x).
 float track_turn_term(float p_yaw, float p_gear_ratio, float p_throttle, bool p_negative_x_side, bool p_inverted) {
 	const float direction = p_gear_ratio < 0.0f && p_throttle != 0.0f ? -1.0f : 1.0f;
 	const float side = p_negative_x_side ? 1.0f : -1.0f;
@@ -22,10 +25,13 @@ float track_turn_term(float p_yaw, float p_gear_ratio, float p_throttle, bool p_
 	return p_yaw * direction * side * inverted * kTankSteer * kTrackSteerForce;
 }
 
+// SOURCE: notes R5-G1-5 3 (the turn term x (1 - clamp(7 |slip| - 1, 0, 1))).
 float track_slip_fade(float p_slip) {
 	return 1.0f - std::clamp(kTankSteerFixMultiplier * std::fabs(p_slip) - kTankSteerFixOffset, 0.0f, 1.0f);
 }
 
+// INFERRED: the SteerInertia curve holds its end values outside its points (R5-G1-5 4 gives no end rule).
+// Settle: a note on the SteerInertia lookup.
 float track_steer_inertia(const TrackSteerRule &p_rule, float p_speed) {
 	const std::span<const std::array<float, 2>> c = p_rule.steer_inertia;
 	if (c.empty()) {
@@ -47,6 +53,7 @@ float track_steer_inertia(const TrackSteerRule &p_rule, float p_speed) {
 	return std::max(v, 1.0f);
 }
 
+// SOURCE: notes R5-G1-5 4 (a sign change restarts from 0, a shrink applies at once, a step under 0.01 whole).
 float track_steer_smooth(float p_previous, float p_target, float p_inertia) {
 	float previous = p_previous;
 	if (previous * p_target < 0.0f) {
@@ -62,10 +69,13 @@ float track_steer_smooth(float p_previous, float p_target, float p_inertia) {
 	return previous + change / std::max(p_inertia, 1.0f);
 }
 
+// SOURCE: notes R5-G1-5 5 (half the chassis angular speed; the turn limit fades the turn term, the forward limit
+// the forward term).
 float track_speed_attenuation(float p_limit, float p_angular_speed) {
 	return 1.0f - std::clamp(p_limit * kTrackSpinShare * std::fabs(p_angular_speed), 0.0f, 1.0f);
 }
 
+// SOURCE: notes R5-G1-5 6 (1 + AccelerationScale x (strength - 1)).
 float boost_drive_factor(float p_acceleration_scale, float p_strength) {
 	return 1.0f + p_acceleration_scale * (p_strength - 1.0f);
 }

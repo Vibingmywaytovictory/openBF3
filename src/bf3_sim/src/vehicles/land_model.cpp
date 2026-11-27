@@ -122,6 +122,8 @@ core::Status build_land_drive(const core::gameplay::VehicleDriveDef &p_def, Land
 	r_land.limit_backward_throttle = gb.limit_backward_throttle;
 	r_land.backward_throttle_limit = gb.backward_throttle_limit;
 
+	// STAND-IN: the first engine with a torque curve drives every driven wheel, where the notes step each engine's own
+	// wheels. Settle: bf3dump for a land vehicle with two such engines.
 	const core::gameplay::EngineDef *engine = nullptr;
 	for (const core::gameplay::EngineDef &e : p_def.engines) {
 		if (!e.rpm_points.empty()) {

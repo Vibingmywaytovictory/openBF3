@@ -11,6 +11,8 @@ namespace bf3::sim {
 
 namespace {
 
+// INFERRED: the differential's wheel pair list is empty in retail, so every drive share is 1 (notes R5-G1-1 checker
+// found no code that fills it). Settle: a note that finds the pair builder.
 constexpr float kUnpairedDriveShare = 1.0f;
 
 float against(float p_speed) {
@@ -22,6 +24,8 @@ std::span<const vehicles::CurvePoint> curve(
 	return std::span<const vehicles::CurvePoint>(p_points.data(), p_count);
 }
 
+// SOURCE: notes R5-G1-5 and R6-G1-apply 6 (each track wheel takes the forward term and its side's turn term).
+// INFERRED: each wheel smooths its own turn term, faded by its own averaged slip ratio. Settle: a note on that state.
 float track_drive(const VehicleModel &p_model, const VehicleWheelModel &p_wheel, const LandSubstep &p_step,
 		LandWheelState &r_state) {
 	const LandDriveModel &land = p_model.land;
@@ -65,6 +69,7 @@ LandWheelDrive land_wheel_drive(const VehicleModel &p_model, size_t p_wheel, con
 		out.resistance -= vehicles::rolling_resistance(
 				r_state.spin, w.rolling_base, w.rolling_velocity_kmh, w.width, w.mass, p_model.wheel_count);
 	}
+	// STAND-IN: no boost or crawl input exists, so the TransmissionLoss strength is 1 (R5-G1-1 3). Settle: build both keys.
 	if (w.driven != 0 && p_contact.grounded) {
 		out.resistance -= against(p_contact.longitudinal_speed) *
 				vehicles::transmission_loss_resistance(curve(land.transmission_loss, land.transmission_loss_points),
@@ -87,11 +92,14 @@ bool land_wheel_drives(const LandWheelDrive &p_drive) {
 	return std::fabs(p_drive.drive) > vehicles::kSpinGateTorque;
 }
 
+// SOURCE: notes R6-G1-apply 2 to 5 (airborne reset, tyre force, low-speed scaling, clamps, slope grip, reaction gate).
 LandWheelForce land_wheel_apply(const VehicleModel &p_model, size_t p_wheel, const LandSubstep &p_step,
 		const LandWheelContact &p_contact, const LandWheelDrive &p_drive, bool p_any_drive, LandWheelState &r_state) {
 	const VehicleWheelModel &w = p_model.wheels[p_wheel];
 	const float torque = p_drive.drive + p_drive.resistance;
 	LandWheelForce out;
+	// STAND-IN: R6-G1-apply 2a's 0.1 drive factor for an airborne wheel under a vehicle level (under water, inferred) is
+	// not applied. Settle: trace that wheel flag.
 	if (!p_contact.grounded) {
 		r_state.grip = vehicles::TyreGrip::Reset;
 		r_state.spin = vehicles::wheel_spin_step(r_state.spin, torque, p_step.dt, w.inertia);
@@ -99,6 +107,8 @@ LandWheelForce land_wheel_apply(const VehicleModel &p_model, size_t p_wheel, con
 	}
 	const float slip_ratio = vehicles::slip_average_value(r_state.slip_ratio);
 	const float slip_angle = vehicles::slip_average_value(r_state.slip_angle);
+	// STAND-IN: the ground material's StaticFrictionModifier and DynamicFrictionModifier are 1 (R6-G1-tyre 2).
+	// Settle: read the contact material's MaterialPropertyPhysicsData.
 	const vehicles::GripStep grip = vehicles::tyre_grip(w.grip, r_state.grip, p_contact.load, slip_angle,
 			p_contact.lateral_speed, slip_ratio, r_state.spin, 1.0f, 1.0f);
 	r_state.grip = grip.state;

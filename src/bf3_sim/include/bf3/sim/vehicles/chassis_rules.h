@@ -6,27 +6,41 @@
 
 namespace bf3::sim::vehicles {
 
+// SOURCE: notes R5-G1-2 (9.82 m/s^2 in K) and R6-G1-apply 4 (the slope term).
 inline constexpr float kChassisGravity = 9.82f;
+// SOURCE: notes R5-G1-3 (sensitivity clamped to 0.5; the steer value is in half-turns, times pi).
 inline constexpr float kSteerSensitivityClamp = 0.5f;
 inline constexpr float kSteerHalfTurn = 3.14159265358979323846f;
+// SOURCE: notes R5-G1-1 3 (TransmissionLoss key shift 100 km/h per unit of strength, divisor 500).
 inline constexpr float kLossKmhPerStrength = 100.0f;
 inline constexpr float kLossDivisor = 500.0f;
+// SOURCE: notes R5-G1-1 4 (engine brake 0.01, 0.03125, f = 11 - v up to 10 m/s).
 inline constexpr float kEngineBrakeScale = 0.01f;
 inline constexpr float kEngineBrakeFraction = 0.03125f;
 inline constexpr float kEngineBrakeFadeSpeed = 10.0f;
+// SOURCE: notes R5-G1-8 1 (rolling resistance 10 x w / (velocity factor / 3.6) clamped to +-2).
 inline constexpr float kRollingSpinScale = 10.0f;
 inline constexpr float kRollingClamp = 2.0f;
+// SOURCE: notes R5-G1-8 3 (low-speed auto brake below 1.0 m/s).
 inline constexpr float kLowSpeedAutoBrakeSpeed = 1.0f;
+// SOURCE: notes R5-G1-4 (h = 10 x dt).
 inline constexpr float kMotionDampingRate = 10.0f;
+// SOURCE: notes R5-G1-6 (gain 2, cap 6 x own load, same axle within 0.1 m).
 inline constexpr float kAntiRollGain = 2.0f;
 inline constexpr float kAntiRollCap = 6.0f;
 inline constexpr float kAntiRollSameAxle = 0.1f;
+// SOURCE: notes R6-G1-apply checker (base 1, +1 with wheels, +1 at or below 15 km/h, at most 3 substeps).
 inline constexpr float kSubstepLowSpeedKmh = 15.0f;
 inline constexpr uint32_t kMaxChassisSubsteps = 3;
 inline constexpr float kHalf = 0.5f;
+// SOURCE: notes R2-G1 A and R7-G1-standstill 1 (the vehicle step runs in BF3's 30 Hz tick).
 inline constexpr float kChassisTickHz = 30.0f;
+// SOURCE: notes R2-G1 B (the progressive multiplier's runtime setting, default 1).
 inline constexpr float kProgressiveSetting = 1.0f;
+// SOURCE: notes R2-G1 checker B (rebound damper force held to 0.8 x the spring force, one-sided).
 inline constexpr float kDamperClamp = 0.8f;
+// SOURCE: notes R7-G1-standstill (limits 1.0 m/s and 0.1 rad/s, k 150 and 10 1/s, pitch and roll share 0.1,
+// at least min(n, 4) wheels, throttle 0.5), this constant and the six below it.
 inline constexpr float kStandStillSpeedLimit = 1.0f;
 inline constexpr float kStandStillAngularLimit = 0.1f;
 inline constexpr float kStandStillLinearDamping = 150.0f;

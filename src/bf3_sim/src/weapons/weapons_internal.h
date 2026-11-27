@@ -77,11 +77,13 @@ inline DVec3 normalize(const DVec3 &p_a, const DVec3 &p_fallback = { 0, 0, 1 }) 
 	return l > 1e-300 && std::isfinite(l) ? scale(p_a, 1.0 / l) : p_fallback;
 }
 using core::finite;
+// SOURCE: notes R2-G4 A steering (a speed at or below 1e-6 m/s keeps the current direction).
 inline constexpr double kMissileDirectionFloor = 1e-6;
 inline DVec3 with_speed(const DVec3 &p_v, double p_speed) {
 	const double l = length(p_v);
 	return l > kMissileDirectionFloor ? scale(p_v, p_speed / l) : p_v;
 }
+// WHY: a fixed polynomial instead of the C library's sin and cos, so every build draws the same directions bit for bit.
 inline void poly_sincos(double p_x, double &r_sin, double &r_cos) {
 	if (!std::isfinite(p_x)) {
 		r_sin = 0;
@@ -139,6 +141,8 @@ struct Frame {
 	DVec3 up{};
 	DVec3 forward{};
 };
+// INFERRED: ShotConfigData InitialSpeed and InitialPosition are in the aim frame (x left from world up, y up, z along
+// the aim). Settle: a note on the shot frame.
 inline Frame frame_of(const DVec3 &p_forward) {
 	Frame f;
 	f.forward = p_forward;

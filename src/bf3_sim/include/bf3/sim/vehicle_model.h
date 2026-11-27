@@ -40,6 +40,8 @@ enum class WheelCollisionTester : uint8_t {
 	Ray = 2,
 };
 
+// STAND-IN: every member is a hand-picked number or a Jolt default with no BF3 source; vehicle_tuning.cfg says what each
+// stands in for. Settle: per key, as vehicle_tuning.cfg says.
 struct VehicleTuning {
 
 	float gravity = 9.81f;
@@ -139,6 +141,8 @@ struct VehicleModel {
 	Vec3 center_of_mass{};
 	Vec3 inertia_modifier{ 1, 1, 1 };
 	Vec3 center_of_mass_handling_offset{};
+	// STAND-IN: friction 0.5 and restitution 0.4 where no RBTypeCollision body gives them.
+	// Settle: bf3dump for a vehicle blueprint without one.
 	float friction = 0.5f, restitution = 0.4f;
 	float linear_damping = 0, angular_damping = 0;
 	std::vector<ChassisPiece> chassis;

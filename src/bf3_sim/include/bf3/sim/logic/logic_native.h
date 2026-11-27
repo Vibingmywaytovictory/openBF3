@@ -19,6 +19,8 @@ using core::gameplay::LogicTypeId;
 
 namespace native_id {
 
+// INFERRED: port hashes with no recovered name (the three below), their meaning read from how the retail graphs
+// link them. Settle: the ports' names.
 inline constexpr int32_t kSpawnerUnknownOut = 154856772;
 
 inline constexpr int32_t kCaptureCharacterSpawnLink = -320184006;

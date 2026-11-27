@@ -50,8 +50,12 @@ enum class NavPartition : uint8_t { Watershed = 0, Monotone = 1, Layers = 2 };
 
 struct NavParams {
 
+	// STAND-IN: Recast build settings for the bots' mesh (cell_size, cell_height and the eight Recast fields after the
+	// agent below). Settle: the bot path gates on each level.
 	float cell_size = 0.2f;
 	float cell_height = 0.1f;
+	// SOURCE: bf3dump soldier (PhysicalRadius 0.35, Stand Height 1.8, Crouch Height 1.15, StepHeight 0.3, MaxAscendAngle
+	// 50), the five fields below, which nav_params_from_motor replaces from the motor params.
 	float agent_radius = 0.35f;
 	float agent_height = 1.8f;
 	float crouch_height = 1.15f;
@@ -69,10 +73,13 @@ struct NavParams {
 	NavPartition partition = NavPartition::Watershed;
 
 	bool drop_links = true;
+	// STAND-IN: drop links down to 4.9 m (a landing at 9.8 m/s, under the 13.9 m/s knee of DamageAtVerticalVelocity),
+	// reaching 1.5 m out, sampled every 1 m. Settle: derive them from the fall damage curve and the motor.
 	float drop_max = 4.9f;
 	float drop_reach = 1.5f;
 	float drop_sample_spacing = 1.0f;
 	bool vault_links = true;
+	// STAND-IN: tiles are baked 32 m past each mode's combat area. Settle: how far bots leave the combat area.
 	float region_margin = 32.0f;
 
 	bool operator==(const NavParams &) const = default;

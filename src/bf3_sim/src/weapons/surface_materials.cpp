@@ -15,7 +15,9 @@ SurfacePair surface_pair(const core::gameplay::MaterialPairRef &p_ref) {
 	s.property = p_ref.property();
 	s.physics_material = p_ref.material();
 	s.flags_and_index = p_ref.flags_and_index;
+	// SOURCE: notes R-A4 4 (FlagsAndIndex bit 24, mask 0x01000000, lets a bullet through).
 	s.penetrable = ((p_ref.flags_and_index >> 24) & 1u) != 0;
+	// INFERRED: FlagsAndIndex bit 27 marks a see-through material. Settle: a note on that bit.
 	s.see_through = ((p_ref.flags_and_index >> 27) & 1u) != 0;
 	return s;
 }

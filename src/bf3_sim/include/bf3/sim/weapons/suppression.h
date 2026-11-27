@@ -11,10 +11,12 @@
 
 namespace bf3::sim::weapons {
 
+// SOURCE: notes Q9 constants (cap 65535, amount x1000, fall-off 10000 per s^2, log10(1 + 9 s)), the four below.
 inline constexpr uint32_t kSuppressionCounterCap = 65535;
 inline constexpr float kSuppressionAmountScale = 1000.0f;
 inline constexpr float kSuppressionFallOffPerSecondSquared = 10000.0f;
 inline constexpr float kSuppressionLogSpan = 9.0f;
+// SOURCE: notes R-A0 (BF3's 30 Hz update, two sim ticks) and Q9 A (the test runs per bullet update step).
 inline constexpr Tick kSuppressionUpdateTicks = 2;
 
 struct SuppressionDef {

@@ -19,6 +19,7 @@ bool vehicle_needs_repair(const OrderParty &p_party, float p_percent) {
 	return p_party.in_vehicle && below_percent(p_party.vehicle_health, p_party.vehicle_max_health, p_percent);
 }
 
+// SOURCE: notes R2-E2 D (repair, heal, then ammo; the first match wins).
 int32_t need_of(const NeedParty &p_needer, const NeedParty &p_supplier) {
 	if (p_needer.def == nullptr) {
 		return kIconNone;
@@ -39,16 +40,19 @@ int32_t need_of(const NeedParty &p_needer, const NeedParty &p_supplier) {
 
 }
 
+// SOURCE: notes R-E2 C and its checker (the issuer's order VO for types 1-5 and 7-14).
 bool issuer_voice(OrderType p_type) {
 	const uint8_t t = uint8_t(p_type);
 	return (t >= 1 && t <= 5) || (t >= 7 && t <= 14);
 }
 
+// SOURCE: notes R4-E2 3 (the server's per-type order event for types 1 to 16).
 bool server_voice(OrderType p_type) {
 	const uint8_t t = uint8_t(p_type);
 	return t >= 1 && t <= 16;
 }
 
+// SOURCE: notes R-E2 A and its checker (the order priority and its distance and percentage tests).
 OrderType pick_order(const spotting::SpotterDef &p_def, const OrderParty &p_me, const OrderParty &p_mate) {
 	const bool pickup = closer_than(p_me.position, p_mate.position, p_def.pickup_order_distance);
 	const bool repair = closer_than(p_me.position, p_mate.position, p_def.repair_order_distance);
@@ -81,6 +85,9 @@ OrderType pick_order(const spotting::SpotterDef &p_def, const OrderParty &p_me, 
 	return OrderType::None;
 }
 
+// SOURCE: notes R-E2 B and its checker (any counted weapon with 100 x (in weapon + reserve) / (capacity x count) below
+// the percentage, and not low at once when a counted weapon has capacity x count 0).
+// INFERRED: which values are in weapon, reserve, capacity and count, as R-E2 B infers. Settle: R-E2 B's getters.
 bool low_ammo(std::span<const WeaponAmmo> p_weapons, float p_need_percent) {
 	bool low = false;
 	for (const WeaponAmmo &w : p_weapons) {
@@ -111,11 +118,13 @@ int32_t highlight_icon(int32_t p_icon) {
 	}
 }
 
+// SOURCE: notes R2-E2 constants (a 2 Hz square wave, high when floor(4 x frac(c)) is odd).
 bool blink_high(double p_clock) {
 	const double frac = p_clock - std::floor(p_clock);
 	return (int64_t(std::floor(4.0 * frac)) & 1) != 0;
 }
 
+// SOURCE: notes R2-E2 B (a newer order resets the timers; the gadget test; other types no icon with the timers set).
 void receive_order(OrderIcon &r_icon, uint64_t p_update, OrderType p_type, uint8_t p_issuer, const Supplies &p_mine) {
 	if (p_update <= r_icon.seen) {
 		return;
@@ -169,6 +178,7 @@ int32_t standing_need_icon(const NeedParty &p_me, const NeedParty &p_mate) {
 	return mine != kIconNone ? mine : need_of(p_mate, p_me);
 }
 
+// SOURCE: notes R2-E2 C (the issuer's order icon while its timer runs, the Highlight variant while it blinks).
 int32_t teammate_icon(const OrderIcon &p_order, uint8_t p_mate, int32_t p_standing, double p_clock) {
 	if (p_order.icon_timer > 0.0f && p_order.issuer == p_mate) {
 		return p_order.blink_timer > 0.0f && blink_high(p_clock) ? highlight_icon(p_order.icon) : p_order.icon;
@@ -176,6 +186,8 @@ int32_t teammate_icon(const OrderIcon &p_order, uint8_t p_mate, int32_t p_standi
 	return p_standing;
 }
 
+// SOURCE: notes R2-E1 D (0 unless Active with a spotter of the viewer's team or 0; 3 flagged, 1 squad leader, else 2).
+// INFERRED: kind 1 is a squad-leader spotter, as R2-E1 D infers. Settle: R2-E1 D's squad-leader query.
 uint8_t spotted_kind(const SpotKind &p_spot, uint8_t p_viewer_team, bool p_no_3d_spotting) {
 	if (p_no_3d_spotting || !p_spot.active || !p_spot.spotter_known ||
 			(p_spot.spotter_team != 0 && p_spot.spotter_team != p_viewer_team)) {
@@ -184,6 +196,7 @@ uint8_t spotted_kind(const SpotKind &p_spot, uint8_t p_viewer_team, bool p_no_3d
 	return p_spot.spotter_flagged ? 3 : (p_spot.spotter_leads_squad ? 1 : 2);
 }
 
+// SOURCE: notes R2-E1 C (an enemy on the minimap when Active, Passive or Radar and NoMinimapSpotting is off).
 bool minimap_shows_enemy(spotting::SpotState p_state, bool p_no_minimap_spotting) {
 	return !p_no_minimap_spotting &&
 			(p_state == spotting::SpotState::Active || p_state == spotting::SpotState::Passive ||

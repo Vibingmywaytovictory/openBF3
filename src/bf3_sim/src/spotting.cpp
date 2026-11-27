@@ -73,6 +73,7 @@ core::Result<SpottingDef> make_spotting_def(const core::gameplay::SoldierDef &p_
 	return out;
 }
 
+// SOURCE: notes Q11 B (ignored when Unspottable or already Active, ActiveSpottedTime x its multiplier).
 bool apply_active(SpotTarget &r_target, const TargetDef &p_def, uint8_t p_spotter) {
 	if (r_target.state == SpotState::Unspottable || r_target.state == SpotState::Active) {
 		return false;
@@ -83,6 +84,8 @@ bool apply_active(SpotTarget &r_target, const TargetDef &p_def, uint8_t p_spotte
 	return true;
 }
 
+// SOURCE: notes Q11 C and its checker (an Active spot refreshed unless firing, Radar keeps its state, else Passive,
+// x SpotOnFireMultiplier while firing).
 bool apply_passive(SpotTarget &r_target, const TargetDef &p_def, uint8_t p_spotter, bool p_firing) {
 	switch (r_target.state) {
 		case SpotState::Unspottable:
@@ -107,6 +110,8 @@ bool apply_passive(SpotTarget &r_target, const TargetDef &p_def, uint8_t p_spott
 	return changed;
 }
 
+// SOURCE: notes R2-E1 E radar apply (Unspottable ignored, an Active spot only refreshed to its active time, else Radar
+// for the sweep's spot time, 1 s by default).
 bool apply_radar(SpotTarget &r_target, const TargetDef &p_def, uint8_t p_spotter, float p_radar_time) {
 	switch (r_target.state) {
 		case SpotState::Unspottable:
@@ -126,6 +131,7 @@ bool apply_radar(SpotTarget &r_target, const TargetDef &p_def, uint8_t p_spotter
 	return changed;
 }
 
+// SOURCE: notes R2-E1 B (the time counts down by dt while above 0, then the state returns to None).
 bool step_target(SpotTarget &r_target, float p_dt) {
 	if (r_target.state == SpotState::None) {
 		return false;
@@ -148,6 +154,7 @@ float crosshair_cosine(const Vec3 &p_eye, const Vec3 &p_view, const Vec3 &p_cent
 	return core::vec::dot(p_view, core::vec::scale(d, 1.0f / len));
 }
 
+// SOURCE: notes R-E1 3 (SpottingFov the half-angle from the crosshair, range to the box centre, pi as 3.1415927).
 bool in_spot_cone(
 		const Vec3 &p_eye, const Vec3 &p_view, const Vec3 &p_centre, float p_half_angle_deg, float p_distance) {
 	const Vec3 d = core::vec::sub(p_centre, p_eye);
@@ -158,6 +165,7 @@ bool in_spot_cone(
 	return limit <= crosshair_cosine(p_eye, p_view, p_centre);
 }
 
+// SOURCE: notes R-E1 (CoolDownAllowedSpotsWithinHistory presses within CoolDownHistoryTime).
 bool SpotCooldown::press(double p_clock, const SpotterDef &p_def) {
 	history_.push_back(p_clock);
 	std::erase_if(history_, [&](double t) { return p_clock - t > double(p_def.cooldown_history_time); });
@@ -170,6 +178,7 @@ bool SpotCooldown::ready(double p_clock, const SpotterDef &p_def) const {
 	return held < p_def.cooldown_allowed;
 }
 
+// SOURCE: notes R-E1 5 and its checker (the first spottable hit with a team set and another team, of 5 hits).
 std::optional<uint8_t> first_enemy_hit(std::span<const RayHit> p_hits, uint8_t p_own_team) {
 	for (const RayHit &h : p_hits.first(std::min(p_hits.size(), kRayHits))) {
 		if (h.spottable && h.team != 0 && h.team != p_own_team) {
@@ -192,6 +201,7 @@ bool PotentialList::add(uint8_t p_slot, float p_cosine) {
 	return true;
 }
 
+// SOURCE: notes R-E1 (OnlyAllowedToHaveOneSpottedPlayer keeps the candidate nearest the crosshair).
 void PotentialList::trim_to_nearest_crosshair() {
 	std::optional<Candidate> best;
 	for (const Candidate &c : entries()) {
@@ -205,6 +215,7 @@ void PotentialList::trim_to_nearest_crosshair() {
 	}
 }
 
+// SOURCE: notes R-E1 7 (the scan timer counts down; at 0 with no press a new scan and PassiveSpottingTimeInterval again).
 bool PassiveScan::scan_due(float p_dt, bool p_pressed, bool p_blocked, const SpotterDef &p_def) {
 	if (p_pressed) {
 		return false;
@@ -217,6 +228,7 @@ bool PassiveScan::scan_due(float p_dt, bool p_pressed, bool p_blocked, const Spo
 	return true;
 }
 
+// SOURCE: notes R-E1 7 (the accumulator from TimeRequiredToPassiveSpot down by the interval; sent below 0).
 bool PassiveScan::send_due(bool p_list_empty, bool p_active_pending, const SpotterDef &p_def) {
 	if (!primed_ || p_list_empty || p_active_pending) {
 		accumulator_ = p_def.passive_required;

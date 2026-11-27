@@ -37,6 +37,8 @@ double zone_damage(const ProjectileSimDef &p_projectile, HitZone p_zone, double 
 
 double blast_damage(const ExplosionSimDef &p_explosion, double p_distance, BlastFalloff p_falloff);
 
+// SOURCE: notes R-G4 2 (size factor clamp(cross-section, 4, 10) / 10) and R-G4 5 / R-G3 10 (crew thrown at 0.3 x
+// BlastImpulse), the three constants below.
 inline constexpr float kImpulseAreaMin = 4.0f;
 inline constexpr float kImpulseAreaMax = 10.0f;
 inline constexpr float kCrewThrowShare = 0.3f;

@@ -428,6 +428,8 @@ core::Result<GadgetDef> read_gadget_def(const core::EbxResolver &p_db, std::stri
 	return g;
 }
 
+// INFERRED: a shot's launch vector is in the aim frame (z along the aim, y from world up, x across).
+// Settle: a note on the ShotConfigData velocity frame.
 Vec3 shot_frame_vector(const Vec3 &p_direction, const Vec3 &p_local) {
 	const Vec3 forward = core::vec::normalize_or(p_direction, Vec3{ 0.0f, 0.0f, 1.0f });
 	const Vec3 right =
@@ -494,6 +496,8 @@ DeployOutcome GadgetField::deploy(const GadgetThrow &p_throw, const CollisionWor
 	d.healing_points = g->healing.capacity;
 	d.ammo_points = g->ammo.capacity;
 	d.health = g->health;
+	// INFERRED: placed where a DeployAreaGroundRayLength ray down from the shot origin meets ground at least
+	// DeployAreaGroundFlatness up, else refused and the round spent. Settle: a note on VehicleDeployWeaponData.
 	if (placed_on_ground(g->kind)) {
 		StaticHit hit;
 		if (p_world == nullptr ||
@@ -525,6 +529,7 @@ DeployOutcome GadgetField::deploy(const GadgetThrow &p_throw, const CollisionWor
 	for (const Deployable &o : live_) {
 		owned += o.owner == d.owner && o.def == d.def && !o.owner_left ? 1u : 0u;
 	}
+	// STAND-IN: past MaxCount per owner and def the oldest goes. Settle: a note on the gadget MaxCount rule.
 	for (size_t i = 0; owned >= g->max_count && i < live_.size();) {
 		if (live_[i].owner == d.owner && live_[i].def == d.def && !live_[i].owner_left) {
 			erase_at(i);
@@ -564,6 +569,8 @@ void GadgetField::step(const CollisionWorld &p_world) {
 		d.velocity[1] -= kGadgetGravity * dt;
 		StaticHit hit;
 		if (p_world.ray(d.position, delta, query_mask::kProjectile, &hit)) {
+			// STAND-IN: a bag rests on a contact within MaxAttachableInclination of up and slides on a steeper one.
+			// Settle: a note on the bag's landing (R3-A8 found no caller of the inclination test).
 			if (hit.normal[1] >= attach_cos) {
 				d.position = hit.position;
 				d.normal = hit.normal;
@@ -594,6 +601,8 @@ void GadgetField::step(const CollisionWorld &p_world) {
 	}
 }
 
+// SOURCE: notes R3-E3 A2 3 (within Radius, SupplySoldiers, the TeamSpecific and ExcludeSelf filters).
+// INFERRED: the receiver's feet stand for its bounding position. Settle: a note on the candidate's position.
 bool supplies(const GadgetDef &p_gadget, const Deployable &p_bag, const SupplyReceiver &p_receiver, bool p_healing) {
 	const SupplyUnitDef &u = p_healing ? p_gadget.healing : p_gadget.ammo;
 	const float points = p_healing ? p_bag.healing_points : p_bag.ammo_points;
@@ -613,6 +622,7 @@ void GadgetField::supply(
 	if (!(p_seconds > 0.0f) || !std::isfinite(p_seconds)) {
 		return;
 	}
+	// SOURCE: notes R3-E3 A2 1 (points refill at SupplyPointsRefillSpeed up to SupplyPointsCapacity).
 	for (Deployable &d : live_) {
 		const GadgetDef &g = defs_[d.gadget];
 		for (SupplyUnitDef const *u : { &g.healing, &g.ammo }) {
@@ -627,6 +637,8 @@ void GadgetField::supply(
 		if (!r.alive || !core::finite(r.position)) {
 			continue;
 		}
+		// STAND-IN: one bag, the highest SupplyIncSpeed, serves a receiver and spends what it gives, where R3-E3 A2 runs
+		// every sphere and spends 1 point a pickup. Settle: R3-E3 A2 per sphere.
 		for (const bool healing : { true, false }) {
 			Deployable *best = nullptr;
 			float best_rate = 0;
@@ -679,6 +691,7 @@ size_t GadgetField::owner_gone(uint8_t p_owner, Tick p_tick) {
 		} else if (d.owner_gone) {
 			d.owner_left = true;
 			++i;
+		// INFERRED: a leaving owner's beacon, SOFLAM, T-UGS and MAV go at once. Settle: a note on placed vehicles' owner.
 		} else if (placed_on_ground(defs_[d.gadget].kind)) {
 			erase_at(i);
 			++removed;
@@ -706,6 +719,8 @@ size_t GadgetField::orphan_packs(uint8_t p_owner, Tick p_tick) {
 	return orphaned;
 }
 
+// SOURCE: notes R2-G4 C (TimeToLiveOnPlayerDeath counted from the owner's loss, 0 never expires).
+// INFERRED: a TimeToLive of 0 never expires and an expired gadget goes without detonating. Settle: R2-G4 C.
 size_t GadgetField::expire(Tick p_tick) {
 	size_t expired = 0;
 	for (size_t i = 0; i < live_.size();) {
@@ -725,6 +740,7 @@ size_t GadgetField::expire(Tick p_tick) {
 	return expired;
 }
 
+// SOURCE: notes R2-G4 C damage (IsDestructible and, for a blast, ReceivesExplosionDamage; a pack at 0 detonates).
 bool GadgetField::damage(uint16_t p_id, float p_amount, bool p_explosion) {
 	for (size_t i = 0; i < live_.size(); ++i) {
 		Deployable &d = live_[i];
@@ -785,6 +801,9 @@ size_t GadgetField::blast(const ExplosionSimDef &p_explosion, BlastFalloff p_fal
 	return destroyed;
 }
 
+// SOURCE: notes R2-G4 C claymore (owner's team skipped, speed > MinSpeedForActivation, Angle a half-angle about
+// the facing with y zeroed).
+// INFERRED: the facing axis has y zeroed (the R2-G4 checker leaves it unconfirmed). Settle: R2-G4 C.
 bool soldier_trips(const ExplosionPackDef &p_pack, const Deployable &p_mine, const PackSoldier &p_soldier) {
 	if (p_soldier.team == p_mine.team || !(p_soldier.speed > p_pack.soldier_min_speed)) {
 		return false;
@@ -803,6 +822,8 @@ bool soldier_trips(const ExplosionPackDef &p_pack, const Deployable &p_mine, con
 	return std::acos(cosine) < p_pack.soldier_angle_deg * std::numbers::pi_v<float> / 180.0f;
 }
 
+// SOURCE: notes R2-G4 C AT mine (driver of the mine's team skipped, box centre within VehicleDetonationRadius,
+// faster than MinSpeedForMineActivation, moving toward the mine).
 bool vehicle_trips(const ExplosionPackDef &p_pack, const Deployable &p_mine, const PackVehicle &p_vehicle) {
 	if (p_vehicle.driver_team != 0 && p_vehicle.driver_team == p_mine.team) {
 		return false;
@@ -911,6 +932,8 @@ LockAim painter_aim(const LaserPainterDef &p_painter, const Deployable &p_design
 	return aim;
 }
 
+// SOURCE: notes R2-G4 B laser (a painter holding a lock paints its vehicle for TimeObjectIsPainted).
+// INFERRED: only an IsAlwaysActive designator steps, from its placed facing. Settle: a note on the SOFLAM's operator.
 void LaserPainters::step(std::span<const GadgetDef> p_defs, std::span<const Deployable> p_live,
 		std::span<const LockCandidate> p_candidates, const CollisionWorld *p_world, SimTime p_now,
 		LockStepStats *r_stats) {
@@ -971,6 +994,9 @@ void LaserPainters::clear() {
 	painted_.clear();
 }
 
+// SOURCE: notes R2-E1 radar sweep (team not 0 and not the sweeper's, within ControllableSweepRadius, at least
+// ControllableSpeedThreshold).
+// STAND-IN: only soldiers are swept and a MAV sweeps from where it was placed. Settle: vehicles and a flown MAV.
 bool sweeps(const RadarSweepDef &p_sweep, const Deployable &p_sensor, const SweepSubject &p_subject) {
 	return p_sensor.team != 0 && p_subject.team != 0 && p_subject.team != p_sensor.team &&
 			p_subject.speed >= p_sweep.speed_threshold &&
@@ -1014,6 +1040,8 @@ void arm_ammo_refill(AmmoRefillState &r_state, const SoldierWeaponsState &p_weap
 	}
 }
 
+// STAND-IN: every slot gains the points and refills to its spawn reserve, where R3-E3 A2 5 serves one weapon a
+// pickup, the current one first. Settle: R3-E3 A2 5.
 int32_t refill_ammo(SoldierWeaponsState &r_weapons, const WeaponTable &p_table,
 		std::span<const AmmoPickupDef> p_pickups, float p_points, AmmoRefillState &r_state) {
 	int32_t added = 0;
@@ -1047,6 +1075,8 @@ int32_t refill_ammo(SoldierWeaponsState &r_weapons, const WeaponTable &p_table,
 	return added;
 }
 
+// STAND-IN: AutoReplenishMagazine gives the spawn reserve back AutoReplenishDelay after it dropped (notes R3-G2 E
+// found no reader). Settle: a note on AutoReplenishMagazine.
 int32_t replenish_ammo(SoldierWeaponsState &r_weapons, const WeaponTable &p_table,
 		std::span<const AmmoPickupDef> p_pickups, Tick p_tick, AmmoRefillState &r_state) {
 	int32_t added = 0;

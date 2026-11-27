@@ -227,6 +227,10 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 			break;
 		}
 	}
+	// INFERRED: the chassis mass M is VehicleConfigData.BodyMass, else the collision body's (R5-G1-2: M is the chassis
+	// rigid body's mass; that it equals BodyMass is inferred). Settle: a note on the rigid body's mass source.
+	// STAND-IN: a 0 mass falls back to the collision body's, where R5-G1-2 1 sets 5000 kg.
+	// Settle: bf3dump for a land vehicle whose BodyMass is 0.
 	m->mass = ch.body_mass > 0.0f ? ch.body_mass : (collision != nullptr ? collision->mass : 0.0f);
 	if (!finite(m->mass) || m->mass < 1.0f || m->mass > 1e6f) {
 		return fail("mass " + std::to_string(m->mass) + " outside 1..1e6 kg");
@@ -293,6 +297,9 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 
 	std::vector<size_t> physics_wheels;
 	for (size_t i = 0; i < p_def.wheels.size(); ++i) {
+		// SOURCE: notes R7-G1-wheels and its checker (only wptNormal wheel components get a physics wheel).
+		// INFERRED: n in every 1/n rule is their count (every created wheel is added: inferred-strong in the note).
+		// Settle: a note that finds the add-wheel call site.
 		if (p_def.wheels[i].physics_type == "wptNormal") {
 			physics_wheels.push_back(i);
 		}
@@ -337,6 +344,8 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		w.spring_damping = c.spring_damping;
 		w.progressive_start = c.spring_progressive_start_ratio;
 		w.progressive_exponent = c.spring_progressive_exponent;
+		// INFERRED: the data's wheel centre is the wheel at rest under the standing load (R5-G1-2 2's balance with 3
+		// substeps), and the attachment sits that compression above it. Settle: a resting retail vehicle's wheel heights.
 		w.rest_compression = std::min(m->mass * p_tuning.gravity * m->gravity_factor /
 						(float(wheel_count) * standing_substep_factor * w.spring_constant),
 				c.spring_length - w.suspension_min);
@@ -346,6 +355,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		if (c.rotation_direction_index < 0 || c.rotation_direction_index > 2) {
 			return fail("wheel " + std::to_string(k) + " rotation direction index outside 0..2");
 		}
+		// SOURCE: notes R6-G1-apply 5 (the spin body's inertia is Inertia[RotationDirectionIndex]).
 		w.inertia = c.inertia[size_t(c.rotation_direction_index)];
 		if (!finite(w.inertia) || !(w.inertia > 0.0f && w.inertia < 1000.0f)) {
 			return fail("wheel " + std::to_string(k) + " inertia outside 0..1000");
@@ -419,6 +429,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 			return fail("wheel " + std::to_string(k) + " differential ratio out of range");
 		}
 
+		// SOURCE: notes R5-G1-5 2 (the track side is the sign of the wheel's mount x; side 1 is negative x).
 		w.side = w.data_centre[0] > 0.0f ? 0 : 1;
 		if (w.steers != 0 && steering_config == nullptr) {
 			steering_config = &c;
@@ -455,6 +466,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		}
 	}
 
+	// STAND-IN: the first steered wheel's SteeringSensitivity serves every wheel. Settle: bf3dump for differing curves.
 	if (steering_config != nullptr) {
 		std::vector<std::array<float, 2>> points;
 		for (const core::gameplay::SteeringSensitivityPoint &p : steering_config->steering_sensitivity) {
@@ -475,6 +487,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	}
 	for (size_t k = 0; k < m->wheel_count; ++k) {
 		const core::gameplay::WheelConfigDef &c = p_def.wheel_configs[p_def.wheels[physics_wheels[k]].config];
+		// SOURCE: notes R5-G1-3 2 and 4 (only SteeringType 1 wheels turn; track-steer wheels never rotate).
 		m->wheels[k].steers = c.steering_type == 1 ? 1 : 0;
 	}
 	core::Status land = build_land_drive(p_def, m->land);
@@ -483,6 +496,7 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	}
 	for (size_t k = 0; k < m->wheel_count; ++k) {
 		const core::gameplay::WheelConfigDef &c = p_def.wheel_configs[p_def.wheels[physics_wheels[k]].config];
+		// STAND-IN: the first driven wheel's TransmissionLoss curve serves every wheel. Settle: bf3dump for differing curves.
 		if (m->wheels[k].driven == 0 || c.transmission_loss.empty()) {
 			continue;
 		}
@@ -501,6 +515,8 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 		break;
 	}
 	for (size_t k = 0; k < m->wheel_count; ++k) {
+		// STAND-IN: the first track-steer wheel's speed limits and SteerInertia serve every wheel.
+		// Settle: bf3dump for differing values.
 		if (m->wheels[k].track_steer == 0) {
 			continue;
 		}

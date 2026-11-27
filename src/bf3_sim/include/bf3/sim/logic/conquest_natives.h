@@ -16,6 +16,7 @@
 
 namespace bf3::sim::logic {
 
+// SOURCE: notes M-CQ2 6b (the "enemy holds all" team event, graph event port #1631530663).
 inline constexpr int32_t kOnEnemyHoldsAllPort = 1631530663;
 
 struct ConquestPlayerSample {

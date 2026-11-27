@@ -47,6 +47,8 @@ void pitch_bucket(const CapsulePoseTable &p_table, double p_deg, size_t &r_bucke
 
 }
 
+// STAND-IN: capsule ends lerped between the table's pitch buckets and transition fractions in place of BF3's posed
+// skeleton. Settle: pose the capsules from the animated skeleton each tick.
 HitTarget posed_target(const CapsulePoseTable &p_table, const TargetPose &p_pose) {
 	HitTarget t;
 	t.id = p_pose.id;

@@ -34,6 +34,7 @@ float shaped_level(const RotationBodyRule &p_rule, float p_level) {
 
 }
 
+// SOURCE: notes R2-G2 A1 (signed square unless UseLinearInput; positive input gives negative torque; the reset term).
 float rotation_input_torque(const RotationBodyRule &p_rule, float p_level, float p_angle) {
 	const float shaped = shaped_level(p_rule, p_level);
 	float torque = -rotation_torque(p_rule, shaped);
@@ -44,6 +45,7 @@ float rotation_input_torque(const RotationBodyRule &p_rule, float p_level, float
 	return torque;
 }
 
+// SOURCE: notes R2-G2 A2 (AlignmentData Speed and StopTolerance).
 float alignment_input(float p_error, float p_speed) {
 	return std::clamp(p_speed * p_error, -1.0f, 1.0f);
 }
@@ -52,6 +54,8 @@ bool alignment_done(float p_error, float p_stop_tolerance_degrees) {
 	return std::fabs(p_error) < p_stop_tolerance_degrees * kRadPerDegree;
 }
 
+// SOURCE: notes R2-G2 A4 (ExtendedConstraints blended over Falloff, no wrap of the parent angle).
+// INFERRED: the parent is the enclosing rotation body, as the note infers. Settle: a note on that pairing.
 RotationLimits rotation_limits(const RotationBodyRule &p_rule, float p_parent_degrees, bool p_has_parent) {
 	float min = p_rule.min_degrees;
 	float max = p_rule.max_degrees;
@@ -79,6 +83,8 @@ float wrap_angle(float p_angle) {
 	return a;
 }
 
+// SOURCE: notes R2-G2 A3 and its checker (damping and threshold before or after the midpoint step, w = L / Inertia,
+// a stop kills the momentum).
 void rotation_body_step(const RotationBodyRule &p_rule, RotationBodyState &r_state, float p_torque,
 		const RotationLimits &p_limits, float p_dt) {
 	float momentum = r_state.momentum;
@@ -116,6 +122,8 @@ void rotation_body_step(const RotationBodyRule &p_rule, RotationBodyState &r_sta
 	r_state.momentum = momentum;
 }
 
+// SOURCE: notes R2-G2 A5 and its checker (a lock turns the body directly, momentum unchanged, clamped to the limits
+// when constrained).
 float rotation_direct(const RotationBodyRule &p_rule, float p_angle, float p_rotation, const RotationLimits &p_limits) {
 	if (std::fabs(p_rotation) <= kTurretMinDirectRotation) {
 		return p_angle;
@@ -127,10 +135,13 @@ float rotation_direct(const RotationBodyRule &p_rule, float p_angle, float p_rot
 	return wrap_angle(std::clamp(from + p_rotation, p_limits.min, p_limits.max));
 }
 
+// SOURCE: notes R2-G2 A5 (the parent's turn times WorldSpaceLockEfficiency).
 float world_lock_rotation(float p_efficiency, float p_parent_rotation) {
 	return p_efficiency > 0.0f ? -p_parent_rotation * p_efficiency : 0.0f;
 }
 
+// STAND-IN: the body's top rate, its midpoint rate after 512 steps at full input, which scales the aim stand-in
+// (aim_level). Settle: a note on how the mouse sets RotationInput's level.
 float rotation_steady_rate(const RotationBodyRule &p_rule, float p_level, float p_dt) {
 	const float inertia = p_rule.inertia > 0.0f ? p_rule.inertia : 1.0f;
 	const float torque = rotation_torque(p_rule, shaped_level(p_rule, std::fabs(p_level)));
@@ -152,6 +163,7 @@ float rotation_steady_rate(const RotationBodyRule &p_rule, float p_level, float 
 	return mid / inertia;
 }
 
+// SOURCE: notes R2-G2 A6 (the counter; input sets it to 5, reaching 0 locks).
 bool position_lock_tick(int32_t &r_counter, float p_level) {
 	if (r_counter > 0) {
 		--r_counter;
@@ -167,6 +179,7 @@ bool position_lock_tick(int32_t &r_counter, float p_level) {
 	return false;
 }
 
+// SOURCE: notes R3-G2-turret-input 2 and its checker (radial InputCurves; fewer than 2 points or below 1e-6 unchanged).
 float input_curve(std::span<const InputCurvePoint> p_points, float p_magnitude) {
 	const float m = std::fabs(p_magnitude);
 	if (p_points.size() < 2 || m < kInputCurveFloor) {

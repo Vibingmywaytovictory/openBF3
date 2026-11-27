@@ -45,6 +45,8 @@ inline constexpr uint32_t kRaycast = 1u << 1;
 inline constexpr uint32_t kCharacter = 1u << 2;
 inline constexpr uint32_t kAll = kCollision | kRaycast | kCharacter;
 
+// INFERRED: a soldier collides with the Collision and Character bodies, and bullets and sight rays (kProjectile)
+// with the Collision and Raycast bodies, after the Havok rigid-body kinds' names. Settle: a note on the query layers.
 inline constexpr uint32_t kMovement = kCollision | kCharacter;
 
 inline constexpr uint32_t kProjectile = kCollision | kRaycast;
@@ -166,6 +168,8 @@ private:
 struct StaticWorldBuildOptions {
 	unsigned threads = 0;
 
+	// STAND-IN: Jolt's active-edge angle for the level meshes in place of Havok's welding. Settle: a note on Havok's
+	// level mesh welding.
 	float active_edge_degrees = 5.0f;
 	bool include_raycast = true;
 	std::atomic<size_t> *tiles_done = nullptr;

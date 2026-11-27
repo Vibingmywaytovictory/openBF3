@@ -12,6 +12,7 @@ namespace bf3::sim::weapons {
 
 namespace {
 
+// SOURCE: notes Q2 constants (pi as the 32-bit float 3.14159274 for the direction draw).
 constexpr double kSwayPi = double(3.14159265358979323846f);
 constexpr double kDeg = core::kDegToRad;
 
@@ -27,6 +28,7 @@ bool gate_open(const WeaponSimDef::Conditional &p_c, const SwayContext &p_contex
 			(p_c.only_supported || p_c.only_light);
 }
 
+// INFERRED: a MaxAngleModifier of 0 leaves MaxAngle as it is. Settle: a note on zero GunSwayDispersionModData fields.
 SwayModifier attachment_product(const WeaponSimDef &p_def, const SwayContext &p_context) {
 	SwayModifier m;
 	for (const WeaponSimDef::Conditional &c : p_def.conditional) {
@@ -46,6 +48,7 @@ SwayModifier attachment_product(const WeaponSimDef &p_def, const SwayContext &p_
 	return m;
 }
 
+// SOURCE: notes Q2 B4 (suppression adds its degrees, then the attachment product multiplies).
 Dispersion with_modifiers(const Dispersion &p_d, const WeaponSimDef &p_def, const SwayContext &p_context) {
 	const Dispersion s =
 			suppressed_dispersion(p_d, p_def.suppression_modifier[zoom_of(p_context)], p_context.suppression);
@@ -91,12 +94,15 @@ DVec3 rotate_y(const DVec3 &p_v, double p_angle) {
 	return { p_v[0] * c + p_v[2] * s, p_v[1], -p_v[0] * s + p_v[2] * c };
 }
 
+// INFERRED: a positive deviation yaw turns toward the aim frame's +X (the soldier's left as the data is drawn).
+// Settle: a note on the sway rotation's sign.
 DVec3 sway_rotate_d(const DVec3 &p_v, double p_pitch, double p_yaw) {
 	return rotate_x(rotate_y(p_v, p_yaw), p_pitch);
 }
 
 }
 
+// SOURCE: notes Q2 B3 (sprint, the 0.5 s air hold for stand only, moving with its lerped MinAngle, base).
 std::optional<SwayRecord> sway_record(const WeaponSimDef &p_def, const SwayContext &p_context, float p_since_air) {
 	const size_t s = stance_of(p_context);
 	const size_t z = zoom_of(p_context);
@@ -144,6 +150,7 @@ void sway_fire_stop(GunSwayState &r_sway) {
 	r_sway.shots = 0;
 }
 
+// SOURCE: notes Q2 A (no new draw on a repeated seed; angle in [-pi, pi], radius up to the dispersion) and Q4 (counter).
 void sway_shot(GunSwayState &r_sway, uint32_t p_seed) {
 	r_sway.flags = uint8_t(r_sway.flags | sway_flags::kFired);
 	if (r_sway.shots < kSwayShotCountCap) {
@@ -162,6 +169,7 @@ void sway_shot(GunSwayState &r_sway, uint32_t p_seed) {
 	r_sway.deviation_yaw = float(c * radius);
 }
 
+// SOURCE: notes Q2 B6-B7 (growth, decay), Q3 1-2 (kick, clamps, recovery) and Q5 (the spring steps only unzoomed).
 void sway_update(GunSwayState &r_sway, const WeaponSimDef &p_def, const SwayContext &p_context) {
 	const double dt = double(kSwaySeconds);
 	const bool fired = (r_sway.flags & sway_flags::kFired) != 0;
@@ -189,6 +197,8 @@ void sway_update(GunSwayState &r_sway, const WeaponSimDef &p_def, const SwayCont
 		const float l = p_context.suppression > 0.0f ? p_context.suppression : 0.0f;
 		const SwayModifier a = attachment_product(p_def, p_context);
 		const SwayModifier &sm = p_def.suppression_modifier[z];
+		// INFERRED: suppression scales the kick by its RecoilMagnitude and RecoilAngle mods (notes Q3 1; the Q9 checker
+		// leaves that consumer unconfirmed). Settle: a note on the suppression recoil consumer.
 		const double mag_v = double(a.recoil_magnitude) + double(sm.recoil_magnitude) * double(l);
 		const double mag_h = double(a.recoil_angle) + double(sm.recoil_angle) * double(l);
 		const double first = r_sway.shots == kSwayFirstShotCount ? double(p_def.first_shot_recoil_multiplier) : 1.0;
@@ -234,6 +244,7 @@ RecoilOffset gameplay_recoil(const WeaponSimDef &p_def, const GunSwayState &p_sw
 	return { float(-double(p_sway.recoil_pitch) * g / kDeg), float(double(p_sway.recoil_yaw) * g / kDeg) };
 }
 
+// SOURCE: notes Q3 3 and Q5 4 (ADS shows the accumulators, hip the spring, x DeviationScaleFactor).
 RecoilOffset camera_recoil(const WeaponSimDef &p_def, const GunSwayState &p_sway, Zoom p_zoom) {
 	const size_t z = std::min<size_t>(size_t(p_zoom), 1);
 	const double k = p_def.deviation_scale[z];
@@ -247,6 +258,8 @@ Vec3 sway_rotate(const Vec3 &p_local, float p_pitch, float p_yaw) {
 	return detail::to_f(sway_rotate_d(detail::to_d(p_local), p_pitch, p_yaw));
 }
 
+// SOURCE: notes Q2 C and R4-A2 (the bullet carries the dispersion and the recoil, x GameplayDeviationScaleFactor).
+// INFERRED: the server's bullets follow the recoil too (R4-A2 checker C5 leaves it unconfirmed). Settle: R4-A2 C5.
 Vec3 shoot_direction(uint16_t p_yaw, int16_t p_pitch, const WeaponSimDef &p_def, const GunSwayState &p_sway,
 		Zoom p_zoom, bool p_dispersion) {
 	const double g = gameplay_deviation_scale(p_def, p_zoom);
@@ -259,6 +272,7 @@ Vec3 shoot_direction(uint16_t p_yaw, int16_t p_pitch, const WeaponSimDef &p_def,
 	return detail::to_f(detail::normalize(v));
 }
 
+// STAND-IN: pellets drawn area-uniform in the pellet cone. Settle: a note on how BF3 spreads a shell's pellets.
 Vec3 sample_cone(const Vec3 &p_aim, float p_spread_degrees, float p_u_radius, float p_u_angle) {
 	using namespace detail;
 	const DVec3 aim = normalize(to_d(p_aim));
@@ -290,6 +304,7 @@ float sway_carry_at(SimTime p_time) {
 	return float(double(sway_tick_end(sway_tick(p_time)) - p_time) / double(kTimeUnitsPerSecond));
 }
 
+// SOURCE: notes R-A3 A (one float32 state timer per 30 Hz tick, the overshoot carried as remaining dt).
 SwayWait sway_wait(SimTime p_from, float p_carry, float p_seconds) {
 	uint32_t k = sway_tick(p_from);
 	float timer = p_seconds;

@@ -67,14 +67,22 @@ struct VaultStart {
 };
 
 namespace vault_rules {
+// SOURCE: notes Q10 1 and its checker (forward input at least 0.2; exactly 0.2 passes).
 inline constexpr float kMinForwardInput = 0.2f;
+// STAND-IN: the probes' middle reference height, which notes R-B4 leave open (their guess about 0.9 m).
+// Settle: a note that reads the middle height.
 inline constexpr float kMiddleHeight = 0.75f;
+// SOURCE: notes R-B4 B (high, middle and low probes +0.5, -0.2 and -0.4 m from the middle height).
 inline constexpr float kHighOffset = 0.5f;
 inline constexpr float kMiddleOffset = -0.2f;
 inline constexpr float kLowOffset = -0.4f;
+// SOURCE: notes R-B4 checker (each height probe runs 0.5 m along one horizontal local axis).
 inline constexpr float kProbeReach = 0.5f;
+// SOURCE: notes Q10 constants (detection ray scales 1.2 and 5; the note infers their meaning).
 inline constexpr float kDetectionRayMinScale = 1.2f;
 inline constexpr float kDetectionRayMaxScale = 5.0f;
+// SOURCE: notes Q10 3 and its checker (1.8 m down rays, 0.1 m least height, 1e-6 m past the face, vault-up 0.25 m
+// within 0.2 m, side rays 0.35 m, 4 m back search, 0.05 m least length), this constant and the seven below it.
 inline constexpr float kDownProbe = 1.8f;
 inline constexpr float kMinHeight = 0.1f;
 inline constexpr float kFrontEpsilon = 1e-6f;
@@ -83,8 +91,10 @@ inline constexpr float kUpTolerance = 0.2f;
 inline constexpr float kSideOffset = 0.35f;
 inline constexpr float kBackSearch = 4.0f;
 inline constexpr float kMinLength = 0.05f;
+// SOURCE: notes R-B4 E5 (scale phase margin 0.2 m before and after the obstacle, Optimum threshold 1e-6).
 inline constexpr float kPhaseMargin = 0.2f;
 inline constexpr float kOptimumFloor = 1e-6f;
+// SOURCE: notes Q10 6 and its checker (squared distance 0.12 m^2, squared speed floor 1e-6, abort cone cos -0.5).
 inline constexpr float kContactSqrDistance = 0.12f;
 inline constexpr float kContactMinSqrSpeed = 1e-6f;
 inline constexpr float kContactCos = -0.5f;

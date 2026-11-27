@@ -19,6 +19,8 @@ inline constexpr uint8_t kSpotStateCount = 5;
 
 enum class SpotType : uint8_t { Active = 1, Passive = 2 };
 
+// SOURCE: notes Q11 A and R-E1 (8 targets a message and an 8-entry list, 5 hits a ray, the 1.5 x cone of R2-E1),
+// Q11 constants (the 2 s low-ammo check, the radar sweep's 1 s spot time), the five constants below.
 inline constexpr size_t kMaxSpotTargets = 8;
 inline constexpr size_t kRayHits = 5;
 inline constexpr float kSeatedConeWidening = 1.5f;

@@ -354,6 +354,8 @@ void find_drop_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf
 	});
 }
 
+// STAND-IN: a vault link where the motor's own probe_vault finds VaultOverHigh or VaultOverLow with walkable floor
+// beyond, within the drop reach. Settle: a note on how BF3 bots cross vaultable obstacles.
 void find_vault_links(const rcPolyMesh &p_mesh, const rcCompactHeightfield &p_chf, const std::vector<uint8_t> &p_areas,
 		const NavParams &p_params, const NavCells &p_cells, const CollisionWorld &p_world,
 		std::vector<DropLink> &r_links) {

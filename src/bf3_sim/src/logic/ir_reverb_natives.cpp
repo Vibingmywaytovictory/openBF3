@@ -20,6 +20,8 @@ core::Error ir_error(const std::string &p_what) {
 
 }
 
+// INFERRED: an IrReverbEntityData's amplitude is fade(FadeCurve, 1 - Volume) x Gain in dB.
+// Settle: a note on IrReverbEntityData.
 float IrReverbDef::amplitude(float p_volume) const {
 	const float v = std::isfinite(p_volume) ? std::clamp(p_volume, 0.0f, 1.0f) : 0.0f;
 	const float a = core::level::area_fade(curve, 1.0f - v, 1.0f) * std::pow(10.0f, gain_db / 20.0f);

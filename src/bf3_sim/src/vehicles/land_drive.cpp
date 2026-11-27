@@ -22,6 +22,8 @@ namespace {
 
 constexpr float kLockedWheelTorque = std::numeric_limits<float>::max() * kTickSeconds * kTickSeconds;
 
+// INFERRED: the pedals swap in a reverse gear, or in neutral with the direction bit set (R2-G1 C2 swaps them when the
+// direction flag changes). Settle: a note on the swap's condition.
 bool channels_swapped(const vehicles::GearboxState &p_gearbox) {
 	return p_gearbox.gear < 0 || (p_gearbox.gear == 0 && p_gearbox.reverse_direction != 0);
 }
@@ -60,6 +62,8 @@ void store_wheel_state(const LandWheelState &p_state, VehicleTyreState &r_tyre) 
 	r_tyre.track_steer = p_state.track_steer;
 }
 
+// SOURCE: notes R5-G1-6 2 (more than 2 wheels; front bar on the two largest z, rear bar on the two smallest).
+// INFERRED: the sort key is the wheel's data z, as the note infers. Settle: a note on the wheel list's sort key.
 void anti_roll_bars(const VehicleModel &p_model, std::array<float, kMaxVehicleWheels> &r_loads) {
 	if (p_model.wheel_count <= 2 || (p_model.anti_roll_front == 0.0f && p_model.anti_roll_rear == 0.0f)) {
 		return;
@@ -85,6 +89,7 @@ void anti_roll_bars(const VehicleModel &p_model, std::array<float, kMaxVehicleWh
 	bar(order[p_model.wheel_count - 2u], order[p_model.wheel_count - 1u], p_model.anti_roll_rear);
 }
 
+// SOURCE: notes R7-G1-standstill 1, 3b and 3c (BF3's tick dt in every substep call; every wheel's spin zeroed).
 void stand_still_sleep(JPH::Body &r_body, std::array<LandWheelState, kMaxVehicleWheels> &r_states, size_t p_wheels) {
 	const JPH::Vec3 v = r_body.GetLinearVelocity();
 	const JPH::Vec3 w = r_body.GetAngularVelocity();
@@ -147,6 +152,7 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 	const float steer_in = vehicles::shape_deadzone(steer_axis, land.yaw.deadzone, true);
 	d.throttle_filter = vehicles::shape_inertia(d.throttle_filter, throttle_in, dt, land.throttle);
 	d.brake_filter = vehicles::shape_inertia(d.brake_filter, brake_in, dt, land.brake);
+	// SOURCE: notes R-G1 checker 1 (the clamp after inertia is on the yaw channel only).
 	d.steer_filter = std::clamp(vehicles::shape_inertia(d.steer_filter, steer_in, dt, land.yaw), -1.0f, 1.0f);
 	d.reversing = swapped ? 1 : 0;
 
@@ -161,6 +167,8 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 	vehicles::gearbox_advance(rule, d.gearbox, dt);
 
 	const int32_t gear = d.gearbox.gear;
+	// INFERRED: BackwardThrottleLimit is in m/s and cuts the engine torque (R2-G1 E names no unit).
+	// Settle: a note on its unit.
 	const bool backward_limited = land.limit_backward_throttle && gear < 0 && speed >= land.backward_throttle_limit;
 	const float engine_torque = backward_limited
 			? 0.0f
@@ -172,10 +180,19 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 	const bool tracked = track_steered(m);
 	const float steer_max = vehicles::steer_angle(1.0f, vehicle_steer_sensitivity(m, speed));
 	const bool idle = forward_pedal == 0.0f && back_pedal == 0.0f && (!tracked || steer_axis == 0.0f);
+	// INFERRED: a driven vehicle is in R7-G1-standstill 2's started mode with its engine flag clear, which the notes
+	// leave open. Settle: a note on the vehicle mode and the engine type.
 	const bool started = (p_command.flags & vehicle_flags::kDriven) != 0;
+	// WHY: Jolt applies the suspension inside its solver before it moves the hull, where BF3's damping follows its own
+	// suspension impulse, so a vehicle the stand-still rule held keeps Jolt's hold for the next step.
 	const bool standing = m.stand_still_sleep && d.stand_still_ticks > 0;
+	// STAND-IN: Jolt's tyre friction and an unlimited Jolt brake hold an idle vehicle, driverless or stand-still-held, for
+	// R7-G1-standstill's rule (land_wheel_pass skips a driverless one). Settle: run that rule for a driverless vehicle.
 	const bool hold = idle && (!started || standing);
 
+	// INFERRED: the command's steer +1 is the notes' yaw -1 (toward data -x). Settle: retail footage of a full right steer.
+	// STAND-IN: the command's brake axis brakes the wheels without asking the gearbox to turn.
+	// Settle: a note on the brake key.
 	v.tick = { engine_torque, land_gear_ratio(land, gear), d.throttle_filter, -d.steer_filter,
 		std::max(d.brake_filter, brake_axis), hand_brake ? 1.0f : 0.0f, hold, started };
 	v.jolt_grip = hold ? 1.0f : 0.0f;
@@ -202,6 +219,8 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 	if (p_command.throttle != 0 || p_command.brake != 0 || p_command.steer != 0 || hand_brake) {
 		bi.ActivateBody(v.body);
 	}
+	// WHY: Jolt keeps the suspension, contacts and steer angle; its transmission stays neutral and its tyre friction is 0
+	// unless held, as land_wheel_pass applies BF3's drive and tyre forces.
 	JPH::WheeledVehicleController *controller =
 			static_cast<JPH::WheeledVehicleController *>(v.constraint->GetController());
 	controller->GetTransmission().Set(0, 0.0f);
@@ -220,6 +239,8 @@ void land_drive(VehicleWorld::Impl &r_world, VehicleSlot p_slot, const VehicleCo
 	}
 }
 
+// SOURCE: notes R6-G1-apply 0 to 5 (per substep: drive, anti-roll on the loads, impulses F x dt at the contact moved by
+// CenterOfMassHandlingOffset, then the spin) and R7-G1-standstill 0 (after each substep's impulses).
 void land_wheel_pass(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
 	VehicleWorld::Impl::Vehicle &v = r_world.vehicles[p_slot];
 	if (!v.used || (v.tick.hold && !v.tick.started)) {
@@ -299,6 +320,8 @@ void land_wheel_pass(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
 			c.drive_axis_up = g.longitudinal.GetY();
 			const float extension = -relative.Dot(g.suspension);
 			const JPH::SpringSettings spring = land_spring(m, m.wheels[i], start_speed, g.compression, extension);
+			// INFERRED: N is the spring settings' force at the contact's compression and rebound speed, floored at 0 (R2-G1 B).
+			// Settle: compare with R2-G1 B's force from the contact distance.
 			loads[i] = std::max(spring.mStiffness * g.compression - spring.mDamping * extension, 0.0f);
 		}
 		anti_roll_bars(m, loads);
@@ -330,6 +353,8 @@ void land_wheel_pass(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
 			}
 		}
 	}
+	// WHY: R7-G1-standstill 3a's timer is compared with nothing on wheeled vehicles; this count only marks a vehicle the
+	// rule held for the next tick's hold.
 	if (m.stand_still_brake) {
 		d.stand_still_ticks = still
 				? uint16_t(std::min<uint32_t>(d.stand_still_ticks + 1u, std::max<uint32_t>(m.stand_still_ticks, 1u)))
@@ -342,6 +367,7 @@ void land_wheel_pass(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
 	}
 }
 
+// SOURCE: notes R5-G1-4 1 (once per tick after the substeps, skipped for an inactive body).
 void land_motion_damping(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
 	VehicleWorld::Impl::Vehicle &v = r_world.vehicles[p_slot];
 	const VehicleModel &m = *v.model;
@@ -363,6 +389,7 @@ void land_motion_damping(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
 	bi.SetLinearAndAngularVelocity(v.body, u, w);
 }
 
+// SOURCE: notes R2-G1 D and checker A (after the drive, so the next drive uses this rpm; floor 0 on the gearbox path).
 void land_engine_update(VehicleWorld::Impl &r_world, VehicleSlot p_slot) {
 	VehicleWorld::Impl::Vehicle &v = r_world.vehicles[p_slot];
 	const VehicleModel &m = *v.model;

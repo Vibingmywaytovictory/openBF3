@@ -8,6 +8,8 @@
 
 namespace bf3::sim {
 
+// STAND-IN: the sim ticks at 60 Hz, where notes R-A0 give BF3's 30 Hz tick; the sway and fire rules step their
+// 30 Hz update every second tick. Settle: R-A0's 30 Hz tick for the whole sim.
 inline constexpr uint32_t kSimHz = 60;
 inline constexpr float kTickSeconds = 1.0f / float(kSimHz);
 using Tick = uint32_t;

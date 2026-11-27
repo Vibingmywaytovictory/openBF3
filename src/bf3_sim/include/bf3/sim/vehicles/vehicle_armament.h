@@ -20,6 +20,7 @@ namespace bf3::sim::vehicles {
 inline constexpr size_t kMaxArmamentTurrets = 16;
 inline constexpr size_t kMaxArmamentWeapons = 16;
 inline constexpr size_t kMaxArmamentSeats = 8;
+// SOURCE: notes R2-G2 checker (a rotation body steps once per 30 Hz tick at 1/30 s), so every second 60 Hz tick.
 inline constexpr float kTurretStepSeconds = 1.0f / 30.0f;
 inline constexpr uint32_t kTurretTickDivisor = 2;
 

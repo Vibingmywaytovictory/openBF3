@@ -199,6 +199,8 @@ SettleResult settle_spawn(const SoldierMotor &p_motor, const CollisionWorld &p_w
 	return r;
 }
 
+// STAND-IN: team or neutral points with no live soldier within SpawnProtectionRadius, the highest Priority, then a
+// seeded pick (notes M-CQ3 6 leave the choice untraced). Settle: a note on the spawner's point choice.
 size_t choose_spawn(const std::vector<SpawnPoint> &p_points, int p_team, const std::vector<Vec3> &p_live_soldiers, float p_protection_radius,
 		uint64_t p_seed) {
 	const float r2 = std::isfinite(p_protection_radius) ? p_protection_radius * p_protection_radius : 0.0f;
@@ -397,6 +399,8 @@ bool spawn_finite(const Vec3 &p_v) {
 
 }
 
+// STAND-IN: the farthest nearest enemy (capped at safe_distance), then the first of the best four no near enemy sees
+// (notes M-CQ3 6 leave TryToSpawnOutOfSight untraced). Settle: a note on the spawner's point choice.
 size_t choose_spawn_scored(const SpawnQuery &p_query) {
 	struct Candidate {
 		size_t index = 0;

@@ -65,6 +65,7 @@ std::vector<NativePortBinding> build_bindings() {
 	add(T::RoundOver, D::EventOut, id("OnRoundOver"), M::OnRoundOver, "OnRoundOver");
 	add(T::GameInteraction, D::EventIn, id("Enable"), M::Enable, "Enable");
 	add(T::GameInteraction, D::EventIn, id("Disable"), M::Disable, "Disable");
+	// INFERRED: the unnamed GameInteraction input -686199110 is its activation. Settle: that port's name.
 	add(T::GameInteraction, D::EventIn, -686199110, M::Activate, "");
 
 	add(T::KillCounter, D::PropertyOut, id("Kills"), M::Kills, "Kills");
@@ -201,6 +202,8 @@ core::Result<LogicNativeStubs> LogicNativeStubs::create(std::shared_ptr<const gp
 	return LogicNativeStubs(std::move(state));
 }
 
+// STAND-IN: a native type with no handler keeps only its Enabled, owner and ticket state; its other ports are
+// recorded and dropped (Objective, GameInteraction, LifeCounter and others). Settle: build those natives.
 core::Status LogicNativeStubs::apply(Tick p_tick, std::span<const LogicEffect> p_effects, LogicRuntime &r_runtime) {
 	State &s = *state_;
 	s.tick = p_tick;
@@ -315,6 +318,7 @@ core::Status LogicNativeStubs::capture(uint32_t p_capture_point, uint8_t p_team,
 		}
 		const std::optional<LogicValue> team = g.param(e.target, team_field);
 		const bool own = team && team->i == p_team;
+		// INFERRED: the capture point's own character spawners follow the owner from the next tick. Settle: notes M-CQ3/4.
 		s.pending.push_back({ s.tick + 1, e.target, own });
 	}
 	return core::Status::success();

@@ -496,6 +496,8 @@ std::vector<std::array<float, 4>> nav_water_boxes(std::span<const core::level::W
 	return boxes;
 }
 
+// STAND-IN: bots treat terrain whose top lies deeper than kCoverWaterDepth under a water plane as unwalkable.
+// Settle: the swim rules of notes R-B5 for bots.
 NavWetTest nav_terrain_wet(const std::array<Vec3, 3> &p_triangle, std::span<const core::level::WaterPlane> p_water,
 		std::span<const std::array<float, 4>> p_boxes) {
 	NavWetTest out;

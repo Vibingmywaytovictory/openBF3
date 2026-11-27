@@ -6,9 +6,12 @@
 
 namespace bf3::sim::vehicles {
 
+// SOURCE: notes R2-G2 A3 6 (the 1 degree wrap test) and A5 (direct rotations of 1e-4 rad or less skipped).
 inline constexpr float kTurretWrapMargin = 0.017453292f;
 inline constexpr float kTurretMinDirectRotation = 1e-4f;
+// SOURCE: notes R3-G2-turret-input 2 (InputCurves skip below 1e-6).
 inline constexpr float kInputCurveFloor = 1e-6f;
+// SOURCE: notes R2-G2 A6 (input floor 1e-6; the lock ray waits 5 ticks and reaches 2000 m).
 inline constexpr float kPositionLockInputFloor = 1e-6f;
 inline constexpr int32_t kPositionLockWaitTicks = 5;
 inline constexpr float kPositionLockDistance = 2000.0f;

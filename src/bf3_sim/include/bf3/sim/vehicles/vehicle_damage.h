@@ -9,12 +9,16 @@
 
 namespace bf3::sim::vehicles {
 
+// INFERRED: hull zones 0 to 3 are front, rear, left and right, the data's record order. Settle: a retail hit on each side.
 enum class HullZone : uint8_t { Front = 0, Rear = 1, Left = 2, Right = 3 };
 inline constexpr size_t kHullZoneCount = 4;
 
+// SOURCE: notes R-G3 (zone angle normalised by 90 degrees) and R3-G3 H (abandon minimum time left 1e-6 s).
 inline constexpr float kZoneAngleScaleDegrees = 90.0f;
 inline constexpr float kAbandonMinimumLeft = 1e-6f;
 inline constexpr float kHorizontalDirectionFloor = 1e-6f;
+// INFERRED: R3-G3 F's water check every second tick is of BF3's 30 Hz tick, so every 4th 60 Hz tick.
+// Settle: a note on the water check's tick rate.
 inline constexpr uint32_t kWaterCheckTicks = 4;
 
 struct AngleOfImpactRule {

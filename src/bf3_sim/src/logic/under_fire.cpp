@@ -145,6 +145,8 @@ void UnderFireNatives::apply(Tick p_tick, std::span<const LogicEffect> p_effects
 	}
 }
 
+// INFERRED: a hit within Radius of the linked OBBData box fires while Enabled, after Delay, once per CoolDownTime,
+// RunOnce until the next Enable (the data's own Delays suggest it). Settle: a note on UnderFireTrigger.
 core::Status UnderFireNatives::impacts(Tick p_tick, std::span<const core::Vec3> p_points, LogicRuntime &r_runtime) {
 	stats_.impacts += p_points.size();
 	for (size_t i = 0; i < triggers_.size(); ++i) {

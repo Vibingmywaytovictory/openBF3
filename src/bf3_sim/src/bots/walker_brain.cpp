@@ -33,6 +33,8 @@ float yaw_of(float p_dx, float p_dz) {
 	return std::atan2(p_dx, p_dz);
 }
 
+// STAND-IN: hand-picked steering constants (the nine below: drop and vault reach and timing, arrival height, the
+// off-mesh search, sprint straights and cones, crouch look-ahead). Settle: OpenBF2's bot movement @c47317b.
 constexpr float kDropReach = 0.6f;
 constexpr float kDropTimeout = 3.0f;
 constexpr float kVaultStallSpeed = 0.5f;

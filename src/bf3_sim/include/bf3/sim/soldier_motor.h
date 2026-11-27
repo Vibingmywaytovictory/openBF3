@@ -35,22 +35,35 @@ enum class GainModel : uint8_t {
 };
 
 struct MotorTuning {
+	// SOURCE: notes R4-B D and its checker (the character's initial gravity (0, -9.81, 0) m/s^2) and R-A0 (BF3's 30 Hz tick).
+	// INFERRED: no later writer changes that gravity, and a data gain is per 30 Hz tick. Settle: R4-B D and R-B1 G.
 	float gravity = 9.81f;
 	float reference_hz = 30.0f;
+	// SOURCE: notes R-B1 G (a gain is the fraction closed per tick) and its checker C8 (a negative DecelerationGain moves
+	// the velocity by |gain| m/s^2), the three models below.
+	// STAND-IN: Linear also runs a positive gain (Swimming's 0.8) and off the ground, where the checker's branch is
+	// OnGround with a negative gain (bf3dump soldier: -15). Settle: R-B1 checker C8.
 	GainModel acceleration_model = GainModel::FractionPerReferenceTick;
 	GainModel deceleration_model = GainModel::Linear;
 	GainModel sprint_model = GainModel::FractionPerReferenceTick;
 	float air_control_scale = 1.0f;
 
+	// INFERRED: during a pose transition the slower pose's speeds apply. Settle: a note on speeds during a transition.
 	bool transition_uses_slower_pose = true;
 
+	// STAND-IN: JumpPenaltyFactor scales a repeated jump's height, where notes R-B2 E let the landing penalty scale speeds.
+	// Settle: R-B2 E.
 	bool jump_penalty_scales_height = true;
 
 	bool sprint_stands_up = true;
 
+	// STAND-IN: the prone CollisionBoxMin/MaxExpand footprint, 0.35 m high, must be free to go prone and to turn.
+	// Settle: a note on the prone collision box.
 	bool prone_footprint_check = true;
 	float prone_footprint_height = 0.35f;
 
+	// STAND-IN: Jolt CharacterVirtual settings (the seven fields below) in place of BF3's character proxy.
+	// Settle: notes R-B1 J's hull and proxy.
 	float character_padding = 0.02f;
 	float predictive_contact_distance = 0.1f;
 	float penetration_recovery_speed = 1.0f;
@@ -58,6 +71,7 @@ struct MotorTuning {
 	uint32_t max_collision_iterations = 5;
 	uint32_t max_constraint_iterations = 15;
 	bool enhanced_internal_edge_removal = true;
+	// STAND-IN: an impact below 0.5 m/s is no landing. Settle: a note on the landing threshold.
 	float min_landing_speed = 0.5f;
 
 	bool operator==(const MotorTuning &) const = default;
@@ -112,6 +126,8 @@ struct SwimParams {
 };
 
 struct MotorParams {
+	// STAND-IN: fallbacks for the fields below until make_motor_params reads the soldier's EBX values.
+	// Settle: refuse a soldier without them.
 	float radius = 0.35f;
 	float mass = 100.0f;
 	float max_ascend_degrees = 50.0f;
@@ -125,6 +141,7 @@ struct MotorParams {
 	float max_health = 100.0f;
 	uint16_t immortal_ticks = 120;
 	Curve fall_damage_vertical;
+	// STAND-IN: read but not applied, so a horizontal impact does no damage. Settle: a note on DamageAtHorizVelocity.
 	Curve fall_damage_horizontal;
 	std::array<PoseParams, kPoseCount> poses{};
 	MotorTuning tuning;

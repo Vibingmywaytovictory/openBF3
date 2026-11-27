@@ -22,23 +22,31 @@ struct RoundNativeParams {
 	struct KillCounter {
 		uint32_t node = core::gameplay::kNoLogicIndex;
 		uint8_t team = 0;
+		// SOURCE: notes M-OT2 TDM data (MaxKillCount 100, EnemyWeight 1.0), the fallbacks below until the level's counter.
 		int32_t max_kill_count = 100;
 		float enemy_weight = 1.0f;
 		bool ignore_ai = false;
 	};
 	std::vector<KillCounter> kill_counters;
 
+	// STAND-IN: fallbacks until the level's PreRound gives RoundMinPlayerCount, RoundMaxPlayerCount and
+	// RoundRestartCountdown. Settle: refuse a level without them.
 	int32_t round_min_players = 4;
 	int32_t round_max_players = 8;
 	float round_restart_countdown_s = 10.0f;
 
+	// SOURCE: notes M-OT2 TDM data (PlayerKilledDelay 5.0 s), the fallback until the level's HumanPlayer is read.
 	float player_killed_delay_s = 5.0f;
 
+	// SOURCE: notes M-OT2 TDM data (AutoBalance, RotateTeamOnNewRound, PlayerCountNeededToAutoBalance 8,
+	// TeamDifferenceToAutoBalance 3), the fallbacks below until the level's AutoTeam is read.
 	bool auto_balance = true;
 	bool rotate_team_on_new_round = true;
 	int32_t balance_player_count = 8;
 	int32_t balance_team_difference = 3;
 
+	// STAND-IN: the inputs a pre-round restriction lets through until the level's InputRestriction gives them.
+	// Settle: refuse a level without them.
 	uint32_t restrict_allowed = (1u << 2) | (1u << 3) | (1u << 4) | (1u << 5) | (1u << 6) | (1u << 8) | (1u << 9);
 	bool from_data = false;
 	std::vector<std::string> notes;

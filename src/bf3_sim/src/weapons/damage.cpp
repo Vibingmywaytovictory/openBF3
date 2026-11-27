@@ -8,6 +8,7 @@
 
 namespace bf3::sim::weapons {
 
+// SOURCE: notes R-A4 3 (StartDamage before DamageFalloffStartDistance, linear to EndDamage at the end distance).
 double falloff_damage(const ProjectileSimDef &p_projectile, double p_distance) {
 
 	const double a = p_projectile.falloff_start;
@@ -29,6 +30,7 @@ double zone_damage(const ProjectileSimDef &p_projectile, HitZone p_zone, double 
 	return falloff_damage(p_projectile, p_distance) * mult;
 }
 
+// SOURCE: notes R-G4 1 (BlastDamage inside InnerBlastRadius, linear to BlastRadius, ShockwaveDamage as a floor).
 double blast_damage(const ExplosionSimDef &p_explosion, double p_distance, BlastFalloff p_falloff) {
 	(void)p_falloff;
 	if (!p_explosion.present || (p_explosion.radius <= 0.0f && p_explosion.shockwave_radius <= 0.0f)) {
@@ -49,6 +51,7 @@ double blast_damage(const ExplosionSimDef &p_explosion, double p_distance, Blast
 	return std::max(blast, double(p_explosion.shockwave_damage));
 }
 
+// SOURCE: notes R-G4 2 ((1 - r / BlastRadius) x BlastImpulse, floored at ShockwaveImpulse).
 double blast_impulse(const ExplosionSimDef &p_explosion, double p_distance) {
 	if (!p_explosion.present) {
 		return 0.0;
@@ -60,6 +63,8 @@ double blast_impulse(const ExplosionSimDef &p_explosion, double p_distance) {
 	return std::max(s, double(p_explosion.shockwave_impulse));
 }
 
+// INFERRED: the two cross axes of R-G4 2's projected extents are built from world up.
+// Settle: a note on the axes the size factor projects the box onto.
 float impulse_size_factor(const ImpulseBox &p_box, const Vec3 &p_direction) {
 	const Vec3 d = core::vec::normalize_or(p_direction, Vec3{ 0.0f, 1.0f, 0.0f });
 	const Vec3 u = core::vec::normalize_or(core::vec::cross(d, Vec3{ 0.0f, 1.0f, 0.0f }), Vec3{ 1.0f, 0.0f, 0.0f });

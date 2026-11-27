@@ -53,6 +53,8 @@ HullBox chassis_box(const VehicleModel &p_model) {
 	return box;
 }
 
+// STAND-IN: the hull is hit as a grid of capsules filling the chassis bounding box, in place of R-G3 6's damage parts.
+// Settle: build the damage parts' shapes.
 weapons::HitTarget hull_target(const HullBox &p_box, const core::Transform &p_hull, uint32_t p_id, uint8_t p_property) {
 	weapons::HitTarget t;
 	t.id = p_id;

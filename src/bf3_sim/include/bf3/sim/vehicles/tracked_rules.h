@@ -5,6 +5,7 @@
 
 namespace bf3::sim::vehicles {
 
+// SOURCE: notes R5-G1-5 (800, 0.25, 0.33, 0.01, 0.5; runtime setting defaults steer 1, forward 1, slip fade 7 and 1).
 inline constexpr float kTrackSteerForce = 800.0f;
 inline constexpr float kTankSteer = 1.0f;
 inline constexpr float kTankForward = 1.0f;

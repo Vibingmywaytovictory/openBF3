@@ -18,6 +18,7 @@ bool zone_angle_along_x(HullZone p_zone) {
 	return zone_index(p_zone) < 2;
 }
 
+// INFERRED: regeneration heals each zone by its share of MaxHealth. Settle: a note on how it spreads over the zones.
 void heal_zones(const VehicleDamageRule &p_rule, VehicleHealth &r_state, float p_amount) {
 	const float full = full_vehicle_health(p_rule);
 	if (!(full > 0.0f)) {
@@ -31,6 +32,8 @@ void heal_zones(const VehicleDamageRule &p_rule, VehicleHealth &r_state, float p
 	}
 }
 
+// INFERRED: the water, upside-down, abandonment and burning lumps skip the hit modifiers and land on the front zone.
+// Settle: a note on their hits.
 VehicleHit plain_hit(float p_damage) {
 	VehicleHit h;
 	h.damage = p_damage;
@@ -39,6 +42,7 @@ VehicleHit plain_hit(float p_damage) {
 	return h;
 }
 
+// SOURCE: notes R3-G3 F (the event starts below the surface, adds dt, past BelowWaterDamageDelay lumps WaterDamage x t).
 void step_water_damage(const VehicleDamageRule &p_rule, VehicleHealth &r_state, const VehicleTickInput &p_input,
 		VehicleTickOutcome &r_out) {
 	if (!(p_rule.water_damage > 0.0f) || !(full_vehicle_health(p_rule) > 0.0f)) {
@@ -68,6 +72,7 @@ void step_water_damage(const VehicleDamageRule &p_rule, VehicleHealth &r_state, 
 }
 }
 
+// SOURCE: notes R-G3 4 and its checker (bands at Zone12Delimiter and Zone23Delimiter, inclusive).
 float angle_of_impact_factor(const AngleOfImpactRule &p_rule, float p_degrees) {
 	if (!p_rule.enabled) {
 		return 1.0f;
@@ -81,10 +86,12 @@ float angle_of_impact_factor(const AngleOfImpactRule &p_rule, float p_degrees) {
 	return p_rule.multiplier[0];
 }
 
+// SOURCE: notes R-G3 6 (max(angle, MinDamageAngle) / 90 x DamageAngleMultiplier).
 float zone_angle_factor(const HealthZoneRule &p_zone, float p_degrees) {
 	return std::max(p_degrees, p_zone.min_damage_angle) / kZoneAngleScaleDegrees * p_zone.damage_angle_multiplier;
 }
 
+// SOURCE: notes R-G3 4 (FriendlyDamageModifier, / ArmorMultiplier, VehicleDamageModifier, 0 for an occupant attacker).
 float damage_modifier(float p_armor_multiplier, const DamageParties &p_parties) {
 	float m = 1.0f;
 	if (p_parties.difficulty && p_parties.attacker_is_player && p_parties.attacker_team != 0 &&
@@ -107,6 +114,7 @@ float damage_modifier(float p_armor_multiplier, const DamageParties &p_parties) 
 	return m;
 }
 
+// SOURCE: notes R-G4 checker and R-A4 (DamageProtectionThreshold is a cutoff on D x M, not a subtraction).
 float material_relation_damage(float p_damage, float p_protection_multiplier, float p_protection_threshold) {
 	const float d = p_damage * p_protection_multiplier;
 	return d >= p_protection_threshold ? d : 0.0f;
@@ -120,6 +128,7 @@ float full_vehicle_health(const VehicleDamageRule &p_rule) {
 	return full;
 }
 
+// SOURCE: notes R3-G3 A and its checker (health = the largest MaxHealth x the smallest zone ratio).
 float vehicle_health(const VehicleDamageRule &p_rule, const VehicleHealth &p_state) {
 	float ratio = std::numeric_limits<float>::infinity();
 	for (size_t i = 0; i < kHullZoneCount; ++i) {
@@ -131,6 +140,7 @@ float vehicle_health(const VehicleDamageRule &p_rule, const VehicleHealth &p_sta
 	return std::isfinite(ratio) ? full_vehicle_health(p_rule) * ratio : 0.0f;
 }
 
+// INFERRED: shields start full. Settle: a note on the shield at spawn.
 VehicleHealth spawned_vehicle_health(const VehicleDamageRule &p_rule) {
 	VehicleHealth s;
 	for (size_t i = 0; i < kHullZoneCount; ++i) {
@@ -140,6 +150,9 @@ VehicleHealth spawned_vehicle_health(const VehicleDamageRule &p_rule) {
 	return s;
 }
 
+// SOURCE: notes R-G3 4 and 6 with the checker (struck box face; quadrant table {0, 3, 2, 1}; zone angle about local X
+// for zones 0 and 1, Z for the others).
+// INFERRED: the quadrants are cut by the chassis box's diagonals (unconfirmed in R-G3). Settle: a retail corner hit.
 HullHit hull_hit(const HullBox &p_box, const Vec3 &p_local_point, const Vec3 &p_local_direction) {
 	HullHit out;
 	Vec3 n{};
@@ -201,6 +214,9 @@ HullHit hull_hit(const HullBox &p_box, const Vec3 &p_local_point, const Vec3 &p_
 	return out;
 }
 
+// SOURCE: notes R-G3 1, 4 and 6 to 10 with its checker, and R3-G3 I 2 (a killing hit over PreDestructionDamageThreshold
+// explodes the next tick).
+// STAND-IN: R-G3 2, 3 and 5 (EMP, the protected state, the protected-shield filter) are not applied. Settle: build them.
 VehicleDamageOutcome apply_vehicle_damage(
 		const VehicleDamageRule &p_rule, VehicleHealth &r_state, const VehicleHit &p_hit) {
 	VehicleDamageOutcome out;
@@ -268,6 +284,7 @@ VehicleDamageOutcome apply_vehicle_damage(
 	return out;
 }
 
+// SOURCE: notes R-G3 per-tick order and R3-G3 G, H and I (upside-down, abandonment, the destroyed window).
 VehicleTickOutcome step_vehicle_health(
 		const VehicleDamageRule &p_rule, VehicleHealth &r_state, const VehicleTickInput &p_input) {
 	VehicleTickOutcome out;

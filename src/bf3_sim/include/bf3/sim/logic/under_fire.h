@@ -19,6 +19,8 @@ class World;
 
 namespace bf3::sim::logic {
 
+// INFERRED: the unnamed output -1580778154 is the trigger's fire event (what the retail graphs link from it).
+// Settle: that port's name.
 inline constexpr int32_t kUnderFireOut = -1580778154;
 inline constexpr size_t kMaxUnderFireTriggers = 1024;
 

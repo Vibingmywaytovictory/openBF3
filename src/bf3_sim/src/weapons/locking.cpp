@@ -38,6 +38,7 @@ bool visible(const CollisionWorld &p_world, const Vec3 &p_from, const Vec3 &p_ai
 
 }
 
+// SOURCE: notes R2-G5 B signatures (LockAlways 1, Radar and Heat signatures, LockOnLaserPainted 1 while painted).
 float lock_signature(const LockCandidate &p_candidate, LockType p_type) {
 	if (!p_candidate.lockable) {
 		return 0.0f;
@@ -58,6 +59,8 @@ float lock_signature(const LockCandidate &p_candidate, LockType p_type) {
 	return 0.0f;
 }
 
+// SOURCE: notes R2-G5 B and R-G5 (signature floor, RayLength, 10 m floor, in front, AcceptanceAngle cone, nearest at 0,
+// the DistanceConstant and AngleConstant score x the signature).
 const LockCandidate *pick_lock_candidate(const LockingControllerSimDef &p_def, LockType p_type, const LockAim &p_aim,
 		std::span<const LockCandidate> p_candidates, const CollisionWorld *p_world, LockStepStats *r_stats) {
 	const double ray2 = double(p_def.ray_length) * double(p_def.ray_length);
@@ -74,6 +77,8 @@ const LockCandidate *pick_lock_candidate(const LockingControllerSimDef &p_def, L
 		if (!c.occupied && !p_def.lock_on_empty_vehicles && !c.never_report_empty) {
 			continue;
 		}
+		// INFERRED: a vehicle of the locker's team is no candidate (R2-G5 B states it for missiles only).
+		// Settle: a note on the team filter for vehicle candidates.
 		if (p_aim.team != 0 && c.team == p_aim.team) {
 			continue;
 		}
@@ -114,6 +119,8 @@ const LockCandidate *pick_lock_candidate(const LockingControllerSimDef &p_def, L
 	return best;
 }
 
+// SOURCE: notes R2-G5 B (SampleRate gating, MinimumLockTime hold, the same-target timer, ReleaseTime and
+// ReleaseOnNewTargetTime switch, the decay, locked above 0.999999).
 void step_lock(const LockingControllerSimDef &p_def, LockState &r_state, const LockAim &p_aim, SimTime p_dt,
 		std::span<const LockCandidate> p_candidates, const CollisionWorld *p_world, LockStepStats *r_stats) {
 	const LockType type = p_def.lock_type(p_aim.zoom);
@@ -169,6 +176,8 @@ void step_lock(const LockingControllerSimDef &p_def, LockState &r_state, const L
 	}
 }
 
+// INFERRED: the weapon is locked when its LockingController or its SecondaryLockingController is.
+// Settle: a note on how a weapon pairs its two controllers.
 void step_weapon_lock(const LockingSimDef &p_def, WeaponLockState &r_state, const LockAim &p_aim, SimTime p_dt,
 		std::span<const LockCandidate> p_candidates, const CollisionWorld *p_world, LockStepStats *r_stats) {
 	step_lock(p_def.primary, r_state.primary, p_aim, p_dt, p_candidates, p_world, r_stats);

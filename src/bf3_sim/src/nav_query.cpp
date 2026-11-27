@@ -47,6 +47,7 @@ core::Result<std::unique_ptr<NavQuery>> NavQuery::create(std::shared_ptr<const N
 	impl->filter.setIncludeFlags(p_options.include_flags);
 	impl->filter.setExcludeFlags(p_options.exclude_flags);
 	impl->filter.setAreaCost(kNavAreaWalk, 1.0f);
+	// STAND-IN: a crouch-height poly costs 1.5 times a walk one. Settle: the bot path gates on each level.
 	impl->filter.setAreaCost(kNavAreaCrouch, 1.5f);
 	impl->filter.setAreaCost(kNavAreaDrop, 1.0f);
 	impl->filter.setAreaCost(kNavAreaVault, 1.0f);

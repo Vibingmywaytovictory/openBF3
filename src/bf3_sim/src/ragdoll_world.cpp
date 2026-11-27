@@ -104,6 +104,8 @@ core::Result<JPH::RefConst<JPH::Shape>> body_shape(const RagdollBodyDef &p_body)
 	return JPH::RefConst<JPH::Shape>(r.Get());
 }
 
+// INFERRED: a ragdoll joint as a six-degree-of-freedom constraint (twist about X, cone about Y, the planes range
+// clipped to the cone about Z, pyramid swing), a limited hinge as a hinge. Settle: a note on Havok's joint limits.
 JPH::Ref<JPH::TwoBodyConstraintSettings> joint_settings(const RagdollDef &p_def, const RagdollJointDef &p_joint) {
 	const core::Transform &child = p_def.bodies[p_joint.child].rest;
 	const core::Transform &parent = p_def.bodies[p_joint.parent].rest;

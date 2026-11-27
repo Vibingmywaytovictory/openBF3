@@ -141,9 +141,12 @@ struct RoundNatives::State {
 		return nullptr;
 	}
 
+	// STAND-IN: KillLimit is MaxKillCount (or the override), without notes M-OT2 1's GameModeCounterModifier and its
+	// 1..65535 clamp. Settle: M-OT2 1.
 	int32_t limit_of(const Counter &p_counter) const { return config.kill_limit_override > 0 ? config.kill_limit_override : p_counter.max_kill_count; }
 
 	core::Status publish_counter(Counter &r_counter, LogicRuntime &r_runtime) {
+		// STAND-IN: Kills published rounded down, where notes M-OT2 4 round to the nearest. Settle: M-OT2 4.
 		const int64_t k = int64_t(std::floor(r_counter.kills + 1e-9));
 		if (k != r_counter.published) {
 			r_counter.published = k;
@@ -162,6 +165,8 @@ struct RoundNatives::State {
 
 	uint32_t player_count() const { return team_count(1) + team_count(2); }
 
+	// STAND-IN: AutoTeam puts a player in the smaller team, team 1 on a tie, none once both hold max_players / 2.
+	// Settle: a note on AutoTeam's join rule.
 	uint8_t choose_team() const {
 		const uint32_t cap = std::max<uint32_t>(1u, uint32_t(config.max_players) / 2u);
 		const uint32_t a = team_count(1), b = team_count(2);
@@ -177,6 +182,8 @@ struct RoundNatives::State {
 		return b < a ? 2 : 1;
 	}
 
+	// STAND-IN: the latest-joined bot of the larger team (a human only without one) moves at its next death.
+	// Settle: a note on AutoTeam's balance.
 	void pick_balance_candidate() {
 		balance_candidate = -1;
 		if (!params.auto_balance) {
@@ -403,6 +410,8 @@ core::Status RoundNatives::apply(Tick p_tick, std::span<const LogicEffect> p_eff
 				break;
 			default:
 
+				// INFERRED: LevelControl's unnamed event input (the post-round Delay's) ends the level like RestartLevel.
+				// Settle: that input's name.
 				if (type == T::LevelControl && dir == D::EventIn) {
 					s.level_end_flag = true;
 					s.phase = RoundPhase::Restarting;
@@ -516,6 +525,8 @@ core::Status RoundNatives::player_died(uint8_t p_slot, uint8_t p_team, int p_kil
 	if (s.phase == RoundPhase::InRound && p_killer >= 0 && p_killer != int(p_slot) && (p_killer_team == 1 || p_killer_team == 2)) {
 		const bool enemy = p_killer_team != p_team;
 		const bool killer_bot = p_killer < int(kSlots) && s.bot[size_t(p_killer)];
+		// SOURCE: notes M-OT2 3-4 (the killer's team's counter, IgnoreAI, EnemyWeight, clamped to 0..KillLimit).
+		// STAND-IN: a team kill adds team_kill_weight, not TeamKillWeight's cool-down weight. Settle: M-OT2 3.
 		for (State::Counter &c : s.counters) {
 			if (c.team != p_killer_team || (c.ignore_ai && killer_bot)) {
 				continue;
@@ -537,6 +548,8 @@ core::Status RoundNatives::player_died(uint8_t p_slot, uint8_t p_team, int p_kil
 	return core::Status::success();
 }
 
+// SOURCE: notes M-OT2 5 (an accepted revive takes the kill back: -EnemyWeight on the killer team's counter).
+// INFERRED: the killer team is the revived player's stored team, as M-OT2 5 infers. Settle: M-OT2 5's stored field.
 core::Status RoundNatives::kill_undone(uint8_t p_killer_team, LogicRuntime &r_runtime) {
 	State &s = *state_;
 	if (s.phase != RoundPhase::InRound) {
@@ -558,6 +571,8 @@ core::Status RoundNatives::tick_round(Tick p_tick, LogicRuntime &r_runtime) {
 		return core::Status::success();
 	}
 	const uint32_t players = s.player_count();
+	// STAND-IN: PreRound counts RoundRestartCountdown once RoundMinPlayerCount players are in, then fires StartRound and
+	// EnablePlayerMovement. Settle: a note on PreRound.
 	if (!s.counting && players >= min_players()) {
 		const float seconds = s.config.preround_override_s >= 0.0f && std::isfinite(s.config.preround_override_s) ? s.config.preround_override_s
 																												 : s.params.round_restart_countdown_s;

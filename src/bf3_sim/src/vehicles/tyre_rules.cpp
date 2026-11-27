@@ -10,6 +10,8 @@ namespace bf3::sim::vehicles {
 
 namespace {
 
+// STAND-IN: BF3's 2 substeps of 1/60 s (3 of 1/90 s at or below 15 km/h) per 30 Hz tick, spread over our 60 Hz ticks
+// by a 180 Hz clock (one a tick, or two and one in turn). Settle: the same course stepped at 30 Hz with whole ticks.
 constexpr uint8_t kSubstepClockPerTick = 3;
 constexpr uint8_t kSubstepClockSlow = 2;
 constexpr uint8_t kSubstepClockFast = 3;
@@ -29,6 +31,7 @@ float curve_stiffness(float p_load_ratio, float p_pos_k) {
 
 }
 
+// SOURCE: notes R6-G1-tyre 1 (slips over |v_x|, or over 10 m/s below 2 m/s; the running averages).
 float slip_divisor(float p_longitudinal_speed) {
 	const float v = std::fabs(p_longitudinal_speed);
 	return v > kSlipSlowSpeed ? v : std::max(kSlipSlowDivisor, kSlipDivisorFloor);
@@ -61,6 +64,7 @@ float slip_average_value(SlipAverage p_average) {
 	return p_average.sum / float(std::max<uint8_t>(p_average.count, 1));
 }
 
+// SOURCE: notes R6-G1-tyre 2 (grip and slide state, thresholds A, B and K).
 GripStep tyre_grip(const GripRule &p_rule, TyreGrip p_state, float p_load, float p_slip_angle, float p_lateral_speed,
 		float p_slip_ratio, float p_spin, float p_static_modifier, float p_dynamic_modifier) {
 	const float grip = kFrictionSetting * kGripFriction * p_static_modifier;
@@ -92,6 +96,7 @@ GripStep tyre_grip(const GripRule &p_rule, TyreGrip p_state, float p_load, float
 	return { TyreGrip::Grip, grip };
 }
 
+// SOURCE: notes R6-G1-tyre 3 (empty gives 1; clamped at both ends; the checker left the interpolation untraced).
 float friction_scale_at(std::span<const CurvePoint> p_points, float p_kmh) {
 	if (p_points.empty()) {
 		return 1.0f;
@@ -110,11 +115,14 @@ float friction_scale_at(std::span<const CurvePoint> p_points, float p_kmh) {
 	return p_points.back()[1];
 }
 
+// SOURCE: notes R6-G1-tyre 3 (the 3 m/s is the signed longitudinal contact speed).
 float tyre_lateral_brake_scale(float p_brake, float p_longitudinal_speed, float p_brake_scale) {
 	const float b = p_longitudinal_speed > kBrakeScaleSpeed ? p_brake : 0.0f;
 	return 1.0f - b + b * p_brake_scale;
 }
 
+// SOURCE: notes R6-G1-tyre 4 and its checker (N, or M x ConstantSpringForceFrictionScale, x the low-speed factor
+// and up . n).
 float tyre_load(float p_load, float p_mass, float p_constant_spring_force_friction_scale, float p_up_dot_normal,
 		float p_planar_speed, float p_right_horizontal_length) {
 	const float s =
@@ -130,6 +138,7 @@ float tyre_load(float p_load, float p_mass, float p_constant_spring_force_fricti
 	return k * s * p_up_dot_normal;
 }
 
+// SOURCE: notes R6-G1-tyre 5 (rows 18 and 19 below a load of 9500, the high-load slopes above).
 std::array<float, 4> tyre_peaks(float p_load_ratio) {
 	std::array<float, 4> out{};
 	for (size_t i = 0; i < 4; ++i) {
@@ -148,6 +157,7 @@ float spin_term_scale(float p_stuck_seconds) {
 	return std::max((kSpinTermFadeEnd - p_stuck_seconds) * kSpinTermFadeRate, 0.0f);
 }
 
+// SOURCE: notes R6-G1-tyre 6 to 9 (combined slip, pure curves, blend, direction; no friction ellipse).
 TyreForces tyre_forces(const TyreCurveRule &p_rule, float p_slip_ratio, float p_slip_angle, float p_tyre_load,
 		float p_mass, float p_longitudinal_scale, float p_lateral_scale, float p_planar_speed, float p_stuck_seconds) {
 	if (!(p_tyre_load > 0.0f) || !(p_mass > 0.0f)) {
@@ -203,21 +213,26 @@ TyreForces tyre_forces(const TyreCurveRule &p_rule, float p_slip_ratio, float p_
 	return out;
 }
 
+// SOURCE: notes R6-G1-tyre 7 checker (squared full chassis speed under 64, input over 0.5).
+// INFERRED: the input the note calls throttle is the shaped throttle. Settle: a note naming that input.
 float stuck_seconds_step(float p_seconds, float p_speed_squared, float p_throttle, float p_dt) {
 	return p_speed_squared < kStuckSpeedSquared && p_throttle > kStuckThrottle ? p_seconds + p_dt : 0.0f;
 }
 
+// SOURCE: notes R6-G1-apply 2c (x V below 1 m/s with no drive and the chassis spin under 0.1 rad/s).
 float tyre_low_speed_scale(float p_planar_speed, float p_drive_torque, float p_angular_speed) {
 	return p_planar_speed < kLowSpeedForceSpeed && p_drive_torque == 0.0f && p_angular_speed < kLowSpeedForceSpin
 			? p_planar_speed
 			: 1.0f;
 }
 
+// SOURCE: notes R6-G1-apply 2c (max factor x mass x clamp setting 1).
 float tyre_force_clamp(float p_force, float p_max_factor, float p_mass) {
 	const float limit = p_max_factor * p_mass;
 	return std::clamp(p_force, -limit, limit);
 }
 
+// SOURCE: notes R6-G1-apply 2c and its checker (an exponent of 0 or less acts as 1).
 float slope_grip_scale(float p_climb_up, float p_min_degrees, float p_max_degrees, int32_t p_exponent) {
 	const float a = std::asin(std::clamp(p_climb_up, 0.0f, 1.0f));
 	const float hi = p_max_degrees * core::kDegToRadF;
@@ -230,6 +245,7 @@ float slope_grip_scale(float p_climb_up, float p_min_degrees, float p_max_degree
 	return scale;
 }
 
+// SOURCE: notes R6-G1-apply 4 ((F_x - slope term) x Radius x FxTorqueRadiusMultiplier / (16 x DiffGearRatio)).
 float wheel_reaction_torque(float p_longitudinal_force, float p_forward_up, float p_mass, uint32_t p_wheels,
 		float p_radius, float p_radius_multiplier, float p_diff_gear_ratio) {
 	const float slope = -p_forward_up * p_mass * kChassisGravity / float(std::max<uint32_t>(p_wheels, 1u));
@@ -240,6 +256,7 @@ bool wheel_spin_gate(bool p_any_drive, float p_planar_speed) {
 	return p_any_drive || p_planar_speed > kSpinGateSpeed;
 }
 
+// SOURCE: notes R6-G1-apply 5 (a midpoint step, exact for a constant torque; no damping on land wheels).
 float wheel_spin_step(float p_spin, float p_torque, float p_dt, float p_inertia) {
 	return p_spin + p_torque * p_dt / p_inertia;
 }

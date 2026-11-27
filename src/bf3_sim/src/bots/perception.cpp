@@ -14,6 +14,8 @@ namespace bf3::sim::bots {
 
 namespace {
 
+// STAND-IN: a target faster than 0.5 m/s is moving for detection.
+// Settle: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotSenses.cpp @c47317b.
 constexpr float kMovingSpeed = 0.5f;
 constexpr size_t kMaxSlots = 256;
 
@@ -117,6 +119,8 @@ uint32_t Perception::heard_last() const {
 	return heard_;
 }
 
+// STAND-IN: openBF3's own rule (chest then head ray, detection += dt (1 + moving + firing) / detection_time, heard
+// shots with a position error, forgetting) in place of OpenBF2's senses. Settle: port AIDLL/AI/AIBot/BotSenses.cpp.
 uint32_t Perception::update(const PerceptionInput &p_in) {
 	newly_.clear();
 	heard_ = 0;

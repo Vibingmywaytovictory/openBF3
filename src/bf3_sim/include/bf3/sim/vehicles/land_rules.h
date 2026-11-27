@@ -6,17 +6,22 @@
 
 namespace bf3::sim::vehicles {
 
+// SOURCE: notes R-G1 1 (dead-zone reduction 0.15; inertia step 2 when a duration is 0 or less).
 inline constexpr float kDeadzoneReduction = 0.15f;
 inline constexpr float kInstantInertiaStep = 2.0f;
+// SOURCE: notes R2-G1 constants (shift input 0.0625, stop speed 1.0 m/s, mode 2 tap latch 0.75, 1 rpm minimum step).
 inline constexpr float kShiftInputThreshold = 0.0625f;
 inline constexpr float kStopSpeed = 1.0f;
 inline constexpr float kKmhPerMs = 3.6f;
 inline constexpr float kManualTapLatch = 0.75f;
 inline constexpr float kRadPerSecToRpm = 9.549296f;
 inline constexpr float kMinRpmStep = 1.0f;
+// SOURCE: notes R-G1 checker 4 (chassis friction switch below 10 km/h with an input of at least 0.25).
 inline constexpr float kStandStillSpeedSquared = 7.71605f;
 inline constexpr float kStandStillInput = 0.25f;
+// SOURCE: notes R6-G1-tyre 1 (slip ratio clamped to +-200).
 inline constexpr float kSlipClamp = 200.0f;
+// SOURCE: notes R2-G1 E (wheel drive 0.075 and 0.25).
 inline constexpr float kDriveTorqueShare = 0.075f;
 inline constexpr float kDriveTorqueQuarter = 0.25f;
 

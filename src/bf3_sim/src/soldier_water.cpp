@@ -16,6 +16,7 @@ WaterDepth water_depth(const WaterSurface *p_water, const Vec3 &p_feet) {
 	return out;
 }
 
+// SOURCE: notes R-B5 B (the shallow-bank rule, WaterDepthLimit less 0.05 m once swimming, the clear ray down).
 bool soldier_in_water(const SwimParams &p_swim, const WaterDepth &p_water, const SwimTest &p_test,
 		const CollisionWorld &p_world, const Vec3 &p_feet) {
 	if (!p_swim.present || !p_water.surface) {
@@ -43,10 +44,13 @@ bool soldier_in_water(const SwimParams &p_swim, const WaterDepth &p_water, const
 	return !p_world.ray_any({ p_feet[0], *p_water.surface, p_feet[2] }, { 0.0f, -limit, 0.0f }, query_mask::kMovement);
 }
 
+// SOURCE: notes R-B3 F (pose-cycle requests acted on only while depth < Crouch Height - 0.3 m).
+// INFERRED: the two input flags R-B3 F names are the crouch and prone requests, as the note infers. Settle: R-B3 F.
 bool water_blocks_low_pose(const MotorParams &p_params, const WaterDepth &p_water) {
 	return p_params.swim.present && p_water.depth >= p_params.poses[size_t(Pose::Crouch)].height - kWaterCrouchMargin;
 }
 
+// SOURCE: notes R-B3 F (target Crouch from Crouch Height - 0.3 m deep, Prone from Prone Height - 0.1 m: stand).
 bool water_forces_stand(const MotorParams &p_params, const WaterDepth &p_water, Pose p_target) {
 	if (!p_params.swim.present) {
 		return false;
@@ -60,6 +64,7 @@ bool water_forces_stand(const MotorParams &p_params, const WaterDepth &p_water, 
 	return false;
 }
 
+// SOURCE: notes R-B5 D 4 (vy = (surface - (feet + BodyUnderWater)) / dt, 0 without a water level).
 float swim_vertical_speed(const SwimParams &p_swim, const WaterDepth &p_water, float p_feet_y, float p_dt) {
 	if (!p_water.surface || !(p_dt > 0.0f)) {
 		return 0.0f;

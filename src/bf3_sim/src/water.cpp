@@ -100,6 +100,8 @@ size_t WaterSurface::triangle_count() const {
 	return n;
 }
 
+// SOURCE: notes R4-B B (a vertical ray inside the water body's box gives the level, none outside).
+// INFERRED: the highest triangle over the point is that ray's hit and the soldier reads this query. Settle: R4-B B.
 std::optional<float> WaterSurface::height(float p_x, float p_z) const {
 	std::optional<float> best;
 	if (!std::isfinite(p_x) || !std::isfinite(p_z)) {

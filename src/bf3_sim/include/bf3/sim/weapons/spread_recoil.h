@@ -12,13 +12,17 @@ namespace bf3::sim::weapons {
 using core::gameplay::Stance;
 using core::gameplay::Zoom;
 
+// SOURCE: notes R-A0 (the sway and recoil update once per 30 Hz tick, dt 1/30 s; two of the sim's 60 Hz ticks).
 inline constexpr float kSwaySeconds = 1.0f / 30.0f;
 inline constexpr SimTime kSwayUnits = 2 * kTimeUnitsPerTick;
+// SOURCE: notes Q2 constants (the 0.5 s jump hold and the 0.5 m/s moving threshold, the two constants below).
 inline constexpr float kSwayAirHold = 0.5f;
 inline constexpr float kSwayMovingSpeed = 0.5f;
+// SOURCE: notes Q3 (the vertical kick from 0.9 x RecoilAmplitudeIncPerShot) and Q6 (recovery x 0.01 rad per update).
 inline constexpr float kSwayVerticalLow = 0.9f;
 inline constexpr double kSwayRecoveryScale = 0.01;
 inline constexpr uint32_t kNoSwaySeed = 0xFFFFFFFFu;
+// SOURCE: notes Q4 (shots since the trigger press saturate at 2; FirstShotRecoilMultiplier only at exactly 1).
 inline constexpr uint8_t kSwayFirstShotCount = 1;
 inline constexpr uint8_t kSwayShotCountCap = 2;
 
@@ -41,6 +45,8 @@ struct SwayContext {
 	SwayMove move = SwayMove::Base;
 	float move_fraction = 1.0f;
 	float suppression = 0.0f;
+	// STAND-IN: supported and light_on are never set (no bipods or weapon lights), so the conditional modifiers never
+	// apply. Settle: build supported shooting and weapon lights.
 	bool supported = false;
 	bool light_on = false;
 

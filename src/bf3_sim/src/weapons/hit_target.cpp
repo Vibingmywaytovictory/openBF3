@@ -95,6 +95,8 @@ struct Placed {
 	Vec3 b{};
 };
 
+// STAND-IN: hand-placed capsule ends per pose and role, metres in the soldier frame (x left, y up, z forward).
+// Settle: place the capsules on the soldier's animated pose.
 Placed layout(Pose p_pose, Role p_role, float p_side) {
 	switch (p_pose) {
 		case Pose::Stand:
@@ -149,6 +151,7 @@ Placed layout(Pose p_pose, Role p_role, float p_side) {
 	return {};
 }
 
+// STAND-IN: the eye heights the layout above was placed for. Settle: place the capsules on the animated pose.
 constexpr float kLayoutEye[kPoseCount] = { 1.6f, 1.0f, 0.3f };
 
 using bf3::core::to_lower_ascii;
@@ -298,6 +301,8 @@ core::Result<HitTarget> standin_target(const core::gameplay::SoldierDef &p_soldi
 				role = Role::Chest;
 				counter = nullptr;
 				break;
+			// STAND-IN: a Body capsule of radius 0.15 m or more is the lower spine, a Legs one of 0.105 m or more a thigh.
+			// Settle: map each capsule by its bone.
 			case HitZone::Body:
 				role = cap.radius >= 0.15f ? Role::LowerSpine : Role::Arm;
 				counter = role == Role::Arm ? &arms : nullptr;

@@ -9,6 +9,8 @@ namespace bf3::sim {
 
 class CollisionWorld;
 
+// SOURCE: notes R-B5 constants (0.2 throttle and -0.5 bank dot of the shallow rule, 0.05 m hysteresis) and R-B3 F
+// (stand-up margins 0.3 m crouch, 0.1 m prone), the five constants below.
 inline constexpr float kSwimThrottleThreshold = 0.2f;
 inline constexpr float kSwimBankDot = -0.5f;
 inline constexpr float kSwimHysteresis = 0.05f;

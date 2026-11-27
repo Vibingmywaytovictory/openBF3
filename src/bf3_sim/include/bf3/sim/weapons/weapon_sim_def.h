@@ -65,6 +65,8 @@ struct ExplosionSimDef {
 	std::array<float, kHitZoneCount> zone_threshold{};
 	bool zone_multiplier_from_data = false;
 
+	// INFERRED: a blast reaches entities within the largest of the three radii (R-G4 1 leaves the gather to the caller).
+	// Settle: a note on which entities an explosion gathers.
 	float gather_radius() const { return std::max({ inner_radius, radius, shockwave_radius }); }
 };
 
@@ -207,6 +209,7 @@ struct WeaponTable {
 
 	bool exact_aim = false;
 
+	// STAND-IN: 0.12 s until the table reads SoldierSprintSettingsData.RecoverTime. Settle: refuse a table without it.
 	SimTime sprint_recover_time = 7'200'000;
 	uint64_t hash = 0;
 
@@ -231,6 +234,7 @@ struct WeaponTableOptions {
 	Mechanics mechanics;
 	bool infinite_magazine = false;
 	bool exact_aim = false;
+	// STAND-IN: 0.12 s until the install gives SoldierSprintSettingsData.RecoverTime. Settle: refuse a table without it.
 	float sprint_recover_seconds = 0.12f;
 	std::span<const std::vector<WeaponSimDef>> variants;
 };

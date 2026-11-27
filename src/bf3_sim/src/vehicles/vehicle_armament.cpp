@@ -47,6 +47,8 @@ bool frame_ok(const core::Transform &p_frame) {
 			std::fabs(p_frame.trans[2]) < 100.0f;
 }
 
+// STAND-IN: a body whose RotationInput is a yaw, roll, pitch or camera action follows the seat's look, about axis 1 as
+// yaw and axis 0 as pitch. Settle: a note on how RotationInput's level comes from the mouse.
 TurretAimAxis aim_of(std::string_view p_input, int p_axis) {
 	const bool player = p_input == "EIAYaw" || p_input == "EIARoll" || p_input == "EIAPitch" ||
 			p_input == "EIACameraYaw" || p_input == "EIACameraPitch";
@@ -181,6 +183,7 @@ core::Vec3 weapon_muzzle(const VehicleArmament &p_armament, const ArmamentState 
 			.transform_point(p_armament.weapons[p_weapon].spawn_offset);
 }
 
+// STAND-IN: a seat's look direction is its aim, as the notes found no mouse-to-level rule. Settle: that rule.
 float aim_error(
 		const ArmamentTurret &p_turret, float p_angle, const core::Transform &p_rest, const core::Vec3 &p_direction) {
 	const float x = vec::dot(p_direction, p_rest.right);
@@ -195,11 +198,15 @@ float aim_error(
 	return wrap_angle(desired - p_angle);
 }
 
+// STAND-IN: the input level is the angle error over one step at the body's top rate. Settle: as aim_error.
+// WHY: positive input turns the body the negative way (R2-G2 A1), so the error is negated.
 float aim_level(const ArmamentTurret &p_turret, float p_error) {
 	const float step = rotation_steady_rate(p_turret.rule, 1.0f, kTurretStepSeconds) * kTurretStepSeconds;
 	return step > 0.0f ? std::clamp(-p_error / step, -1.0f, 1.0f) : 0.0f;
 }
 
+// STAND-IN: the position lock (R2-G2 A6) and AlignmentData (A2) are not run; every body takes the world lock.
+// Settle: build both.
 void step_armament(const VehicleArmament &p_armament, ArmamentState &r_state, const core::Transform &p_hull,
 		std::span<const SeatAim> p_seats) {
 	for (size_t i = 0; i < p_armament.turrets.size() && i < kMaxArmamentTurrets; ++i) {
@@ -211,6 +218,8 @@ void step_armament(const VehicleArmament &p_armament, ArmamentState &r_state, co
 		const core::Transform rest = parent_world(p_armament, r_state, p_hull, t.frame_turret).then_inner(t.frame);
 		const core::Vec3 axis = vec::normalize(rest.transform_vector(axis_unit(t.rule_axis)));
 		const core::Vec3 reference = rest.transform_vector(axis_reference(t.rule_axis));
+		// INFERRED: the world lock measures the parent's turn since the last step about the body's axis (R2-G2 A5).
+		// Settle: a note on the measured angle.
 		if (r_state.parent_known[i] != 0) {
 			const core::Vec3 before = r_state.parent_reference[i];
 			const float twist = std::atan2(vec::dot(axis, vec::cross(before, reference)),

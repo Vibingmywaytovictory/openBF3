@@ -10,6 +10,7 @@
 
 namespace bf3::sim::vehicles {
 
+// SOURCE: notes R2-A5 C3 (+1000 above the object's threshold).
 inline constexpr float kRunOverKillDamage = 1000.0f;
 
 struct RunOverRule {

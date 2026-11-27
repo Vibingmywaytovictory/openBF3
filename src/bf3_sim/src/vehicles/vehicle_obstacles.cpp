@@ -57,6 +57,8 @@ core::Status VehicleObstacles::place(
 		if (!shape) {
 			return core::make_error(where + ": " + shape.error().message);
 		}
+		// INFERRED: a soldier does not move a hull, as the notes give no such push; the hull is a CharacterVirtual the
+		// soldier's character meets but cannot shove. Settle: a note on soldier-vehicle contact.
 		JPH::CharacterVirtualSettings settings;
 		settings.mShape = *shape;
 		settings.mUp = JPH::Vec3::sAxisY();

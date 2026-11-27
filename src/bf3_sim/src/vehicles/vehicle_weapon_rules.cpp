@@ -21,6 +21,7 @@ bool recoil_impulse_due(const RecoilImpulseState &p_state, float p_impulse_stren
 	return p_state.counter == 1 && p_impulse_strength > 0.0f;
 }
 
+// SOURCE: notes R-A3 H and R2-G2 B1 (the penalty runs down first, then heat falls and clears below OverHeatThreshold).
 void overheat_tick(OverheatState &r_state, const OverheatRule &p_rule, float p_dt) {
 	if (r_state.penalty > 0.0f) {
 		r_state.penalty = std::max(0.0f, r_state.penalty - p_dt);

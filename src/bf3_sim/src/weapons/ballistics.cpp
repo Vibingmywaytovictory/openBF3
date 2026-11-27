@@ -100,6 +100,9 @@ SegmentEnd guided_update(
 	return e;
 }
 
+// SOURCE: notes R2-G4 A unguided (gravity before burnout only with ApplyGravityWhenGuided, thrust to MaxSpeed from
+// EngineTimeToIgnition for EngineTimeToLive, then |v| - Drag and gravity).
+// INFERRED: one step per 30 Hz update (Drag is per update), as R2-G4 A infers. Settle: a note on the missile update rate.
 SegmentEnd missile_update(const Projectile &p_p, const ProjectileSimDef &p_d, SimTime p_until) {
 	SegmentEnd e;
 	e.time = p_until;
@@ -177,6 +180,7 @@ void describe_static(const Env &p_env, const StaticHit &p_h, ImpactEvent &r_e) {
 	}
 }
 
+// SOURCE: notes R-A4 4 (the penetrable bit, NeverPenetrate's veto, later hits x DamagePenetrationMultiplier).
 bool passes_surface(const Env &p_env, const ProjectileSimDef &p_d, const StaticHit &p_h, float &r_factor) {
 	const SurfaceMaterialTable *m = p_env.materials();
 	if (m == nullptr || p_d.never_penetrate_any) {
@@ -219,6 +223,8 @@ bool first_target(Env &r_env, const Projectile &p_p, const Vec3 &p_a, const Vec3
 		if (!segment_target(p_a, p_b, t, h)) {
 			continue;
 		}
+		// INFERRED: a DeactivateIfBehindWall capsule is skipped when the static world lies between the shot origin and the
+		// hit. Settle: a note on that capsule flag.
 		if ((h.capsule_flags & zone_capsule_flags::kDeactivateIfBehindWall) != 0) {
 			const Vec3 o = to_f(p_p.origin);
 			const Vec3 d{ h.position[0] - o[0], h.position[1] - o[1], h.position[2] - o[2] };
@@ -347,6 +353,8 @@ void blast(Env &r_env, const Projectile &p_p, const ExplosionSimDef &p_x, bool p
 		if (!r_env.charge(1 + size_t(n))) {
 			return;
 		}
+		// INFERRED: the blast distance is to the nearest capsule surface (R-G4 1 names the entity's reference point).
+		// Settle: a note on the explosion's reference point.
 		double best = 1e300;
 		HitZone zone = HitZone::Body;
 		uint8_t capsule = 0;
@@ -367,6 +375,8 @@ void blast(Env &r_env, const Projectile &p_p, const ExplosionSimDef &p_x, bool p
 		if (!(base > 0) || (t.spawn_protected && mech.spawn_protection_blocks)) {
 			continue;
 		}
+		// STAND-IN: blocked when no ray from 0.05 m off the surface reaches a capsule centre. Settle: a note on the
+		// explosion occlusion query.
 		if (mech.blast_occlusion && !p_x.disable_occlusion) {
 			bool visible = false;
 			for (uint8_t i = 0; i < n && !visible; ++i) {
@@ -395,6 +405,7 @@ void blast(Env &r_env, const Projectile &p_p, const ExplosionSimDef &p_x, bool p
 		e.base = float(base);
 		e.multiplier = p_x.zone_multiplier[size_t(zone)];
 		e.penetration = 1.0f;
+		// SOURCE: notes R-G4 1 material and its checker (D x DamageProtectionMultiplier, 0 below DamageProtectionThreshold).
 		e.amount = vehicles::material_relation_damage(float(base), e.multiplier, p_x.zone_threshold[size_t(zone)]);
 		if (e.amount > 0.0f || t.id >= vehicles::kVehicleTargetIdBase) {
 			r_env.out.damage.push_back(e);
@@ -403,6 +414,7 @@ void blast(Env &r_env, const Projectile &p_p, const ExplosionSimDef &p_x, bool p
 }
 
 void detonate(Env &r_env, const Projectile &p_p, const ProjectileSimDef &p_d, const DVec3 &p_pos, const Vec3 &p_normal, SimTime p_time, bool p_timeout) {
+	// SOURCE: notes R2-G4 A (the Explosion once TimeToArm has run, else the DudExplosion).
 	const bool armed = p_time - p_p.spawn_time >= p_d.time_to_arm;
 	DetonationEvent e;
 	e.time = p_time;
@@ -547,6 +559,8 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 		const DVec3 vel = add(r_p.velocity, scale(sub(e.velocity, r_p.velocity), f));
 		r_p.path_length += length(sub(pos, r_p.position));
 		const Vec3 normal = r.kind == SegResult::Kind::Static ? r.stat.normal : r.target.normal;
+		// INFERRED: a bounce reflects v x CollisionSpeedMultiplier and rests below MinBounceSpeed. Settle: a note on grenades.
+		// STAND-IN: a grenade rests after max_bounces (4). Settle: a note on the grenade's bounce limit.
 		if (d.kind == ProjectileKind::Grenade) {
 
 			const DVec3 n = normalize(to_d(normal), { 0, 1, 0 });
@@ -597,6 +611,8 @@ bool fly(Env &r_env, Projectile &r_p, SimTime p_t_end) {
 		return false;
 	}
 	if (r_p.time >= expiry) {
+		// STAND-IN: an unarmed timeout detonates the DudExplosion, where notes R-A4 2i explode only an armed projectile.
+		// Settle: R-A4 2i.
 		if (d.detonate_on_timeout) {
 			detonate(r_env, r_p, d, r_p.position, { 0, 1, 0 }, expiry, true);
 		} else {

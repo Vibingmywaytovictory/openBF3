@@ -29,6 +29,8 @@ struct InstallWeapons {
 	std::vector<core::gameplay::HitCapsule> capsules;
 	core::gameplay::SoldierDef soldier;
 	std::shared_ptr<const SurfaceMaterialTable> materials;
+	// STAND-IN: fallbacks for the three fields below when the level's soldier data lacks its max health, Stand eye height
+	// or RecoverTime. Settle: refuse a level without them.
 	float max_health = 100.0f;
 	float stand_eye_height = 1.6f;
 	float sprint_recover_seconds = 0.12f;

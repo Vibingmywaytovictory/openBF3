@@ -54,6 +54,7 @@ core::Result<SuppressionDef> make_suppression_def(const core::gameplay::SoldierD
 	return out;
 }
 
+// SOURCE: notes Q9 B (held for FallOffDelay, then (t - FallOffDelay)^2 x 10000 x FallOffMultiplier off, truncated).
 uint16_t suppression_counter(const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick) {
 	if (p_state.counter == 0 || p_tick <= p_state.hit_tick) {
 		return p_state.counter;
@@ -72,10 +73,12 @@ float suppression_ratio(const SuppressionDef &p_def, const SuppressionState &p_s
 	return float(suppression_counter(p_def, p_state, p_tick)) / float(kSuppressionCounterCap);
 }
 
+// SOURCE: notes R2-A7 5 (suppressed from r >= SuppressionHighThreshold until r <= SuppressionLowThreshold).
 bool suppressed(const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick) {
 	return p_def.present && p_state.suppressed && suppression_ratio(p_def, p_state, p_tick) > p_def.low_threshold;
 }
 
+// SOURCE: notes Q9 C (s = (r - L) / (1 - L) from L = SuppressionLowThreshold, r - L below it).
 float suppression_level(const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick) {
 	const float r = suppression_ratio(p_def, p_state, p_tick);
 	const float low = p_def.low_threshold;
@@ -85,6 +88,8 @@ float suppression_level(const SuppressionDef &p_def, const SuppressionState &p_s
 	return (r - low) / (1.0f - low);
 }
 
+// INFERRED: T = log10(1 + 9 s) only while suppressed and with s floored at 0, where notes Q9 D2 take no clamp.
+// Settle: Q9 D2's open question on when the client component is active.
 float suppression_scale(const SuppressionDef &p_def, const SuppressionState &p_state, Tick p_tick) {
 	if (!suppressed(p_def, p_state, p_tick)) {
 		return 0.0f;
@@ -124,6 +129,8 @@ SuppressionState mirror_suppression(
 	return out;
 }
 
+// SOURCE: notes Q9 A 2-3 (closest point on the step, t >= 0, strictly inside the victim's SuppressionSphereRadius).
+// STAND-IN: CheckLineOfSight (Q9 A 4) is not applied. Settle: Q9 A 4.
 std::optional<NearMiss> near_miss(
 		const Vec3 &p_from, const Vec3 &p_to, const Vec3 &p_origin, const Vec3 &p_centre, float p_radius) {
 	const Vec3 d = core::vec::sub(p_to, p_from);
@@ -143,6 +150,7 @@ std::optional<NearMiss> near_miss(
 	return NearMiss{ core::vec::length(core::vec::sub(closest, p_origin)), miss };
 }
 
+// SOURCE: notes Q9 A 5 and its checker (w from WeaponSuppressionData over the distance flown, x radial x 1000, truncated).
 uint32_t near_miss_amount(const ProjectileSimDef &p_projectile, const SuppressionDef &p_def, const NearMiss &p_miss) {
 	if (!(p_def.sphere_radius > 0.0f)) {
 		return 0;
@@ -160,6 +168,7 @@ uint32_t near_miss_amount(const ProjectileSimDef &p_projectile, const Suppressio
 	return uint32_t(std::min(amount, float(kSuppressionCounterCap)));
 }
 
+// SOURCE: notes Q9 A 6 and R2-A7 4 (trunc(Q x the victim's resist x the shooter's boost + 0.5), a zero add skipped).
 uint32_t near_miss_add(uint32_t p_amount, float p_victim_resist, float p_shooter_boost) {
 	const double add = double(p_amount) * double(p_victim_resist) * double(p_shooter_boost) + 0.5;
 	if (!(add >= 1.0)) {
@@ -168,6 +177,7 @@ uint32_t near_miss_add(uint32_t p_amount, float p_victim_resist, float p_shooter
 	return uint32_t(std::min(add, double(kSuppressionCounterCap)));
 }
 
+// SOURCE: notes Q9 D 3 and Q2 B4 (each dispersion modifier x T added in degrees).
 Dispersion suppressed_dispersion(const Dispersion &p_dispersion, const SwayModifier &p_increments, float p_scale) {
 	if (!(p_scale > 0.0f)) {
 		return p_dispersion;

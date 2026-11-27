@@ -24,6 +24,7 @@ constexpr float kMaxDistance = 100'000.0f;
 constexpr float kMaxFactor = 10'000.0f;
 constexpr float kMaxOffset = kMaxRadius;
 
+// WHY: a data float is taken as its shortest decimal, so a time written as 0.1 s lands on whole sim time units.
 double data_decimal(float p_value) {
 	if (!std::isfinite(p_value)) {
 		return double(p_value);
@@ -239,6 +240,7 @@ ProjectileSimDef make_projectile(Checker &r_c, const WeaponDef &p_def, const Sur
 	out.muzzle_speed = float(speed);
 	out.gravity = r_c.range(p.gravity, -kMaxGravity, kMaxGravity, "ProjectileData.Gravity");
 	const SimTime ttl = r_c.time(p.time_to_live, "ProjectileData.TimeToLive");
+	// STAND-IN: a TimeToLive of 0 flies 30 s, where notes R-A4 constants give a 1024 s fallback. Settle: R-A4's fallback.
 	out.time_to_live = ttl > 0 ? ttl : kMaxFlightTime;
 	out.instant_hit = p.instant_hit;
 	out.start_damage = r_c.range(p.start_damage, 0.0f, kMaxDamage, "BulletEntityData.StartDamage");
@@ -659,6 +661,7 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 	}
 	d.mode_count = uint8_t(logics.size());
 
+	// SOURCE: notes R-A3 E (the bolt waits BoltActionDelay, then BoltActionTime).
 	d.bolt_cycle = seconds_to_units(data_decimal(c.range(f.bolt_action_delay, 0.0f, 60.0f, "BoltActionDelay")) +
 			data_decimal(c.range(f.bolt_action_time, 0.0f, 60.0f, "BoltActionTime")));
 	if (d.bolt_cycle >= kMaxDefTime) {
@@ -678,6 +681,8 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 	}
 	d.hold_power_per_second = c.rate(f.hold_power_per_second, "HoldAndReleaseData.PowerIncreasePerSecond");
 
+	// INFERRED: a MagazineCapacity of -1 (gadgets) is one round a throw with no reserve to spend.
+	// Settle: a note on gadgets' MagazineCapacity -1.
 	const bool gadget_without_magazine = f.magazine_capacity == -1;
 	if ((f.magazine_capacity < 0 && !gadget_without_magazine) || f.magazine_capacity > kMaxMagazine) {
 		c.fail("MagazineCapacity", "= " + std::to_string(f.magazine_capacity) + " is outside [0, " + std::to_string(kMaxMagazine) + "]");
@@ -699,6 +704,8 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 
 	d.reload_type = f.reload_type;
 	d.reload_threshold = c.range(f.reload_threshold, 0.0f, 1.0f, "ReloadThreshold");
+	// STAND-IN: ReloadDelay is read for rtSingleBullet only, where notes R-A3 F wait it before every empty-magazine
+	// reload. Settle: R-A3 F for magazine reloads.
 	switch (f.reload_type) {
 		case ReloadType::MagazineWithPossibleShorterReload:
 			d.reload_tactical = c.time(f.reload_time_bullets_left, "ReloadTimeBulletsLeft");
@@ -722,6 +729,7 @@ core::Result<WeaponSimDef> make_weapon_sim_def(const core::gameplay::WeaponDef &
 			}
 			break;
 	}
+	// SOURCE: notes R-A3 F (the ammo goes in at R x ReloadThreshold of the reload time R).
 	d.reload_commit_tactical = scale_units(d.reload_tactical, data_decimal(d.reload_threshold));
 	d.reload_commit_empty = scale_units(d.reload_empty, data_decimal(d.reload_threshold));
 	d.switch_cancels_reload = f.reload_logic == "rlWeaponSwitchCancelsUnfinishedReload";

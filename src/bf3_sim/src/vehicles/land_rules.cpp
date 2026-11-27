@@ -24,6 +24,9 @@ float speed_at(std::span<const float> p_speeds, int32_t p_one_based) {
 
 }
 
+// SOURCE: notes R-G1 1a (the data's dead zone less 0.15, the rest rescaled to 0..1, sign kept on signed axes).
+// INFERRED: the dead zone always applies; R-G1 gates it on a caller flag it did not identify.
+// Settle: a note naming that flag.
 float shape_deadzone(float p_input, float p_deadzone, bool p_signed) {
 	const float dz = std::max(p_deadzone - kDeadzoneReduction, 0.0f);
 	const auto shaped = [dz](float p_x) { return p_x <= dz || dz >= 1.0f ? 0.0f : (p_x - dz) / (1.0f - dz); };
@@ -33,6 +36,7 @@ float shape_deadzone(float p_input, float p_deadzone, bool p_signed) {
 	return sign_of(p_input) * shaped(std::fabs(p_input));
 }
 
+// SOURCE: notes R-G1 1b and its checker (growth takes the OutDuration, decay the InDuration).
 float shape_inertia(float p_previous, float p_target, float p_dt, const InputAxisRule &p_axis) {
 	if ((p_axis.inertia_in <= 0.0f && p_axis.inertia_out <= 0.0f) || p_target == p_previous) {
 		return p_target;
@@ -54,6 +58,7 @@ float shape_inertia(float p_previous, float p_target, float p_dt, const InputAxi
 	return p_previous + sign_of(distance) * std::min(std::fabs(distance), step);
 }
 
+// SOURCE: notes R-G1 2 (flat below the first rpm point, the last segment extended above the last).
 float torque_curve_at(float p_rpm, std::span<const float> p_rpm_points, std::span<const float> p_torque_points) {
 	const size_t n = std::min(p_rpm_points.size(), p_torque_points.size());
 	if (n == 0) {
@@ -83,6 +88,7 @@ float engine_torque(float p_rpm, std::span<const float> p_rpm_points, std::span<
 	return (1.0f - p_clutch) * p_throttle * torque_curve_at(p_rpm, p_rpm_points, p_torque_points) * p_power_multiplier;
 }
 
+// SOURCE: notes R2-G1 C2 (without UseNeutralGear the step skips 0; clamped to the gear range).
 int32_t gear_step(const GearboxRule &p_rule, int32_t p_gear, int32_t p_delta) {
 	int32_t target = p_gear + p_delta;
 	if (!p_rule.use_neutral_gear && target == 0) {
@@ -91,6 +97,10 @@ int32_t gear_step(const GearboxRule &p_rule, int32_t p_gear, int32_t p_delta) {
 	return std::clamp(target, -p_rule.reverse_gears, p_rule.forward_gears);
 }
 
+// SOURCE: notes R2-G1 C1 and its checker (the automatic up, down and opposite-direction requests).
+// INFERRED: in neutral the brake always starts the opposite-direction change and the throttle always steps; the
+// checker's separate direction value is not traced. Settle: a note tracing that direction value.
+// STAND-IN: GearboxMode 2's 0.75 tap latch (R2-G1 C1) is not built. Settle: build it, or find no retail mode 2 gearbox.
 GearRequest gearbox_request(
 		const GearboxRule &p_rule, const GearboxState &p_state, float p_throttle, float p_brake, float p_speed) {
 	if (p_rule.gearbox_type != 1 || p_state.phase != GearPhase::Idle) {
@@ -128,6 +138,7 @@ GearRequest gearbox_request(
 	return out;
 }
 
+// SOURCE: notes R2-G1 C2 and its checker (only GearboxMode 1 ramps the clutch; the others wait GearChangeTime).
 bool gearbox_accept(const GearboxRule &p_rule, GearboxState &r_state, GearRequest p_request) {
 	if (p_request == GearRequest::None || r_state.phase != GearPhase::Idle) {
 		return false;
@@ -187,6 +198,7 @@ void gearbox_advance(const GearboxRule &p_rule, GearboxState &r_state, float p_d
 	}
 }
 
+// SOURCE: notes R2-G1 C2 (clutch flag in mode 0's wait, or mode 1 with UseClassicGearBoxAutoClutch).
 bool gearbox_clutch_pressed(const GearboxRule &p_rule, const GearboxState &p_state) {
 	if (p_rule.gearbox_mode == 0) {
 		return p_state.phase == GearPhase::Wait;
@@ -194,6 +206,7 @@ bool gearbox_clutch_pressed(const GearboxRule &p_rule, const GearboxState &p_sta
 	return p_rule.gearbox_mode == 1 && p_rule.use_classic_auto_clutch && shifting(p_state.phase);
 }
 
+// SOURCE: notes R2-G1 D (mean |w| x 9.549296 x |gear ratio| x DiffGearRatio x TransmissionEfficiency).
 float wheel_rpm(std::span<const float> p_wheel_angular_velocities, float p_gear_ratio, float p_diff_gear_ratio,
 		float p_transmission_efficiency) {
 	if (p_wheel_angular_velocities.empty()) {
@@ -206,6 +219,7 @@ float wheel_rpm(std::span<const float> p_wheel_angular_velocities, float p_gear_
 	return sum / float(p_wheel_angular_velocities.size());
 }
 
+// SOURCE: notes R2-G1 D and its checker (target per GearboxMode, load, desired rpm and step), with the three below.
 float engine_rpm_target(const EngineRule &p_rule, bool p_in_gear, bool p_clutch_pressed, float p_clutch,
 		float p_throttle, float p_wheel_rpm) {
 	const float range = p_rule.rpm_max - p_rule.rpm_min;
@@ -253,12 +267,15 @@ float engine_rpm_step(const EngineRule &p_rule, float p_rpm, float p_desired, fl
 	return std::min(rpm, p_rule.rpm_max);
 }
 
+// SOURCE: notes R2-G1 E and R5-G1-1 2 (share x 0.075 x Te x gear ratio x DiffGearRatio x TransmissionEfficiency
+// x 0.25).
 float wheel_drive_torque(float p_engine_torque, float p_gear_ratio, float p_diff_gear_ratio,
 		float p_transmission_efficiency, float p_share) {
 	return p_share * kDriveTorqueShare * p_engine_torque * p_gear_ratio * p_diff_gear_ratio *
 			p_transmission_efficiency * kDriveTorqueQuarter;
 }
 
+// SOURCE: notes R2-G1 B (substep factors 1, 1.5 and 1.75; the progressive multiplier below).
 float spring_substep_factor(uint32_t p_substeps) {
 	static constexpr float kFactors[3] = { 1.0f, 1.5f, 1.75f };
 	return kFactors[std::clamp<uint32_t>(p_substeps, 1, 3) - 1];
@@ -271,6 +288,7 @@ float spring_progressive(float p_compression_ratio, float p_start_ratio, float p
 	return std::pow(p_exponent * p_setting, (p_compression_ratio - p_start_ratio) / p_start_ratio);
 }
 
+// SOURCE: notes R5-G1-8 2 (spin and momentum both x clamp(1 - factor x input, 0, 1); no force brake).
 float brake_scale(float p_angular_velocity, float p_factor, float p_input) {
 	if (!(p_input > 0.0f)) {
 		return p_angular_velocity;
@@ -278,11 +296,13 @@ float brake_scale(float p_angular_velocity, float p_factor, float p_input) {
 	return p_angular_velocity * std::clamp(1.0f - p_factor * p_input, 0.0f, 1.0f);
 }
 
+// SOURCE: notes R-G1 checker 4 (the low-velocity value below 10 km/h with input at least 0.25, else the normal one).
 float chassis_friction(float p_horizontal_speed_squared, float p_input, float p_normal, float p_low_velocity) {
 	return p_horizontal_speed_squared < kStandStillSpeedSquared && p_input >= kStandStillInput ? p_low_velocity
 																							   : p_normal;
 }
 
+// SOURCE: notes R-G1 3 checker (the magic formula's ellipse; R6-G1-tyre: FrictionMethod 0 has none).
 EllipseForces friction_ellipse(float p_longitudinal, float p_lateral, float p_longitudinal_peak, float p_lateral_peak) {
 	EllipseForces out{ p_longitudinal, p_lateral };
 	if (p_longitudinal_peak != 0.0f) {
@@ -296,10 +316,12 @@ EllipseForces friction_ellipse(float p_longitudinal, float p_lateral, float p_lo
 	return out;
 }
 
+// SOURCE: notes R6-G1-tyre 1 (slip ratio clamped to +-200).
 float clamp_slip(float p_slip) {
 	return std::clamp(p_slip, -kSlipClamp, kSlipClamp);
 }
 
+// SOURCE: notes R2-G1 E (the boost tank).
 float boost_tank_step(const BoostRule &p_rule, float p_tank, bool p_boosting, float p_dt) {
 	const float full = std::max(p_rule.dissipation_time, 0.0f);
 	const float refill = p_rule.recovery_time > 0.0f ? full / p_rule.recovery_time : full;

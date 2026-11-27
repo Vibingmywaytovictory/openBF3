@@ -14,6 +14,7 @@
 namespace bf3::sim {
 
 inline constexpr uint8_t kRagdollObjectLayer = 4;
+// INFERRED: the ragdoll steps in 60 Hz sub-steps. Settle: a note on the Havok ragdoll step rate.
 inline constexpr float kRagdollStepSeconds = 1.0f / 60.0f;
 inline constexpr uint32_t kMaxRagdollSubSteps = 8;
 
@@ -27,6 +28,7 @@ struct RagdollWorldOptions {
 	uint32_t max_body_pairs = 16384;
 	uint32_t max_contact_constraints = 4096;
 	uint32_t temp_allocator_bytes = 16u << 20;
+	// INFERRED: the ragdoll falls at 9.81 m/s^2. Settle: a note on the Havok world gravity.
 	float gravity = 9.81f;
 };
 

@@ -4,6 +4,7 @@
 
 namespace bf3::sim::vehicles {
 
+// SOURCE: notes R2-G2 D (counter 2 at the shot, the impulse in the update where it is 1; muzzle index mod n).
 inline constexpr uint8_t kRecoilImpulseCounter = 2;
 
 struct RecoilImpulseState {
@@ -19,6 +20,7 @@ void recoil_impulse_shot(RecoilImpulseState &r_state, uint8_t p_muzzles);
 
 bool recoil_impulse_due(const RecoilImpulseState &p_state, float p_impulse_strength);
 
+// SOURCE: notes R2-G2 B1 (ReloadTimeMultiplier and OverheatDropPerSecondMultiplier on R-A3's reload and heat drop).
 constexpr float vehicle_reload_seconds(float p_reload_time, float p_reload_time_multiplier) {
 	return p_reload_time * p_reload_time_multiplier;
 }

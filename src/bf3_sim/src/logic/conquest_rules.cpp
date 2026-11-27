@@ -20,6 +20,7 @@ bool polygon_contains(std::span<const std::array<float, 2>> p_polygon, float p_x
 
 namespace {
 
+// SOURCE: notes M-CQ1 5 (the return rate toward home, negated with LoseControlWhenNotClose).
 float return_rate(const CapturePointParams &p_params, const CapturePointState &p_state) {
 	const float m = p_params.return_multiplier;
 	if (p_state.progress == p_state.home || m <= 0.0f) {
@@ -31,6 +32,7 @@ float return_rate(const CapturePointParams &p_params, const CapturePointState &p
 	return p_params.lose_control_when_not_close ? -m : m;
 }
 
+// SOURCE: notes M-CQ1 (the head count capped at MaxCaptureMultiplier, 1 + AddedMultiplierPerPlayer (n - 1), seesaw).
 float player_rate(const CapturePointParams &p_params, uint32_t p_attackers, uint32_t p_defenders) {
 	const int64_t a = p_attackers, d = p_defenders;
 	const int64_t cap = std::max<int64_t>(p_params.max_capture_multiplier, 0);
@@ -96,6 +98,7 @@ bool capture_point_contains(const CapturePointParams &p_params, const Vec3 &p_po
 	return dx * dx + dy * dy + dz * dz < p_params.capture_radius * p_params.capture_radius;
 }
 
+// SOURCE: notes M-CQ1 6-7 (100 / TimeToGetControl or TimeToLoseControl percent a second, the team switch at 0 and 100).
 CaptureEvents step_capture_point(const CapturePointParams &p_params, CapturePointState &r_state,
 		std::span<const uint32_t, kConquestTeams> p_inside, float p_dt) {
 	CaptureEvents ev;
@@ -165,6 +168,8 @@ CaptureEvents step_capture_point(const CapturePointParams &p_params, CapturePoin
 	return ev;
 }
 
+// SOURCE: notes M-CQ3 1 (LockedTeam false takes the flag's team, true opens only a spawner of that Team; disable
+// gives team 0 or closes it).
 void enable_spawner(SpawnerGate &r_gate, uint8_t p_flag_team) {
 	if (r_gate.locked_team) {
 		r_gate.enabled = r_gate.data_team == p_flag_team;
@@ -185,6 +190,7 @@ int64_t TicketCounterState::displayed() const {
 	return int64_t(std::trunc(std::max(tickets, 0.0)));
 }
 
+// SOURCE: notes M-CQ2 (trunc(InitialTicketCount x GameModeCounterModifier) clamped to 1..65535).
 double initial_tickets(int64_t p_initial_ticket_count, double p_game_mode_counter_modifier) {
 	const double product = double(p_initial_ticket_count) *
 			(std::isfinite(p_game_mode_counter_modifier) ? p_game_mode_counter_modifier : 1.0);
@@ -199,6 +205,7 @@ TicketCounterState reset_ticket_counter(const TicketCounterParams &p_params, dou
 	return s;
 }
 
+// SOURCE: notes M-CQ2 (a free first spawn per player, then 1 a redeploy once StartRound and a respawn were seen).
 void ticket_respawn(const TicketCounterParams &p_params, TicketCounterState &r_state, uint8_t p_slot, uint8_t p_team) {
 	r_state.respawn_seen = true;
 	if (p_team != p_params.team || p_params.decrease != TicketDecrease::OnRespawned) {
@@ -273,10 +280,13 @@ bool enemy_holds_all(uint8_t p_team, std::span<const ConquestPoint> p_points) {
 	return flags > 0 && flags == held;
 }
 
+// SOURCE: notes M-CQ3 3 (SpawnAlwaysAllowed, or the team holds a capture point, HQ included).
 bool spawn_allowed(const TicketCounterParams &p_params, uint8_t p_team, std::span<const ConquestPoint> p_points) {
 	return p_team != p_params.team || p_params.spawn_always_allowed || team_holds_point(p_team, p_points);
 }
 
+// SOURCE: notes M-CQ2 (TicketLossPerMin (1 + 0.01 (enemy area - TicketLossStart)) / 60, the halt on equal area, the
+// lost-all rates).
 TicketEvents ticket_bleed(
 		const TicketCounterParams &p_params, TicketCounterState &r_state, const BleedInputs &p_inputs, double p_dt) {
 	TicketEvents ev;
@@ -349,6 +359,8 @@ bool combat_area_tracks(const CombatAreaParams &p_params, const CombatAreaPlayer
 	return !(p_player.ai && p_params.ai_allowed_outside);
 }
 
+// SOURCE: notes M-CQ5 (TimeToReturn on leaving, the strike at 1 s, the kill at 0, removed on return).
+// INFERRED: a player the trigger stops tracking leaves its list. Settle: a note on CombatAreaTrigger's list.
 CombatAreaEvents step_combat_area(const CombatAreaParams &p_params, std::vector<Deserter> &r_deserters,
 		std::span<const CombatAreaPlayer> p_players, bool p_deserting_allowed, float p_dt) {
 	CombatAreaEvents ev;

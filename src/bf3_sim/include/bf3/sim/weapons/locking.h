@@ -19,10 +19,13 @@ using core::gameplay::LockType;
 
 inline constexpr size_t kMaxZoomLocks = 4;
 inline constexpr uint32_t kNoLockTarget = UINT32_MAX;
+// SOURCE: notes R2-G5 B and constants (0.999999 lock, 1e-6 signature floor, 10 m minimum distance), R3-G5 E (1e-6
+// cone floor), the four constants below.
 inline constexpr float kLockedAmount = 0.999999f;
 inline constexpr float kLockSignatureFloor = 1e-6f;
 inline constexpr float kLockConeFloor = 1e-6f;
 inline constexpr float kLockMinDistance = 10.0f;
+// SOURCE: notes R-G5 checker (the LockOnVisibleTargetsOnly ray aims at a point 3 m beyond the target's box centre).
 inline constexpr float kLockVisibilityBeyond = 3.0f;
 
 struct LockingControllerSimDef {

@@ -27,6 +27,8 @@ struct SpawnPoint {
 	uint32_t index = 0;
 };
 
+// STAND-IN: a hand-picked search (every field of this struct) that moves a spawn point sitting in or near geometry
+// to where a standing soldier fits. Settle: a note on how BF3 places a soldier at its spawn point.
 struct SettleOptions {
 	float probe_up = 1.0f;
 	float probe_down = 2.0f;
@@ -85,16 +87,23 @@ struct SpawnQuery {
 	std::span<const Vec3> enemies;
 	std::span<const Vec3> enemy_eyes;
 	std::span<const FriendlyDeath> recent_deaths;
+	// STAND-IN: a point with a live enemy within 10 m is skipped. Settle: a note on the spawner's SpawnProtectionRadius.
 	float protection_radius = 10.0f;
+	// STAND-IN: the radius in which SpawnProtectionFriendlyKilledCount deaths within SpawnProtectionFriendlyKilledTime
+	// block a point. Settle: a note on the spawner's friendly-kill protection.
 	float friendly_block_radius = 30.0f;
+	// STAND-IN: 3 friendly deaths within 30 s (1800 ticks) until the caller passes others. Settle: the spawner's
+	// SpawnProtectionFriendlyKilledCount and SpawnProtectionFriendlyKilledTime from the level.
 	int friendly_block_count = 3;
 	uint32_t friendly_block_ticks = 1800;
 	uint32_t tick = 0;
 	uint64_t seed = 0;
+	// STAND-IN: the out-of-sight test's ray budget. Settle: a note on TryToSpawnOutOfSight.
 	int max_los_rays = 16;
 	const CollisionWorld *world = nullptr;
 
 	float safe_distance = 0.0f;
+	// STAND-IN: the point above the spawn the out-of-sight rays aim at. Settle: a note on TryToSpawnOutOfSight.
 	float chest_height = 1.3f;
 };
 

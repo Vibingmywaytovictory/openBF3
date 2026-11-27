@@ -24,7 +24,9 @@ enum class MissileState : uint8_t {
 	Proximity = 6,
 };
 
+// SOURCE: notes R2-G4 A and constants (1e-6 rad steering threshold, static point (0, 100, 0) for a vertical launch).
 inline constexpr double kSteerThreshold = 1e-6;
+// STAND-IN: a launch is vertical when its horizontal part is at most 1e-6. Settle: R2-G4's vertical launch test.
 inline constexpr double kVerticalLaunchFloor = 1e-6;
 inline constexpr DVec3 kVerticalStaticPoint{ 0.0, 100.0, 0.0 };
 

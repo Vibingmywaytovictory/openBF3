@@ -58,6 +58,8 @@ public:
 	}
 };
 
+// STAND-IN: a chassis on static ground takes its own friction, two dynamic bodies the geometric mean; R-G1 checker 4's
+// chassis friction switch (chassis_friction) is not applied. Settle: apply that switch.
 float combine_contact_friction(const JPH::Body &p_body1, const JPH::SubShapeID &, const JPH::Body &p_body2, const JPH::SubShapeID &) {
 	if (p_body1.IsStatic()) {
 		return p_body2.GetFriction();
@@ -421,6 +423,8 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 		return core::make_error(where + ": " + chassis.error().message);
 	}
 
+	// STAND-IN: the chassis inertia is Jolt's from the hull shape at the chassis mass, each axis times InertiaModifier
+	// (R6-G1-apply: not derivable from the data). Settle: a note or a retail measurement of the hull inertia.
 	JPH::MassProperties mass = (*chassis)->GetMassProperties();
 	mass.ScaleToMass(m.mass);
 	const JPH::Mat44 scale = JPH::Mat44::sScale(
@@ -465,10 +469,13 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 		wheel->mRadius = wm.radius;
 		wheel->mWidth = wm.width;
 		wheel->mInertia = wm.inertia;
+		// SOURCE: notes R6-G1-apply 5 (no damping on a land wheel's spin body).
 		wheel->mAngularDamping = 0.0f;
 		wheel->mMaxSteerAngle = 0.0f;
 		wheel->mMaxBrakeTorque = 0.0f;
 		wheel->mMaxHandBrakeTorque = 0.0f;
+		// STAND-IN: Jolt's default tyre friction curves, times the grip keys, act only while Jolt holds an idle vehicle
+		// (land_drive's hold); FrictionMethod 0 drives it otherwise. Settle: as land_drive's hold.
 		for (JPH::LinearCurve::Point &p : wheel->mLongitudinalFriction.mPoints) {
 			p.mY *= m.tuning.longitudinal_grip;
 		}
@@ -500,6 +507,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	const float ground = w.options.tuning.ground_friction;
 	v.jolt_grip = 1.0f;
 	const float *grip = &v.jolt_grip;
+	// WHY: jolt_grip 0 turns Jolt's tyre friction off while land_wheel_pass applies the FrictionMethod 0 forces.
 	v.constraint->SetCombineFriction([ground, grip](JPH::uint, float &r_longitudinal, float &r_lateral,
 											 const JPH::Body &p_body, const JPH::SubShapeID &) {
 		if (p_body.IsStatic()) {
@@ -512,6 +520,7 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 		r_lateral = JPH::Sqrt(r_lateral * f) * *grip;
 	});
 	VehicleWorld::Impl *world = &w;
+	// WHY: the wheel pass needs this step's wheel contacts and suspension lengths, which Jolt fills in its own step.
 	v.constraint->SetPostStepCallback(
 			[world, p_slot](JPH::VehicleConstraint &, const JPH::PhysicsStepListenerContext &) {
 				land_wheel_pass(*world, p_slot);

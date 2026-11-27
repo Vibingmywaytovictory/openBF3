@@ -94,6 +94,7 @@ struct BallisticsLimits {
 	uint8_t max_recasts = 8;
 	uint8_t max_bounces = 4;
 	size_t budget_per_step = 1u << 22;
+	// STAND-IN: a projectile is dropped 200 m past the level's static bounds. Settle: a note on the level's kill bounds.
 	float world_margin = 200.0f;
 };
 

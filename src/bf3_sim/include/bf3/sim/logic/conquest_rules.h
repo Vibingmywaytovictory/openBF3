@@ -31,6 +31,8 @@ struct CapturePointParams {
 	float area_value = 0.0f;
 	bool area_values_per_team = false;
 	std::array<float, kConquestTeams> area_values{};
+	// SOURCE: notes M-CQ1 retail values (Conquest flag prefab: TimeToGetControl and TimeToLoseControl 20, ReturnMultiplier
+	// 1.0, MinNrToTakeControl 1, MaxCaptureMultiplier 4, AddedMultiplierPerPlayer 0.34, Seesaw true), those defaults below.
 	int32_t time_to_get_control = 20;
 	int32_t time_to_lose_control = 20;
 	float return_multiplier = 1.0f;
@@ -175,6 +177,8 @@ struct CombatAreaParams {
 	uint8_t team = 0;
 	bool team_specific = false;
 	bool ai_allowed_outside = true;
+	// SOURCE: notes M-CQ5 retail values (MP_007 CQS TimeToReturn 10 s, IsAiAllowedOutside true), this default and
+	// ai_allowed_outside above.
 	int32_t time_to_return = 10;
 };
 

@@ -31,6 +31,8 @@ core::Result<LogicGhostLayout> LogicGhostLayout::of(const LogicGraph &p_graph) {
 	for (const uint32_t i : p_graph.nodes_of_type(gp::LogicTypeId::SyncedSequence)) {
 		out.sequences.push_back(i);
 	}
+	// STAND-IN: every ClientAndServer Sequence goes in the ghost, none narrowed to those synced state gates.
+	// Settle: a note on which sequences BF3 replicates.
 	for (const uint32_t i : p_graph.nodes_of_type(gp::LogicTypeId::Sequence)) {
 		if (p_graph.nodes()[i].realm == gp::LogicRealm::ClientAndServer) {
 			out.sequences.push_back(i);

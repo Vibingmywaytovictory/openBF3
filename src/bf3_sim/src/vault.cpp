@@ -23,6 +23,7 @@ Vec3 at(const Vec3 &p_feet, const Vec3 &p_forward, float p_ahead, float p_up) {
 
 }
 
+// INFERRED: Q10's "reference point" the height probes start 1.8 m above is the feet. Settle: a note naming that point.
 float vault_height_at(
 		const CollisionWorld &p_world, const Vec3 &p_feet, const Vec3 &p_forward, float p_ahead, uint32_t p_mask) {
 	StaticHit hit;
@@ -58,6 +59,8 @@ bool vault_input_allows(float p_forward) {
 	return !(vault_rules::kMinForwardInput > p_forward);
 }
 
+// INFERRED: Q10's detection ray scales 1.2 and 5, named without their input, clamp the horizontal speed in m/s.
+// Settle: a note on the scales' input.
 float vault_probe_reach(float p_speed) {
 	return vault_rules::kProbeReach *
 			clamp_between(p_speed, vault_rules::kDetectionRayMinScale, vault_rules::kDetectionRayMaxScale);
@@ -67,6 +70,7 @@ float vault_probe_height(float p_fraction) {
 	return std::fmax((1.0f - p_fraction) * vault_rules::kDownProbe, vault_rules::kMinHeight);
 }
 
+// SOURCE: notes Q10 checker (one-sided test; only the middle probe's kind becomes VaultUpHigh).
 VaultKind vault_up_or_over(VaultKind p_kind, float p_front_height, float p_further_height) {
 	if (p_kind == VaultKind::OverHigh && p_further_height >= p_front_height - vault_rules::kUpTolerance) {
 		return VaultKind::UpHigh;
@@ -74,6 +78,7 @@ VaultKind vault_up_or_over(VaultKind p_kind, float p_front_height, float p_furth
 	return p_kind;
 }
 
+// SOURCE: notes R-B4 C (the first entry whose three open bands hold the measurement, else the plain state).
 uint8_t choose_vault_variant(const VaultParams &p_params, VaultKind p_kind, const VaultMeasure &p_measure) {
 	const size_t k = size_t(p_kind);
 	const size_t n = std::min<size_t>(p_params.variant_count[k], kMaxVaultVariants);
@@ -96,6 +101,7 @@ const SpecialMoveParams &vault_move(const VaultParams &p_params, VaultKind p_kin
 	return p_params.plain[k];
 }
 
+// SOURCE: notes R-B4 E5 (scales and the horizontal phase by distance moved; a 0 optimum gives 0, or 1 for length).
 VaultScales vault_scales(const SpecialMoveParams &p_move, const VaultMeasure &p_measure, bool p_disabled) {
 	VaultScales s;
 	if (!p_move.scale_with_distance || p_disabled) {
@@ -124,6 +130,7 @@ float vault_horizontal_scale(const VaultScales &p_scales, const VaultMeasure &p_
 	return p_scales.length;
 }
 
+// SOURCE: notes R-B4 E2 and F (linear between keys; the move lasts until the last MotionPoints key).
 std::optional<Vec3> sample_move_keys(std::span<const MoveKey> p_keys, float p_time) {
 	if (p_keys.empty()) {
 		return std::nullopt;
@@ -152,6 +159,8 @@ float move_duration(const SpecialMoveParams &p_move) {
 	return n == 0 ? 0.0f : p_move.motion[n - 1].time;
 }
 
+// INFERRED: the GravityPoints sample at the move clock is the tick's gravity, none past the last key (notes R-B4 E7
+// read a per-tick override and leave its use open). Settle: a note on how the override is applied.
 Vec3 vault_gravity(const SpecialMoveParams &p_move, uint32_t p_tick) {
 	const size_t n = std::min<size_t>(p_move.gravity_count, kMaxMoveKeys);
 	const float time = float(p_tick) * kTickSeconds;
@@ -161,6 +170,8 @@ Vec3 vault_gravity(const SpecialMoveParams &p_move, uint32_t p_tick) {
 	return *sample_move_keys(std::span<const MoveKey>(p_move.gravity.data(), n), time);
 }
 
+// INFERRED: the vault's fall speed is that gravity summed over the ticks the soldier has been off the ground.
+// Settle: the same note as vault_gravity.
 Vec3 vault_fall_velocity(const SpecialMoveParams &p_move, uint32_t p_ticks, uint32_t p_airborne) {
 	Vec3 fall{};
 	for (uint32_t tick = p_ticks - std::min(p_airborne, p_ticks) + 1; tick <= p_ticks; ++tick) {
@@ -187,6 +198,11 @@ bool vault_contact_aborts(const Vec3 &p_contact_offset, const Vec3 &p_normal, co
 	return along < vault_rules::kContactCos;
 }
 
+// SOURCE: notes R-B4 B (high probe refuses, middle gives VaultOverHigh, low VaultOverLow) and Q10 3 (the measurement).
+// INFERRED: the rays start on the soldier's axis above the feet along his facing, the side and back rays at the
+// hitting probe's height (Q10 3c-3e geometry). Settle: a note on the probes' origin and frame.
+// INFERRED: Q10 3d's length 4 x fraction is taken as 4 x (1 - fraction) of a ray cast back from 4 m past the face.
+// Settle: a note on the back ray's start and fraction.
 std::optional<VaultStart> probe_vault(
 		const CollisionWorld &p_world, const Vec3 &p_feet, const Vec3 &p_forward, uint32_t p_mask, float p_reach) {
 	using namespace vault_rules;

@@ -68,6 +68,8 @@ SimTime commit_time(const WeaponSlotState &p_s, const WeaponSimDef &p_d) {
 void start_reload(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSimDef &p_d, SimTime p_time) {
 	r_s.phase = WeaponPhase::Reloading;
 	r_s.phase_start = p_time;
+	// STAND-IN: a shell reload waits ReloadDelay, then ReloadTime a shell with the round at its end, where notes R-A3 F
+	// wait ReloadDelay only when empty and add each round at ReloadThreshold. Settle: R-A3 F for rtSingleBullet.
 	if (p_d.reload_type == ReloadType::SingleBullet) {
 		r_s.phase_end = p_time + p_d.reload_delay;
 	} else {
@@ -110,6 +112,7 @@ bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSi
 		sway_fire_start(r_s.sway);
 	}
 	const float spread = r_s.sway.dispersion;
+	// SOURCE: notes R-A0 (the sway reseeds with BF3's 30 Hz tick number).
 	sway_shot(r_s.sway, sway_tick(p_time));
 
 	const uint32_t index = r_io.st.next_shot_index++;
@@ -120,6 +123,8 @@ bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSi
 	const double frac = tick_fraction(p_time);
 	const DVec3 e0 = detail::to_d(r_io.ctx.eye_start);
 	const DVec3 e1 = detail::to_d(r_io.ctx.eye_end);
+	// INFERRED: a sub-tick shot leaves from the eye lerped across the tick, where notes R-A3 A find no sub-tick offset on
+	// BF3's bullet. Settle: a note on the shot origin.
 	const DVec3 eye = detail::add(e0, detail::scale(detail::sub(e1, e0), frac));
 	const DVec3 origin = detail::add(eye, detail::frame_apply(detail::frame_of(detail::to_d(aim)), p_d.projectile.launch_offset));
 
@@ -141,6 +146,8 @@ bool fire_shot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSi
 	const size_t stance = std::min<size_t>(size_t(r_io.sway.stance), 2);
 	e.pellet_cone = p_d.pellets > 1 ? p_d.pellet_cone[stance].min_angle : 0.0f;
 	e.recoil = gameplay_recoil(p_d, r_s.sway, zoom);
+	// STAND-IN: every TraceFrequency-th shot by the player's running shot index, where notes R-A3 I count
+	// (MagazineCapacity - rounds in the magazine). Settle: R-A3 I.
 	e.tracer = p_d.trace_frequency > 0 && (index % uint32_t(p_d.trace_frequency)) == 0;
 	e.power = p_power;
 	if (r_io.table.exact_aim) {
@@ -200,6 +207,8 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 		r_io.events |= weapon_events::kDryFire;
 	}
 	const FireModeDef &mode = mode_of(r_s, p_d);
+	// STAND-IN: a press starts the fire cycle on its own 60 Hz tick, where notes R-A3 A run the fire logic once per 30 Hz
+	// tick. Settle: R-A3 A at 30 Hz.
 	const SimTime press_ready = press ? r_io.t0 + p_d.pre_fire_delay : r_io.t0;
 
 	SimTime now = r_io.t0;
@@ -254,6 +263,7 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 						offer(now, Action::ReloadStart);
 						break;
 					}
+					// SOURCE: notes R-A3 C (the fire stop comes once the interval after the cycle's last shot has run).
 					offer(cycle_end, goes_on ? Action::Shot : Action::FireStop);
 					break;
 				}
@@ -394,6 +404,8 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 						}
 						wait(r_s.burst_left > 0 ? mode.burst_interval_seconds : mode.interval_seconds);
 						break;
+					// STAND-IN: the bolt runs from the shot alongside the interval and HoldBoltActionUntilZoomRelease is not applied,
+					// where notes R-A3 E start it after the interval. Settle: R-A3 E.
 					case FireLogic::SingleWithBoltAction:
 						wait(mode.interval_seconds);
 						r_s.flags = uint8_t(r_s.flags & ~slot_flags::kPressPending);
@@ -426,6 +438,8 @@ void process_active(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const Wea
 	}
 }
 
+// STAND-IN: a switch away commits an unfinished reload at once unless the ReloadLogic cancels it, where notes R-A3 F
+// keep it running on the inactive weapon. Settle: a note on the switch path of rlReloadUnaffectedByWeaponSwitch.
 void leave_slot(Tick_ &r_io, uint8_t p_slot, WeaponSlotState &r_s, const WeaponSimDef &p_d, SimTime p_time) {
 	if (r_s.phase == WeaponPhase::Reloading || r_s.phase == WeaponPhase::ReloadShell) {
 		const bool committed = (r_s.flags & slot_flags::kReloadCommitted) != 0;
@@ -501,6 +515,8 @@ core::Status spawn_soldier_weapons(SoldierWeaponsState &r_state, const WeaponTab
 		const WeaponSimDef &d = p_table.def(s.def, s.variant);
 		s.phase = WeaponPhase::Ready;
 		s.magazine = d.magazine_capacity;
+		// STAND-IN: NumberOfMagazines x MagazineCapacity in reserve, where notes R-A3 F give (NumberOfMagazines - 1) x
+		// MagazineCapacity. Settle: R-A3 F's starting ammo.
 		s.reserve = d.unlimited_ammo ? 0 : d.magazines * d.magazine_capacity;
 	}
 	WeaponSlotState &a = r_state.slots[p_active];
@@ -659,6 +675,7 @@ uint64_t soldier_weapons_hash(const SoldierWeaponsState &p_state) {
 
 SwayContext weapon_sway_context(const MotorParams &p_motor, const SoldierState &p_after, const Command &p_command) {
 	SwayContext sway;
+	// INFERRED: the record's stance is the target pose during a transition. Settle: a note on the stance the sway reads.
 	sway.stance = Stance(std::min<uint8_t>(uint8_t(p_after.target_pose), 2));
 	sway.zoom = (p_command.buttons & weapon_buttons::kZoom) != 0 ? Zoom::Zoom : Zoom::NoZoom;
 	const float hs2 = p_after.velocity[0] * p_after.velocity[0] + p_after.velocity[2] * p_after.velocity[2];
@@ -668,6 +685,8 @@ SwayContext weapon_sway_context(const MotorParams &p_motor, const SoldierState &
 		sway.move = SwayMove::Jumping;
 	} else if (hs2 > kSwayMovingSpeed * kSwayMovingSpeed) {
 		sway.move = SwayMove::Moving;
+		// SOURCE: notes Q2 B3 c (the Moving MinAngle lerps by clamp(speed / maxSpeed, 0, 1)).
+		// INFERRED: maxSpeed is the pose's walk speed. Settle: a note on the speed that divides.
 		const float walk = walk_speed(p_motor, p_after);
 		sway.move_fraction = walk > 0.0f ? std::min(1.0f, std::sqrt(hs2) / walk) : 1.0f;
 	} else {

@@ -29,6 +29,7 @@ constexpr float kSpeedSnap = 1e-4f;
 
 constexpr float kHugProbeRadius = 0.05f;
 
+// STAND-IN: the prone footprint box starts 0.1 m above the feet. Settle: a note on the prone collision box.
 constexpr float kFootprintFloorClearance = 0.1f;
 
 constexpr float kMaxCoordinate = 1.0e6f;
@@ -59,6 +60,8 @@ Pose smaller_pose(Pose p_a, Pose p_b) {
 	return pose_rank(p_a) <= pose_rank(p_b) ? p_a : p_b;
 }
 
+// SOURCE: notes R-B1 G (a gain closes that fraction of the gap per tick) and the R-B1 checker C8 (a negative
+// gain moves the velocity |gain| x dt toward the target, the Linear model).
 void apply_gain(GainModel p_model, float p_factor, const float p_target[2], float r_v[2]) {
 	switch (p_model) {
 		case GainModel::FractionPerReferenceTick:
@@ -111,6 +114,8 @@ const StateSpeed &move_speed(const MotorParams &p_params, const SoldierState &p_
 	return *speed;
 }
 
+// STAND-IN: the direction constants blended by the squared input shares, where notes R-B1 E scale by
+// sqrt((u Cf)^2 + (s Cs)^2) / m. Settle: R-B1 E.
 float directional_speed(const StateSpeed &p_speed, float p_forward, float p_right) {
 	const float along = p_forward >= 0.0f ? p_speed.forward : p_speed.backward;
 	const float side = p_right >= 0.0f ? p_speed.right : p_speed.left;
@@ -128,6 +133,8 @@ std::vector<JPH::Vec3> hull_recovery(const JPH::CharacterVirtual &p_character) {
 	return pushes;
 }
 
+// WHY: Jolt's push out of a vehicle hull the soldier already overlapped is not his own motion, so it is taken off
+// the realised displacement before that sets his velocity.
 JPH::Vec3 without_recovery(const JPH::Vec3 &p_moved, const std::vector<JPH::Vec3> &p_pushes) {
 	JPH::Vec3 moved = p_moved;
 	for (const JPH::Vec3 &push : p_pushes) {
@@ -159,6 +166,8 @@ float sprint_speed(const MotorParams &p_params) {
 	return ground.velocity * ground.forward * ground.sprint_multiplier * p_params.body_sprint_multiplier;
 }
 
+// STAND-IN: Jolt's CharacterVirtual collide-and-slide on a capsule (a sphere prone) in place of BF3's character
+// proxy and its hull (notes R-B1 J). Settle: R-B1 J's hull and C's per-tick rules.
 struct SoldierMotor::Impl {
 	std::shared_ptr<void> runtime;
 	const CollisionWorld *world = nullptr;
@@ -303,6 +312,7 @@ void SoldierMotor::Impl::step_vault(SoldierState &r_s, bool p_blocked, MotorStep
 	}
 }
 
+// SOURCE: notes R-B5 D (the Swimming PoseInfo through the ground formula and gains, the vertical speed set by depth).
 void SoldierMotor::Impl::step_swim(SoldierState &r_s, const Command &p_command, const WaterDepth &p_water,
 		bool p_blocked, MotorStepInfo *r_info) const {
 	const float dt = kTickSeconds;
@@ -476,6 +486,8 @@ core::Status SoldierMotor::init(const CollisionWorld &p_world, const MotorParams
 	set_obstacles(m.obstacles);
 
 	const uint32_t mask = query_mask::kMovement;
+	// WHY: one zero-velocity Update far above the level primes Jolt's last delta time, which RefreshContacts reads
+	// before the first step, so a fresh motor steps like a used one.
 	m.character->SetLinearVelocity(JPH::Vec3::sZero());
 	m.character->Update(kTickSeconds, JPH::Vec3(0.0f, -p_params.tuning.gravity, 0.0f), w.broadphase_filter(mask), w.object_filter(mask), w.body_filter,
 			w.shape_filter, *w.temp);
@@ -552,6 +564,8 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 	const float right_in = axis_value(p_command.move_right);
 	const bool sprint_held = (p_command.buttons & buttons::kSprint) != 0 && forward_in > 0.0f;
 	s.pitch = p_command.pitch;
+	// INFERRED: a still prone soldier turns only when the prone footprint box is free at the new yaw.
+	// Settle: a note on prone turning.
 	if (p_command.yaw != s.yaw) {
 
 		const bool prone_still = s.pose == Pose::Prone && s.target_pose == Pose::Prone;
@@ -580,6 +594,7 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 		if (uint8_t(requested) >= kPoseCount) {
 			requested = s.pose;
 		}
+		// INFERRED: sprint input in crouch or prone asks for Stand. Settle: a note on sprint from a low pose.
 		if (tun.sprint_stands_up && sprint_held && requested != Pose::Stand) {
 			requested = Pose::Stand;
 		}
@@ -614,6 +629,8 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 	JPH::CharacterVirtual &ch = *m.character;
 	const float yaw = yaw_radians(s.yaw);
 	const JPH::Vec3 p0 = to_jolt(s.position);
+	// WHY: the velocity is set before RefreshContacts, which takes it as the active-edge direction; else one soldier's
+	// velocity would reach the next soldier's contacts on the shared character.
 	ch.SetShape(m.shapes[size_t(move_pose)], FLT_MAX, w.broadphase_filter(mask), w.object_filter(mask), w.body_filter, w.shape_filter, *w.temp);
 	ch.SetPosition(JPH::RVec3(p0));
 	ch.SetRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), yaw));
@@ -667,6 +684,7 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 	float f = forward_in;
 	float rgt = right_in;
 	const float mag2 = f * f + rgt * rgt;
+	// STAND-IN: sprint has no energy meter (notes R-B2 F). Settle: R-B2 F's SprintPowerDecrease and Increase rules.
 	const bool sprinting = sprint_held && grounded0 && speed->sprint_multiplier > 0.0f;
 	if (mag2 > 0.0f) {
 		float mag = std::sqrt(mag2);
@@ -699,6 +717,8 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 		apply_gain(tun.acceleration_model, speed->acceleration_factor, target, vh);
 	}
 
+	// STAND-IN: a jump from Stand or Crouch, v0 = sqrt(2 g h) at once, the penalty on its height within JumpPenaltyTime,
+	// where notes R-B2 A-B, E allow Stand only, run two Jumping ticks and let the landing penalty scale speeds. Settle: R-B2.
 	const bool jumped = (p_command.buttons & buttons::kJump) != 0 && grounded0 && s.pose != Pose::Prone && s.target_pose != Pose::Prone &&
 			s.transition_ticks == 0 && s.target_pose == s.pose;
 	float vy0 = grounded0 ? 0.0f : s.velocity[1];
@@ -725,6 +745,8 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 	update.mWalkStairsStepUp = airborne ? JPH::Vec3::sZero() : JPH::Vec3(0.0f, p.poses[size_t(move_pose)].step_height, 0.0f);
 	ch.ExtendedUpdate(dt, JPH::Vec3(0.0f, -g, 0.0f), update, w.broadphase_filter(mask), w.object_filter(mask), w.body_filter, w.shape_filter, *w.temp);
 
+	// STAND-IN: a 0.05 m sphere swept the whole AllowedDistanceFromGround, where notes R-B1 C3 cast a ray from 0.05 m
+	// above the feet to (1 - k) x AllowedDistanceFromGround, k the seconds unsupported. Settle: R-B1 C3.
 	const bool hug = grounded0 && !jumped && p.ground_hugging && p.allowed_distance_from_ground > 0.0f;
 	if (hug && ch.GetGroundState() != JPH::CharacterBase::EGroundState::OnGround && JPH::Vec3(ch.GetPosition()).GetY() - p0.GetY() <= 1e-6f) {
 		const JPH::Vec3 at = JPH::Vec3(ch.GetPosition());
@@ -745,6 +767,8 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 	{
 		float ex = v_mid.GetX() * dt;
 		float ez = v_mid.GetZ() * dt;
+		// WHY: sliding along a walkable slope shortens the horizontal step by v dt sin^2, which is no obstruction and must
+		// not slow the soldier.
 		if (!airborne) {
 
 			const JPH::Vec3 step = v_mid * dt;
@@ -786,6 +810,8 @@ void SoldierMotor::step(SoldierState &r_state, const Command &p_command, const M
 		if (impact >= tun.min_landing_speed) {
 			s.events |= soldier_events::kLanded;
 			s.impact_speed = impact;
+			// INFERRED: fall damage is CollisionData.DamageAtVerticalVelocity at the landing impact speed (notes R-A5 7 did not
+			// find its evaluation). Settle: a note on the fall damage evaluation.
 			const float damage = eval(p.fall_damage_vertical, impact);
 			if (damage >= 1.0f && s.protect_ticks == 0) {
 				s.damage = damage;
@@ -866,6 +892,7 @@ float eye_height(const MotorParams &p_params, const SoldierState &p_state) {
 	if (from == to || p_state.transition_ticks == 0 || p_state.transition_total == 0) {
 		return from == to ? a : p_params.poses[to].eye_height;
 	}
+	// INFERRED: the eye height moves linearly over a pose transition. Settle: a note on the camera during a pose change.
 	const float progress = 1.0f - float(std::min(p_state.transition_ticks, p_state.transition_total)) / float(p_state.transition_total);
 	return a + (p_params.poses[to].eye_height - a) * progress;
 }

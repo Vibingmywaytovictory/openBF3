@@ -133,6 +133,8 @@ core::Status validate_tuning(const MotorTuning &p_tuning) {
 	return core::Status::success();
 }
 
+// INFERRED: a gain is per BF3 30 Hz tick (R-A0), compounded over the sim's 60 Hz ticks, where notes R-B1 G assumed
+// a 1/60 s tick. Settle: R-B1 G with the 30 Hz tick.
 float gain_factor(GainModel p_model, float p_gain, float p_reference_hz) {
 	switch (p_model) {
 		case GainModel::FractionPerReferenceTick: {
@@ -464,12 +466,14 @@ core::Result<MotorParams> make_motor_params(const core::gameplay::SoldierDef &p_
 
 		auto state_speed = [&](const core::gameplay::MovementStateDef *p_state) {
 			const core::gameplay::StatePoseSpeed *s = p_state ? p_state->pose(pose) : nullptr;
+			// INFERRED: a pose the state lists no PoseInfo for uses its Stand row. Settle: a note on a missing pose row.
 			if (s == nullptr && p_state != nullptr) {
 				s = p_state->pose(SoldierPose::Stand);
 			}
 			if (s != nullptr) {
 				return to_speed(*s);
 			}
+			// STAND-IN: a state with no PoseInfo row moves at the on-ground speeds without gains. Settle: a note on missing rows.
 			StateSpeed fallback = pp.on_ground;
 			fallback.acceleration_gain = 0;
 			fallback.deceleration_gain = 0;

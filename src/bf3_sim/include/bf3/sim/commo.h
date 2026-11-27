@@ -10,6 +10,7 @@
 
 namespace bf3::sim::commo {
 
+// SOURCE: notes R-E2 (the OrderType values, 0 None to 17 Attack; Count 18).
 enum class OrderType : uint8_t {
 	None = 0,
 	RequestHeal = 1,
@@ -67,6 +68,8 @@ struct WeaponAmmo {
 
 bool low_ammo(std::span<const WeaponAmmo> p_weapons, float p_need_percent);
 
+// SOURCE: notes R2-E2 (UIHudIcon values and its checker) and R2-E2 constants (10 s order icon, 2 s blink), the
+// constants below.
 inline constexpr int32_t kIconNeedBackup = 65;
 inline constexpr int32_t kIconNeedAmmo = 66;
 inline constexpr int32_t kIconNeedMedic = 67;

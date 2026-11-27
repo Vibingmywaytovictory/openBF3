@@ -26,6 +26,9 @@ void step_weapons_with_rules(const WeaponTable &p_table, SoldierWeaponsState &r_
 		}
 
 		const WeaponSlotState &active = r_state.slots[r_state.active];
+		// SOURCE: notes R2-A3 checker on B (Zoom forced off while sprinting, like Fire).
+		// STAND-IN: zoom is not refused in the RecoverTime window after a sprint, as that checker has it. Settle: R2-A3 B.
+		// INFERRED: zoom is also refused for the whole deploy and a pending switch. Settle: a note on zoom during a deploy.
 		bool refuse = p_context.sprinting;
 		if (active.phase == WeaponPhase::Deploying && active.phase_end > tick_start(p_command.tick)) {
 			refuse = true;

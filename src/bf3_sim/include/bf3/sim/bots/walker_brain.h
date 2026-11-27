@@ -19,10 +19,13 @@ struct BotGoal {
 	Kind kind = Kind::NavPoint;
 	Vec3 position{};
 	NavPolyRef poly = 0;
+	// STAND-IN: a goal counts as reached within 1.5 m. Settle: OpenBF2's waypoint arrival radius @c47317b.
 	float arrive_radius = 1.5f;
 	uint32_t index = 0;
 };
 
+// STAND-IN: hand-picked walker tuning (every field of this struct). Settle: OpenBF2's bot movement values @c47317b
+// or the per-map AI configs.
 struct WalkerParams {
 	float think_hz = 10.0f;
 	float objective_share = 0.5f;

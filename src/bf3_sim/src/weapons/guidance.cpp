@@ -36,6 +36,7 @@ bool engine_state(MissileState p_state) {
 
 }
 
+// SOURCE: notes R2-G4 A 5 (StaticPosition.x along the horizontal launch direction, .y up; (0, 100, 0) when vertical).
 DVec3 missile_static_point(const DVec3 &p_origin, const DVec3 &p_direction, const std::array<float, 2> &p_static) {
 	const DVec3 flat{ p_direction[0], 0.0, p_direction[2] };
 	const double l = length(flat);
@@ -46,6 +47,7 @@ DVec3 missile_static_point(const DVec3 &p_origin, const DVec3 &p_direction, cons
 	return add(add(p_origin, ahead), DVec3{ 0.0, double(p_static[1]), 0.0 });
 }
 
+// SOURCE: notes R2-G4 A 5 steering (slerp by at most MaxTurnAngle x pi/180 x dt toward the target, speed kept).
 DVec3 steer_toward(const DVec3 &p_velocity, const DVec3 &p_position, const DVec3 &p_target, double p_max_turn_rad) {
 	const double speed = length(p_velocity);
 	if (!(speed > kMissileDirectionFloor)) {
@@ -69,6 +71,7 @@ DVec3 steer_toward(const DVec3 &p_velocity, const DVec3 &p_position, const DVec3
 	return scale(turned, speed);
 }
 
+// SOURCE: notes R2-G4 A 4-6 and its checker (the seven states, their tests, actions and thrust, |v| clamped to MaxSpeed).
 MissileStep step_guided_missile(const ProjectileSimDef &p_def, const MissileGuide &p_guide, const DVec3 &p_position,
 		const DVec3 &p_velocity, double p_flight, double p_dt, SimTime p_now,
 		const std::optional<GuidanceTarget> &p_target, uint64_t p_seed) {
@@ -107,6 +110,8 @@ MissileStep step_guided_missile(const ProjectileSimDef &p_def, const MissileGuid
 	};
 	const auto arm_fuse = [&] {
 		m.state = MissileState::Proximity;
+		// STAND-IN: the fuse delay's U(MinDetonationDelay, MaxDetonationDelay) drawn from the shot seed in place of the
+		// engine generator R2-G4 names. Settle: a note on that generator.
 		const float u = unit_float(shot_random(p_seed, RngPurpose::NearTargetDelay));
 		m.detonate_at = p_now + g.near_min_delay + scale_units(g.near_max_delay - g.near_min_delay, double(u));
 	};

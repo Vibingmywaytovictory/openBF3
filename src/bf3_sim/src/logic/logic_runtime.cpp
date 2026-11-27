@@ -82,6 +82,8 @@ constexpr int32_t kStringOut = gp::logic_port_id("StringOut");
 constexpr int32_t kStringIn0 = gp::logic_port_id("StringIn0");
 constexpr int32_t kStringIn1 = gp::logic_port_id("StringIn1");
 
+// INFERRED: SwitchPropertyString's two select events, names not recovered, differ in the last bit like StringIn0 and
+// StringIn1, so the odd hash selects 0. Settle: the names of those two port hashes.
 constexpr int32_t kSelectString0 = 263676847;
 constexpr int32_t kSelectString1 = 263676846;
 constexpr int32_t kPrint = gp::logic_port_id("Print");
@@ -667,6 +669,8 @@ struct LogicRuntime::State {
 		}
 	}
 
+	// STAND-IN: RandomDelay and RandomMultiEvent draw from a hash chain of the match seed and the node in place of BF3's
+	// generator. Settle: a note on those entities' random source.
 	double delay_seconds(uint32_t p_node) {
 		const T type = node(p_node).type;
 		if (type == T::RandomDelay) {
@@ -700,6 +704,7 @@ struct LogicRuntime::State {
 		}
 		st.value = v_bool(p_value);
 		publish(p_node, p_out, st.value);
+		// INFERRED: the start-up settle propagates values without the value-change events. Settle: a note on logic start.
 		if (!settling) {
 			fire(p_node, p_value ? port::kOnTrue : port::kOnFalse, p_context);
 		}
@@ -866,6 +871,8 @@ struct LogicRuntime::State {
 		return false;
 	}
 
+	// INFERRED: MathOp operators 0 add, 1 subtract, 2 multiply, 3 divide (0 on a zero divisor), 4 min, 5 max, left to
+	// right (the enumerator names are not in the data). Settle: the operator enum's names.
 	LogicValue math_out(uint32_t p_node) {
 		const size_t ops = std::min(param_count(p_node, port::kOperators), kMaxOutputs - 1);
 		LogicValue acc = in(p_node, kInN[0]);
@@ -1093,6 +1100,8 @@ struct LogicRuntime::State {
 					unhandled_port(p_node, p_port, true);
 				}
 				return;
+			// INFERRED: Out fires once each of In1..In<EventCount> has come since Reset, repeats ignored (no selector or re-arm
+			// is in the data). Settle: a note on EventAndGate.
 			case T::EventAndGate: {
 				const int64_t count =
 						std::clamp<int64_t>(as_int(in(p_node, port::kEventCount)), 0, int64_t(kMaxOutputs) - 1);
@@ -1125,6 +1134,7 @@ struct LogicRuntime::State {
 
 					LogicContext addressed = p_context;
 					addressed.team = static_cast<uint8_t>(std::clamp<int64_t>(team, 0, 255));
+					// INFERRED: OnTriggerOnlyForSpecifiedTeam fires whatever the cause, addressed to the Team. Settle: a note on TeamFilter.
 					fire(p_node, port::kOnTriggerOnlyForSpecifiedTeam, addressed);
 				} else {
 					unhandled_port(p_node, p_port, true);
@@ -1376,6 +1386,7 @@ struct LogicRuntime::State {
 				return;
 			case T::PrintDebugText:
 				return;
+			// INFERRED: Out carries the In1..In8 value set last (the data names no selector). Settle: a note on TransformHub.
 			case T::TransformHub: {
 				const int k = index_of(kInN, p_port);
 				if (k >= 1 && k <= 8) {
@@ -1387,6 +1398,8 @@ struct LogicRuntime::State {
 			}
 			case T::Locator:
 
+				// INFERRED: a driven Locator Transform republishes on every output port as the constant one does at start.
+				// Settle: a note on Locator.
 				if (p_port == port::kTransform) {
 					publish_all_ports(p_node, p_value);
 				} else {
@@ -1520,6 +1533,8 @@ struct LogicRuntime::State {
 			case T::SwitchPropertyString:
 				switch_string_publish(p_node);
 				return;
+			// STAND-IN: no server settings table, so a bool setting reads true, an int 0 and a float 0. Settle: read the
+			// server's settings.
 			case T::Setting: {
 
 				const std::optional<LogicValue> name = param(p_node, port::kBoolSettingName);
@@ -1560,6 +1575,7 @@ struct LogicRuntime::State {
 				return;
 			case T::BoolToEvent:
 
+				// INFERRED: InitalEvent fires the event of the settled value (false gives OnFalse). Settle: a note on BoolToEvent.
 				if (param_bool(p_node, port::kInitalEvent, false)) {
 					fire(p_node, as_bool(st.value) ? port::kOnTrue : port::kOnFalse, LogicContext{});
 				}
