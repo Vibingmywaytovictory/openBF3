@@ -170,6 +170,15 @@ std::optional<sim::Vec3> TdmStrategy::mission(uint8_t p_slot) const {
 	return std::nullopt;
 }
 
+const ai::SquadMember *TdmStrategy::squad_member(uint8_t p_slot) const {
+	for (int side = 1; side <= 2; ++side) {
+		if (const ai::SquadMember *member = squads_->squad_member(p_slot, side)) {
+			return member;
+		}
+	}
+	return nullptr;
+}
+
 uint64_t TdmStrategy::squad_mates(uint8_t p_slot) const {
 	const SquadTable &table = rules_->squads();
 	uint64_t mates = 0;

@@ -51,6 +51,7 @@ public:
 	void remove_bot(uint8_t p_slot);
 	void step(sim::Tick p_tick);
 	std::optional<sim::Vec3> mission(uint8_t p_slot) const;
+	const ai::SquadMember *squad_member(uint8_t p_slot) const;
 	uint64_t squad_mates(uint8_t p_slot) const;
 
 	sim::Tick game_tick() const override { return tick_; }

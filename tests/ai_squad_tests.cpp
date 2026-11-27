@@ -615,6 +615,32 @@ TEST_SUITE("ai-squad") {
 		CHECK(manager.player_valid_positions().empty());
 	}
 
+	TEST_CASE("SquadMember::isCloseToNonOwnedTarget: with an accepted mission on an area its side does not own, a "
+			  "member whose squad goto lies inside its formation distance") {
+		World world;
+		SquadCoordinator squad(world.services(), 0, 0);
+		join_bots(world, squad, { 1, 2 }, { 0.0f, 0.0f, 0.0f });
+		Area area;
+		squad.assign_squad(&area, { 50.0f, 0.0f, 50.0f }, SquadOrder::Attack, SquadMissionStatus::Accepted);
+		squad.update(++world.tick);
+		CHECK_FALSE(squad.squad_member(0)->is_close_to_non_owned_target());
+		CHECK_FALSE(squad.squad_member(1)->is_close_to_non_owned_target());
+		world.players[2]->body.where = { 45.0f, 0.0f, 45.0f };
+		squad.update(++world.tick);
+		int index = 0;
+		const SquadMember *near = squad.squad_member(2, index);
+		REQUIRE(near != nullptr);
+		CHECK(near->formation_distance_sq() > distance_sq({ 45.0f, 0.0f, 45.0f }, { 50.0f, 0.0f, 50.0f }));
+		CHECK(near->is_close_to_non_owned_target());
+		CHECK_FALSE(squad.squad_member(1, index)->is_close_to_non_owned_target());
+		squad.assign_squad(&area, { 50.0f, 0.0f, 50.0f }, SquadOrder::Attack, SquadMissionStatus::Issued);
+		CHECK_FALSE(near->is_close_to_non_owned_target());
+		squad.assign_squad(&area, { 50.0f, 0.0f, 50.0f }, SquadOrder::Attack, SquadMissionStatus::Accepted);
+		CHECK(near->is_close_to_non_owned_target());
+		area.owner_status = 0;
+		CHECK_FALSE(near->is_close_to_non_owned_target());
+	}
+
 	TEST_CASE("SquadCoordinator: orders, fire records, repair requests and strategic strength") {
 		World world;
 		InformationManager information;

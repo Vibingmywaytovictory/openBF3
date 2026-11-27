@@ -154,6 +154,24 @@ TEST_SUITE("ai-vehicle") {
 				doctest::Approx(kJeepSpeed * 5.0f * 3.0f / 15.0f));
 	}
 
+	TEST_CASE("a bot whose squad member is close to a non-owned target looks for no vehicle, as BBChange skips the "
+			  "hardware scan on SquadMember::isCloseToNonOwnedTarget; a seated one may still get out") {
+		std::vector<ai::ChangeVehicle> vehicles{ jeep(20.0f) };
+		ai::ChangeBot bot = fresh_bot();
+		REQUIRE(ai::choose_change(bot, vehicles).change);
+		bot.close_to_non_owned_target = true;
+		const ai::ChangeChoice near = ai::choose_change(bot, vehicles);
+		CHECK_FALSE(near.change);
+		CHECK(near.best == doctest::Approx(2.0f * kSoldierSpeed * 5.0f));
+		bot.now_s = 200.0;
+		bot.vehicle = 0;
+		bot.seat = 0;
+		bot.position = vehicles[0].position;
+		vehicles[0].seat[0].occupant = bot.player_id;
+		bot.stuck = true;
+		CHECK(ai::choose_change(bot, vehicles).get_out);
+	}
+
 	TEST_CASE("a manned jeep offers its free seats by its driver's order, against staying on foot") {
 		std::vector<ai::ChangeVehicle> vehicles{ jeep(20.0f) };
 		vehicles[0].seat[0].occupant = 9;

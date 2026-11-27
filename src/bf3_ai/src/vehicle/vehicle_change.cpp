@@ -106,7 +106,7 @@ ChangeChoice choose_change(const ChangeBot &p_bot, std::span<const ChangeVehicle
 		}
 	}
 
-	if (!get_out) {
+	if (!get_out && !p_bot.close_to_non_owned_target) {
 		const float radius_sqr = kHardwareRadius * kHardwareRadius;
 		for (size_t v = 0; v < p_vehicles.size(); ++v) {
 			const ChangeVehicle &vehicle = p_vehicles[v];

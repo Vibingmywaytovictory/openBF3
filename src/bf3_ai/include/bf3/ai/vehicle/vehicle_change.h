@@ -86,6 +86,7 @@ struct ChangeBot {
 	double now_s = 0.0;
 	float bail_value = 0.3f;
 	bool stuck = false;
+	bool close_to_non_owned_target = false;
 	int vehicle = -1;
 	uint8_t seat = 0;
 	ChangeStrengths strengths{};

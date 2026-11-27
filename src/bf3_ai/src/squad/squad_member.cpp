@@ -66,6 +66,15 @@ bool SquadMember::position(Vec3 &r_position) const {
 	return position_valid_;
 }
 
+bool SquadMember::is_close_to_non_owned_target() const {
+	const SquadArea *const area = squad_->squad_strategic_area_assignment();
+	if (squad_->mission_status() != SquadMissionStatus::Accepted || area == nullptr || area->status(side_ + 1) == 0 ||
+			!position_valid_) {
+		return false;
+	}
+	return formation_distance_sq_ > distance_sq(squad_->squad_goto_position(), position_);
+}
+
 bool SquadMember::is_allowed_in_formation() const {
 	if (!player_->is_alive() || player_->is_man_down()) {
 		return false;

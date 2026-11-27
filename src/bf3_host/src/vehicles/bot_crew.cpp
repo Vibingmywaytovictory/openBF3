@@ -338,6 +338,8 @@ ai::ChangeBot change_bot(const TdmShared &p_shared, const ServerVehicles &p_vehi
 	b.now_s = seconds(view.tick());
 	b.bail_value = p_shared.ai != nullptr ? p_shared.ai->main().bot_manager().vehicle_bail_value() : b.bail_value;
 	b.stuck = p_stuck;
+	const ai::SquadMember *member = p_shared.strategy != nullptr ? p_shared.strategy->squad_member(p_slot) : nullptr;
+	b.close_to_non_owned_target = member != nullptr && member->is_close_to_non_owned_target();
 	if (const std::optional<VehicleSeat> seat = p_vehicles.seat_of(p_slot)) {
 		b.vehicle = seat->vehicle;
 		b.seat = seat->seat;

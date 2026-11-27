@@ -36,6 +36,7 @@ public:
 	void update(sim::Tick p_tick);
 	void update_formation_status();
 	bool position(Vec3 &r_position) const;
+	bool is_close_to_non_owned_target() const;
 	bool is_allowed_in_formation() const;
 	void update_member_pos();
 	bool is_mobile() const;
