@@ -27,28 +27,45 @@ class CollisionWorld;
 
 namespace bf3::fx {
 
+// STAND-IN: at most 256 impact decals, the oldest replaced. Settle: the DecalSettings ring buffer size.
 inline constexpr uint32_t kMaxDecals = 256;
+// STAND-IN: the 30 s decal fade time is hand-picked. Settle: the decal lifetime BF3 uses.
 inline constexpr float kDecalFadeSeconds = 30.0f;
+// SOURCE: research/topics/01-weapons.md 1.6 (visualConvergeDistance 30 on the bullets); for a def that has none.
 inline constexpr float kTracerConvergeM = 30.0f;
 inline constexpr uint32_t kMaxPendingStarts = 1024;
 
+// STAND-IN: the soldier zones' impact cells by hard-coded PhysicsMaterialIndex (body 66, chest 158, head 65), not looked
+// up through the grid's MaterialNames. Settle: look the indices up by name.
 inline constexpr uint8_t kSoldierBodyMaterial = 66;
 inline constexpr uint8_t kSoldierChestMaterial = 158;
 inline constexpr uint8_t kSoldierHeadMaterial = 65;
+// SOURCE: research/topics/gap-r2-vfx-effects-system.md 2.4 (fx_grenade_frag_01 is the
+// M67's, RPG-7's and M320 LVG's DetonationEffect).
 inline constexpr std::string_view kGrenadeEffectName = "fx_grenade_frag_01";
 
+// SOURCE: research/topics/gap-r2-vfx-effects-system.md 2.4 (decal_scorchmark_m_01 is the
+// decal of most explosion cells).
 inline constexpr std::string_view kScorchDecal = "decals/impacts/scorch/decal_scorchmark_m_01";
+// STAND-IN: a projectile without a material takes the 5.56's row, PhysicsMaterialIndex 1 (research gap-r2 3).
+// Settle: what BF3 selects for a projectile without a MaterialPair.
 inline constexpr uint8_t kDefaultBulletMaterial = 1;
 inline constexpr uint32_t kDetonationSurface = 0x100u;
+// STAND-IN: a detonation's surface is the hit of a 1.25 m ray from 0.25 m above the point along -normal.
+// Settle: the surface material sent with the detonation.
 inline constexpr float kSurfaceProbeLift = 0.25f;
 inline constexpr float kSurfaceProbeDepth = 1.0f;
 inline constexpr uint32_t kDedupeKeys = 16384;
 inline constexpr uint32_t kMaxTracers = 256;
 inline constexpr uint32_t kMaxAttached = 512;
+// STAND-IN: a def without a muzzle speed or TimeToLive takes 600 m/s and the rifle bullets' 1.5 s (research
+// 01-weapons 1.6). Settle: a census of defs that lack either field.
 inline constexpr float kTracerFallbackSpeed = 600.0f;
 inline constexpr float kTracerFallbackTtl = 1.5f;
 
 inline constexpr uint32_t kTriggerOwnerBase = 0x80000000u;
+// STAND-IN: a muzzle without a posed weapon sits 0.15 m right, 0.12 m down and 0.55 m ahead of the eye.
+// Settle: the weapon's muzzle joint for every shooter.
 inline constexpr float kFallbackMuzzleRight = 0.15f;
 inline constexpr float kFallbackMuzzleUp = -0.12f;
 inline constexpr float kFallbackMuzzleForward = 0.55f;
@@ -183,6 +200,7 @@ DecalPlacement decal_placement(const DecalTemplate &p_template, uint64_t p_seed)
 
 core::Result<std::vector<uint8_t>> decode_bc1(std::span<const uint8_t> p_blocks, uint32_t p_width, uint32_t p_height);
 
+// STAND-IN: a decal texture with at least 20 % magenta texels is magenta-keyed. Settle: the decal shader's key rule.
 inline constexpr float kMagentaKeyedShare = 0.2f;
 float magenta_share(std::span<const uint8_t> p_rgba);
 
@@ -194,6 +212,7 @@ core::Result<std::vector<uint8_t>> decode_bc3(std::span<const uint8_t> p_blocks,
 
 float transparent_share(std::span<const uint8_t> p_rgba);
 
+// STAND-IN: a decal texture under 5 % see-through texels is refused as opaque. Settle: the decal shader's blend.
 inline constexpr float kMinDecalTransparentShare = 0.05f;
 
 enum class DecalPixelFormat : uint8_t {

@@ -173,15 +173,21 @@ struct PolynomialDef {
 	bool operator==(const PolynomialDef &) const = default;
 };
 
+// INFERRED: Coefficients x, y, z, w are c3, c2, c1, c0 (research gap-r2 2.2 and 9: a verified slot-pattern count, the
+// semantics inferred). Settle: a note on PolynomialData.
 inline float polynomial_raw(const Vec4 &p_c, float p_t) {
 	return ((p_c.x * p_t + p_c.y) * p_t + p_c.z) * p_t + p_c.w;
 }
 
+// INFERRED: clamp to [MinClamp, MaxClamp] first, then times ScaleValue (research gap-r2 2.2 infers the order).
+// Settle: a note on how PolynomialData is evaluated.
 inline float evaluate_polynomial(const PolynomialDef &p_poly, float p_t) {
 	const float f = polynomial_raw(p_poly.coefficients, p_t);
 	return std::fmin(std::fmax(f, p_poly.min_clamp), p_poly.max_clamp) * p_poly.scale;
 }
 
+// INFERRED: colour = lerp(Color1, Color0, clamp(f, 0, 1)), so f = 1 gives Color0 (research gap-r2 2.2: hot to cool in
+// 689 of 846). Settle: a note on PolynomialColorInterpData.
 inline Vec3 evaluate_color_interp(const Vec4 &p_coefficients, const Vec3 &p_color0, const Vec3 &p_color1, float p_t) {
 	const float f = std::fmin(std::fmax(polynomial_raw(p_coefficients, p_t), 0.0f), 1.0f);
 	return { p_color1.x + (p_color0.x - p_color1.x) * f, p_color1.y + (p_color0.y - p_color1.y) * f, p_color1.z + (p_color0.z - p_color1.z) * f };

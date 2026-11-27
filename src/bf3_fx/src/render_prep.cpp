@@ -95,6 +95,8 @@ FxBatchKey fx_batch_key(const EmitterDef &p_emitter, bool p_first_person) {
 			k.shader = FxShaderClass::Saq;
 			break;
 	}
+	// INFERRED: Emissive draws additive and wins over Opaque, and Opaque draws in a pass of its own; the data names no
+	// precedence. Settle: a note on the emitter render passes.
 	k.blend = (p_emitter.tmpl.flags & kEmitterEmissive) != 0 ? FxBlend::Additive
 			: (p_emitter.tmpl.flags & kEmitterOpaque) != 0	 ? FxBlend::Opaque
 															 : FxBlend::Alpha;
@@ -102,6 +104,8 @@ FxBatchKey fx_batch_key(const EmitterDef &p_emitter, bool p_first_person) {
 	return k;
 }
 
+// SOURCE: research/topics/gap-r2-vfx-effects-system.md 1.3 (no Trail or Point emitter in @all-mp).
+// STAND-IN: Trail and Point emitters are not drawn. Settle: a level whose effects use them.
 bool fx_emittable_drawn(EmittableType p_type) {
 	switch (p_type) {
 		case EmittableType::ScreenAlignedQuad:
@@ -117,6 +121,8 @@ bool fx_emittable_drawn(EmittableType p_type) {
 	return false;
 }
 
+// INFERRED: DistanceScaleNearValue at the camera to DistanceScaleFarValue at DistanceScaleLength m and beyond, linear
+// between. Settle: a note on the emitter distance scale.
 float fx_distance_scale(const EmitterTemplateDef &p_template, float p_distance) {
 	const float near_scale = p_template.distance_scale_near, far_scale = p_template.distance_scale_far;
 	if (!std::isfinite(near_scale) || !std::isfinite(far_scale) || !std::isfinite(p_distance)) {
@@ -136,6 +142,8 @@ FxViewAxes fx_view_axes(const Vec3 &p_forward) {
 	return axes;
 }
 
+// INFERRED: size is the quad's full extent and UpdateSizeData.Pivot -1 and 1 are its edges, so the particle sits there.
+// Settle: a retail capture of a pivoted emitter (ground mist, flames).
 Vec3 fx_pivoted_position(FxShaderClass p_shader, bool p_world_aligned, const Vec2 &p_pivot,
 		const ParticleVertex &p_particle, const Vec3 &p_emitter_right, const Vec3 &p_emitter_up,
 		const Vec3 &p_view_right, const Vec3 &p_view_up) {
@@ -347,6 +355,8 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 			m.per_batch[fx_batch_index(fx_batch_key(e, o.first_person))].push_back(OutputRef{ uint32_t(i), std::isfinite(depth) ? depth : 0.0f });
 		}
 
+		// INFERRED: an emitter's particle lights draw as one light at their intensity-weighted centre with their mean
+		// intensity and largest radius. Settle: a retail capture of a lit-spark emitter's lighting.
 		if (o.light_count > 0 && size_t(o.first_light) + o.light_count <= plights.size()) {
 			FxLight l;
 			double sum = 0, px = 0, py = 0, pz = 0, cr = 0, cg = 0, cb = 0;
@@ -367,9 +377,12 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 				l.position = Vec3{ float(px / sum), float(py / sum), float(pz / sum) };
 				l.intensity = float(sum / double(o.light_count));
 
+				// WHY: each particle light's colour is PointLightColor times its intensity, so summed colours over summed
+				// intensities give the emitter's PointLightColor back.
 				l.color = Vec3{ float(cr / sum), float(cg / sum), float(cb / sum) };
 				l.radius = radius;
 				const Vec3 d = sub(l.position, cam);
+				// STAND-IN: the light pool keeps the lights of highest intensity over distance squared. Settle: BF3's light culling.
 				l.priority = l.intensity / std::max(dot(d, d), kFxLightMinDistance2);
 				l.first_person = o.first_person;
 				l.effect = o.effect;
@@ -393,6 +406,8 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 				if (list.empty()) {
 					continue;
 				}
+				// STAND-IN: transparent emitters sort back to front by emitter origin and particles keep simulation order,
+				// ForceNiceSorting is not read. Settle: a note on BF3's particle sort.
 				if (blend != FxBlend::Additive) {
 					std::stable_sort(list.begin(), list.end(), [](const OutputRef &a, const OutputRef &b) { return a.depth > b.depth; });
 				}
@@ -445,6 +460,8 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 								break;
 							case FxShaderClass::Waq: {
 
+								// INFERRED: a WorldAlignedQuad lies flat facing world up, a Quad in its emitter's right-up plane (research gap-r2 10:
+								// neither convention checked). Settle: a retail capture of each type.
 								const Vec3 bx = world_aligned ? Vec3{ 1, 0, 0 } : ex;
 								const Vec3 by = world_aligned ? Vec3{ 0, 0, -1 } : ey;
 								const Vec3 bn = world_aligned ? Vec3{ 0, 1, 0 } : ez;
@@ -456,6 +473,7 @@ void RenderPrep::prepare(const FxWorld &p_world, const FxView &p_view, const Emi
 							case FxShaderClass::Mesh:
 							default: {
 
+								// INFERRED: SpawnOrientation is Euler degrees, turned about y, then x, then z. Settle: a capture of a mesh particle.
 								const float yx = p.axis.y * core::kDegToRadF, xx = p.axis.x * core::kDegToRadF, zx = p.axis.z * core::kDegToRadF;
 								const float cy = std::cos(yx), sy = std::sin(yx), cx = std::cos(xx), sx = std::sin(xx), cz = std::cos(zx), sz = std::sin(zx);
 

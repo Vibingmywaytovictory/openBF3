@@ -50,6 +50,8 @@ void add_pairs(detail::Reader &r_r, const core::EbxPartition &p_container, std::
 		if (!m) {
 			continue;
 		}
+		// SOURCE: research/topics/gap-r2-vfx-effects-system.md 3 (the grid is indexed through
+		// MaterialIndexMap[PhysicsMaterialIndex & 0xFF]).
 		r_pairs.emplace(id, uint8_t(*m & 0xFF));
 	}
 }
@@ -261,6 +263,8 @@ core::Result<ImpactTable> ImpactTable::load(const core::EbxResolver &p_db, std::
 	return out;
 }
 
+// SOURCE: research/topics/gap-r2-vfx-effects-system.md 3 (row from the projectile's
+// PhysicsMaterialIndex, column from the surface's).
 const ImpactCell *ImpactTable::select(uint8_t p_projectile_material, uint8_t p_surface_material) const {
 	if (p_projectile_material >= index_map_.size() || p_surface_material >= index_map_.size()) {
 		return nullptr;

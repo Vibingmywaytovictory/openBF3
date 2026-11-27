@@ -483,6 +483,7 @@ struct Compile {
 			case ProcessorType::UpdateAge:
 				pp.particle_lifetime = r.number(s, "Lifetime");
 				break;
+			// STAND-IN: UpdateCameraProximityData is carried but not applied. Settle: build camera proximity.
 			case ProcessorType::UpdateCameraProximity:
 				pp.proximity_forward_offset = r.number(s, "ForwardOffset");
 				pp.proximity_size = r.vec3(s, "Size");
@@ -518,9 +519,11 @@ struct Compile {
 				pp.alpha_exponent = r.number(s, "Exponent");
 				break;
 			case ProcessorType::UpdateTextureCoords:
+				// STAND-IN: TextureBlendValue is not applied; flipbook frames do not blend. Settle: a note on frame blending.
 				pp.texture_blend = r.number(s, "TextureBlendValue");
 				texture_info(s, r_e);
 				break;
+			// STAND-IN: the Lookup is carried but quads draw whole (research gap-r2 10). Settle: a note on UpdateClipScaleData.
 			case ProcessorType::UpdateClipScale: {
 				const core::OptionalEbxArray lookup = r.array(s, "Lookup", kMaxClipLookup);
 				if (lookup) {
@@ -603,6 +606,8 @@ struct Compile {
 		if (!r.ok()) {
 			return;
 		}
+		// INFERRED: a chain that is only a BaseEmitterData takes the base document's whole chain and ignores the orphan copy
+		// (research gap-r2 1.2 leaves it open). Settle: a note on BaseEmitterData at run time.
 		if (links.size() == 1 && links.front().second == ProcessorType::BaseEmitter) {
 			const EbxStruct s = links.front().first.data();
 			(void)r.flag(s, "Enable");
@@ -648,6 +653,8 @@ struct Compile {
 			const char *name;
 			uint32_t bit;
 		};
+		// STAND-IN: FollowSpawnSource, ForceFullRes and TransparencySunShadowEnable are read but not applied.
+		// Settle: build them.
 		static const FlagField kFlags[] = { { "LocalSpace", kEmitterLocalSpace }, { "FollowSpawnSource", kEmitterFollowSpawnSource },
 			{ "ActAsPointLight", kEmitterActAsPointLight }, { "Emissive", kEmitterEmissive }, { "Opaque", kEmitterOpaque },
 			{ "ForceFullRes", kEmitterForceFullRes }, { "ForceNiceSorting", kEmitterForceNiceSorting },
@@ -669,6 +676,8 @@ struct Compile {
 		l.random_min = r.number(p_s, "PointLightRandomIntensityMin");
 		l.random_max = r.number(p_s, "PointLightRandomIntensityMax");
 		l.pivot = r.vec3(p_s, "PointLightPivot");
+		// STAND-IN: the five distance and cull fields below are read but not applied; particles draw at any distance.
+		// Settle: build emitter culling.
 		r_t.max_spawn_distance = r.number(p_s, "MaxSpawnDistance");
 		r_t.visible_after_distance = r.number(p_s, "VisibleAfterDistance");
 		r_t.mesh_culling_distance = r.number(p_s, "MeshCullingDistance");
@@ -680,6 +689,8 @@ struct Compile {
 		r_t.soft_particles_fade = r.number(p_s, "SoftParticlesFadeDistanceMultiplier");
 		r_t.light_multiplier = r.number(p_s, "LightMultiplier");
 		r_t.light_wrap_around = r.number(p_s, "LightWrapAroundFactor");
+		// STAND-IN: these two blend factors and ZOcclusionLookup below are read but not applied.
+		// Settle: build them into the particle lighting.
 		r_t.vertex_pixel_lighting_blend = r.number(p_s, "VertexPixelLightingBlendFactor");
 		r_t.global_local_normal_blend = r.number(p_s, "GlobalLocalNormalBlendFactor");
 		if (const core::OptionalEbxArray z = r.array(p_s, "ZOcclusionLookup", kMaxZOcclusionLookup)) {
@@ -883,6 +894,7 @@ struct Compile {
 			}
 			c.transform = r.transform(cs, "Transform");
 			c.start_delay = r.number(cs, "StartDelay");
+			// STAND-IN: a component's own CullDistance is not applied. Settle: build per-component culling.
 			c.cull_distance = r.number(cs, "CullDistance");
 			c.tiers = tiers(cs);
 			if (r.ok() && c.start_delay < 0) {

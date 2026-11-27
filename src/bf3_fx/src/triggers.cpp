@@ -70,6 +70,8 @@ float seconds_of(int64_t p_units) {
 	return float(double(p_units) / double(sim::weapons::kTimeUnitsPerSecond));
 }
 
+// INFERRED: the impact effect's axis is uniform in solid angle within ImpactEffectMaxSpreadAngle degrees.
+// Settle: a note on MaterialRelationEffectData's spread.
 Vec3 spread_direction(const Vec3 &p_axis, float p_degrees, uint64_t p_seed) {
 	if (!(p_degrees > 0.0f)) {
 		return p_axis;
@@ -84,6 +86,7 @@ Vec3 spread_direction(const Vec3 &p_axis, float p_degrees, uint64_t p_seed) {
 	return normalize_or(add(add(mul(f.up, cos_t), mul(f.right, sin_t * std::cos(phi))), mul(f.forward, sin_t * std::sin(phi))), p_axis);
 }
 
+// INFERRED: the legs take the body cell, as the grid has no leg material. Settle: a note on soldier impact materials.
 uint8_t zone_material(uint32_t p_zone) {
 	switch (p_zone) {
 		case 0:
@@ -134,6 +137,7 @@ void read_fire_list(detail::Reader &r, const core::EbxStruct &p_ffd, std::string
 		fe.offset = fire_effect_offset(offset, rotation);
 		fe.update_transform = r.flag_or(*s, "UpdateTransform", false);
 		fe.disable_during_zoom = r.flag_or(*s, "DisableDuringZoom", false);
+		// STAND-IN: an entry is a shell ejection when its blueprint lies under a shells folder. Settle: a data field for it.
 		fe.shell = blueprint.find("/shells/") != std::string::npos;
 		r_out.push_back(std::move(fe));
 	}
@@ -236,6 +240,8 @@ uint64_t pack(EffectHandle p_h) {
 
 }
 
+// INFERRED: an effect's local +y is the barrel or the surface normal and a muzzle's +z the weapon's up.
+// Settle: retail captures of a muzzle and an impact effect.
 Transform effect_frame(const Vec3 &p_origin, const Vec3 &p_axis, const Vec3 &p_forward_hint) {
 	const Vec3 u = normalize_or(p_axis, { 0, 1, 0 });
 	Vec3 f = finite(p_forward_hint) ? sub(p_forward_hint, mul(u, dot(p_forward_hint, u))) : Vec3{};
@@ -290,6 +296,7 @@ MuzzleSample fallback_muzzle(const present::PresentedSoldier &p_soldier) {
 	return aim_muzzle(p_soldier.slot, eye, dir, { p_soldier.velocity[0], p_soldier.velocity[1], p_soldier.velocity[2] });
 }
 
+// INFERRED: FireEffectData.Rotation is degrees about x, then y, then z. Settle: a capture of a rotated fire effect.
 Transform fire_effect_offset(const Vec3 &p_offset, const Vec3 &p_rotation_degrees) {
 	Transform t;
 	t.trans = finite(p_offset) ? p_offset : Vec3{};
@@ -443,6 +450,8 @@ std::vector<std::string> impact_decal_names(const ImpactTable &p_table) {
 	return { names.begin(), names.end() };
 }
 
+// INFERRED: a decal's texture is <decal>_d, else the diffuse in its folder sharing the longest name prefix (at least 6).
+// Settle: the decal template's material binding.
 std::string pick_decal_texture(std::string_view p_decal, std::span<const std::string> p_textures) {
 	const std::string decal = detail::canonical_name(p_decal);
 	const size_t slash = decal.rfind('/');
@@ -490,6 +499,8 @@ core::Result<DecalTemplate> load_decal_template(const core::EbxResolver &p_db, s
 	const core::EbxStruct s = primary.data();
 	DecalTemplate t;
 	t.name = name;
+	// STAND-IN: Size 0.2, NormalOffset 0.001 and ClipAngle 70 where the template lacks the field.
+	// Settle: the DecalTemplateData defaults in the type info.
 	t.size = r.number_or(s, "Size", 0.2f);
 	t.random_size = r.number_or(s, "RandomSize", 0.0f);
 	t.rotation = r.number_or(s, "Rotation", 0.0f);
@@ -525,6 +536,8 @@ core::Result<DecalTemplate> load_decal_template(const core::EbxResolver &p_db, s
 	return t;
 }
 
+// INFERRED: size = Size + U x RandomSize (U in [0, 1]); rotation = Rotation + V x RandomRotation degrees (V in
+// [-1, 1]). Settle: a note on DecalTemplateData's random fields.
 DecalPlacement decal_placement(const DecalTemplate &p_template, uint64_t p_seed) {
 	DecalPlacement d;
 	d.size = p_template.size + fx_unit(splitmix64(p_seed ^ 0x51ull)) * p_template.random_size;
@@ -623,6 +636,7 @@ core::Result<std::vector<uint8_t>> decode_bc3(std::span<const uint8_t> p_blocks,
 	return decode_bc_level(p_blocks, p_width, p_height, true, "decode_bc3");
 }
 
+// STAND-IN: a texel is magenta when R and B are at least 230 and G at most 25. Settle: the decal shader's key rule.
 float magenta_share(std::span<const uint8_t> p_rgba) {
 	const size_t n = p_rgba.size() / 4;
 	if (n == 0) {
@@ -636,6 +650,8 @@ float magenta_share(std::span<const uint8_t> p_rgba) {
 	return float(double(keyed) / double(n));
 }
 
+// INFERRED: a keyed texel is a x grey + (1 - a) x magenta, so 1 - a = min(R, B) - G and the grey is G / a.
+// Settle: the decal shader's key rule.
 void unkey_magenta(std::span<uint8_t> r_rgba) {
 	auto q = [](float p_v) {
 		return uint8_t(std::lround(std::clamp(p_v, 0.0f, 1.0f) * 255.0f));
@@ -935,6 +951,8 @@ struct FxTriggers::Impl {
 		if (r_culled != nullptr) {
 			*r_culled = false;
 		}
+		// INFERRED: an effect beyond its CullDistance from the camera when it starts is not started.
+		// Settle: a note on EffectEntityData.CullDistance.
 		if (p_def->cull_distance > 0.0f && !p_first_person) {
 			const float d = length(sub(p_frame.trans, view.camera_position));
 			if (d > p_def->cull_distance) {
@@ -953,6 +971,8 @@ struct FxTriggers::Impl {
 		es.tier = config.tier;
 		es.first_person = p_first_person;
 		es.start_age = p_age;
+		// INFERRED: each shooter's triggered effects are their own instance pool, so one metal hit does not end every
+		// other's light. Settle: an answer to Q-FX2 (STATUS.md, open).
 		es.owner = kTriggerOwnerBase | p_e.slot;
 		core::Result<EffectHandle> h = world.start(p_def, es);
 		if (!h) {
@@ -1025,6 +1045,8 @@ struct FxTriggers::Impl {
 		}
 		MuzzleSample m;
 		const bool vehicle = (p_e.flags & present::flags::kVehicle) != 0;
+		// STAND-IN: a vehicle shot's effects start at the shot origin along its direction; no vehicle muzzle is posed.
+		// Settle: the vehicle weapon's muzzle position.
 		if (vehicle) {
 			m = aim_muzzle(p_e.slot, origin, dir, {});
 		} else if (const MuzzleSample *s = muzzle_for(p_e.slot, own)) {
@@ -1101,6 +1123,8 @@ struct FxTriggers::Impl {
 		tracers.push_back(t);
 	}
 
+	// INFERRED: the tracer leaves the muzzle and joins the shot line linearly over VisualConvergeDistance (research
+	// 01-weapons 1.6). Settle: a retail capture of a tracer near the shooter.
 	static Transform tracer_frame(const Tracer &p_t, float p_s) {
 		const float k = std::clamp(p_s / std::max(p_t.converge, 0.01f), 0.0f, 1.0f);
 		const Vec3 pos = add(add(p_t.origin, mul(p_t.direction, p_s)), mul(sub(p_t.muzzle, p_t.origin), 1.0f - k));
@@ -1146,9 +1170,11 @@ struct FxTriggers::Impl {
 		bool started = false;
 		if (!p_cell.effects.empty()) {
 			const size_t n = p_cell.effects.size();
+			// INFERRED: one of the cell's ImpactEffects, uniform by the seed. Settle: a note on how a cell's effect is chosen.
 			const size_t pick = std::min(n - 1, size_t(fx_unit(trigger_seed(p_seed, TriggerPurpose::ImpactChoice, 0)) * float(n)));
 			if (const std::shared_ptr<const EffectDef> def = get(p_cell.effects[pick])) {
 				Vec3 axis = p_normal;
+				// INFERRED: MirrorImpactDirection reflects the shot direction about the normal. Settle: a note on the field.
 				if (p_cell.mirror_impact_direction) {
 					if (const ShotMemory *s = shot_of(p_e.slot, p_e.id)) {
 						const Vec3 d = s->direction;
@@ -1236,6 +1262,7 @@ struct FxTriggers::Impl {
 		if (!first_time(own_key)) {
 			return;
 		}
+		// WHY: a hit on the own soldier plays nothing, as the first-person camera sits inside the hit capsule.
 		if (!contact && (p_e.flags & present::flags::kOwnVictim) != 0) {
 			return;
 		}
@@ -1275,6 +1302,7 @@ struct FxTriggers::Impl {
 			++stats.unknown_defs;
 		}
 		std::string_view name = w != nullptr && !w->detonation.empty() ? std::string_view(w->detonation) : std::string_view();
+		// STAND-IN: a detonation without its own DetonationEffect plays fx_grenade_frag_01. Settle: the def's explosion data.
 		if (name.empty() && fire) {
 			name = fire->default_detonation;
 		}
@@ -1282,6 +1310,8 @@ struct FxTriggers::Impl {
 		const Vec3 pos = from(p_e.pos);
 		const Vec3 n = normalize_or(from(p_e.dir), { 0, 1, 0 });
 		const ImpactTable *table = library.impacts();
+		// INFERRED: a detonation also plays its explosion material's grid cell on the surface under it (research gap-r2
+		// 2.4). Settle: a note on ExplosionEntityData.MaterialPair.
 		const ImpactCell *cell = w != nullptr && w->has_explosion_material && table != nullptr &&
 						(p_e.material & kDetonationSurface) != 0
 				? table->select(w->explosion_material, uint8_t(p_e.material & 0xFFu))
@@ -1299,6 +1329,7 @@ struct FxTriggers::Impl {
 			play_cell(*cell, p_e, seed, pos, n, p_age, true, true);
 			return;
 		}
+		// STAND-IN: the scorch decal is placed only where no surface cell is found. Settle: a note on explosion decals.
 		if (!culled && config.decals) {
 			DecalCue d;
 			d.decal = kScorchDecal;
@@ -1326,6 +1357,7 @@ struct FxTriggers::Impl {
 			if (!def) {
 				continue;
 			}
+			// STAND-IN: a gadget's effects start at its position with world up as their axis. Settle: the gadget's effect frames.
 			const EffectHandle h = start(def, p_e, TriggerPurpose::Deployed, uint32_t(i),
 					trigger_seed(seed, TriggerPurpose::Deployed, uint32_t(i)),
 					effect_frame(from(p_e.pos), { 0, 1, 0 }, { 0, 0, 1 }), {}, p_age, false);

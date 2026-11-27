@@ -173,6 +173,8 @@ uint64_t atlas_level_bytes(uint32_t p_width, uint32_t p_height) {
 	return uint64_t((std::max(p_width, 1u) + 3) / 4) * ((std::max(p_height, 1u) + 3) / 4) * kBlockBytes;
 }
 
+// INFERRED: NormalDXT5RGA holds normal x in R and y in A, G and B dropped (research gap-r2 5, a statistical reading; the
+// sign of y is unknown). Settle: a matched render of a normal-mapped smoke emitter.
 core::Status convert_normal_dxt5rga_to_bc5(const uint8_t *p_blocks, uint64_t p_size, uint32_t p_width, uint32_t p_height, std::vector<uint8_t> &r_out,
 		core::gameplay::WorkBudget &r_budget) {
 	if (p_width == 0 || p_height == 0 || p_width > kMaxSide || p_height > kMaxSide) {

@@ -18,6 +18,7 @@ namespace {
 constexpr uint32_t kNone = UINT32_MAX;
 constexpr size_t kChunk = 256;
 constexpr float kPi = std::numbers::pi_v<float>;
+// STAND-IN: turbulence noise has a knot every 1/30 s of particle age. Settle: a note on TurbulanceData's noise.
 constexpr float kTurbulenceKnotsPerSecond = 30.0f;
 
 inline float clampf(float p_v, float p_lo, float p_hi) {
@@ -82,6 +83,8 @@ inline float draw(uint64_t p_seed, uint32_t p_serial, uint32_t p_slot, uint32_t 
 	return fx_unit(fx_key(p_seed, p_serial, p_slot, p_lane));
 }
 
+// STAND-IN: an evaluator's EmitterParameter is ignored, as if None; EffectStart::params is never read.
+// Settle: build the game-fed emitter parameters.
 Vec4 eval_one(const EmitterDef &p_e, const EvaluatorDef &p_ev, uint32_t p_slot, float p_input, uint64_t p_seed, uint32_t p_serial,
 		const Vec4 &p_defaults) {
 	switch (p_ev.type) {
@@ -109,12 +112,14 @@ Vec4 eval_one(const EmitterDef &p_e, const EvaluatorDef &p_ev, uint32_t p_slot, 
 				fx_uniform(p_ev.random_xyz.min.z, p_ev.random_xyz.max.z, draw(p_seed, p_serial, p_slot, 2)), 1.0f };
 		case EvaluatorType::Box: {
 
+			// INFERRED: Pivot is in half extents: (Pivot / 2 + u - 1/2) x Dimensions. Settle: a note on BoxEvaluatorData.
 			const BoxDef &b = p_ev.box;
 			return { (0.5f * b.pivot.x + draw(p_seed, p_serial, p_slot, 0) - 0.5f) * b.dimensions.x,
 				(0.5f * b.pivot.y + draw(p_seed, p_serial, p_slot, 1) - 0.5f) * b.dimensions.y,
 				(0.5f * b.pivot.z + draw(p_seed, p_serial, p_slot, 2) - 0.5f) * b.dimensions.z, 1.0f };
 		}
 		case EvaluatorType::Sphere: {
+			// INFERRED: Pivot + Scale x a point uniform in the ball of Radius. Settle: a note on SphereEvaluatorData.
 			const SphereDef &s = p_ev.sphere;
 			const float cos_theta = 2.0f * draw(p_seed, p_serial, p_slot, 0) - 1.0f;
 			const float sin_theta = std::sqrt(std::fmax(0.0f, 1.0f - cos_theta * cos_theta));
@@ -125,6 +130,8 @@ Vec4 eval_one(const EmitterDef &p_e, const EvaluatorDef &p_ev, uint32_t p_slot, 
 		}
 		case EvaluatorType::RotateVector: {
 
+			// INFERRED: a direction uniform in a cone of Angle degrees around DefaultValues.xyz, times its length; RotateWithinPlane
+			// fixes the azimuth and InputAffectsPhi is not read. Settle: a note on RotateVectorData.
 			const Vec3 axis_raw{ p_defaults.x, p_defaults.y, p_defaults.z };
 			Vec3 axis = normalize_or_zero(axis_raw);
 			if (axis.x == 0 && axis.y == 0 && axis.z == 0) {
@@ -139,9 +146,12 @@ Vec4 eval_one(const EmitterDef &p_e, const EvaluatorDef &p_ev, uint32_t p_slot, 
 			const float len = length(axis_raw);
 			return { d.x * len, d.y * len, d.z * len, 1.0f };
 		}
+		// STAND-IN: CameraProximityEvaluatorData is not evaluated; the slot's DefaultValues stand in. Settle: build it.
 		case EvaluatorType::CameraProximity:
 			return p_defaults;
 		case EvaluatorType::SampleTexture: {
+			// INFERRED: GradientData is a 1-D table sampled at the input; value = lerp(ColorIntensityMin, ColorIntensityMax, sample).
+			// Settle: a note on SampleTextureData.
 			const SampleTextureDef &st = p_ev.sample_texture;
 			Vec4 s{ 1, 1, 1, 1 };
 			if (st.count > 0 && size_t(st.first) + st.count <= p_e.gradients.size()) {
@@ -221,6 +231,8 @@ struct FxWorld::Impl {
 		uint32_t parent_child_slot = 0;
 		uint64_t seed = 0;
 		float e_age = 0;
+		// INFERRED: the spawn accumulator starts at 1, so a start spawns at least one particle (research gap-r2 2.1).
+		// Settle: a note on SpawnRateData's first spawn.
 		float acc = 1;
 		bool burst_pending = true;
 		bool stopped = false;
@@ -486,6 +498,8 @@ struct FxWorld::Impl {
 					continue;
 				}
 				if (comp.kind == ComponentKind::VisualEnvironment) {
+					// STAND-IN: a VisualEnvironmentEffectEntityData only raises this event; nothing applies its visual environment.
+					// Settle: build effect screen effects.
 					event(FxEvent::Kind::VisualEnvironmentStart, p_slot, c);
 					continue;
 				}
@@ -508,6 +522,8 @@ struct FxWorld::Impl {
 				}
 				EmitterInstance &inst = emitters[id];
 				inst.e_age = e_age;
+				// STAND-IN: an effect started late advances its clocks but spawns nothing for the time it missed.
+				// Settle: a note on effects a late joiner sees.
 				if (e_age > 0) {
 					inst.acc = 0;
 					inst.burst_pending = false;
@@ -525,6 +541,8 @@ struct FxWorld::Impl {
 		return eval_one(p_e, p_e.evaluators[size_t(slot.evaluator)], uint32_t(p_type), p_input, p_seed, p_serial, slot.default_values);
 	}
 
+	// INFERRED: EfNormTime is age over life, EfEmitterNormTime emitter age over Lifetime and EfVelocity the speed in m/s
+	// (research gap-r2 2.1). Settle: a note on EvaluatorInput.
 	static float input_of(EvaluatorInput p_input, float p_t, float p_te, float p_speed) {
 		switch (p_input) {
 			case EvaluatorInput::NormTime:
@@ -554,6 +572,8 @@ struct FxWorld::Impl {
 			inst.transform = compose(fx.base, d.components[inst.component].transform);
 			inst.source_velocity = fx.start.velocity;
 		} else if (!inst.stopped) {
+			// INFERRED: a child emitter sits on its parent particle, up along its velocity, and stops when it dies (research gap-r2 10
+			// leaves child timing open). Settle: a note on EmitterData child emitters.
 			const EmitterInstance &p = emitters[inst.parent];
 			bool found = false;
 			if (p.active && p.generation == inst.parent_generation && p.state_count > 0) {
@@ -600,6 +620,8 @@ struct FxWorld::Impl {
 		if (window_open && e.has(ProcessorType::SpawnRate)) {
 			const Vec4 v = slot_value(e, ProcessorType::SpawnRate, input_of(e.slot(ProcessorType::SpawnRate).input, 0, te_before, 0), inst.seed, 0);
 			const float rate = std::fmax(0.0f, e.params.spawn_rate * v.x);
+			// INFERRED: DistributeOverTime false spawns floor(1 + rate x Lifetime) at the window start; a continuous emitter keeps
+			// the rate (research gap-r2 2.1). Settle: a note on SpawnRateData.DistributeOverTime.
 			const bool burst = !e.params.distribute_over_time && t.lifetime > 0;
 			if (burst) {
 				if (inst.burst_pending) {
@@ -609,6 +631,8 @@ struct FxWorld::Impl {
 			} else {
 				it.a0 = inst.acc;
 				double inc = 0;
+				// INFERRED: DistributeOverDistance spawns rate per metre the emitter moved (research gap-r2 2.1); TrailSegmentLength is
+				// not read. Settle: a note on SpawnRateData's distance mode and TrailSegmentLength.
 				if (e.params.distribute_over_distance) {
 					const Vec3 tr = inst.transform.trans;
 					const float moved = inst.has_prev ? length(Vec3{ tr.x - inst.prev_trans.x, tr.y - inst.prev_trans.y, tr.z - inst.prev_trans.z }) : 0.0f;
@@ -647,6 +671,8 @@ struct FxWorld::Impl {
 		}
 
 		inst.e_age += dt_e;
+		// INFERRED: RepeatParticleSpawning restarts the spawn window (and its burst) every Lifetime until the emitter stops.
+		// Settle: a note on EmitterTemplateData.RepeatParticleSpawning.
 		if (repeat && t.lifetime > 0 && inst.e_age >= t.lifetime) {
 			inst.e_age = std::fmod(inst.e_age, t.lifetime);
 			inst.acc = 1.0f;
@@ -707,6 +733,8 @@ struct FxWorld::Impl {
 				} else {
 					const uint32_t k = idx - r_it.old_count;
 					float f = 0;
+					// INFERRED: a particle spawned inside a sub-step is aged from when the rate reached it there, so a fast emitter does not
+					// clump. Settle: a retail capture of a fast emitter's spacing.
 					if (r_it.rate_dt > 0) {
 						f = clampf((float(k) + 1.0f - r_it.a0) / r_it.rate_dt, 0.0f, 1.0f);
 					}
@@ -754,6 +782,8 @@ struct FxWorld::Impl {
 		if (p_e.has(ProcessorType::SpawnDirection)) {
 			const Vec4 v = value(ProcessorType::SpawnDirection);
 			dir = normalize_or_zero(Vec3{ v.x, v.y, v.z });
+			// INFERRED: DirectionFromEmitterOrigin lerps the direction toward the spawn position's direction from the origin.
+			// Settle: a note on SpawnDirectionData.
 			const float k = pp.direction_from_emitter_origin;
 			if (k != 0) {
 				const Vec3 radial = normalize_or_zero(pos);
@@ -769,6 +799,7 @@ struct FxWorld::Impl {
 			const Vec4 v = value(ProcessorType::SpawnSize);
 			size = { pp.size * v.x, pp.size * v.y, pp.size * v.z };
 		}
+		// INFERRED: Rotation and RotationSpeed are in half turns (times pi rad). Settle: a note on their unit.
 		const float rotation = p_e.has(ProcessorType::SpawnRotation) ? pp.rotation * value(ProcessorType::SpawnRotation).x * kPi : 0.0f;
 		const float rotation_speed = p_e.has(ProcessorType::SpawnRotationSpeed) ? pp.rotation_speed * value(ProcessorType::SpawnRotationSpeed).x * kPi : 0.0f;
 		Vec3 axis{};
@@ -776,6 +807,8 @@ struct FxWorld::Impl {
 			const Vec4 v = value(ProcessorType::SpawnOrientation);
 			axis = { v.x, v.y, v.z };
 		}
+		// INFERRED: a Pre on SpawnAnimationFrame replaces AnimationFrame (0-based); SpawnAnimation's Pre scales AnimationSpeed
+		// and its DefaultValues are ignored. Settle: a note on SpawnAnimationFrameData and SpawnAnimationData.
 		float frame = 0;
 		if (p_e.has(ProcessorType::SpawnAnimationFrame)) {
 			frame = p_e.slot(ProcessorType::SpawnAnimationFrame).evaluator != kNoEvaluator ? value(ProcessorType::SpawnAnimationFrame).x : float(pp.animation_frame);
@@ -784,7 +817,10 @@ struct FxWorld::Impl {
 		if (p_e.has(ProcessorType::SpawnAnimation)) {
 			frame_rate = pp.animation_speed * (p_e.slot(ProcessorType::SpawnAnimation).evaluator != kNoEvaluator ? value(ProcessorType::SpawnAnimation).x : 1.0f);
 		}
+		// INFERRED: UpdateAgeData.Lifetime is the particle's life, EmitterTemplateData.Lifetime the spawn window (research
+		// gap-r2 2.1). Settle: a note on the two Lifetimes.
 		const float life = p_e.has(ProcessorType::UpdateAge) ? pp.particle_lifetime * value(ProcessorType::UpdateAge).x : 0.0f;
+		// INFERRED: PointLightRandomIntensityMin/Max is drawn once per particle. Settle: a note on ActAsPointLight particles.
 		float light = 1.0f;
 		if ((p_e.tmpl.flags & kEmitterActAsPointLight) != 0) {
 			light = fx_uniform(p_e.tmpl.light.random_min, p_e.tmpl.light.random_max, draw(seed, serial, kSlotLight, 0));
@@ -914,6 +950,7 @@ struct FxWorld::Impl {
 				r_dead[i] = (has_age && before > 0) ? 1 : 0;
 			}
 		}
+		// INFERRED: without UpdateAge, particles die when the emitter's window ends. Settle: a note on emitters without it.
 		if (p_it.kill_all || (!has_age && p_it.window_over)) {
 			for (uint32_t i = 0; i < p_n; ++i) {
 				r_dead[i] = 1;
@@ -923,6 +960,7 @@ struct FxWorld::Impl {
 
 		if (p_e.has(ProcessorType::AirResistance)) {
 			values(p_e, ProcessorType::AirResistance, p_it, p_inst, r_s, p_at, p_n, t, false, v);
+			// INFERRED: drag scales the velocity by exp(-DragFactor x value x dt). Settle: a note on AirResistanceData.
 			const float f_full = v.constant ? std::exp(-(pp.drag * v.c.x) * p_it.dt_e) : 0.0f;
 			for (uint32_t i = 0; i < p_n; ++i) {
 				const float k = pp.drag * (v.constant ? v.c.x : v.x[i]);
@@ -935,6 +973,7 @@ struct FxWorld::Impl {
 
 		if (p_e.has(ProcessorType::Gravity)) {
 			values(p_e, ProcessorType::Gravity, p_it, p_inst, r_s, p_at, p_n, t, false, v);
+			// INFERRED: a positive GravityData.Gravity pulls along world -y, local-space emitters too. Settle: a note on GravityData.
 			const Vec3 down = p_local ? unrotate(p_inst.transform, Vec3{ 0, -1, 0 }) : Vec3{ 0, -1, 0 };
 			for (uint32_t i = 0; i < p_n; ++i) {
 				const float a = pp.gravity * (v.constant ? v.c.x : v.x[i]) * p_dt[i];
@@ -946,6 +985,7 @@ struct FxWorld::Impl {
 
 		if (p_e.has(ProcessorType::LocalForce)) {
 			values(p_e, ProcessorType::LocalForce, p_it, p_inst, r_s, p_at, p_n, t, true, v);
+			// INFERRED: LocalForce is an acceleration in the emitter's frame. Settle: a note on LocalForceData.
 			const Vec3 &f = pp.local_force;
 			for (uint32_t i = 0; i < p_n; ++i) {
 				const Vec3 lf = v.constant ? Vec3{ f.x * v.c.x, f.y * v.c.y, f.z * v.c.z } : Vec3{ f.x * v.x[i], f.y * v.y[i], f.z * v.z[i] };
@@ -958,6 +998,8 @@ struct FxWorld::Impl {
 
 		if (p_e.has(ProcessorType::Turbulance) && pp.turbulence != 0) {
 			values(p_e, ProcessorType::Turbulance, p_it, p_inst, r_s, p_at, p_n, t, false, v);
+			// STAND-IN: turbulence is a per-particle unit vector of value noise, linear between knots, times Intensity (research
+			// gap-r2 10 leaves the noise open). Settle: a note on TurbulanceData.
 			const uint32_t *serial = r_s.serial.data() + p_at;
 			for (uint32_t i = 0; i < p_n; ++i) {
 				const float a = age[i] * kTurbulenceKnotsPerSecond;
@@ -996,6 +1038,8 @@ struct FxWorld::Impl {
 		}
 		if (p_e.has(ProcessorType::UpdateTextureCoords)) {
 			values(p_e, ProcessorType::UpdateTextureCoords, p_it, p_inst, r_s, p_at, p_n, t, false, v);
+			// INFERRED: the flipbook advances by the spawn frame rate times the slot's value per second and wraps.
+			// Settle: a note on UpdateTextureCoordsData.
 			float *frame = r_s.f[kFrame].data() + p_at;
 			const float *frate = r_s.f[kFrate].data() + p_at;
 
@@ -1106,17 +1150,22 @@ struct FxWorld::Impl {
 		}
 		const float alpha = p_o.has_alpha ? vx_of(p_o.alpha, p_i) : 1.0f;
 		out.color = { rgb.x, rgb.y, rgb.z, alpha };
+		// INFERRED: a mesh particle turns by its SpawnOrientation angles and a DirectionAlignedQuad lies along its world
+		// velocity. Settle: a note on SpawnOrientationData and the quad types.
 		if (p_e.tmpl.emittable == EmittableType::ParticleMesh) {
 			out.axis = { p_s.f[kAx][p_at], p_s.f[kAy][p_at], p_s.f[kAz][p_at] };
 		} else if (p_e.tmpl.emittable == EmittableType::DirectionAlignedQuad) {
 			out.axis = normalize_or_zero(wvel);
 		}
 		out.age = t;
+		// INFERRED: the alpha levels are MinLevel x value, MaxLevel x value and the scale's value (research gap-r2 10 leaves
+		// the math open). Settle: a note on UpdateAlphaLevelMin/Max/ScaleData.
 		out.alpha_min = p_o.has_alpha_min ? pp.alpha_min_level * vx_of(p_o.alpha_min, p_i) : 0.0f;
 		out.alpha_max = p_o.has_alpha_max ? pp.alpha_max_level * vx_of(p_o.alpha_max, p_i) : 1.0f;
 		out.alpha_scale = p_o.has_alpha_scale ? vx_of(p_o.alpha_scale, p_i) : 1.0f;
 		out.serial = serial;
 
+		// WHY: a NaN or infinity in any output makes this zero-weighted sum non-zero, so one compare drops a broken particle.
 		const float p0 = (out.position.x + out.position.y) + (out.position.z + vel.x);
 		const float p1 = (vel.y + vel.z) + (out.size.x + out.size.y);
 		const float p2 = (out.size.z + out.color.x) + (out.color.y + out.color.z);
@@ -1129,6 +1178,8 @@ struct FxWorld::Impl {
 		ParticleLight light;
 		if (p_it.light_first != kNone) {
 			const PointLightDef &l = p_e.tmpl.light;
+			// INFERRED: one light per live particle (research gap-r2 4): PointLightIntensity at its t times its random draw, radius
+			// PointLightRadius at any particle size, at the turned PointLightPivot. Settle: a note on ActAsPointLight.
 			const float intensity = evaluate_polynomial(l.intensity, t) * p_s.f[kLight][p_at];
 			light.position = add(pos, rotate(p_inst.transform, l.pivot));
 			light.radius = l.radius;
@@ -1178,6 +1229,8 @@ struct FxWorld::Impl {
 			if (pe.children.empty()) {
 				continue;
 			}
+			// INFERRED: each new parent particle starts one instance of each child emitter, at most MaxCount live per child (research
+			// gap-r2 1.2 reads them as per-particle sub-emitters). Settle: a note on EmitterData.EmitterAssets.
 			const uint32_t first = emitters[pid].state_first;
 			const uint32_t count = emitters[pid].state_count;
 			for (uint32_t k = 0; k < count; ++k) {
@@ -1282,6 +1335,8 @@ core::Result<EffectHandle> FxWorld::start(std::shared_ptr<const EffectDef> p_def
 				std::to_string(w.cfg.max_particles));
 	}
 
+	// INFERRED: MaxInstanceCount counts the live instances of one blueprint per EffectStart::owner (a placement or a
+	// shooter), not per blueprint. Settle: an answer to Q-FX2 (STATUS.md, open).
 	uint32_t live = 0;
 	uint32_t oldest = kNone;
 	for (const uint32_t slot : w.effect_list) {
@@ -1293,11 +1348,15 @@ core::Result<EffectHandle> FxWorld::start(std::shared_ptr<const EffectDef> p_def
 			}
 		}
 	}
+	// STAND-IN: EmitterEntityData's own MaxInstanceCount and ResetInstanceWhenStarted are not applied.
+	// Settle: a note on the component-level instance pools.
 	if (live >= p_def->max_instance_count) {
 		if (!p_def->reset_instance_when_started || oldest == kNone) {
 			++w.stats.refused_starts;
 			return core::make_error("start: " + p_def->name + ": instance pool full");
 		}
+		// INFERRED: ResetInstanceWhenStarted stops the oldest instance's spawning and ends its point lights; its particles live
+		// out their life unless KillParticlesWithEmitter. Settle: an answer to Q-FX2 (STATUS.md, open).
 		Impl::EffectSlot &old = w.effects[oldest];
 		old.stopping = true;
 		old.reset = true;

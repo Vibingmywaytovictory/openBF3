@@ -16,10 +16,13 @@
 namespace bf3::fx {
 
 inline constexpr size_t kMaxFxBatches = 32;
+// STAND-IN: at most 64 effect lights a frame, a Godot cost budget (research gap-r2 6.2), not BF3's count.
+// Settle: a BF3 light count in a firefight.
 inline constexpr size_t kMaxFxLights = 64;
 
 inline constexpr float kFxLightMinDistance2 = 0.01f;
 
+// STAND-IN: an emitter whose texture the atlas does not hold draws this entry. Settle: what BF3 draws then.
 inline constexpr const char *kFxDefaultTexture = "systems/emitter/defaulttexture";
 
 enum class FxShaderClass : uint8_t { Saq = 0, Daq = 1, Waq = 2, Mesh = 3, Count };

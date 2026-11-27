@@ -69,6 +69,8 @@ void PlacedEffects::step(FxWorld &r_world, const FxView &p_view, uint8_t p_tier,
 			}
 			continue;
 		}
+		// INFERRED: a placed effect runs while the camera is within its blueprint's CullDistance (always when 0), and one
+		// that ended is not restarted. Settle: a note on placed EffectEntityData and CullDistance.
 		const float cull = slot.def->cull_distance;
 		const bool in_range = !(cull > 0.0f) || distance(slot.transform.trans, p_view.camera_position) <= cull;
 		in_range_count += in_range ? 1u : 0u;
@@ -86,6 +88,7 @@ void PlacedEffects::step(FxWorld &r_world, const FxView &p_view, uint8_t p_tier,
 			start.transform = slot.transform;
 			start.seed = core::splitmix64(p_seed ^ (uint64_t(i) + 1) ^ (stats_.starts << 32));
 			start.tier = p_tier;
+			// INFERRED: each placement is its own MaxInstanceCount pool. Settle: an answer to Q-FX2 (STATUS.md, open).
 			start.owner = uint32_t(i) + 1;
 			core::Result<EffectHandle> h = r_world.start(slot.def, start);
 			if (h) {

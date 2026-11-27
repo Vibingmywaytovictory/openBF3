@@ -50,11 +50,14 @@ core::Result<AtlasTextureInfo> EmitterAtlas::texture_info(const std::string &p_p
 	return out;
 }
 
+// SOURCE: research/topics/gap-r2-vfx-effects-system.md 5 (one EmitterSystemAsset at levels/<l>/<l>/emittersystem_win32).
 std::string EmitterAtlas::emitter_system_of(std::string_view p_level) {
 	const std::string l = detail::canonical_name(p_level);
 	return "levels/" + l + "/" + l + "/emittersystem_win32";
 }
 
+// SOURCE: research/topics/gap-r2-vfx-effects-system.md 5 (*_n, *_nr, *_nrm and the
+// defaultnormalmap aliases have their UVs in the normal atlas).
 AtlasKind EmitterAtlas::kind_of_name(std::string_view p_name) {
 	const std::string n = detail::canonical_name(p_name);
 	if (ends_with(n, "_n") || ends_with(n, "_nr") || ends_with(n, "_nrm") || n.find("normalmap") != std::string::npos) {
@@ -165,6 +168,8 @@ const AtlasEntry *EmitterAtlas::resolve(std::string_view p_name) const {
 	return &entries_[*it];
 }
 
+// INFERRED: flipbook frames run row-major inside the entry rect (research gap-r2 5 assumes it).
+// Settle: a retail capture of one flipbook's frame order.
 void EmitterAtlas::frame_rect(const AtlasEntry &p_entry, uint32_t p_frame, uint32_t p_frame_count, uint32_t p_frame_columns, Vec2 &r_min, Vec2 &r_max) {
 	const uint32_t count = std::max(1u, p_frame_count);
 	const uint32_t columns = std::clamp(p_frame_columns, 1u, count);
