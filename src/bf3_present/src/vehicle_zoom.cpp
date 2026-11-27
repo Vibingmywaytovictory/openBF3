@@ -24,6 +24,8 @@ VehicleZoomView VehicleZoom::step(
 		zoomed_ = p_held;
 		const float target = zoomed_ ? z.fov : p_regular_fov;
 		const float from = fov_.value_or(target);
+		// INFERRED: the AlternateView FOV moves at |FieldOfView - regular| / FovTransitionTime, as notes R-C3 A2b and B give
+		// the soldier zoom. Settle: a note on the vehicle zoom's FOV transition.
 		const float span = std::fabs(z.fov - p_regular_fov);
 		const float rate = z.fov_transition > 0.0f ? span / z.fov_transition : 0.0f;
 		const float moved = rate > 0.0f ? rate * dt : std::fabs(target - from);
@@ -42,6 +44,8 @@ VehicleZoomView VehicleZoom::step(
 			phase_ = Phase::FadeOut;
 			t_ = dt;
 		}
+		// INFERRED: the view switches as BlackDuration starts, between FadeOutDuration and FadeInDuration.
+		// Settle: a note on AlternateCameraViewData's fade to black.
 		if (phase_ == Phase::FadeOut) {
 			if (t_ < z.fade_out) {
 				black = t_ / z.fade_out;

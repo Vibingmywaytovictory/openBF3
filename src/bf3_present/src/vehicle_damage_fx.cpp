@@ -92,6 +92,8 @@ void VehicleDamageFx::step(
 		}
 		for (size_t i = 0; i < def.engine.size(); ++i) {
 			const core::gameplay::VehicleEngineEffectDef &d = def.engine[i];
+			// INFERRED: OnStart/OnStop effects follow VehicleFxSight::engine, the driver seat taken, as notes R5-VS1 Rule 1a give
+			// the engine sound. Settle: a note on EngineComponentData's effect events.
 			const bool want = d.on == core::gameplay::VehicleEngineEvent::Boost ? s.boost : s.engine;
 			if (want == shown.engine[i]) {
 				continue;

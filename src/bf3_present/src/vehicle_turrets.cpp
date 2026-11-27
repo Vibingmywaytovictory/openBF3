@@ -39,11 +39,14 @@ std::vector<core::Transform> turret_offsets(
 
 VehicleLookLimits camera_look_limits(const core::gameplay::VehicleCameraDef &p_camera) {
 	VehicleLookLimits out;
+	// INFERRED: zero yaw or pitch limits mean the view turns freely. Settle: a note on the camera's limit fields.
 	out.left = out.right = sim::kPi;
 	out.up = out.down = 0.5f * sim::kPi;
 	if (p_camera.left_yaw > 0.0f || p_camera.right_yaw > 0.0f) {
 		out.left = p_camera.left_yaw * core::kDegToRadF;
 		out.right = p_camera.right_yaw * core::kDegToRadF;
+		// INFERRED: a turret camera's yaw limits centre on the way it faces at rest; the notes give the limits no frame.
+		// Settle: a note on the frame of the camera's yaw limits.
 		if (p_camera.turret >= 0) {
 			out.centre = std::atan2(p_camera.transform.forward[0], p_camera.transform.forward[2]);
 		}
