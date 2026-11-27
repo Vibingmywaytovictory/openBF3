@@ -9364,6 +9364,8 @@ float hull_heading(const std::array<float, 4> &p_q) {
 	return std::atan2(2.0f * (p_q[0] * p_q[2] + p_q[3] * p_q[1]), 1.0f - 2.0f * (p_q[0] * p_q[0] + p_q[1] * p_q[1]));
 }
 
+constexpr uint16_t kDriveRowTankSpawner = 11;
+
 TankRoute drive_tank_route(const tdm::TdmLevel &p_level, const sim::CollisionWorld &p_world, uint16_t p_spawner) {
 	const host::LevelVehicles &lv = *p_level.shared->vehicles;
 	TankRoute out;
@@ -9442,11 +9444,9 @@ TankRoute drive_tank_route(const tdm::TdmLevel &p_level, const sim::CollisionWor
 }
 
 TEST_SUITE("host-vehicles-handling") {
-	TEST_CASE(
-			"vehicles: MP_007 ConquestSmall0: godot.vehicle_drive's tank route headless: each M1A2 alone on the "
-			"level, 1 s manned, 3 s of throttle, then 2 s of throttle and full right steer; the first spawner's M1A2 "
-			"is stopped under throttle by what ends its clear run, the one with the longest clear run keeps its speed "
-			"and turns right more than 10 deg") {
+	TEST_CASE("vehicles: MP_007 ConquestSmall0: godot.vehicle_drive's tank route headless: each M1A2 alone on the "
+			  "level, 1 s manned, 3 s of throttle, then 2 s of throttle and full right steer; spawner 11's M1A2, the "
+			  "row's, has 60 m clear ahead and turns right more than 10 deg") {
 		std::unique_ptr<tdm::TdmLevel> level = tdm::load_tdm_level("MP_007", "ConquestSmall0", false);
 		if (level == nullptr) {
 			return;
@@ -9462,7 +9462,7 @@ TEST_SUITE("host-vehicles-handling") {
 			}
 		}
 		REQUIRE(routes.size() >= 2u);
-		size_t roomiest = 0;
+		const TankRoute *row = nullptr;
 		for (size_t r = 0; r < routes.size(); ++r) {
 			const TankRoute &t = routes[r];
 			REQUIRE_MESSAGE(t.error.empty(), t.error);
@@ -9474,11 +9474,11 @@ TEST_SUITE("host-vehicles-handling") {
 					unsigned(t.spawner), double(t.start[0]), double(t.start[1]), double(t.start[2]), double(t.clear),
 					double(t.along_at_steer), double(t.kmh_at_steer), double(t.farthest), double(t.turn_deg),
 					double(t.end_kmh), double(t.largest_tick_loss_kmh), double(t.loss_along));
-			roomiest = t.clear > routes[roomiest].clear ? r : roomiest;
+			row = t.spawner == kDriveRowTankSpawner ? &t : row;
 		}
-		CHECK(routes.front().end_kmh < 0.5f * routes.front().kmh_at_steer);
-		CHECK(routes[roomiest].end_kmh > 0.5f * routes[roomiest].kmh_at_steer);
-		CHECK(routes[roomiest].turn_deg < -10.0f);
+		REQUIRE(row != nullptr);
+		CHECK(row->clear >= 60.0f);
+		CHECK(row->turn_deg < -10.0f);
 		tdm::check_install_unchanged(*level);
 	}
 

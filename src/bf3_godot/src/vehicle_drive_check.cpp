@@ -44,6 +44,7 @@ constexpr float kDriveMetres = 4.0f;
 constexpr float kOffLine = 1.5f;
 constexpr const char *kJeep = "vehicles/growleritv/growleritv";
 constexpr const char *kTank = "vehicles/m1a2/m1abrams";
+constexpr uint16_t kTankSpawner = 11;
 constexpr const char *kIfv = "vehicles/bmp2/bmp2";
 constexpr double kGunHold = 1.0;
 constexpr double kZoomSettle = 0.5;
@@ -75,12 +76,13 @@ const host::PresentedVehicle *presented(const host::PresentationFrame &p_frame, 
 	return nullptr;
 }
 
-const host::PresentedVehicle *parked(
-		const host::PresentationFrame &p_frame, const host::LevelVehicles &p_lv, const char *p_blueprint) {
+const host::PresentedVehicle *parked(const host::PresentationFrame &p_frame, const host::LevelVehicles &p_lv,
+		const char *p_blueprint, std::optional<uint16_t> p_spawner = std::nullopt) {
 	const host::PresentedVehicle *best = nullptr;
 	for (size_t i = 0; i < p_frame.vehicle_count && i < p_frame.vehicles.size(); ++i) {
 		const host::PresentedVehicle &v = p_frame.vehicles[i];
-		if (v.spawner >= p_lv.spawners.size() || p_lv.kinds[p_lv.spawners[v.spawner].kind].blueprint != p_blueprint) {
+		if (v.spawner >= p_lv.spawners.size() || p_lv.kinds[p_lv.spawners[v.spawner].kind].blueprint != p_blueprint ||
+				(p_spawner && v.spawner != *p_spawner)) {
 			continue;
 		}
 		if (sim::vehicles::hull_up_y(v.rotation) > 0.98f && speed(v.linear_velocity) < 0.05f &&
@@ -879,9 +881,11 @@ bool VehicleDriveRun::step(Bf3LevelSession &r_session, const VehicleDriveInputs 
 			enter(Phase::TankPick);
 			return false;
 		case Phase::TankPick: {
-			const host::PresentedVehicle *best = parked(f, lv, kTank);
+			const host::PresentedVehicle *best = parked(f, lv, kTank, kTankSpawner);
 			if (best == nullptr) {
-				return t_ > kPickTimeout ? fail("tank_pick", fmt("no parked upright M1A2 after %.0f s", kPickTimeout))
+				return t_ > kPickTimeout ? fail("tank_pick",
+												   fmt("no parked upright M1A2 at spawner %u after %.0f s",
+														   unsigned(kTankSpawner), kPickTimeout))
 										 : false;
 			}
 			host::ClientSession *client = r_session.client();
