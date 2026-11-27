@@ -20,6 +20,7 @@ sim::Vec3 sub3(const sim::Vec3 &p_a, const sim::Vec3 &p_b) {
 }
 
 bool states_match(const sim::SoldierState &p_a, const sim::SoldierState &p_b, float p_pos_eps, float p_vel_eps) {
+	// WHY: the client does not predict damage to itself; after_match rebases health and the damaged event instead.
 	const uint16_t events_a = uint16_t(p_a.events & ~sim::soldier_events::kDamaged);
 	const uint16_t events_b = uint16_t(p_b.events & ~sim::soldier_events::kDamaged);
 	if (p_a.tick != p_b.tick || p_a.life != p_b.life || p_a.yaw != p_b.yaw || p_a.pitch != p_b.pitch || p_a.pose != p_b.pose ||

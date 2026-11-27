@@ -279,6 +279,7 @@ struct ClientProjectiles::Impl {
 			}
 			push(r_events, e);
 		}
+		// WHY: detonations are presented from the server's CombatEvents, not from the client's own projectile step.
 		stats.detonations_suppressed += out.detonations.size();
 	}
 };

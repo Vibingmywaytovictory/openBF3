@@ -146,6 +146,8 @@ ui::HudVehicle hud_vehicle(const HudFeedInput &p_input) {
 	}
 	out.in_vehicle = true;
 	out.health = std::isfinite(vehicle->health) ? std::clamp(vehicle->health, 0.0f, 1.0f) * 100.0f : 0.0f;
+	// INFERRED: Disabled is any condition but Healthy; notes R5-UI2 B3 push Disabled for state 1 and Critical for 2.
+	// Settle: what the vehicle damage state values mean (notes R5-UI2 Not found).
 	out.damage_state_disabled = vehicle->condition != sim::vehicles::VehicleCondition::Healthy;
 	// SOURCE: notes R5-UI1 E (Speed = trunc(|v| x 3.6) km/h).
 	// STAND-IN: every seat reads the hull's velocity, where the notes take a 0.5 s position difference for seats
@@ -165,6 +167,8 @@ ui::HudVehicle hud_vehicle(const HudFeedInput &p_input) {
 	}
 	const net::PlayerRow *own = row_of(p_input.players, p_input.own_slot);
 	const uint8_t own_squad = own != nullptr ? own->squad : uint8_t(0);
+	// STAND-IN: every seat is listed, where notes R5-UI2 checker B3 omit seats with EntryComponentData.ForbiddenForHuman.
+	// Settle: read that field per seat.
 	const size_t seats = std::min<size_t>(vehicle->seat_count, ui::kHudMaxPassengers);
 	for (size_t k = 0; k < seats; ++k) {
 		ui::HudPassenger &p = out.passenger_list.passengers[out.passenger_list.count++];

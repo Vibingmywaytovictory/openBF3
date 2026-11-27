@@ -16,6 +16,8 @@ namespace {
 
 constexpr float kSpawnPointMatchMetres = 0.5f;
 
+// STAND-IN: only a linked character spawner makes a flag a deploy row; vehicle spawners give no spawn choice.
+// Settle: vehicle spawn choices on the deploy screen.
 bool spawnable(const lg::ConquestParams &p_params, size_t p_point) {
 	for (const uint32_t node : p_params.points[p_point].spawners) {
 		const lg::ConquestSpawnerData *s = p_params.spawner(node);
@@ -156,6 +158,7 @@ void feed_conquest(Frame &r_frame) {
 		ui::HudSpawnPoint &s = spawns.points[spawns.count++];
 		s.kind = ui::HudSpawnKind::Flag;
 		s.team = int8_t(r_frame.own_team);
+		// SOURCE: notes M-CQ3 1 (a team spawns on a flag from when it holds it at the top until the enemy pulls it to 0).
 		s.available = r_frame.match && w.controlled && w.team == r_frame.own_team && r_frame.own_team != 0;
 		s.x = p.position[0];
 		s.z = p.position[2];

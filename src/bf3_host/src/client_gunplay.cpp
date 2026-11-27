@@ -434,6 +434,8 @@ bool ClientGunplay::combat(const net::NetSim::Datagram &p_d, net::CombatEvents &
 		PresentEvent ev;
 		ev.kind = PresentKind::Hit;
 		const bool own_victim = h.victim == slot, own_shooter = h.shooter == slot;
+		// SOURCE: notes R2-H 5a (the shooter's hit marker is posted on receipt, outside the interpolation delay).
+		// STAND-IN: own-victim hits are immediate too; notes R2-H 5f play them at render time, 0.066 s apart. Settle: port 5f.
 		ev.timeline = own_victim || own_shooter ? PresentTimeline::Immediate : PresentTimeline::Render;
 		ev.flags = uint8_t((own_victim ? present_flags::kOwnVictim : 0u) | (own_shooter ? present_flags::kOwnShooter : 0u));
 		ev.slot = h.shooter;

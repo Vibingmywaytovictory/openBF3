@@ -160,6 +160,7 @@ void feed_scoreboard(Frame &r_frame) {
 	kc.enemy_team_kills = theirs;
 	kc.leading_team_kills = std::max(k1, k2);
 	kc.leading_by_kills = mine - theirs;
+	// INFERRED: on a tied kill count the own team shows first. Settle: retail footage of a tied kill counter.
 	kc.player_team_position = mine >= theirs ? 1 : 2;
 }
 

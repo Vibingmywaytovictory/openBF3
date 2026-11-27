@@ -45,6 +45,8 @@ void feed_spawn(Frame &r_frame) {
 
 	model.soldier.show_medic_revive = sp.revive_possible;
 	model.soldier.time_until_revive = sp.seconds_revive_left;
+	// STAND-IN: no interactive man-down state on the HUD; a downed soldier is dead with a revive window.
+	// Settle: port notes R-E4 B (the man-down state and its countdown).
 	model.soldier.time_until_death = 0.0f;
 	model.soldier.is_interactive_man_down = false;
 	model.spawn_logic.time_to_respawn = sp.seconds_to_deploy;
@@ -56,6 +58,8 @@ void feed_spawn(Frame &r_frame) {
 	model.spawn_points.has_valid_spawn = match;
 	ui::HudSpawnPointList &list = model.spawn_points.spawn_points;
 	list = ui::HudSpawnPointList();
+	// INFERRED: an enabled own-team character spawner with a LocationTextSid is an HQ deploy row.
+	// Settle: how the spawn screen builds its list (notes M-CQ3 Not found).
 	for (const core::level::CharacterSpawnerDef &s : in.spawners) {
 		if (!s.enabled || r_frame.own_team == 0 || s.team != r_frame.own_team || s.location_text_sid.empty()) {
 			continue;

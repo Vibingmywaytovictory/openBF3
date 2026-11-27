@@ -63,6 +63,7 @@ void sample_working_set(LoadProgress *p_progress) {
 	}
 }
 
+// STAND-IN: each load stage's share of the loading bar (per mille) is hand-picked. Settle: stage times of a cold load.
 constexpr std::array<uint32_t, kLoadStageCount> kStageWeight = {
 	20,
 	80,

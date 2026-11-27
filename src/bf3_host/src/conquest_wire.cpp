@@ -35,6 +35,7 @@ bool same_but_progress(const net::ConquestState &p_a, const net::ConquestState &
 			p_a.point_count != p_b.point_count || p_a.struck != p_b.struck) {
 		return false;
 	}
+	// WHY: the return tick is the tick plus the rounded float deserter timer, so it can move by one tick between ticks.
 	const int64_t back = int64_t(p_a.return_by_tick) - int64_t(p_b.return_by_tick);
 	if ((p_a.return_by_tick == 0) != (p_b.return_by_tick == 0) || back > 1 || back < -1) {
 		return false;

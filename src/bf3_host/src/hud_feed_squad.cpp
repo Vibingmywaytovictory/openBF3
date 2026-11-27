@@ -105,6 +105,8 @@ void feed_squad(Frame &r_frame) {
 		ui::HudSquadEntry &e = squad.available_squads.squads[squad.available_squads.count++];
 		e.squad = int8_t(q);
 		e.members = counts[q];
+		// STAND-IN: a squad is open below 4 members, not the mode's SquadSize that level_load reads.
+		// Settle: feed the level's squad size.
 		e.open = counts[q] < ui::kHudSquadSize;
 	}
 
@@ -123,6 +125,8 @@ void feed_squad(Frame &r_frame) {
 		p.team = int8_t(r_frame.own_team);
 		p.player = m->slot;
 		const present::PresentedSoldier *at = presented(r_frame, m->slot);
+		// SOURCE: notes M-CQ3 4 (spawning on a squad mate needs the mate alive).
+		// STAND-IN: this row makes no free-seat test and no OnlySquadLeaderSpawn test. Settle: port M-CQ3 4's checks.
 		p.available = r_frame.match && deploy_phase && m->alive && at != nullptr;
 		if (at != nullptr) {
 			p.x = at->position[0];
@@ -185,6 +189,8 @@ std::optional<net::SquadRequest> squad_flow_request(std::span<const std::string>
 	}
 	const std::string_view what = p_params.front();
 	net::SquadRequest q;
+	// INFERRED: 'create' from a squad member leaves the squad, as retail footage 18.57 shows LEAVE SQUAD on that button.
+	// Settle: squadscreen's script for that button (DisableLeaveSquad is not read).
 	if (what == core::ui::kSquadCreateParam) {
 		q.op = own->squad != 0 ? net::SquadOp::Leave : net::SquadOp::Create;
 		return q;

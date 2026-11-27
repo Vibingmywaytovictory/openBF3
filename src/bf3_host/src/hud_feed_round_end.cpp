@@ -84,7 +84,8 @@ void feed_eor_stats(Frame &r_frame, ui::HudEndOfRound &r_eor) {
 			r_eor.best_weapon_info.image_path = item->texture_path;
 		}
 	}
-	// INFERRED: the dog tags taken are the round's knife kills. Settle: retail footage of an end-of-round panel.
+	// INFERRED: the dog tags taken are the round's knife kills; notes R-E3 C raise DogTag on a melee takedown.
+	// Settle: whether every knife kill is a takedown, or retail footage of an end-of-round panel.
 	int32_t dogtags = 0;
 	for (size_t d = 0; d < st.own_weapon_kills.size(); ++d) {
 		const HudStaticRow *row = r_frame.statics.row(uint16_t(d));

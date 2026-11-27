@@ -21,6 +21,8 @@ void feed_menu(Frame &r_frame) {
 		ui::HudMenuEntry &e = list.entries[list.count++];
 		e.label_sid_hash = ui::text_hash(kHudMenuSids[i]);
 		e.action = ui::HudMenuAction(i);
+		// STAND-IN: SUICIDE is enabled while alive in the pre-round or round, SQUAD while on a team; hand rules.
+		// Settle: retail footage of the in-game menu while dead and between rounds.
 		switch (e.action) {
 			case ui::HudMenuAction::Suicide:
 				e.enabled = r_frame.match && alive && fighting;

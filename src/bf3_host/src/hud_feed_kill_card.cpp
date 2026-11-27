@@ -88,6 +88,8 @@ void feed_kill_card(Frame &r_frame, std::span<const PresentEvent> p_drained) {
 		++state.deaths_fed;
 		if ((e.flags & present_flags::kOwnShooter) != 0 && !suicide) {
 			push_kill(msg.local_kill_message, state.local_kill_serial, line);
+			// SOURCE: notes R3-E3 D1 (a same-team kill raises TeamKill, not the Kill events).
+			// STAND-IN: the client makes the kill and headshot score lines and none for TeamKill. Settle: port notes R-E3 A.
 			if (!line.team_kill) {
 				push_score(msg.score_message, state.score_serial, ui::kHudScoreKillSid, in.score_kill);
 				if (line.headshot) {

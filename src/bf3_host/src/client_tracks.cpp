@@ -10,6 +10,8 @@ namespace bf3::host {
 namespace {
 
 constexpr size_t kTrackSamples = 8;
+// STAND-IN: a remote track ends after max(1 s, 3 snapshot gaps) with no record, this and the one below; hand-picked.
+// Settle: the server's ghost removal, as notes R2-H 3c only freeze a soldier 0.5 s past its last state.
 constexpr uint64_t kTrackTimeoutNs = 1'000'000'000ull;
 constexpr uint64_t kTrackTimeoutGaps = 3;
 
@@ -114,6 +116,8 @@ void RemoteTracks::publish(PresentationFrame &r_frame, uint64_t p_now) {
 		for (const auto &o : offsets_) {
 			lo = std::min(lo, o.second);
 		}
+		// STAND-IN: the receive clock follows the lowest arrival offset of the last 1 s at 0.05 ticks a tick; hand-picked.
+		// Settle: notes R2-H 2b and 2d (BF3's lateness window, its delay moving at most 0.9 x dt an update).
 		const double step = 0.05;
 		const double diff = lo - recv_offset_;
 		const double moved = std::clamp(diff, -step, step);

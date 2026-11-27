@@ -30,6 +30,7 @@ PresentedOtherWeapon weapon_of_track(const OtherTrack &p_track, double p_render_
 		return out;
 	}
 
+	// SOURCE: notes R2-H 3b (discrete fields switch when the later state becomes the front one).
 	const net::TimedOther *src = &samples[sel.index_a];
 	if (p_render_ticks > double(src->server_tick) && sel.kind == net::SampleKind::Interpolate) {
 		const net::TimedOther &b = samples[sel.index_b];
