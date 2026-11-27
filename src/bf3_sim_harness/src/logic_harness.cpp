@@ -375,6 +375,8 @@ core::Result<LogicRunReport> run_logic_script(std::shared_ptr<const LogicGraph> 
 				}
 			}
 		}
+		// INFERRED: a PreRound fires StartRound once RoundMinPlayerCount players are in; the stub has no player count, so the
+		// script forces it at round_start_tick. Settle: a note on PreRound's start condition.
 		if (p_options.kind != LogicScriptKind::Idle && p_options.round_start_tick == t) {
 			for (const uint32_t pre : g.nodes_of_type(T::PreRound)) {
 				BF3_TRY(rt.force_event(pre, gp::logic_port_id("StartRound"), LogicContext{}));

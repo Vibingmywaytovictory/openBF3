@@ -176,6 +176,8 @@ private:
 		return true;
 	}
 
+	// WHY: unlike CollisionWorld's rays these ignore back faces, so a surface a vehicle would pass through from behind is
+	// never taken for a course.
 	bool front_ray(const Vec3 &p_origin, const Vec3 &p_delta, StaticHit *r_hit) const {
 		const CollisionWorld::Impl &w = world_.impl();
 		const JPH::Vec3 origin(p_origin[0], p_origin[1], p_origin[2]);
