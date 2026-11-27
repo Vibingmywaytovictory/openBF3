@@ -623,6 +623,8 @@ inline constexpr uint32_t kThrowGrenade = 1u << 12;
 inline constexpr uint32_t kAll = (1u << 13) - 1;
 }
 
+// STAND-IN: the Yaw, Pitch, Crouch, Prone, Melee and ThrowGrenade bits are not applied (melee and grenades go out on
+// the Fire button). Settle: a level whose InputRestriction refuses one of them.
 constexpr sim::Command restrict_command(sim::Command p_command, sim::Tick p_restrict_until_tick, uint32_t p_allowed) {
 	if (p_restrict_until_tick == 0 || p_command.tick >= p_restrict_until_tick) {
 		return p_command;

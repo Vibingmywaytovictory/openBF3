@@ -16,6 +16,7 @@ struct NetSimConfig {
 	float latency_max_ms = 0;
 	float loss = 0;
 	float spike_chance = 0;
+	// SOURCE: research/topics/05-networking.md 1.1 (Game.cfg's drop spikes last 0.3 to 1.0 s) and the next constant.
 	float spike_min_ms = 300;
 	float spike_max_ms = 1000;
 	float reorder = 0;

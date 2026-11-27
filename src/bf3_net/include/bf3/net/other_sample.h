@@ -12,6 +12,8 @@
 namespace bf3::net {
 
 inline constexpr size_t kTrackSamples = 8;
+// STAND-IN: a track whose newest sample is 60 ticks (1 s) old is dropped. Settle: a note on when a remote soldier
+// without updates stops being shown.
 inline constexpr uint32_t kTrackTimeoutTicks = 60;
 
 struct TimedOther {
@@ -69,6 +71,7 @@ SampleSelection select_sample(std::span<const TimedOther> p_samples, double p_re
 int64_t sim_time_q8(sim::weapons::SimTime p_time);
 
 constexpr int32_t view_lag_q8(int32_t p_view_back_q8) {
+	// WHY: view_back is measured from the command's tick T, but the step of tick T starts one tick earlier.
 	return p_view_back_q8 - 256;
 }
 

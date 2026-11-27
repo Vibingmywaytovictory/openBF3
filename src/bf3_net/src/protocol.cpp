@@ -2560,6 +2560,8 @@ uint8_t seat_weapon_heat_wire(float p_heat) {
 		return kSeatWeaponHeatFull;
 	}
 	const float scaled = std::round(p_heat * float(kSeatWeaponHeatFull));
+	// WHY: only 0 heat sends 0 and only full heat 255, so the HUD movie's heat > 0 and heat >= 1 tests read as on the
+	// server.
 	return uint8_t(std::clamp(scaled, 1.0f, float(kSeatWeaponHeatFull - 1)));
 }
 

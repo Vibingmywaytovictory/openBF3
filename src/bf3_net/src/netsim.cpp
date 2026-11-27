@@ -69,6 +69,8 @@ KeyOutcome parse_base(std::string_view p_item, size_t p_index, NetSimConfig &r_c
 	if (p_item == "off") {
 		c = NetSimConfig{};
 	} else if (p_item == "bf3") {
+		// SOURCE: research/topics/05-networking.md 1.1 (Game.cfg's network simulator: 0.1-0.2 s latency, 1 % drops,
+		// 3 % drop spikes of 0.3-1.0 s, 1 % reordering, 2 % duplication) and the eight constants below.
 		c.latency_min_ms = 100;
 		c.latency_max_ms = 200;
 		c.loss = 0.01f;

@@ -23,6 +23,8 @@ float hermite(float p_p0, float p_m0, float p_p1, float p_m1, float p_u) {
 float eye_of(std::span<const float, sim::kPoseCount> p_eyes, const OtherSoldier &p_o) {
 	const size_t from = std::min<size_t>(uint8_t(p_o.pose), sim::kPoseCount - 1);
 	const size_t to = std::min<size_t>(uint8_t(p_o.target_pose), sim::kPoseCount - 1);
+	// STAND-IN: the eye moves linearly from the current pose's height to the target's over the transition.
+	// Settle: the eye joint's height through the 3p stance transition clips.
 	return lerp(p_eyes[from], p_eyes[to], float(p_o.transition) / 255.0f);
 }
 
@@ -83,6 +85,9 @@ void set_vault(OtherPose &r_out, std::span<const TimedOther *const> p_newest_fir
 
 }
 
+// SOURCE: notes R2-H 3c (past the last state, extrapolate it up to a limit).
+// INFERRED: hold before the first state and interpolate the bracketing pair, as R2-H 3b reads (its checker left 3b
+// unconfirmed). Settle: a checker pass on R2-H 3b.
 SampleSelection select_sample(std::span<const TimedOther> p_samples, double p_render_ticks, double p_max_extrapolate_ticks) {
 	SampleSelection s;
 	const uint32_t used = uint32_t(std::min<size_t>(p_samples.size(), 0xFFFFFFFFu));
@@ -137,6 +142,8 @@ OtherPose sample_other(std::span<const TimedOther> p_samples, double p_render_ti
 		const float u = float(std::clamp((render - double(sa.server_tick)) / span, 0.0, 1.0));
 		const float dt = float(span) * sim::kTickSeconds;
 		out = present_sample(p_pose_eye_heights, sa.soldier);
+		// STAND-IN: a Hermite on x, y and z with velocity x span as tangents; notes R2-H 3d take x and z with the
+		// horizontal gap x the unit velocity direction as tangents and y linear. Settle: port R2-H 3d.
 		for (size_t k = 0; k < 3; ++k) {
 			out.position[k] = hermite(sa.soldier.position[k], sa.soldier.velocity[k] * dt, sb.soldier.position[k], sb.soldier.velocity[k] * dt, u);
 			out.velocity[k] = lerp(sa.soldier.velocity[k], sb.soldier.velocity[k], u);
@@ -145,10 +152,14 @@ OtherPose sample_other(std::span<const TimedOther> p_samples, double p_render_ti
 		out.yaw = sim::yaw_radians(uint16_t(sa.soldier.yaw + int32_t(std::lround(float(dyaw) * u))));
 		out.pitch = lerp(sim::pitch_radians(sa.soldier.pitch), sim::pitch_radians(sb.soldier.pitch), u);
 
+		// INFERRED: discrete fields switch when the newer state becomes the front one, as R2-H 3b reads (checker left it
+		// unconfirmed). Settle: a checker pass on R2-H 3b.
 		set_discrete(out, u >= 1.0f ? sb.soldier : sa.soldier);
 		out.eye_height = lerp(eye_of(p_pose_eye_heights, sa.soldier), eye_of(p_pose_eye_heights, sb.soldier), u);
 	} else {
 
+		// STAND-IN: past the limit the soldier holds at the limit's extrapolated position; notes R2-H 3c and 3d set him
+		// back to the last received position. Settle: port R2-H 3c's snap.
 		const double ahead = std::min(render - double(sa.server_tick), max_extra_ticks);
 		const float secs = float(ahead) * sim::kTickSeconds;
 		out = present_sample(p_pose_eye_heights, sa.soldier);

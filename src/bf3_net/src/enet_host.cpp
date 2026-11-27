@@ -11,6 +11,8 @@ std::mutex g_runtime_mutex;
 int g_runtime_users = 0;
 
 void never_throttle_unreliable(ENetPeer *p_peer) {
+	// WHY: ENet's throttle drops unreliable packets when ack times jitter; deceleration 0 keeps it at its limit, so a
+	// snapshot or command packet is never dropped by ENet itself.
 	enet_peer_throttle_configure(p_peer, ENET_PEER_PACKET_THROTTLE_INTERVAL, ENET_PEER_PACKET_THROTTLE_ACCELERATION, 0);
 	p_peer->packetThrottle = p_peer->packetThrottleLimit;
 }
