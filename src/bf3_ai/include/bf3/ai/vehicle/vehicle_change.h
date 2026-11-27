@@ -65,6 +65,7 @@ struct ChangeVehicle {
 	float health = 1.0f;
 	float altitude = 0.0f;
 	bool on_nav = true;
+	bool allowed_by_bots = true;
 	float nav_gap = 0.0f;
 	int strength_type = kChangeLightArmourStrength;
 	Vec3 right{ 1.0f, 0.0f, 0.0f };

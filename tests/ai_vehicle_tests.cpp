@@ -253,6 +253,27 @@ TEST_SUITE("ai-vehicle") {
 		CHECK(ai::choose_change(bot, booked).target == ai::ChangeTarget{ 0, 0 });
 	}
 
+	TEST_CASE("a vehicle not allowed by bots is left out of the scan, as BBChange skips getIsAllowedByBots false; a "
+			  "bot sitting in it keeps its seat") {
+		ai::ChangeBot bot = fresh_bot();
+		std::vector<ai::ChangeVehicle> banned{ jeep(20.0f), jeep(40.0f) };
+		banned[0].allowed_by_bots = false;
+		const ai::ChangeChoice c = ai::choose_change(bot, banned);
+		REQUIRE(c.change);
+		CHECK(c.target == ai::ChangeTarget{ 1, 0 });
+		banned[1].allowed_by_bots = false;
+		CHECK_FALSE(ai::choose_change(bot, banned).change);
+		bot.vehicle = 0;
+		bot.seat = 1;
+		banned[0].seat[1].occupant = bot.player_id;
+		banned[0].seat[1].occupant_bot = true;
+		banned[0].seat[0].occupant = 9;
+		banned[0].seat[0].occupant_bot = true;
+		const ai::ChangeChoice seated = ai::choose_change(bot, banned);
+		CHECK_FALSE(seated.change);
+		CHECK(seated.current > 0.0f);
+	}
+
 	TEST_CASE("a seated bot gets out of a flipped jeep or when stuck, and keeps a good seat") {
 		ai::ChangeBot bot = fresh_bot();
 		bot.now_s = 200.0;

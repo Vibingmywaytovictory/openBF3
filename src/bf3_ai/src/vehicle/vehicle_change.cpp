@@ -114,7 +114,8 @@ ChangeChoice choose_change(const ChangeBot &p_bot, std::span<const ChangeVehicle
 		for (size_t v = 0; v < p_vehicles.size(); ++v) {
 			const ChangeVehicle &vehicle = p_vehicles[v];
 			if (int(v) == p_bot.vehicle || vehicle.kind == ChangeUnitKind::Soldier ||
-					vehicle.kind == ChangeUnitKind::Naval || manned_by_enemy(vehicle, p_bot.side)) {
+					vehicle.kind == ChangeUnitKind::Naval || !vehicle.allowed_by_bots ||
+					manned_by_enemy(vehicle, p_bot.side)) {
 				continue;
 			}
 			const float d_sqr = distance_sq(vehicle.position, position);
