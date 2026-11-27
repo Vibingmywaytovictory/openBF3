@@ -5,6 +5,7 @@ import sys
 CODE_EXT = ('.cpp', '.h', '.gdshader', '.gdshaderinc')
 CODE_DIRS = ('src', 'tests', 'tools', 'bf3-opensource/shaders')
 CMAKE_DIRS = ('src', 'tests', 'tools')
+CFG_DIRS = ()
 MD_ALLOW_DIRS = ('docs/design', 'docs/history', 'research')
 MD_ALLOW_FILES = ('README.md', 'CLAUDE.md', 'docs/architecture.md', 'docs/testing.md')
 MD_ALLOW_GLOB = re.compile(r'^tools/[^/]+/README\.md$')
@@ -14,6 +15,20 @@ RAW_PREFIX = ('', 'L', 'u', 'U', 'u8')
 TEST_HOOKS = re.compile(r'\b(push_window_mouse|capture_for_check|run_check_and_quit)\b')
 TEST_HOOK_DIR = 'src/bf3_godot'
 CHECKS_GUARD = re.compile(r'#\s*if\s+OPENBF3_BUILD_CHECKS\b')
+
+COMMENT_TAG = re.compile(r'^(SOURCE|INFERRED|STAND-IN|WHY): \S')
+SETTLE_TAGS = ('INFERRED', 'STAND-IN')
+SETTLE = re.compile(r'\bSettle: \S')
+COMMENT_MAX_LINES = 2
+COMMENT_MAX_CHARS = 120
+BANNED_MARKERS = re.compile(r'\b(TODO|FIXME|XXX|HACK|NOTE|BUG)\b')
+DISASSEMBLY = re.compile(
+    r'\b(FUN|DAT|LAB|PTR|SUB|thunk)_[0-9A-Fa-f]{5,}\b|\b0x14[0-9A-Fa-f]{7}\b|decompil|disassembl|ghidra|pseudo-?code'
+    r'|\.work\.txt|\b[A-Za-z0-9_]+\.c\b', re.IGNORECASE)
+CODE_LIKE = re.compile(
+    r'[;{}]\s*$|^\s*(#\s*(include|define|if|endif)\b|return\b|(if|for|while|switch)\s*\(|(const\s+)?'
+    r'(auto|int|float|double|bool|uint\d+_t|int\d+_t|size_t)\s+\w+\s*=)')
+CFG_ASSIGN = re.compile(r'^\s*[A-Za-z_][A-Za-z0-9_.]*\s*=\s*\S+\s*$')
 
 
 def lex_comments(text):
@@ -33,14 +48,15 @@ def lex_comments(text):
             j = text.find('\n', i)
             if j < 0:
                 j = n
-            comments.append(line)
+            start = text.rfind('\n', 0, i) + 1
+            comments.append((line, '//', text[i + 2:j].rstrip('\r'), text[start:i].strip() == ''))
             i = j
             continue
         if c == '/' and i + 1 < n and text[i + 1] == '*':
             j = text.find('*/', i + 2)
             if j < 0:
                 j = n - 2
-            comments.append(line)
+            comments.append((line, '/*', text[i + 2:j], False))
             line += text.count('\n', i, j + 2)
             out.append(' ')
             i = j + 2
@@ -95,31 +111,75 @@ def lex_comments(text):
     return ''.join(out), comments
 
 
-def tidy(text):
-    lines = [l.rstrip() for l in text.split('\n')]
-    result = []
-    for l in lines:
-        if l == '' and result and result[-1] == '':
+def hash_comments(text, inline):
+    comments = []
+    for i, l in enumerate(text.split('\n')):
+        if inline:
+            k = l.find('#')
+            if k >= 0:
+                comments.append((i + 1, '#', l[k + 1:].rstrip('\r'), l[:k].strip() == ''))
+        elif l.lstrip().startswith('#'):
+            body = l.lstrip()[1:].rstrip('\r')
+            comments.append((i + 1, '#[[' if body.startswith('[[') else '#', body, True))
+    return comments
+
+
+def settle_missing(block, found):
+    if block is not None and block['tag'] in SETTLE_TAGS and not block['settle']:
+        found.append((block['line'], f'{block["tag"]} needs "Settle: <what would settle it>"'))
+
+
+def check_comments(comments, cfg=False):
+    found = []
+    block = None
+    previous = None
+    for line, kind, body, own in comments:
+        if kind in ('/*', '#[['):
+            settle_missing(block, found)
+            block = None
+            found.append((line, 'block comment; use one or two own-line comments'))
             continue
-        result.append(l)
-    while result and result[0] == '':
-        result.pop(0)
-    while result and result[-1] == '':
-        result.pop()
-    return '\n'.join(result) + '\n'
-
-
-def strip_cmake(text):
-    kept = []
-    for l in text.split('\n'):
-        if l.lstrip().startswith('#') and not l.lstrip().startswith('#[['):
+        if not own:
+            settle_missing(block, found)
+            block = None
+            found.append((line, 'comment after code; put it on its own line above'))
             continue
-        kept.append(l)
-    return tidy('\n'.join(kept))
+        text = body[1:] if body.startswith(' ') else body
+        if text.rstrip().endswith('\\'):
+            found.append((line, 'comment line ends in a backslash'))
+        if len(text) > COMMENT_MAX_CHARS:
+            found.append((line, f'comment line longer than {COMMENT_MAX_CHARS} characters'))
+        if BANNED_MARKERS.search(text):
+            found.append((line, 'banned marker (TODO, FIXME, XXX, HACK, NOTE, BUG)'))
+        if DISASSEMBLY.search(text):
+            found.append((line, 'disassembly reference; comments cite the notes, never disassembly'))
+        tag = COMMENT_TAG.match(text)
+        if tag:
+            settle_missing(block, found)
+            block = {'tag': tag.group(1), 'line': line, 'settle': bool(SETTLE.search(text)), 'lines': 1}
+            rest = text[len(tag.group(1)) + 1:]
+        elif block is not None and previous == line - 1:
+            block['lines'] += 1
+            block['settle'] = block['settle'] or bool(SETTLE.search(text))
+            rest = text
+            if block['lines'] > COMMENT_MAX_LINES:
+                found.append((line, f'comment longer than {COMMENT_MAX_LINES} lines'))
+        else:
+            settle_missing(block, found)
+            block = None
+            previous = line
+            found.append((line, 'comment without SOURCE:, INFERRED:, STAND-IN: or WHY:'))
+            continue
+        if CODE_LIKE.search(rest) or (cfg and CFG_ASSIGN.match(rest)):
+            found.append((line, 'commented-out code'))
+        previous = line
+    settle_missing(block, found)
+    return sorted(found)
 
 
-def cmake_comments(text):
-    return [i + 1 for i, l in enumerate(text.split('\n')) if l.lstrip().startswith('#')]
+def report(failures, root, p, found):
+    if found:
+        failures.append(f'{os.path.relpath(p, root)}:{found[0][0]}: {found[0][1]} ({len(found)} in file)')
 
 
 def walk(root, dirs, pred):
@@ -171,35 +231,13 @@ def ungated_test_hooks(text):
 
 def main():
     root = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else '.')
-    strip = '--strip' in sys.argv
     failures = []
     for p in walk(root, CODE_DIRS, lambda x: x.endswith(CODE_EXT)):
-        text = open(p, encoding='utf-8').read()
-        stripped, comments = lex_comments(text)
-        if comments:
-            if strip:
-                open(p, 'w', encoding='utf-8', newline='\n').write(tidy(stripped))
-            else:
-                failures.append(f'{os.path.relpath(p, root)}:{comments[0]}: comment ({len(comments)} in file)')
-    for p in walk(root, CMAKE_DIRS, is_cmake):
-        text = open(p, encoding='utf-8').read()
-        lines = cmake_comments(text)
-        if lines:
-            if strip:
-                open(p, 'w', encoding='utf-8', newline='\n').write(strip_cmake(text))
-            else:
-                failures.append(f'{os.path.relpath(p, root)}:{lines[0]}: comment ({len(lines)} in file)')
-    for p in ('CMakeLists.txt',):
-        full = os.path.join(root, p)
-        text = open(full, encoding='utf-8').read()
-        lines = cmake_comments(text)
-        if lines:
-            if strip:
-                open(full, 'w', encoding='utf-8', newline='\n').write(strip_cmake(text))
-            else:
-                failures.append(f'{p}:{lines[0]}: comment ({len(lines)} in file)')
-    if strip:
-        return 0
+        report(failures, root, p, check_comments(lex_comments(open(p, encoding='utf-8').read())[1]))
+    for p in list(walk(root, CMAKE_DIRS, is_cmake)) + [os.path.join(root, 'CMakeLists.txt')]:
+        report(failures, root, p, check_comments(hash_comments(open(p, encoding='utf-8').read(), False)))
+    for p in walk(root, CFG_DIRS, lambda x: x.endswith('.cfg')):
+        report(failures, root, p, check_comments(hash_comments(open(p, encoding='utf-8').read(), True), cfg=True))
     for dp, dn, fn in os.walk(root):
         dn[:] = [x for x in dn if x not in ('extern', '.git', 'b', '.godot')]
         for f in fn:

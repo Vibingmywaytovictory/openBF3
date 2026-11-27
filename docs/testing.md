@@ -121,7 +121,7 @@ Dev preset, a row measured alone on a quiet machine; asan is about 10x.
 
 * `*.unit`, `*.contract` and data-free fuzz rows: at most 2 s.
 * Install rows: at most 15 s.
-* A row above 30 s needs a written reason in its CMake comment and a COST. Remove repeated work first (decode or
+* A row above 30 s needs a `# WHY:` comment above it giving the reason, and a COST. Remove repeated work first (decode or
   load once per process, shared untimed setup). Then add parallelism inside the test (`parallel_map` over
   independent items, RNG streams pre-drawn serially, CHECKs on the main thread, output in item order), or split the
   cases with `openbf3_case_row`.

@@ -2,8 +2,8 @@
 
 This page describes the system in the tree today: what the libraries are, how they depend on each other, which
 threads run what, and how data flows from a retail Battlefield 3 install to the screen and over the wire. It is the
-page to read before any design document, and the only place where the code is explained in words: the code has
-no comments, by rule ([CLAUDE.md](../CLAUDE.md), enforced by the ctest row `hygiene.rules`). The per-track
+page to read before any design document. The code's own comments say only where a value comes from (`SOURCE:`),
+what is guessed (`INFERRED:`, `STAND-IN:`) and why (`WHY:`), by rule ([CLAUDE.md](../CLAUDE.md), `hygiene.rules`). The per-track
 designs with their as-built notes are in [design/](design/); the milestone record with its measurements is
 [history/dev-log.md](history/dev-log.md).
 

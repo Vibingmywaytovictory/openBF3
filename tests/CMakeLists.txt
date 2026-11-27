@@ -1719,6 +1719,8 @@ openbf3_check_rows()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME hygiene.rules COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/check_hygiene.py" "${CMAKE_SOURCE_DIR}")
 set_tests_properties(hygiene.rules PROPERTIES TIMEOUT 120 LABELS "unit")
+add_test(NAME hygiene.comment_rule COMMAND Python3::Interpreter -B "${CMAKE_CURRENT_SOURCE_DIR}/hygiene_comment_rule.py")
+set_tests_properties(hygiene.comment_rule PROPERTIES TIMEOUT 60 LABELS "unit")
 add_test(NAME test.scratch.rows COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/test_scratch_rows.py" "${CMAKE_CTEST_COMMAND}" "${CMAKE_BINARY_DIR}")
 set_tests_properties(test.scratch.rows PROPERTIES TIMEOUT 60 LABELS "unit")
 
