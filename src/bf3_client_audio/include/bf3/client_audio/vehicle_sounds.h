@@ -30,6 +30,8 @@ struct VehicleAudioAssets {
 core::Result<VehicleAudioAssets> load_vehicle_audio(
 		const core::EbxResolver &p_db, const host::LevelVehicles &p_level, std::vector<std::string> &r_report);
 
+// SOURCE: notes R5-VS1 Rule 4 (the GForce target is 1.0 while the chassis is nearly still).
+// INFERRED: GForce also starts at 1.0 (R5-VS1 did not read the start value). Settle: a note on the start value.
 inline constexpr float kVehicleRestGForce = 1.0f;
 
 struct VehicleTurretMotion {

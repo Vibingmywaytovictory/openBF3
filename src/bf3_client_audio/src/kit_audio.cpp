@@ -26,6 +26,8 @@ WeaponFireMode fire_mode_of(gp::FireLogic p_logic) {
 	}
 }
 
+// STAND-IN: knives, grenades and hold-and-release weapons play one instance per use. Settle: notes R5-VS3's event
+// stream for those weapons.
 bool is_one_shot(const gp::WeaponDef &p_def) {
 	return p_def.weapon_class == "wcKnife" || p_def.projectile.kind == gp::ProjectileKind::Grenade || p_def.fire.logic == gp::FireLogic::HoldAndRelease;
 }
@@ -56,9 +58,13 @@ WeaponSoundSource weapon_sound_source(const gp::WeaponDef &p_def) {
 	const bool magazine_reload = p_def.fire.reload_type == gp::ReloadType::Magazine ||
 			p_def.fire.reload_type == gp::ReloadType::MagazineWithPossibleShorterReload;
 	s.magazine = magazine_reload ? p_def.fire.magazine_capacity : 0;
+	// STAND-IN: a weapon that holds off its reload until the fire release gets no reload sound (clients see no trigger).
+	// Settle: a note on the remote reload.
 	s.auto_reload = p_def.fire.always_auto_reload && !p_def.fire.hold_off_reload_until_fire_release;
+	// SOURCE: notes R-A3 F (an empty magazine waits ReloadDelay, then ReloadTime).
 	const double empty_reload = double(p_def.fire.reload_delay) + double(p_def.fire.reload_time);
 	s.reload_s = magazine_reload && std::isfinite(empty_reload) ? empty_reload : 0.0;
+	// STAND-IN: a zero rate of fire gives a 0.1 s interval, where notes R-A3 B give 1.0 s. Settle: follow R-A3 B.
 	const double interval = gp::shot_interval(p_def.fire);
 	s.shot_interval_s = std::isfinite(interval) && interval > 0.0 ? interval : 0.1;
 	return s;

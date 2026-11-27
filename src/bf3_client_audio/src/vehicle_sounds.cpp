@@ -52,6 +52,8 @@ core::Result<VehicleAudioAssets> load_vehicle_audio(
 			}
 		}
 		a.turret_programs.push_back(std::move(turrets));
+		// SOURCE: notes R5-VS1 Rule 2 item 19 (DisabledDamageThreshold over the vehicle's maximum health).
+		// INFERRED: the maximum health is the largest zone MaxHealth, as R5-VS1 infers. Settle: a note on that getter.
 		float full = 0.0f;
 		for (const sim::vehicles::HealthZoneRule &z : k.damage.zones) {
 			full = std::max(full, z.max_health);
@@ -68,6 +70,8 @@ core::Result<VehicleAudioAssets> load_vehicle_audio(
 
 namespace {
 
+// SOURCE: notes R5-VS1 constants (GForce 9.82, 1 (m/s)^2 gate, 0.2 snap, 0.05 smoothing; Slip 1/36 m/s gate and 0.5
+// weight; Load 0.1 per km/h), the 7 constants below.
 constexpr float kGravity = 9.82f;
 constexpr float kGForceMovingSpeedSquared = 1.0f;
 constexpr float kGForceSnap = 0.2f;
@@ -87,6 +91,8 @@ float spring_compression(const host::PresentedVehicle &p_v, const sim::VehicleMo
 	return out;
 }
 
+// SOURCE: notes R5-VS1 Rule 2 item 15 (Load = clamp(km/h x 0.1, 0, 1) x the first engine's load).
+// STAND-IN: the engine load is recomputed from the presented wheel spin, rpm and hull. Settle: replicate the load.
 float engine_load_input(const host::PresentedVehicle &p_v, const sim::VehicleModel &p_model,
 		const core::Transform &p_hull, float p_speed) {
 	const sim::LandDriveModel &land = p_model.land;
@@ -143,6 +149,7 @@ bool first_person_view(const core::gameplay::VehicleSoundDef &p_def, uint32_t p_
 
 }
 
+// SOURCE: notes R5-VS1 Rule 4 (specific force with gravity, signed by its up part, a step of 0.2 g or more taken at 5 %).
 float vehicle_g_force_step(float p_g_force, const core::Vec3 &p_previous_velocity, const core::Vec3 &p_velocity,
 		const core::Vec3 &p_up, float p_dt) {
 	if (!(p_dt > 0.0f)) {
@@ -185,6 +192,8 @@ bool own_view_first_person(std::span<const host::PresentedVehicle> p_vehicles, c
 	return false;
 }
 
+// SOURCE: notes R5-VS1 Rule 2 item 10 (the slip ratio sum, plus off-ground wheels and half the second-contact wheels
+// above 1/36 m/s).
 float vehicle_slip_input(
 		float p_slip_ratio_sum, uint32_t p_wheels_off_ground, uint32_t p_wheels_in_second_contact, float p_speed) {
 	if (!(p_speed > kSlipGateSpeed)) {
@@ -226,6 +235,7 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 		const uint32_t key = vehicle_sound_key(v.spawner, v.generation, kVehicleEngineSound);
 		VehicleChassisMotion &chassis = chassis_of(r_memory, key, v);
 		chassis.seen = true;
+		// INFERRED: GForce steps once per presented tick (R5-VS1 did not trace its cadence). Settle: a note on the cadence.
 		if (v.tick != chassis.tick) {
 			const float seconds = float(v.tick - chassis.tick) / float(sim::kSimHz);
 			chassis.g_force =
@@ -251,6 +261,10 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 			any_contact = any_contact || contact;
 			off_ground += contact ? 0u : 1u;
 		}
+		// SOURCE: notes R5-VS1 Rule 2 (AngularVelocity w.y, RelativeVelocity |listener - chassis|, Roll (1 - up.y) / 2,
+		// Tilt forward.y, Velocity |v|, SpringCompression max (L - x) / L) and R5-VS2 3a (InteriorCam, #2045231802).
+		// STAND-IN: Contact has no second contact state, Slip no tyre slip ratios, RPM no fake rpm and Boost is 0.
+		// Settle: simulate those physics values.
 		auto &p = s.params;
 		p[size_t(P::AngularVelocity)] = v.angular_velocity.y;
 		p[size_t(P::Contact)] = any_contact ? 1.0f : 0.0f;
@@ -289,6 +303,8 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 				m.angle = angle;
 			}
 			m.previous_rpm = m.rpm;
+			// SOURCE: notes R5-VS1 Rule 7 (rotation speed x 9.549296 as RPM).
+			// INFERRED: the speed is a magnitude, as R5-VS1 infers. Settle: a note on the getter's sign.
 			m.rpm = m.speed * sim::vehicles::kRadPerSecToRpm;
 			VehicleSoundSource t;
 			t.key = turret_key;
@@ -297,6 +313,8 @@ void vehicle_sound_sources(std::span<const host::PresentedVehicle> p_vehicles, c
 			t.emitter = s.emitter;
 			for (const core::gameplay::VehicleTurretSound &c : def.turrets) {
 				if (c.turret == turret) {
+					// STAND-IN: the spin sound sits at the turret's rest position, where notes R5-VS1 Rule 7 follow the
+					// child part's world transform. Settle: the turned turret's transform.
 					t.emitter.position = hull.transform_point(c.position);
 					t.start_rpm = c.start_rpm;
 					t.stop_rpm = c.stop_rpm;

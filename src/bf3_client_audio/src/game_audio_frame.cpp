@@ -98,6 +98,8 @@ void GameAudioDriver::step(WeaponAudioRouter &r_router, ImpactAudio *r_impacts, 
 	r_router.set_own_first_person(p_in.own_first_person);
 	if (p_in.frame != nullptr && p_in.frame->own_weapons_valid) {
 		const net::WeaponTimersWire &active = p_in.frame->own_weapons_curr.timers[0];
+		// WHY: for the local player's weapon the fire end, not the trigger release, ends a burst once it has fired (notes
+		// R5-VS3 1), so the trigger counts as held while rounds of the burst are left.
 		r_router.set_own_trigger((active.flags & sw::slot_flags::kTriggerDown) != 0 || active.burst_left > 0);
 	}
 	r_router.set_listener(p_in.listener);
@@ -146,6 +148,7 @@ core::Result<std::shared_ptr<const ca::SoundProgram>> compile_patch_lenient(cons
 	if (strict) {
 		return strict;
 	}
+	// STAND-IN: a patch with node types that are not built plays without them. Settle: build those node types.
 	ca::CompileOptions lenient;
 	lenient.allow_unimplemented = true;
 	return compile_patch(p_db, p_patch, lenient);

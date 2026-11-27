@@ -132,6 +132,7 @@ bool AreaBeds::start(MixerCore &r_mixer, AreaBed &r_bed, const AudioTuning &p_tu
 		return false;
 	}
 	EmitterState emitter;
+	// STAND-IN: a bed sounds at the listener. Settle: a note on where a SoundArea's sound is placed.
 	emitter.position = p_listener.position;
 	(*inst)->set_geometry(emitter, p_listener);
 	(*inst)->set_parameter(kHashBedAmplitude, r_bed.amplitude);
@@ -184,6 +185,8 @@ void AreaBeds::step(MixerCore &r_mixer, const sim::logic::SoundAreaNatives *p_ar
 	const std::span<const sim::logic::SoundAreaValue> values = p_areas->areas();
 	const uint64_t now = r_mixer.clock();
 	uint32_t sounding = 0;
+	// STAND-IN: a bed plays while its area's proximity is above 0, with Amplitude the proximity times the configuration's
+	// Amplitude, and stops at 0. Settle: a note on how a SoundArea drives its Sound.
 	for (AreaBed &bed : beds_) {
 		const sim::logic::SoundAreaValue &v = values[bed.area];
 		const float proximity = v.published && std::isfinite(v.proximity) ? std::max(0.0f, v.proximity) : 0.0f;

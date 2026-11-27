@@ -13,6 +13,8 @@ namespace ca = core::audio;
 
 namespace {
 
+// STAND-IN: a down ray from 0.5 m above the feet to 1.5 m below them finds the surface, where notes R2-D2 3 read the
+// character physics' ground material. Settle: the character's ground material.
 constexpr float kGroundProbeUpM = 0.5f;
 constexpr float kGroundProbeDropM = 1.5f;
 
@@ -149,6 +151,8 @@ void footstep_soldiers(const host::PresentationFrame *p_frame, std::span<const h
 	}
 }
 
+// INFERRED: the own-hit sound plays at the listener facing from the shooter's eye to the hit, or the listener's forward
+// when the shooter is not presented, once per Hit (a blast's too). Settle: a note on SoldierSoundData.BulletImpact.
 std::optional<Vec3> own_hit_forward(const host::PresentEvent &p_hit, std::span<const host::PresentedSoldier> p_others) {
 	for (const host::PresentedSoldier &p : p_others) {
 		if (p.slot != p_hit.slot) {
@@ -215,6 +219,8 @@ void DeathScreamAudio::on_events(std::span<const host::PresentEvent> p_events,
 		}
 		heard_.push_back(key);
 		const bool own = e.aux == p_own_slot;
+		// STAND-IN: the scream sounds at the victim's eye height, or at the listener for the own soldier. Settle: a note on
+		// the Death sound's position (R-D2 gives only the one-shot per flag).
 		EmitterState em;
 		bool placed = own;
 		em.position = p_listener.position;

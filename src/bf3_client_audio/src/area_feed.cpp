@@ -9,6 +9,8 @@ void AreaFeed::step(MixerCore &r_mixer, const sim::logic::SoundAreaNatives *p_ar
 	if (p_areas == nullptr || !p_areas->listening()) {
 		return;
 	}
+	// STAND-IN: only the AreaType mixer value reaches the patches; the level's other MixerEntity outputs are not posted.
+	// Settle: post every mixer value the patches' MixerReceive nodes read.
 	const float area_type = p_areas->area_type();
 	if (stats_.posted && area_type == stats_.area_type) {
 		return;

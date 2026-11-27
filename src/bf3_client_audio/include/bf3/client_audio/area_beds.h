@@ -24,7 +24,9 @@ class LoadedLevel;
 
 namespace bf3::audio {
 
+// SOURCE: the name hash of the patch input "Amplitude" (h = 33 h xor byte from 5381, notes R5-VS1).
 inline constexpr uint32_t kHashBedAmplitude = 698564572u;
+// STAND-IN: a bed our mixer refused or ended is tried again after 1 s. Settle: notes R4-D3's resume of a sound.
 inline constexpr double kBedRetrySeconds = 1.0;
 
 struct AreaBedSound {
