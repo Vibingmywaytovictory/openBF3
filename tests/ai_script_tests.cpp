@@ -85,6 +85,30 @@ TEST_SUITE("ai-script") {
 		}
 	}
 
+	TEST_CASE("a declared vehicle class weighs only the behaviours its setVehicleBehaviour lines bind, as BF2's "
+			  "AIConsole::setVehicleBehaviour registers a class's behaviours one by one; an undeclared class keeps "
+			  "Infantry's") {
+		core::Result<AiConfig> config = load_level_ai_config(kShipped, "MP_007", kTwoAreas);
+		REQUIRE_MESSAGE(config.ok(), (config.ok() ? std::string() : config.error().message));
+		REQUIRE(config->settings.vehicle("Tank") < 0);
+		const core::Status st =
+				run_ai_script("aiSettings.setVehicle Tank\n"
+							  "aiSettings.setVehicleMods Tank Default\n"
+							  "aiSettings.setVehicleBehaviour Tank Random BBRandom BBPRandom 0 Memory Unit\n",
+						"tank", *config);
+		REQUIRE_MESSAGE(st.ok(), message(st));
+		BehaviourTuning tuning;
+		REQUIRE(apply_behaviour_weights(*config, tuning).ok());
+		const std::array<float, kBotBehaviourCount> &tank = tuning.class_weights[size_t(EquipmentClass::Tank)];
+		const std::array<float, kBotBehaviourCount> &car = tuning.class_weights[size_t(EquipmentClass::Car)];
+		for (size_t i = 0; i < kInfantryBehaviourCount; ++i) {
+			const bool random = InfantryBehaviour(i) == InfantryBehaviour::Random;
+			CHECK(tank[i] == (random ? tuning.curves[i].weight : 0.0f));
+			CHECK(car[i] == tuning.curves[i].weight);
+		}
+		CHECK(tank[size_t(InfantryBehaviour::Random)] > 0.0f);
+	}
+
 	TEST_CASE("a level's own files override: its StrategicAreas.ai replaces the derived areas, its AI.ai runs last "
 			  "and its weights and skill reach the config; a config that never sets the basic bot weights is refused") {
 		const ScratchRoot root;

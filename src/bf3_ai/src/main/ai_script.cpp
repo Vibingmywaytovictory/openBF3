@@ -876,8 +876,17 @@ core::Status apply_behaviour_weights(const AiConfig &p_config, BehaviourTuning &
 		const float *mods = p_config.settings.mods_of(infantry);
 		out.weight = p_config.settings.basic_bot_weights[i] * (mods != nullptr ? mods[i] : 1.0f);
 		for (size_t k = 0; k < kEquipmentClassCount; ++k) {
-			const float *own = p_config.settings.mods_of(p_config.settings.vehicle(kEquipmentClassNames[k]));
-			tuning.class_weights[k][i] = own != nullptr ? p_config.settings.basic_bot_weights[i] * own[i] : out.weight;
+			const int vehicle = p_config.settings.vehicle(kEquipmentClassNames[k]);
+			const float *own = p_config.settings.mods_of(vehicle);
+			const bool binds = vehicle < 0 ||
+					std::any_of(
+							p_config.vehicle_behaviours.begin(), p_config.vehicle_behaviours.end(),
+							[&](const VehicleBehaviour &p_b) {
+								return p_b.vehicle == vehicle && p_b.behaviour == int(i);
+							});
+			tuning.class_weights[k][i] = !binds ? 0.0f
+					: own != nullptr			? p_config.settings.basic_bot_weights[i] * own[i]
+												: out.weight;
 		}
 		if (curve.kind == UrgeCurveDef::Kind::Linear) {
 			out.slope = curve.values[0];
