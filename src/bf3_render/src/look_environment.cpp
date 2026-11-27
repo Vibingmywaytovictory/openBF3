@@ -561,8 +561,9 @@ LookVec3 look_grade(const LookEnvState &p_state, const std::vector<uint8_t> &p_c
 }
 
 std::optional<std::array<float, 4>> look_engine_global(const LookEnvState &p_state, std::string_view p_name) {
-	// INFERRED: from the names, the hemisphere direction is world up and the top and bottom colours are OutdoorLight's
-	// SkyColor and GroundColor. Settle: the engine's own values for these constants.
+	// SOURCE: notes R5-VG1 4 (the hemisphere's top is SkyColor, its bottom GroundColor).
+	// STAND-IN: the direction is world up; R5-VG1 4 tilts it toward the sun by SkyLightAngleFactor x pi/4.
+	// Settle: build R5-VG1 4's direction (MP_007's factor is 0.452).
 	if (p_name == "outdoorLightHemisphereDir") {
 		return std::array<float, 4>{ 0.0f, 1.0f, 0.0f, 0.0f };
 	}
