@@ -27,6 +27,8 @@ class Bf3MinimapControl;
 class Bf3WorldIcons;
 class MinimapCheck;
 
+// STAND-IN: outside a match the viewer is taken as team 1 to pick objective and soldier icon states.
+// Settle: give the minimap the viewer's team from the presentation frame outside a match too.
 inline constexpr int32_t kNoMatchLocalTeam = 1;
 
 struct MinimapAssets {

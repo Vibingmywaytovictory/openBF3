@@ -715,6 +715,8 @@ void Bf3LevelSession::tdm_presented(uint64_t p_now_ns) {
 		m.own_life_seen = f.own_curr.life;
 		m.spawned_this_round = true;
 		++m.own_spawns;
+		// STAND-IN: a new life within 2 s of the own Revive event is the revive. Settle: a note on when a revived life
+		// reaches the client.
 		m.life_revived = m.revive_seen_s >= 0.0 && now_s - m.revive_seen_s < 2.0;
 		if (m.deploy.armed && !m.life_revived) {
 			++m.deploys;
@@ -1576,6 +1578,8 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 				(m.eor_camera == nullptr || !m.eor_camera->active())) {
 			const std::shared_ptr<const host::SharedLevel> shared = shared_level();
 			if (shared != nullptr && !shared->spawns.empty()) {
+				// STAND-IN: before the first spawn the camera looks over the first spawn point, 3 m up and 0.25 rad
+				// down. Settle: retail footage of the join screen's background view.
 				const sim::SpawnPoint &sp = shared->spawns.front();
 				const float yaw = sim::yaw_radians(sp.yaw);
 				const Basis b = Basis(Vector3(0, 1, 0), yaw + float(sim::kPi)) * Basis(Vector3(1, 0, 0), -0.25f);
@@ -1606,6 +1610,8 @@ bool Bf3LevelSession::tdm_frame(uint64_t p_now_ns, [[maybe_unused]] double p_del
 			m.eor_flash->frame(this, r_game.layer, *eor_level->eor_fading, effects);
 		}
 		const std::optional<core::level::EorCamera> &eor = eor_level->eor_camera;
+		// STAND-IN: only the EOR camera's LogicVisualEnvironment reaches the look; the others the logic enables (out of
+		// bounds, the UI dimmer) are not blended. Settle: every enabled LogicVisualEnvironmentEntityData's weight.
 		if (eor && eor->environment) {
 			const host::LogicEnvironmentState *lve = effects.environment(eor->environment->visual_environment);
 			look_.set_logic_environment(eor->environment->visual_environment, lve != nullptr ? lve->visibility : 0.0f);

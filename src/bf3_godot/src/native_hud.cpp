@@ -46,6 +46,10 @@ namespace ui = bf3::core::ui;
 
 namespace {
 
+// STAND-IN: the shader's edge_width 0.01, the smoothstep half-width at the combat-area and detail thresholds, is
+// hand-picked; the data gives only the thresholds. Settle: retail minimap footage at a combat-area edge.
+// INFERRED: the premultiplied layer order (tint at MinimapTextureOpacity, detail ColorTint above its threshold, hatched
+// combat area, mask), fitted to the 18.57 footage. Settle: the minimap shader's own program.
 constexpr std::string_view kMinimapMapShader = R"(shader_type canvas_item;
 uniform sampler2D satellite : filter_linear_mipmap, repeat_disable;
 uniform sampler2D combat_area : filter_linear, repeat_disable;
@@ -973,6 +977,8 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 	view.player_z = pose.z;
 	view.heading = pose.yaw;
 	view.rotate = true;
+	// INFERRED: at a zoom step that does not centre the player (IsMaxZoom) the large map fits the combat-area rect
+	// north-up, as the overview does. Settle: retail footage of the large map at its start step.
 	if (!minimap_state_.player_is_center) {
 		view.heading = 0.0f;
 		view.rotate = false;
@@ -1033,6 +1039,7 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 		if (minimap_debug_uv_) {
 			return;
 		}
+		// INFERRED: a minimap icon draws one atlas texel per Minimap_01 local unit. Settle: icon sizes on the 18.57 footage.
 		const float w = float(r.width) * unit;
 		const float h = float(r.height) * unit;
 		rs->canvas_item_add_set_transform(minimap_icon_item_, Transform2D(p_angle, p_at));
@@ -1049,6 +1056,7 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 	};
 	const std::vector<ui::HudFlagIcon> flags =
 			ui::hud_minimap_flags(model_.capture_points.minimap_capturepoints_status_data);
+	// WHY: with live flags the data's objective icons are skipped, as they carry only each point's initial owner.
 	for (const MinimapIconDraw &ic : minimap_source_->icon_draws()) {
 		const ui::ScreenPoint p = ui::minimap_project(view, ic.world_x, ic.world_z);
 		if (on_map(p) && !(ic.objective && !flags.empty())) {
@@ -1056,6 +1064,8 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 					ic.objective ? MinimapDebugKind::Objective : MinimapDebugKind::Friendly, ic.world_x, ic.world_z);
 		}
 	}
+	// INFERRED: the flag letter drawn in $Menu_medium, white, centred on the flag icon; not compared with footage.
+	// Settle: retail Conquest footage of the minimap's flag letters.
 	if (!flags.empty() && tag_font_.is_null()) {
 		if (Bf3UiAssets *u = Bf3UiAssets::current()) {
 			tag_font_ = u->get_font(String("$Menu_medium"));
@@ -1080,6 +1090,8 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 				HORIZONTAL_ALIGNMENT_LEFT, -1, letter_size, Color(1, 1, 1, 1));
 		paint_.minimap_letters++;
 	}
+	// SOURCE: notes R2-E2 E (a man-down team-mate shows PlayerDead on the minimap).
+	// STAND-IN: never Revive, which E gives a viewer carrying a defibrillator. Settle: the viewer's gadget test here.
 	const ui::HudIcon *dead = a->atlas.find(ui::kHudIconPlayerDead);
 	for (const NativeHudDownedMate &d : downed_) {
 		const ui::ScreenPoint p = ui::minimap_project(view, d.x, d.z);
@@ -1088,6 +1100,8 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 			paint_.minimap_downed++;
 		}
 	}
+	// INFERRED: the own squad's standing order shows on the minimap as the atlas icon its order names; not seen in
+	// footage. Settle: retail footage of a squad order on the minimap.
 	if (tags_ != nullptr && tags_->order_mark()) {
 		const NativeOrderMark &o = *tags_->order_mark();
 		const std::optional<ui::HudSquadOrderLook> look = ui::squad_order_look(o.order);
@@ -1100,6 +1114,8 @@ void Bf3NativeHud::paint_minimap(const SwfEngineTarget &p_target, const ui::SwfS
 	}
 	if (tags_ != nullptr) {
 		const ui::HudIcon *player = a->atlas.find(kPlayerIcon);
+		// STAND-IN: a team-mate's minimap icon is always UIHudIcon_Player; the need and order icons notes R2-E2 C put on it
+		// are not drawn. Settle: draw NativeTag::need_icon here for team-mates.
 		for (const IffMinimapEntry &e : tags_->minimap()) {
 			const ui::ScreenPoint p = ui::minimap_project(view, e.feet[0], e.feet[2]);
 			if (!on_map(p)) {
@@ -1170,6 +1186,8 @@ void Bf3NativeHud::paint_tags() {
 				atlas->get_rid(), Rect2(float(r.x), float(r.y), float(r.width), float(r.height)), p_modulate);
 		paint_.tag_icons++;
 	};
+	// STAND-IN: the 6 px font floor, the halved glow size and, in the loop below, the 2-unit gaps, the name's kit icon
+	// (16 units in an 18-unit column, 0.35 of the text height up) and the 0.55 black glow. Settle: footage nametags.
 	const int font_size = std::max(6, int(std::lround(style.name_font_size * cs)));
 	const int glow = std::max(1, int(std::lround(style.name_glow_size * 0.5f * cs)));
 	for (const NativeTag &t : tags_->tags()) {
@@ -1183,16 +1201,22 @@ void Bf3NativeHud::paint_tags() {
 			if (need != nullptr) {
 				frame(need, relation_state(t.relation), t.anchor, icon_size, Color(1, 1, 1, t.alpha));
 			} else if (t.squad_leader && leader != nullptr) {
+				// INFERRED: the own squad leader's tag is UIHudIcon_SquadleaderBg plus UIHudIcon_SquadLeader in place of the
+				// kit icon, from the atlas's Squad states. Settle: retail footage of a squad leader's nametag.
 				frame(leader_bg, ui::HudIconState::Squad, t.anchor, icon_size, Color(1, 1, 1, t.alpha));
 				frame(leader, ui::HudIconState::Squad, t.anchor, icon_size, Color(1, 1, 1, t.alpha));
 				paint_.tag_leaders++;
 			} else if (squad && kit != nullptr) {
 				frame(kit, ui::HudIconState::Squad, t.anchor, icon_size, Color(1, 1, 1, t.alpha));
 			} else {
+				// INFERRED: other tags, a spotted enemy's marker among them, are UIHudIcon_Player by relation; notes R2-E1 D
+				// give only the spotted kind the nametag movie draws. Settle: how that movie draws spotted kinds 1 to 3.
 				frame(player, relation_state(t.relation), t.anchor, icon_size, Color(1, 1, 1, t.alpha));
 			}
 			top -= 0.5f * std::min(icon_size, 16.0f) * cs + 2.0f * cs;
 		}
+		// STAND-IN: no UINametagCompData HealthBarSize bar under the name, as other soldiers' health is not presented.
+		// Settle: present team-mates' health and draw the bar.
 		if (!t.name || tag_font_.is_null() || t.text.is_empty()) {
 			continue;
 		}

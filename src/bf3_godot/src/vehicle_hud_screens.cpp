@@ -56,6 +56,8 @@ size_t VehicleHudScreens::step(
 	std::string name;
 	if (view.hud != nullptr) {
 		const std::optional<host::PresentedSeat> seat = host::vehicle_seat_of(p_in.vehicles, p_in.own_slot);
+		// INFERRED: the AS2's vehicle name is VehicleEntityData.NameSid, as HelperFunctions.getIsVehicleRussian's twelve
+		// names are NameSids. Settle: the binding that feeds the vehicle name traced.
 		name = p_in.level->kinds[p_in.level->spawners[seat->spawner].kind].name_sid;
 	}
 	if (name != vehicle_name_) {

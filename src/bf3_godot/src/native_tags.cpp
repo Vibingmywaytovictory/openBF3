@@ -34,6 +34,8 @@ namespace bf3::godot_side {
 
 namespace {
 
+// INFERRED: the kit icons come from gameplay/teams/us's kits, each matched to the kit index by the role word in its
+// name, and serve both teams. Settle: compare the RU kits' UIHudIcon values.
 constexpr std::array<const char *, 4> kKitRoles{ "assault", "engineer", "support", "recon" };
 
 uint8_t own_team_of(const host::PresentationFrame &p_frame) {
@@ -259,6 +261,8 @@ void NativeTags::update_capture_points(const Camera3D *p_camera, bool p_show, co
 		return;
 	}
 	const ui::HudCapturePointList &points = p_model.capture_points.capturepoints_status_data;
+	// INFERRED: the flag letters run A, B, C over the non-HQ points in the model's order. Settle: each point's letter
+	// on retail Conquest footage or a data field naming it.
 	char letter = 'A';
 	for (size_t i = 0; i < points.count && i < points.points.size(); ++i) {
 		const ui::HudCapturePoint &c = points.points[i];
@@ -445,6 +449,8 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 			if (dec.needs_line_of_sight && world != nullptr && rays < kMaxLosRaysPerFrame) {
 				const sim::Vec3 from{ eye.x, eye.y, eye.z };
 				bool clear = false;
+				// STAND-IN: the nametag sight test aims at 0.75 and 1.0 of the eye height, clear when either ray is.
+				// Settle: a note on the nametag's line-of-sight test.
 				for (const float h : { 0.75f, 1.0f }) {
 					const sim::Vec3 to{ s.feet[0], s.feet[1] + s.eye_height * h, s.feet[2] };
 					++rays;
@@ -475,6 +481,8 @@ void NativeTags::update(const Camera3D *p_camera, bool p_show, Vector2 p_viewpor
 			if (dec.relation != ui::TagRelation::Enemy) {
 				sim::commo::NeedParty mate;
 				mate.max_health = me.max_health;
+				// STAND-IN: a mate's health is known only as the low-health flag, so 0 or full stands in for the
+				// health percent of notes R2-E2 D. Settle: the mate's health in the presentation frame.
 				mate.health = s.spot.low_health ? 0.0f : mate.max_health;
 				mate.low_ammo = s.spot.low_ammo;
 				if (gunplay != nullptr && s.kit < host::kKitCount && s.team >= 1 && s.team <= host::kKitTeams) {

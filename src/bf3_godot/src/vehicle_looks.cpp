@@ -56,6 +56,8 @@ Ref<Material> VehicleLooks::material(
 	}
 	Ref<ShaderMaterial> m;
 	m.instantiate();
+	// INFERRED: glass draws see-through at the look's glass tint, as the glass slots' Window_01_D holds masks, not a
+	// colour. Settle: the glass shader's program read.
 	const Ref<Texture2D> albedo = p_look.color && !p_look.glass ? find_(p_look.color->name) : Ref<Texture2D>();
 	const Ref<Texture2D> normal = p_look.normal && p_has_tangents ? find_(p_look.normal->name) : Ref<Texture2D>();
 	if (p_look.graph) {
@@ -63,6 +65,8 @@ Ref<Material> VehicleLooks::material(
 		m->set_shader(program_shader(*p_look.graph));
 		for (size_t t = 0; t < program.textures.size() && t < p_look.graph_textures.size(); ++t) {
 			const std::string &name = p_look.graph_textures[t];
+			// INFERRED: an unset texture parameter reads zero (on MP_007 only HeatMap, weighted by FLIRData.w 0); the data
+			// does not say what the engine binds. Settle: a note on the default texture bound to an empty slot.
 			const Ref<Texture2D> texture = name.empty() ? zero_texture() : find_(name);
 			m->set_shader_parameter(to_godot("t" + std::to_string(program.textures[t])), texture);
 		}

@@ -77,10 +77,14 @@ bool HudBgPainter::paint(Bf3SwfView &r_view, const SwfEngineTarget &p_target, st
 	}
 	rs->canvas_item_clear(p_target.canvas_item);
 	rs->canvas_item_set_material(p_target.canvas_item, material_->get_rid());
+	// STAND-IN: every iBgDraw panel takes the look fitted on the ammo panel (retail's health panel is about 0.8 x as light).
+	// Settle: a fit per panel on the footage, or a note on the iBgDraw renderer.
 	const ui::HudBgDrawLook &k = ui::kHudBgDrawLook;
 	const ui::SwfRect &b = p_target.local_bounds;
 	const BgAxis ax = bg_axis(b.x_min, b.x_max, float(ui::hud_bg_light_ramp_fraction_x()), k);
 	const BgAxis ay = bg_axis(b.y_min, b.y_max, float(ui::hud_bg_light_ramp_fraction_y()), k);
+	// INFERRED: light and coverage are the products of the x and y ramps, linear between the ramp points.
+	// Settle: a note on the iBgDraw renderer.
 	const auto colour_at = [&](size_t p_ix, size_t p_iy) {
 		const float l = ax.light[p_ix] * ay.light[p_iy];
 		return Color(k.premul_rgb255[0] / 255.0f * l, k.premul_rgb255[1] / 255.0f * l, k.premul_rgb255[2] / 255.0f * l,

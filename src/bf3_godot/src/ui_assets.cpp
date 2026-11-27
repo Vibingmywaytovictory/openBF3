@@ -144,6 +144,8 @@ Ref<FontFile> make_font_file(const ui::ConvertedFont &p_font) {
 	}
 	f->set_data(bytes);
 	f->set_antialiasing(TextServer::FONT_ANTIALIASING_GRAY);
+	// WHY: hinted FreeType advances are whole pixels, and AUTO subpixel positioning turns off above 20 px, where Godot's
+	// text server then rounds every shaped advance.
 	f->set_hinting(TextServer::HINTING_NONE);
 	f->set_subpixel_positioning(TextServer::SUBPIXEL_POSITIONING_ONE_QUARTER);
 	f->set_allow_system_fallback(true);

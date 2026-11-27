@@ -25,6 +25,7 @@ using bf3::core::fmt;
 
 namespace {
 
+// WHY: an origin far outside any level, so no point reads the near page before its first draw.
 constexpr float kUnshownOrigin = 1.0e5f;
 constexpr float kCameraClearance = 1.0f;
 
@@ -70,6 +71,8 @@ void TerrainPageDraw::set_param(const char *p_name, const Variant &p_value) cons
 	}
 }
 
+// INFERRED: top-down colour and normal pages near the camera and over the terrain's box stand in for the engine's
+// virtual texture atlases, whose layout and texels the data does not hold. Settle: a note on the virtual texture.
 void TerrainPageDraw::begin(std::string p_name, const RID &p_terrain_mesh, const Transform3D &p_terrain,
 		const AABB &p_world_bounds, float p_near_texel, std::vector<RID> p_materials) {
 	free_all();

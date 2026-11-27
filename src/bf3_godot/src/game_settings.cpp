@@ -99,6 +99,8 @@ core::Result<bool> GameSettings::save_if_changed(const std::string &p_path) {
 void GameSettings::begin_level() {
 	input_revision_ = ~0ull;
 	audio_mixer_ = nullptr;
+	// WHY: the field of view is latched here, at the level load and each round restart, as the FieldOfView option's
+	// hint says it applies at the next level load.
 	level_hip_fov_deg_ = ui::settings_effects(store()).hip_fov_deg;
 }
 

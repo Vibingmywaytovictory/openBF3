@@ -16,6 +16,8 @@
 
 namespace bf3::godot_side {
 
+// STAND-IN: the shader's edge_width 0.01, the smoothstep half-width at the combat-area and detail thresholds, is
+// hand-picked; the data gives only the thresholds. Settle: retail minimap footage at a combat-area edge.
 inline constexpr std::string_view kMinimapShader = R"(shader_type canvas_item;
 uniform sampler2D satellite : filter_linear_mipmap, repeat_disable;
 uniform sampler2D combat_area : filter_linear, repeat_disable;

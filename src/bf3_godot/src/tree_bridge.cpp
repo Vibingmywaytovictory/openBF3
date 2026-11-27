@@ -72,6 +72,7 @@ void TreeBridge::update(const LevelUpload &p_upload, const std::shared_ptr<const
 	RenderingServer *rs = RenderingServer::get_singleton();
 	for (size_t t = 0; t < forest_->trees(); ++t) {
 		const render::TreeSim *sim = forest_->sim(t);
+		// SOURCE: notes R6-VG2-rate (new trees): a tree draws with its instance matrix until its pre-simulation has run.
 		if (sim == nullptr || !forest_->stepped(t) || !forest_->posed(t)) {
 			continue;
 		}

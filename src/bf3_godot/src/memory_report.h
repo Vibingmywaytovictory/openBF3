@@ -16,6 +16,7 @@ struct CommittedMemory {
 	size_t allocations = 0;
 	std::vector<uint64_t> largest;
 
+	// WHY: write-combined private pages are the driver's mappings of video memory, not the process's CPU memory.
 	uint64_t cpu_bytes() const { return private_bytes - write_combined_bytes; }
 };
 

@@ -26,6 +26,7 @@ class Bf3UiTextures;
 inline constexpr int32_t kNativeLoadingLayer = 100;
 inline constexpr std::string_view kNativeLoadingPlatform = "win32";
 inline constexpr double kNativeLoadingMaxStepSeconds = 1.0;
+// WHY: the loading movie is stepped at most 30 times a second, so the main thread keeps its time for the level load.
 inline constexpr double kNativeLoadingStepSeconds = 1.0 / 30.0;
 
 struct NativeLoadingFacts {

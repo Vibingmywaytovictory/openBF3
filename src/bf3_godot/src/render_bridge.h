@@ -43,6 +43,8 @@ struct MaterialOptions {
 
 	bool viewmodel = false;
 	float fov_override = 55.0f;
+	// STAND-IN: the 1P pass's depth squeeze, Godot's z_clip_scale 0.25, keeps the arms in front of the world.
+	// Settle: a note on how BF3 draws the first-person pass's depth.
 	float z_clip_scale = 0.25f;
 };
 

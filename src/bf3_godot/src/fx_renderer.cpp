@@ -31,6 +31,8 @@ namespace {
 
 using bf3::core::ms_since;
 
+// STAND-IN: batches draw by pass, then blend (alpha, premultiplied, additive, opaque), then shader class.
+// Settle: a note on BF3's particle draw order.
 int draw_position(const fx::FxBatchKey &p_key) {
 	int blend = 0;
 	switch (p_key.blend) {
@@ -231,8 +233,12 @@ bool Bf3FxRenderer::ensure_resources() {
 	}
 	for (Light &l : lights_) {
 		l.light = rs->omni_light_create();
+		// STAND-IN: no shadows and Godot's default specular share of 0.5 for effect lights.
+		// Settle: a note on particle point lights' shadow and specular.
 		rs->light_set_shadow(l.light, false);
 		rs->light_set_param(l.light, RenderingServer::LIGHT_PARAM_SPECULAR, 0.5f);
+		// INFERRED: effect lights fall off as the level lights do; BF3's particle light falloff is open (Q-FX1).
+		// Settle: an answer to Q-FX1 (STATUS.md, open).
 		rs->light_set_param(l.light, RenderingServer::LIGHT_PARAM_ATTENUATION, kLevelLightAttenuation);
 		l.instance = rs->instance_create2(l.light, scenario_);
 		rs->instance_set_visible(l.instance, false);

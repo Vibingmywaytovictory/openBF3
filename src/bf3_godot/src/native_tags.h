@@ -40,8 +40,12 @@ namespace bf3::godot_side {
 
 class Bf3LevelSession;
 
+// STAND-IN: a budget of 4 nametag line-of-sight rays a frame; a soldier reached once it is spent is decided without a
+// sight test. Settle: a note on how the nametag tests line of sight.
 inline constexpr uint32_t kMaxLosRaysPerFrame = 4;
 inline constexpr double kNativeTagsSummaryEveryS = 30.0;
+// INFERRED: a world tag behind the camera is pushed along its camera-space x and y from the snap origin, 4096 stage
+// units, far enough to reach the SnapSafeZone edge. Settle: retail footage of a grenade alert behind the player.
 inline constexpr float kAlertBehindReach = 4096.0f;
 inline constexpr uint32_t kOrderTagId = 0xFF000000u;
 inline constexpr uint32_t kCaptureTagId = 0xFE000000u;

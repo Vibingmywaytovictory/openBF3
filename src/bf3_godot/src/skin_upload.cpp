@@ -122,6 +122,8 @@ bool build_team_meshes(const bf3::render::SoldierAssets &p_assets, std::array<Te
 				}
 				return false;
 			}
+			// WHY: Godot does not recompute a skinned instance's bounds, so the bind-pose bounds grow to cover the animated
+			// pose.
 			const Vector3 grow(1.0f, 1.0f, 1.0f);
 			kits[k][t].aabb = AABB(lo - grow, (hi - lo) + grow * 2.0f);
 			kits[k][t].skin = k == 0 ? make_skin(team.binds.binds()) : kits[0][t].skin;

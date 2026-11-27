@@ -122,6 +122,8 @@ void put16(uint8_t *p_dst, uint16_t p_a, uint16_t p_b) {
 	std::memcpy(p_dst + 2, &p_b, 2);
 }
 
+// STAND-IN: the plain --look=m1 shader: grey 0.55 without a colour texture, roughness 0.6, no metal, specular 0.5 and
+// an alpha cut at 0.5. Settle: the L1 look, which draws through the data's shaders.
 std::string shader_code(bool p_alpha, bool p_double_sided) {
 	std::string code = "shader_type spatial;\n";
 	code += std::string("render_mode blend_mix, depth_draw_opaque, diffuse_burley, specular_schlick_ggx, ") + (p_double_sided ? "cull_disabled" : "cull_back") +
@@ -149,6 +151,9 @@ void fragment() {
 	return code;
 }
 
+// INFERRED: UV set 3 is a world projection on the normal's dominant axis. Settle: a note or the shader database on
+// projected texture coordinates.
+// STAND-IN: the defaults where a material gives none: grey 0.55, roughness 0.6, alpha cut 0.5. Settle: the material data.
 std::string shader_code_l1(int p_alpha_mode, bool p_double_sided) {
 	std::string code = "shader_type spatial;\n";
 	code += std::string("render_mode blend_mix, ") + (p_alpha_mode == 2 ? "depth_draw_never" : "depth_draw_opaque") +
@@ -225,7 +230,11 @@ void register_light_pass_globals() {
 void set_look_params(const RID &p_material, const render::MaterialSlot &p_slot, bool p_has_albedo, bool p_glass,
 		const std::optional<std::array<float, 3>> &p_flat, bool p_flat_unlit) {
 	RenderingServer *rs = RenderingServer::get_singleton();
+	// STAND-IN: grey 0.55 without a colour texture, roughness 0.6 without SmoothnessRegular, glass roughness 0.1.
+	// Settle: the shader's own constants for these slots.
 	Color tint = p_has_albedo ? Color(1, 1, 1) : Color(0.55f, 0.55f, 0.55f);
+	// INFERRED: DiffuseDarkening multiplies the colour and SmoothnessRegular.x is 1 - roughness. Settle: the shader
+	// programs that read them.
 	if (const std::array<float, 4> *dark = p_slot.vector("DiffuseDarkening")) {
 		tint = Color(tint.r * (*dark)[0], tint.g * (*dark)[1], tint.b * (*dark)[2]);
 	}
@@ -783,6 +792,8 @@ void LevelUpload::create_materials(double p_deadline_us) {
 			const render::SceneTerrainPlan &tp = plan.terrains[next_material_ - plan.materials.size()];
 			rs->material_set_shader(m, shaders_[0]);
 			rs->material_set_param(m, "albedo_tint", Color(tp.color[0], tp.color[1], tp.color[2]));
+			// STAND-IN: a terrain without its translated look draws its plan colour at roughness 0.9. Settle: the
+			// terrain's surface shader.
 			rs->material_set_param(m, "roughness_value", 0.9f);
 			terrain_materials_[next_material_ - plan.materials.size()] = m;
 		}
@@ -970,6 +981,8 @@ void LevelUpload::create_instances(double p_deadline_us) {
 		for (int k = 0; k < 32 && next < list.size(); ++k, ++next) {
 			const RID inst = rs->instance_create2(meshes_[mesh], scenario_);
 			rs->instance_set_transform(inst, instance_transform(plan.instances[list[next]].transform));
+			// INFERRED: every level mesh casts the sun's shadow from both faces; the data says nothing of how BF3 draws
+			// single-sided shells into its shadow maps. Settle: a note on BF3's sun shadow casters.
 			rs->instance_geometry_set_cast_shadows_setting(inst, RenderingServer::SHADOW_CASTING_SETTING_DOUBLE_SIDED);
 			++double_sided;
 			add_world_bounds(mesh_bounds_[mesh], instance_transform(plan.instances[list[next]].transform));

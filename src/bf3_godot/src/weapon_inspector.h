@@ -28,6 +28,8 @@ class Bf3WeaponInspector : public godot::CanvasLayer {
 
 public:
 
+	// SOURCE: bf3dump weapon weapons/m16a4/m16a4: name sid ID_P_WNAME_M16A4, which reads M16A3 (ID_P_WNAME_M16 reads
+	// M16A4).
 	static constexpr const char *kM16A3 = "weapons/m16a4/m16a4";
 	static constexpr const char *kM16A4Burst = "weapons/m16a4/u_m16_burst";
 

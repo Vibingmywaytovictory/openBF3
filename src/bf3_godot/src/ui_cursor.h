@@ -10,6 +10,8 @@
 
 namespace bf3::godot_side {
 
+// INFERRED: the arrow's points, outline width and the two colours below are read off the 18.57 retail footage at 720p,
+// as the install holds no cursor art. Settle: a retail 1280x720 screenshot of the arrow traced point by point.
 inline constexpr std::array<godot::Vector2, 7> kUiCursorArrow{ godot::Vector2(0.0f, 0.0f), godot::Vector2(13.0f, 13.0f),
 	godot::Vector2(7.8f, 13.0f), godot::Vector2(9.6f, 18.6f), godot::Vector2(7.4f, 19.2f), godot::Vector2(5.0f, 13.8f),
 	godot::Vector2(0.0f, 18.5f) };

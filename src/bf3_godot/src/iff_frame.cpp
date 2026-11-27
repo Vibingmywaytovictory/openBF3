@@ -24,6 +24,7 @@ size_t iff_soldiers(const host::PresentationFrame &p_frame, uint64_t p_now_ns, s
 		IffSoldier s;
 		s.slot = p.slot;
 		s.feet = p.position;
+		// STAND-IN: 1.6 m where no eye height is presented. Settle: the soldier body data's eye height for the pose.
 		s.eye_height = std::isfinite(p.eye_height) ? std::clamp(p.eye_height, 0.0f, 3.0f) : 1.6f;
 		s.yaw = p.yaw;
 		s.alive = (p.flags & sim::soldier_flags::kAlive) != 0;
@@ -69,6 +70,8 @@ void IffReveal::update(std::span<const IffSoldier> p_soldiers, double p_now_s, f
 		if (s.slot >= net::kMaxSlots) {
 			continue;
 		}
+		// STAND-IN: every fire sample seen reveals the shooter, a suppressed weapon's too (IsSilenced is not consulted).
+		// Settle: a note on the fire reveal and whether IsSilenced skips it.
 		if (s.firing && s.sample_tick != last_tick_[s.slot]) {
 			until_[s.slot] = p_now_s + hold;
 			++reveals_;

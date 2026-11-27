@@ -65,6 +65,8 @@ private:
 	std::map<std::string, Drawn, std::less<>> drawn_;
 	std::vector<std::string> notes_;
 	godot::RID scenario_;
+	// STAND-IN: 55 deg and a 0.25 z-clip scale for first-person mesh particles until set_first_person_projection.
+	// Settle: start from the held weapon's SoldierWeaponData.RenderFov.
 	float fp_fov_ = 55.0f;
 	float fp_z_clip_ = 0.25f;
 	FxMeshStats stats_;

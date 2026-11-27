@@ -250,6 +250,7 @@ void Bf3ViewmodelDemo::build_scene() {
 		mi->set_mesh(mesh);
 		mi->set_skin(skin_);
 
+		// WHY: the bind-pose bounds miss the animated, fov-overridden mesh, so a box around the camera keeps it drawn.
 		mi->set_custom_aabb(AABB(Vector3(-3, -1, -3), Vector3(6, 4, 6)));
 		mi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 		skeleton_->add_child(mi);
@@ -329,6 +330,8 @@ void Bf3ViewmodelDemo::pose_at_frame(float p_frame, std::vector<bf3::anim::Xform
 	if (camera_ != nullptr && camera_joint_ >= 0) {
 
 		const Transform3D joint = skeleton_->get_global_transform() * to_godot(model_[size_t(camera_joint_)]);
+		// INFERRED: the CameraJoint frame looks down +Z and a Godot camera down -Z, so it turns 180 degrees about Y.
+		// Settle: a research or note fact on the CameraJoint's view axis.
 		camera_->set_global_transform(joint * Transform3D(Basis(Vector3(0, 1, 0), real_t(Math::PI)), Vector3()));
 	}
 	if (r_model != nullptr) {

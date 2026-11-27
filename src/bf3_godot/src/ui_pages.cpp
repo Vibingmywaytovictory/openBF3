@@ -34,6 +34,7 @@ RID make_page_viewport(RenderingServer *p_rs, RenderingServer::ViewportMSAA p_ms
 		p_rs->viewport_set_parent_viewport(viewport, p_parent);
 	}
 	p_rs->viewport_set_active(viewport, true);
+	// WHY: sized last, as each viewport setter after a size reallocates the render target.
 	p_rs->viewport_set_size(viewport, p_width, p_height);
 	return viewport;
 }
@@ -243,6 +244,7 @@ void Bf3UiPages::begin_frame() {
 		return;
 	}
 	frame_ = now.process_frames;
+	// WHY: a pass stays up until a frame has drawn it, as a process frame with no draw (a minimised window) loses fills.
 	if (pass_requested_at_ != now.draws) {
 		end_pass();
 	}

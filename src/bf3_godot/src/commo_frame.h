@@ -15,6 +15,8 @@
 
 namespace bf3::godot_side {
 
+// INFERRED: a Q press spots and a Q held 0.25 s opens the rose; the data names no hold time.
+// Settle: retail footage of a held Q, or a note on the rose's open rule.
 inline constexpr float kCommoRoseHoldSeconds = 0.25f;
 
 struct CommoFrameInput {

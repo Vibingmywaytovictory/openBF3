@@ -73,6 +73,7 @@ int audio_thread_priority() {
 
 void request_audio_thread_priority(int p_priority) {
 
+	// WHY: the levels SetThreadPriority takes: idle -15, lowest to highest -2..2, time critical 15.
 	const bool valid = p_priority == -15 || p_priority == 15 || (p_priority >= -2 && p_priority <= 2);
 	g_priority_request.store(valid ? p_priority : kNoThreadPriority, std::memory_order_relaxed);
 }

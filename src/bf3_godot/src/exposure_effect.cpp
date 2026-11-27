@@ -25,6 +25,9 @@ constexpr uint32_t kReduceSide = 16;
 constexpr uint32_t kApplySide = 8;
 constexpr uint32_t kStateBytes = 16;
 
+// SOURCE: notes Q1 1-2 (one RGB texel read back from the 1x1 luminance target, then 0.30 R + 0.59 G + 0.11 B).
+// STAND-IN: the texel is the full-size colour's mean from one sum, and the log-average form is not used.
+// Settle: compare with BF3's downsample chain's 1x1 result.
 const char *kReduceShader = R"(#version 450
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 layout(rgba16f, set = 0, binding = 0) uniform restrict readonly image2D color_image;
@@ -168,6 +171,8 @@ RID buffer_set(const RID &p_shader, const RID &p_first, const RID &p_second) {
 }
 
 Bf3ExposureEffect::Bf3ExposureEffect() {
+	// INFERRED: the scene is measured and scaled after the transparent pass, before the tonemap.
+	// Settle: a note on where BF3's HDR exposure pass sits in the frame.
 	set_effect_callback_type(EFFECT_CALLBACK_TYPE_POST_TRANSPARENT);
 }
 

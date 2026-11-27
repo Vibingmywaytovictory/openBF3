@@ -24,6 +24,8 @@ godot::Vector2 rose_button_position(const ui::As2Clip &p_button) {
 	return godot::Vector2(p_button.x() + bg.x(), p_button.y() + bg.y());
 }
 
+// STAND-IN: outside the dead zone the shown button whose direction from the middle is nearest the cursor's is picked.
+// Settle: a note on the PC rose's mouse pick.
 std::optional<int32_t> rose_button_at(
 		const std::array<godot::Vector2, 12> &p_buttons, std::array<bool, 12> p_shown, godot::Vector2 p_cursor) {
 	if (p_cursor.length() < kRoseDeadZone) {

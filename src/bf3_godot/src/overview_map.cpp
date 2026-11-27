@@ -29,6 +29,10 @@ namespace {
 
 Bf3OverviewMap *g_current = nullptr;
 
+// STAND-IN: the overview repeats the HUD minimap's layer composition; its edge_width 0.01, the smoothstep half-width
+// at the thresholds, is hand-picked. Settle: retail overview footage at a combat-area edge.
+// INFERRED: the premultiplied layer order (tint at MinimapTextureOpacity, detail ColorTint above its threshold, hatched
+// combat area), fitted to the 18.57 minimap footage. Settle: the overview's own shader program.
 constexpr std::string_view kOverviewShader = R"(shader_type canvas_item;
 uniform sampler2D satellite : filter_linear_mipmap, repeat_disable;
 uniform sampler2D combat_area : filter_linear, repeat_disable;
@@ -83,6 +87,9 @@ ui::HudIconChoice mark_icon(OverviewMarkKind p_kind) {
 		case OverviewMarkKind::Enemy:
 			return { kPlayerIcon, ui::HudIconState::Enemy };
 		case OverviewMarkKind::Dead:
+			// INFERRED: notes R2-E2 E's minimap rule (PlayerDead on a man-down team-mate) taken for the overview too.
+			// Settle: retail footage of the deploy overview with a downed team-mate.
+			// STAND-IN: never Revive, which E gives a viewer carrying a defibrillator. Settle: the viewer's gadget test.
 			return { ui::kHudIconPlayerDead, ui::HudIconState::Friendly };
 	}
 	return { kPlayerIcon, ui::HudIconState::Neutral };
@@ -384,6 +391,8 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 	if (a == nullptr || atlas.is_null()) {
 		return;
 	}
+	// INFERRED: an overview icon draws one atlas texel per stage unit, whatever the clip's scale. Settle: icon sizes on
+	// the 18.57 footage's deploy and menu overviews.
 	const float unit = 1.0f / stage_per_local;
 	const auto inside = [&](const ui::ScreenPoint &p) {
 		return std::isfinite(p.x) && std::isfinite(p.y) && p.x >= b.x_min && p.y >= b.y_min && p.x <= b.x_max &&
@@ -431,6 +440,8 @@ void Bf3OverviewMap::paint_target(const SwfEngineTarget &p_target, const ui::Swf
 			stats_.objectives++;
 		}
 	}
+	// STAND-IN: the marks' draw order, dead under enemies under friendlies under the squad under the own soldier.
+	// Settle: overlapping marks on retail overview footage.
 	const OverviewMarkKind order[] = { OverviewMarkKind::Dead, OverviewMarkKind::Enemy, OverviewMarkKind::Friendly,
 		OverviewMarkKind::Squad, OverviewMarkKind::Local };
 	for (const OverviewMarkKind kind : order) {

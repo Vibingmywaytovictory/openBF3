@@ -76,6 +76,8 @@ size_t spot_subjects(const host::PresentationFrame &p_frame, uint64_t p_now_ns, 
 		}
 		s.party.position = o.position;
 		s.party.max_health = max_health;
+		// WHY: the snapshot sends only whether a soldier is below OrderHealPercentage, so 0 or full health gives the
+		// order pick (notes R-E2) the same answer.
 		s.party.health = spot.low_health ? 0.0f : max_health;
 		s.party.low_ammo = spot.low_ammo;
 		s.party.supplies = kit_supplies(p_gunplay, row->team, row->kit);

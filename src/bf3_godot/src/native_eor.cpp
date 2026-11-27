@@ -116,6 +116,8 @@ void NativeEor::frame(Bf3UiScreens &r_screens, const ui::HudModel &p_model, cons
 		apply(a, p_io);
 	}
 	const bool over = p_model.end_of_round.visible;
+	// INFERRED: leaving the round end gives input back to the game and hides the cursor whatever the flow last sent.
+	// Settle: the endofroundgraph's MouseInput and GameInput actions across an in-place restart.
 	if (round_over_ && !over) {
 		mouse_input_ = false;
 		game_input_ = true;

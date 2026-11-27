@@ -185,6 +185,7 @@ private:
 	std::vector<bf3::anim::Xform> model_;
 	float viewmodel_fov_ = -1;
 	float hip_fov_deg_ = 0.0f;
+	// INFERRED: the own weapon light is on at the spawn. Settle: retail footage of a fresh spawn with a flashlight.
 	bool weapon_light_ = true;
 	uint8_t shadow_quality_ = 0;
 	double last_present_us_ = 0;

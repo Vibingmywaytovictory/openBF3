@@ -18,6 +18,8 @@ namespace bf3::godot_side {
 
 class Bf3SwfView;
 
+// STAND-IN: the rose cursor's dead zone, 24 stage units, inside which the middle button is picked.
+// Settle: a note on the PC rose's mouse pick or retail footage.
 inline constexpr float kRoseDeadZone = 24.0f;
 
 struct NativeRoseState {

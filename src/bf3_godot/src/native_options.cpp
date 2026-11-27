@@ -59,6 +59,8 @@ void NativeOptions::feed(bf3::host::UiFlowSession &r_session, const ui::OptionsS
 	r_session.set_data(kOptionsSettingsCategory, ui::kOptionsVideoChangedKey, flag(s.video_settings_changed()));
 	r_session.set_data(
 			kOptionsSettingsCategory, ui::kOptionsFullscreenKey, flag(s.value(ui::kFullscreenOption) != 0.0));
+	// STAND-IN: CanSaveToMemCard is always True; the PC settings live in the settings file.
+	// Settle: the value retail PC gives uimemcardcomp CanSaveToMemCard.
 	r_session.set_data(kOptionsMemCardCategory, ui::kOptionsCanSaveKey, flag(true));
 	r_session.set_data(kOptionsSettingsCategory, ui::kOptionsSafeWidthKey,
 			bf3::core::float_text(s.value(ui::kSafeAreaWidthOption)));
@@ -105,6 +107,8 @@ void NativeOptions::apply_write(const bf3::host::UiFlowDataWrite &p_write, ui::O
 			}
 			break;
 		case ui::kOptionsValueKey:
+			// INFERRED: the flow writes an option's Value before its DataKey, so the DataKey write applies the pending value.
+			// Settle: the write order of optionsgraph's SetOptionValue nodes.
 			pending_value_ = number_of(p_write.value).value_or(std::numeric_limits<double>::quiet_NaN());
 			break;
 		case ui::kOptionsDataKeyKey:

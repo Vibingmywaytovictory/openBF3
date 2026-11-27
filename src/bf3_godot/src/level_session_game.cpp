@@ -289,6 +289,8 @@ void Bf3LevelSession::game_parse_args() {
 		}
 		g.team = team == 2 ? 2 : 1;
 	}
+	// STAND-IN: the listen game's respawn delay (firefight and TDM rules), 5 s, 1 s in checks. Settle: the mode's
+	// respawn time in the data.
 	g.respawn_s = g.checks() ? 1.0 : 5.0;
 	if (has_user_arg("respawn")) {
 		const double s = std::atof(user_arg_value("respawn").c_str());
@@ -933,6 +935,8 @@ void build_game_ui(
 		r_game.layer->add_child(frame);
 		pages->attach_present(frame);
 	}
+	// STAND-IN: Godot labels for the score, the next spawn and the death screen, and grey, blue and red tints for the
+	// capsule soldiers. Settle: the native SWF screens and the crowd's soldier meshes.
 	r_game.score_label = make_label(16, HORIZONTAL_ALIGNMENT_RIGHT);
 	r_game.score_label->set_name("Score");
 	r_game.layer->add_child(r_game.score_label);
@@ -1110,6 +1114,7 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 	size_t walking = 0;
 	const std::span<const host::PresentedVehicle> vehicles(p_frame.vehicles.data(), p_frame.vehicle_count);
 	for (size_t i = 0; i < n; ++i) {
+		// STAND-IN: a seated soldier is not drawn, as no seated pose is built. Settle: the entry's seated animation.
 		if (host::vehicle_seat_of(vehicles, soldiers[i].slot)) {
 			continue;
 		}
@@ -1169,6 +1174,8 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 		if (s.valid) {
 			++r_game.own_muzzles_fx;
 		} else {
+			// STAND-IN: without a first-person fire effect entry, the viewmodel's own muzzle transform.
+			// Settle: a first-person fire effect offset for every weapon.
 			s = muzzle_sample(viewmodel_muzzle_transform(*p_own_vm), r_game.own_slot, vel);
 			r_game.own_muzzles_standin += s.valid ? 1 : 0;
 		}

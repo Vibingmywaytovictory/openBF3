@@ -365,6 +365,8 @@ ui::SwfPoint happly(const Hom &p_h, double p_x, double p_y) {
 	return { float(x / w), float(y / w) };
 }
 
+// INFERRED: a _xrotation/_yrotation tilt projects about the stage centre with a focal length that fits the stage
+// height in perspective_fov. Settle: a retail capture of a tilted HUD widget compared point by point.
 Hom tilt_homography(const SwfTilt &p_tilt, double p_px, double p_py, const ui::SwfRect &p_stage) {
 	const double cx = (p_stage.x_min + p_stage.x_max) * 0.5;
 	const double cy = (p_stage.y_min + p_stage.y_max) * 0.5;
@@ -1073,6 +1075,7 @@ struct Bf3SwfView::Impl {
 	bool explicit_size = false;
 	Rect2 present_rect{ 0.0f, 0.0f, 1280.0f, 720.0f };
 	Vector2i target_size{ 1280, 720 };
+	// STAND-IN: hand-picked 4x MSAA for the UI's shape edges. Settle: a retail 1280x720 capture compared edge for edge.
 	RenderingServer::ViewportMSAA msaa = RenderingServer::VIEWPORT_MSAA_4X;
 	std::vector<SpareSurface> spares;
 	uint64_t open_serial = 0;
@@ -2568,6 +2571,8 @@ struct Bf3SwfView::Impl {
 
 		bool engine_target(const ui::SwfSceneNode &p_node) override {
 			const auto rt = view.renderers.find(p_node.id);
+			// INFERRED: a renderer string holding ";i" names an engine-drawn image, read off the retail strings
+			// (t2;iBgDraw, t2;iUIMinimapRender, t2;iUISoldierCompRender). Settle: a note on the renderer string grammar.
 			return rt != view.renderers.end() && rt->second.find(";i") != std::string::npos;
 		}
 

@@ -24,6 +24,8 @@ namespace {
 
 constexpr const char *kBackdropShaderPath = "res://shaders/eor_backdrop.gdshader";
 
+// INFERRED: lightcone_particles_01 draws as LightCone_01 x Color x (1 + LightDust_01_D scrolled at ParticleSpeed).
+// Settle: the compiled shader program of its first solution.
 constexpr const char *kConeShader = R"(shader_type spatial;
 render_mode unshaded, %s, depth_draw_never, cull_disabled, shadows_disabled;
 uniform sampler2D base_tex : source_color, filter_linear_mipmap, repeat_disable;
@@ -94,6 +96,8 @@ void EorShowroom::collect(const render::LevelScenePlan &p_plan) {
 			const bool add = m.look->solution_blend &&
 					render::viewmodel_blend_of(*m.look->solution_blend) == render::ViewmodelBlend::Add;
 			char code[1024];
+			// STAND-IN: a cone that does not blend additively takes its brightest channel as alpha.
+			// Settle: the alpha source of its first solution's blend.
 			std::snprintf(code, sizeof(code), kConeShader, add ? "blend_add" : "blend_mix",
 					add ? "1.0" : "max(cone.r, max(cone.g, cone.b))");
 			cone_shader_.instantiate();
@@ -156,6 +160,8 @@ void EorShowroom::place_light(Node *p_parent, const core::level::EorSpotLight &p
 	light_ = memnew(SpotLight3D);
 	light_->set_name("EorShowroomLight");
 	light_->set_color(Color(p_light.color[0], p_light.color[1], p_light.color[2]));
+	// INFERRED: Godot energy is Intensity / AttenuationOffset^2, an offset of 0 or less read as 1, and Radius the range.
+	// Settle: a note on the SpotLightEntityData falloff.
 	const float offset = p_light.attenuation_offset > 0.0f ? p_light.attenuation_offset : 1.0f;
 	light_->set_param(Light3D::PARAM_ENERGY, p_light.intensity / (offset * offset));
 	light_->set_param(Light3D::PARAM_RANGE, p_light.radius);

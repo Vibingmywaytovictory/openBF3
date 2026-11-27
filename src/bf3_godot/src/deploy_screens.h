@@ -37,6 +37,8 @@ inline constexpr std::string_view kUiSpawnPointCompPartition = "ui/uicomponents/
 inline constexpr std::string_view kUiSpawnLogicCompPartition = "ui/uicomponents/uispawnlogiccomp";
 inline constexpr std::string_view kUiTeamCompPartition = "ui/uicomponents/uiteamcomp";
 inline constexpr std::string_view kUiCustomizationCompPartition = "ui/uicomponents/uicustomizationcomp";
+// INFERRED: what each ui/uicomponents DataSet key hash in this block holds, from how the deploy graphs compare and
+// set it; the key names were not recovered. Settle: the names behind the hashes.
 inline constexpr int32_t kUiKitSelectedKitKey = 1985842909;
 inline constexpr int32_t kUiSpawnPointCanSpawnKey = -990983020;
 inline constexpr int32_t kUiSpawnPointHasValidSpawnKey = -225037516;

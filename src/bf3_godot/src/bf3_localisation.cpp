@@ -21,6 +21,8 @@ Bf3Localisation *g_current = nullptr;
 
 }
 
+// INFERRED: a string id is ID_ then upper-case letters, digits and underscores (SIDs hashed as written, upper case:
+// research/topics/gap-r1-ui-hud-minimap-localisation.md 4). Settle: bf3dump text --census of the SIDs' shapes.
 bool Bf3Translation::looks_like_sid(const std::string &p_text) {
 	if (p_text.size() < 4 || p_text.compare(0, 3, "ID_") != 0) {
 		return false;

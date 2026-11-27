@@ -16,6 +16,7 @@ struct ProcessVideoMemory {
 	uint64_t non_local_bytes = 0;
 };
 
+// WHY: Godot's texture memory monitor overcounts MSAA targets, so memory is read from DXGI's local segment usage.
 class VideoMemoryMeter {
 public:
 	VideoMemoryMeter();

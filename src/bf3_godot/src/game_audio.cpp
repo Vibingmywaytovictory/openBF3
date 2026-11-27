@@ -51,6 +51,8 @@ namespace bf3::godot_side {
 
 namespace {
 
+// WHY: 2 blocks for Godot's mix chunks running ahead between two display frames, and one 60 Hz display frame
+// (800 frames) for an event a frame old.
 constexpr int64_t kBiasMarginFrames = 2 * int64_t(ba::kBlockFrames) + 800;
 constexpr uint32_t kCommandCapacity = 8192;
 

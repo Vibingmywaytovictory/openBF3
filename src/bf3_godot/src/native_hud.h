@@ -39,6 +39,8 @@ class Bf3LevelSession;
 class Bf3MinimapHud;
 
 inline constexpr size_t kNativeHudViews = 4;
+// INFERRED: the minimap flag letter's size, 10 local units, not compared with footage.
+// Settle: retail Conquest footage of the minimap's flag letters.
 inline constexpr float kMinimapFlagLetterSize = 10.0f;
 inline constexpr size_t kNativeHudSharedView = 3;
 
@@ -54,6 +56,8 @@ inline constexpr std::array<std::string_view, kNativeHudViews> kNativeHudPartiti
 		bf3::core::ui::kHudDrawnPartitions;
 
 inline constexpr std::string_view kUiMinimapCompPartition = "ui/uicomponents/uiminimapcomp";
+// SOURCE: the UIDataSourceInfo.DataKey values on uiminimapcomp in ui/flow/graph/ingame/playingminimapinit (bf3dump
+// dump, MP_Subway); each key named by the graph node that reads it (IsMinimapSmall, ZoomLevelIncreaseMinimapSmall/Large).
 inline constexpr int32_t kUiMinimapIsSmallKey = -1358262034;
 inline constexpr int32_t kUiMinimapSmallZoomKey = -1127323954;
 inline constexpr int32_t kUiMinimapLargeZoomKey = -1095821268;

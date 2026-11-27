@@ -18,6 +18,8 @@ namespace bf3::godot_side {
 
 class Bf3UiScreens;
 
+// STAND-IN: only the tank screens, the tank crosshairs and the hit indicator are drawn; other vehicles' HUD screens
+// are not. Settle: the other vehicles' HUD screens drawn and fed.
 inline constexpr std::array<std::string_view, 5> kVehicleHudDrawnPartitions{
 	"ui/flow/screen/vehicle/defaulttankscreen",
 	"ui/flow/screen/vehicle/defaulttankgunnerscreen",

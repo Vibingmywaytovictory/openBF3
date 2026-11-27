@@ -785,6 +785,8 @@ void Bf3LevelSession::on_plan_ready() {
 
 void Bf3LevelSession::build_environment(const render::SceneEnvironment &p_env) {
 
+	// STAND-IN: the plain --look=m1 environment; its fallback sun direction, 250 m shadow reach, horizon blends and
+	// ACES tonemap are hand-picked. Settle: the L1 look (LookBridge) draws the data's visual environments.
 	sun_ = memnew(DirectionalLight3D);
 	sun_->set_name("Sun");
 	Vector3 d(p_env.sun_direction[0], p_env.sun_direction[1], p_env.sun_direction[2]);
@@ -817,6 +819,7 @@ void Bf3LevelSession::build_environment(const render::SceneEnvironment &p_env) {
 	env->set_ambient_light_energy(p_env.ambient_energy);
 	env->set_tonemapper(Environment::TONE_MAPPER_ACES);
 
+	// WHY: fog is opt-in (--fog), as the FogColor this plain look reads is a saturated blue in Metro's park.
 	if (p_env.fog_end > p_env.fog_start && p_env.fog_end > 0.0f && has_user_arg("fog")) {
 		env->set_fog_enabled(true);
 		env->set_fog_mode(Environment::FOG_MODE_DEPTH);
@@ -911,6 +914,7 @@ void Bf3LevelSession::draw_others(uint64_t p_now_ns) {
 		}
 		const host::PresentedSoldier &p = out[i];
 
+		// STAND-IN: another soldier as a grey capsule 0.15 m taller than its eye. Settle: the crowd's soldier meshes.
 		const float height = std::max(0.6f, p.eye_height + 0.15f);
 		const Basis basis = Basis(Vector3(0, 1, 0), p.yaw).scaled(Vector3(1.0f, height / 1.8f, 1.0f));
 		rs->instance_set_transform(other_instances_[i], Transform3D(basis, Vector3(p.position[0], p.position[1] + height * 0.5f, p.position[2])));

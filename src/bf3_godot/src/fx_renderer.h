@@ -23,10 +23,16 @@ inline constexpr int32_t kFxStepTasks = 4;
 inline constexpr size_t kFxSerialItems = 16;
 inline constexpr uint32_t kFxMinCapacity = 64;
 
+// STAND-IN: the particles' self-lit share scaled by 0.3, a hand-set value.
+// Settle: the particle shaders' lighting terms, or retail footage of the same effects.
 inline constexpr float kFxSelfLitScale = 0.3f;
 
+// STAND-IN: additive particle colours scaled by 0.125, a hand-set value.
+// Settle: the additive particle shader's output scale, or retail footage of the same effects.
 inline constexpr float kFxEmissiveScale = 0.125f;
 
+// STAND-IN: an effect light's intensity x its colour's peak taken 1:1 as Godot light energy.
+// Settle: retail footage of an impact light against a level lamp.
 inline constexpr float kFxLightEnergyScale = 1.0f;
 inline constexpr int32_t kFxParamsRowsPerLine = 64;
 
@@ -112,6 +118,8 @@ private:
 	bool resources_ = false;
 	bool soft_ = true;
 	int debug_view_ = 0;
+	// STAND-IN: 55 deg and a 0.25 z-clip scale for first-person particles until set_first_person_projection.
+	// Settle: start from the held weapon's SoldierWeaponData.RenderFov.
 	float fp_fov_ = 55.0f;
 	float fp_z_clip_ = 0.25f;
 

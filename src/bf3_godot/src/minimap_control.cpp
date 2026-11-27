@@ -19,6 +19,8 @@ namespace bf3::godot_side {
 
 namespace {
 
+// STAND-IN: the round control's icon scale, disc margin and rim inset here and the disc and ring colours in _draw are
+// hand-picked; it is drawn only outside a game session. Settle: draw the hudmpscreen minimap outside a session too.
 constexpr float kIconUnitsPerTexelPer100 = 0.45f;
 constexpr float kDiscMargin = 1.5f;
 constexpr float kRimInsetPer100 = 7.0f;

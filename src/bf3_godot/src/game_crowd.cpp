@@ -57,6 +57,7 @@ constexpr uint32_t kSlotsPerTeam = uint32_t(net::kMaxSlots);
 constexpr uint32_t kCrowdSoldiers = kSlotsPerTeam * anim::kMaxCrowdTeams;
 static_assert(kCrowdSoldiers <= anim::kMaxCrowdSoldiers);
 constexpr size_t kMaxPending = 1024;
+// WHY: a corpse's input outlives the evaluator's own hide by this margin, so the evaluator ends the corpse, not the input.
 constexpr float kCorpseExtraSeconds = 0.5f;
 constexpr uint32_t kCamLaneOffset = uint32_t(net::kMaxPlayerRows);
 static_assert(kCamLaneOffset * 2 == kSlotsPerTeam);
@@ -1299,6 +1300,7 @@ namespace bf3::godot_side {
 
 namespace {
 
+// STAND-IN: a Revive event matches a new life seen within 2 s. Settle: a note on when a revived ghost's new life arrives.
 constexpr double kCamReviveWaitSeconds = 2.0;
 
 }
@@ -1346,6 +1348,8 @@ void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
 				begin_revive(c, in);
 			}
 			if (c.active && shown && c.blend.blending_out()) {
+				// INFERRED: the graph's RagdollBlend is 0 after a revive (no get-up clip), so the weight drops at once.
+				// Settle: a note on the get-up graph's RagdollBlend after a revive.
 				c.blend.update(dt, 0.0f);
 				if (!c.blend.blend_out_done()) {
 					continue;
@@ -1382,8 +1386,12 @@ void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
 			c.done = true;
 			continue;
 		}
+		// SOURCE: notes R5-DT1 D and E (the weight follows the graph's RagdollBlend; 1 at once for a body not animating).
+		// INFERRED: RagdollBlend read from the clip's tag, and a death with no clip as the notes' not-animating branch.
+		// Settle: a note on the graph's RagdollBlend output and on deaths without a death clip.
 		const float target =
 				c.clip < death_clips.clips.size() ? death_clips.clips[c.clip].ragdoll_target(float(c.age)) : 1.0f;
+		// SOURCE: notes R5-DT2 B1 (while w < 1 the bodies follow the animated pose and take its velocities).
 		if (c.blend.copies_pose()) {
 			const std::span<const anim::Xform> model = eval->model(i);
 			if (!model.empty()) {
@@ -1405,6 +1413,8 @@ void Bf3GameCrowd::Impl::step_ragdolls(double p_dt) {
 				const anim::Xform &x = c.bodies[b];
 				c.poses[b].position = x.t;
 				c.poses[b].rotation = { x.q.x, x.q.y, x.q.z, x.q.w };
+				// STAND-IN: the animated joints' velocities as the last two pose copies' difference over the frame time.
+				// Settle: a note on how the engine takes the animated joint velocities.
 				if (c.have_previous && c.copy_dt > 0.0f) {
 					linear[b] = anim::vec_scale(anim::vec_sub(x.t, c.previous[b].t), 1.0f / c.copy_dt);
 					anim::Quat d = anim::quat_mul(x.q, anim::quat_conj(c.previous[b].q));
@@ -1480,6 +1490,8 @@ void Bf3GameCrowd::Impl::begin_revive(Corpse &r_c, const anim::CrowdSoldierInput
 	}
 	const sim::RagdollBodyPose &hips = r_c.poses[size_t(ragdoll_hips)];
 	const sim::RagdollBodyPose &head = r_c.poses[size_t(ragdoll_head)];
+	// SOURCE: notes R5-DT2 F3 (the facing transform from the hip and head bones, horizontal hip to head).
+	// INFERRED: its position is the hip body's. Settle: a note on the facing transform's origin.
 	r_c.facing_position = anim::Vec3{ hips.position.x, hips.position.y, hips.position.z };
 	const float dx = head.position.x - hips.position.x;
 	const float dz = head.position.z - hips.position.z;
@@ -1495,6 +1507,8 @@ void Bf3GameCrowd::Impl::revive_roots() {
 		if (!c.active || !c.blend.blending_out() || in.dead || (in.flags & anim::crowd_flags::kHidden) != 0) {
 			continue;
 		}
+		// SOURCE: notes R5-DT2 F3 (the root moves from the stored facing transform to the soldier's by f).
+		// INFERRED: f = 1 is the stored ragdoll transform, as the note infers. Settle: a note on the blend-out's ends.
 		const float f = c.blend.root_fraction();
 		const float yaw = in.yaw + std::remainder(c.facing_yaw - in.yaw, 2.0f * float(std::numbers::pi)) * f;
 		const anim::Vec3 p =

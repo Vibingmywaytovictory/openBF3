@@ -15,6 +15,8 @@ class Node;
 
 namespace bf3::godot_side {
 
+// WHY: the white grade shares the menu grade's layer 0; the black fade at 99 covers the game UI and stays under the
+// glitch (100) and cursor (101) layers.
 inline constexpr int32_t kEorWhiteLayer = 0;
 inline constexpr int32_t kEorFadeLayer = 99;
 

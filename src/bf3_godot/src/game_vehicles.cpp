@@ -409,6 +409,8 @@ void GameVehicles::present_damage(std::span<const present::VehicleFxSight> p_sig
 				}
 				break;
 			case present::VehicleFxOp::StartWreck: {
+				// STAND-IN: the wreck is a static client mesh at the vehicle's last transform, with no banger physics
+				// or spawn impulse. Settle: the BangerEntityData and BangerSpawnImpulseParams simulated.
 				Husk husk{ c.spawner, c.generation, 0, body * godot_transform(def.wreck->transform), {} };
 				Node3D *node = memnew(Node3D);
 				root_->add_child(node);
@@ -532,6 +534,7 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 	const float relative = std::remainder(p_yaw - p_seat.heading, sim::kTwoPi);
 	const Basis look = Basis(Vector3(0, 1, 0), relative + sim::kPi) * Basis(Vector3(1, 0, 0), p_pitch);
 	if (cameras.empty()) {
+		// STAND-IN: a seat without a camera views from its own transform. Settle: a note on a camera-less seat's view.
 		const Vector3 at = seat != nullptr ? to_vector(seat->transform.trans) : Vector3();
 		out.camera = p_seat.body * Transform3D(look, at);
 		chase_key_.reset();
@@ -552,6 +555,8 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 		alternate = present::VehicleZoomDef{ *c.zoom_field_of_view, c.zoom_fov_transition_time, c.zoom_fade_to_black,
 			c.zoom_fade_out, c.zoom_black, c.zoom_fade_in };
 	}
+	// INFERRED: RegularView is AlternateView's counterpart and both have AllowFieldOfViewScaling off, so the FieldOfView
+	// option is used only where the camera has none. Settle: a note on the vehicle camera's field of view.
 	const float regular = c.regular_field_of_view > 0.0f ? c.regular_field_of_view : p_fov_deg;
 	const present::VehicleZoomView zoomed = zoom_.step(alternate, p_zoom, regular, p_dt);
 	out.fov_deg = zoomed.fov;
@@ -581,6 +586,8 @@ VehicleSeatView GameVehicles::seat_view(const OwnVehicleSeat &p_seat, uint32_t p
 	out.right_yaw = limits.right;
 	out.up_pitch = limits.up;
 	out.down_pitch = limits.down;
+	// WHY: placed where the drawn turret puts it but looking the player's way, as the client steps no turret and the
+	// turret follows the look a round trip late.
 	out.camera = p_seat.body * Transform3D(look, on.xform(to_vector(c.transform.trans)));
 	return out;
 }

@@ -32,6 +32,9 @@ namespace {
 
 Bf3UiPostProcess *g_current = nullptr;
 
+// STAND-IN: the band law (8 px rows, noise scroll rates 0.731 and 0.317, luma highlight) is fitted to the 18.57 footage
+// by eye and shifts the whole frame, where retail shifts mostly the UI. Settle: the tvnoise post-process program.
+// INFERRED: how RShift, XPower, YPower, Distort and Highlight combine. Settle: the same program read.
 constexpr std::string_view kGlitchShader = R"(shader_type canvas_item;
 render_mode unshaded, blend_disabled;
 uniform sampler2D screen : hint_screen_texture, filter_linear, repeat_disable;
@@ -69,6 +72,9 @@ void fragment() {
 }
 )";
 
+// INFERRED: saturation about the luma, then contrast about 0.5, then brightness, then the vignette over the screen
+// centre distance. Settle: the menuvisualenvironment's post-process programs.
+// STAND-IN: a uniform 7x7 Gaussian of BlurDeviation stands in for the depth-of-field blur. Settle: a DOF pass.
 constexpr std::string_view kGradeShader = R"(shader_type canvas_item;
 render_mode unshaded, blend_disabled;
 uniform sampler2D screen : hint_screen_texture, filter_linear, repeat_disable;

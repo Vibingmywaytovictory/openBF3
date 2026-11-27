@@ -69,6 +69,7 @@ void Bf3AudioDemo::stop_player() {
 		player_->stop();
 		player_ = nullptr;
 
+		// WHY: the audio thread may be inside _mix; the server lock keeps it off the mixer while it is detached.
 		AudioServer::get_singleton()->lock();
 		if (Bf3AudioPlayback *ours = Object::cast_to<Bf3AudioPlayback>(playback.ptr())) {
 			ours->set_mixer(nullptr);

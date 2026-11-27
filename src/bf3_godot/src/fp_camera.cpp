@@ -16,6 +16,7 @@ namespace {
 
 Basis view_basis(float p_yaw, float p_pitch) {
 
+	// WHY: a Godot camera looks down its -Z; the half turn makes yaw 0 look along the data's +Z.
 	return Basis(Vector3(0, 1, 0), float(double(p_yaw) + 3.14159265358979323846)) * Basis(Vector3(1, 0, 0), p_pitch);
 }
 
@@ -42,6 +43,8 @@ void FpCamera::attach(Node *p_parent) {
 	fp_ = memnew(Camera3D);
 	fp_->set_name("FirstPersonCamera");
 	fp_->set_fov(kFovDegrees);
+	// STAND-IN: a 0.05 m near plane, and a 5000 m far plane until set_view_distance sets the look's view distance.
+	// Settle: the near plane BF3's soldier camera uses.
 	fp_->set_near(0.05f);
 	fp_->set_far(5000.0f);
 	p_parent->add_child(fp_);
@@ -135,6 +138,8 @@ void apply_view_effects(godot::Camera3D *p_camera, const godot::Vector3 &p_eye, 
 			godot::Basis(godot::Vector3(0, 1, 0), real_t(a.yaw + p_effects.shake_yaw_rad + 3.14159265358979323846)) *
 			godot::Basis(godot::Vector3(1, 0, 0), real_t(a.pitch + p_effects.shake_pitch_rad)) *
 			godot::Basis(godot::Vector3(0, 0, 1), real_t(p_effects.shake_roll_rad));
+	// INFERRED: the FOV is vertical, as notes R4-C3 D guesses for BF3's camera FOV. Settle: a note on the projection
+	// setup that takes the camera FOV.
 	p_camera->set_keep_aspect_mode(godot::Camera3D::KEEP_HEIGHT);
 	p_camera->set_fov(p_effects.world_fov_deg);
 	p_camera->set_global_transform(godot::Transform3D(basis, p_eye));

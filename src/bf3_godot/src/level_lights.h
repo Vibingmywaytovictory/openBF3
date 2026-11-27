@@ -11,7 +11,11 @@
 
 namespace bf3::godot_side {
 
+// INFERRED: the weapon lights' inverse-square falloff (Godot attenuation 2) for the level's lights.
+// Settle: a note on BF3's point and spot light falloff.
 inline constexpr float kLevelLightAttenuation = 2.0f;
+// STAND-IN: the nearest lights within Forward+'s clustered budget less these 8, chosen again after the camera moves
+// 0.5 m. Settle: a note on how BF3 culls level lights.
 inline constexpr float kLevelLightReselectDistance = 0.5f;
 inline constexpr size_t kLevelLightReserve = 8;
 

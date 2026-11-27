@@ -140,6 +140,8 @@ void TerrainScatterDraw::upload(Cell &r_cell, const Result &p_result) {
 			w += 12;
 			tilted += inst.up[1] < 1.0f ? 1 : 0;
 		}
+		// STAND-IN: no wind term reaches the scatter programs, so ground cover does not bend (notes R5-VG2 B1).
+		// Settle: the time, MeshScatteringWindSpeed and the record's wind amount fed per type.
 		const RID multimesh = rs->multimesh_create();
 		rs->multimesh_allocate_data(
 				multimesh, int32_t(batch.instances.size()), RenderingServer::MULTIMESH_TRANSFORM_3D);
@@ -147,6 +149,8 @@ void TerrainScatterDraw::upload(Cell &r_cell, const Result &p_result) {
 		rs->multimesh_set_buffer(multimesh, buffer);
 		const RID instance = rs->instance_create2(multimesh, scenario_);
 		rs->instance_set_transform(instance, terrain_);
+		// STAND-IN: no type casts a shadow; notes R5-VG2 B5 draw types with record byte 61 set into the shadow pass within
+		// their bytes 62..65 distance. Settle: VisualTerrainSettings.MeshScatteringCastShadowsEnable's value found.
 		rs->instance_geometry_set_cast_shadows_setting(instance, RenderingServer::SHADOW_CASTING_SETTING_OFF);
 		rs->instance_set_visible(instance, r_cell.visible);
 		r_cell.multimeshes.push_back(multimesh);

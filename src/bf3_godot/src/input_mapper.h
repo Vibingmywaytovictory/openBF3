@@ -45,6 +45,7 @@ godot::Key key_of_ui_idk(std::string_view p_idk);
 godot::KeyLocation key_location_of_ui_idk(std::string_view p_idk);
 godot::MouseButton button_of_ui_idb(std::string_view p_idb);
 
+// STAND-IN: the comm rose cursor's reach from the centre, in mouse counts. Settle: the rose movie's selection radius.
 inline constexpr float kRoseCursorRadius = 160.0f;
 
 struct ViewAngles {
@@ -140,6 +141,7 @@ public:
 	static constexpr size_t kWeaponActionCount = size_t(WeaponAction::Count);
 	static const char *weapon_action_name(WeaponAction p_action);
 
+	// WHY: a reload tap keeps the reload level up 0.1 s, so a tap shorter than a client tick still reaches a command.
 	static constexpr uint64_t kReloadHoldNs = 100'000'000;
 	void enable_weapons(bool p_on);
 	bool weapons_enabled() const { return weapon_.enabled; }

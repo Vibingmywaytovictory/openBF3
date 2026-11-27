@@ -19,7 +19,9 @@
 
 namespace bf3::godot_side {
 
+// STAND-IN: an impact decal projects 0.12 m deep, a hand-picked depth. Settle: BF3's decal projection depth.
 inline constexpr float kDecalDepth = 0.12f;
+// STAND-IN: a decal fades out over 5 s once its kDecalFadeSeconds are up, hand-picked. Settle: BF3's decal fade.
 inline constexpr float kDecalFadeOutSeconds = 5.0f;
 
 struct FxDecalAssets {

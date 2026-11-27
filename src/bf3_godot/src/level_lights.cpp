@@ -41,6 +41,8 @@ void LevelLights::build(const render::SceneLightPlan &p_plan, const RID &p_scena
 		made.light = l.spot ? rs->spot_light_create() : rs->omni_light_create();
 		rs->light_set_color(made.light,
 				Color(std::fmax(l.color[0], 0.0f), std::fmax(l.color[1], 0.0f), std::fmax(l.color[2], 0.0f)));
+		// INFERRED: energy is Intensity and range Radius; AttenuationOffset and the frustum spots' textures are not
+		// applied. Settle: a note on how BF3 lights with Intensity, Radius and AttenuationOffset.
 		rs->light_set_param(made.light, RenderingServer::LIGHT_PARAM_ENERGY, l.intensity);
 		rs->light_set_param(made.light, RenderingServer::LIGHT_PARAM_RANGE, l.radius);
 		rs->light_set_param(made.light, RenderingServer::LIGHT_PARAM_ATTENUATION, kLevelLightAttenuation);

@@ -36,9 +36,16 @@ namespace render = bf3::render;
 
 namespace {
 
+// STAND-IN: Godot's Filmic curve at white 4 for both TonemapMethods (Filmic, FilmicNeutral), as no curve is in the
+// data. Settle: a note on BF3's tonemap curves.
 constexpr float kFilmicWhite = 4.0f;
+// STAND-IN: the sun's shadow reach where no environment gives a SunShadowmapViewDistance above 0. Settle: a note on
+// the engine's default shadow view distance.
 constexpr float kSunShadowDistance = 250.0f;
 
+// INFERRED: the radiance pass adds SkyBoxSunLightColor and SkyBoxBackLightColor lobes falling linearly in the cosine
+// to a cap of half-angle Size radians. Settle: a note on the Enlighten sky box lobes.
+// STAND-IN: the smoothstep blends (0..0.7 up, 0..0.5 down) between the ambient bands. Settle: a note on the sky box.
 const char *kSkyShader = R"(shader_type sky;
 uniform sampler2D panorama : source_color, filter_linear_mipmap, repeat_enable;
 uniform sampler2D panorama_alpha : filter_linear_mipmap, repeat_enable;
@@ -147,9 +154,13 @@ void LookBridge::build(Node *p_parent, std::shared_ptr<const render::LevelSceneP
 	environment_.instantiate();
 	environment_->set_background(Environment::BG_SKY);
 	environment_->set_sky(sky_);
+	// STAND-IN: the sky box bands light every surface unoccluded, in place of Enlighten's indirect light, with no
+	// ambient occlusion. Settle: the level's Enlighten data and DynamicAOComponentData.
 	environment_->set_ambient_source(Environment::AMBIENT_SOURCE_SKY);
 	environment_->set_ambient_light_energy(1.0f);
 	environment_->set_ambient_light_sky_contribution(1.0f);
+	// STAND-IN: the sky's radiance is every surface's reflection, in place of the level's environment maps.
+	// Settle: the shaders' envmap textures bound per material.
 	environment_->set_reflection_source(Environment::REFLECTION_SOURCE_SKY);
 	environment_->set_tonemapper(Environment::TONE_MAPPER_FILMIC);
 	environment_->set_tonemap_white(kFilmicWhite);
@@ -342,6 +353,7 @@ void LookBridge::apply(const render::LookFrame &p_f, bool p_force) {
 	}
 
 	if (first || moved(s.bloom, p_f.bloom)) {
+		// STAND-IN: Godot's additive glow at BloomScale, off unless --look-bloom. Settle: a note on BF3's bloom pass.
 		static const bool bloom_on = has_user_arg("look-bloom");
 		environment_->set_glow_enabled(bloom_on && p_f.bloom > 0.0f && !debug_off("bloom"));
 		environment_->set_glow_intensity(p_f.bloom);

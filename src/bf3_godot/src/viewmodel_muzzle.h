@@ -17,6 +17,8 @@ enum class ViewmodelMuzzleSource : uint8_t {
 	CameraStandIn = 2,
 };
 
+// STAND-IN: a nominal camera-space muzzle (x right, y up, -z forward, metres) for a viewmodel with no Wep_Root.
+// Settle: a FireEffects1p frame for items without a weapon rig.
 inline const godot::Vector3 kMuzzleCameraStandIn(0.10f, -0.11f, -0.70f);
 
 struct ViewmodelMuzzle {

@@ -334,6 +334,8 @@ SpotLight3D *make_weapon_light(
 	SpotLight3D *node = memnew(SpotLight3D);
 	node->set_name(to_godot(p_light.socket_unlock.substr(p_light.socket_unlock.rfind('/') + 1)));
 	node->set_color(Color(l.color[0], l.color[1], l.color[2]));
+	// INFERRED: energy is the data's Intensity with an inverse-square falloff to Radius; AttenuationOffset is not
+	// applied. Settle: a note on the spot light's intensity and falloff law.
 	node->set_param(Light3D::PARAM_ENERGY, l.intensity);
 	node->set_param(Light3D::PARAM_ATTENUATION, 2.0f);
 	node->set_param(Light3D::PARAM_RANGE, l.radius);
@@ -390,6 +392,7 @@ MeshInstance3D *make_part_mesh(Skeleton3D *p_skeleton, const bf3::render::Viewmo
 	MeshInstance3D *mi = memnew(MeshInstance3D);
 	mi->set_name(to_godot(p_part.mesh.substr(p_part.mesh.rfind('/') + 1)));
 	mi->set_mesh(mesh);
+	// WHY: the bind-pose bounds miss the animated, fov-overridden mesh, so a box around the camera keeps it drawn.
 	mi->set_custom_aabb(AABB(Vector3(-3, -1, -3), Vector3(6, 4, 6)));
 	mi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 	p_skeleton->add_child(mi);
@@ -598,6 +601,8 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	fx.shake_roll_rad = p_frame.shake_roll_rad;
 	apply_view_effects(p_camera, p_frame.eye, p_frame.yaw, p_frame.pitch, fx);
 
+	// INFERRED: the CameraJoint frame looks down +Z and a Godot camera down -Z, so it turns 180 degrees about Y.
+	// Settle: a research or note fact on the CameraJoint's view axis.
 	const Transform3D turn(Basis(Vector3(0, 1, 0), real_t(Math::PI)), Vector3());
 	if (p_camera != nullptr && output_.vault_clip != bf3::anim::kNoVaultAnim) {
 		p_camera->set_global_transform(p_camera->get_global_transform() * turn * xform_to_godot(output_.camera_offset) *
@@ -607,6 +612,8 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	const Transform3D joint = xform_to_godot(model_[size_t(camera_joint_)]);
 	Transform3D sight;
 	if (const std::optional<bf3::render::ViewmodelSight> &s = items_[size_t(item_)].item->sight) {
+		// INFERRED: the sight's centre at ZoomIdle's first frame moves onto the camera axis in x and y with the ADS blend,
+		// as WeaponZoomedOffsetY's sign and per-weapon ratio do not fit it. Settle: a note on the 1p ADS alignment.
 		sight.origin = Vector3(-s->at_zoom_pose.x, -s->at_zoom_pose.y, 0.0f) * ads_frame_.blend;
 	}
 	skeleton_->set_global_transform(
@@ -619,6 +626,8 @@ void Bf3Viewmodel::present(const ViewmodelFrame &p_frame, std::span<const bf3::a
 	const ItemNodes &shown = items_[size_t(item_)];
 	zoom_mesh_ = bf3::render::viewmodel_zoom_mesh_shown(zoom_mesh_, ads_frame_.blend, *shown.item);
 	scope_only_ = zoom_mesh_ && optic_hides_weapon();
+	// STAND-IN: the arms hide with the rifle behind a frame-filling scope, as they share its lens; the data hides only the
+	// rifle. Settle: retail footage of a sniper scope at full ADS.
 	arms_->set_visible(!scope_only_);
 	shown.weapon->set_visible(!scope_only_);
 	for (const ItemNodes::Attachment &a : shown.attachments) {

@@ -57,6 +57,7 @@ bf3::core::Result<bf3::net::LoadoutRequest> deploy_loadout_request(const DeployP
 		return bf3::core::make_error(
 				"deploy pick: kit item " + std::to_string(p_pick.slot) + " has no item " + std::to_string(p_pick.item));
 	} else if (item == bf3::host::LoadoutKitItem::Primary) {
+		// WHY: the accessory picks are items of the primary they were picked for.
 		next.accessories = {};
 	}
 	if (const bf3::core::Result<bf3::host::Loadout> r =

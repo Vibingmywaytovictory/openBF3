@@ -117,6 +117,8 @@ constexpr std::string_view kDeployScreenMovie = "ui/assets/spawnscreenpc";
 constexpr std::string_view kMenuScreenMovie = "ui/assets/ingamemenump";
 constexpr ui::SwfRect kDeployMovieBox{ 769.0f, 1183.3f, 132.0f, 547.8f };
 constexpr ui::SwfRect kMenuMovieBox{ 778.0f, 1179.0f, 153.0f, 554.0f };
+// INFERRED: the two overview boxes below are read off the 18.57 retail footage at 1280x720. Settle: a frame-exact
+// retail capture of the deploy screen and the in-game menu.
 constexpr ui::SwfRect kDeployFootageBox{ 777.0f, 1177.0f, 136.0f, 526.0f };
 constexpr ui::SwfRect kMenuFootageBox{ 783.0f, 1173.0f, 153.0f, 545.0f };
 constexpr float kOverviewBoxTolerance = 1.5f;

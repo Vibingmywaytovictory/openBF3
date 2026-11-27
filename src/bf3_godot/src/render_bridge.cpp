@@ -210,6 +210,7 @@ Ref<StandardMaterial3D> make_standard_material(const bf3::render::MaterialSlot &
 	if (albedo.is_valid()) {
 		m->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, albedo);
 	} else {
+		// STAND-IN: 0.55 grey for a slot with no Diffuse texture. Settle: the shader's own constant colour.
 		m->set_albedo(Color(0.55f, 0.55f, 0.55f));
 	}
 	if (const std::array<float, 4> *dark = p_slot.vector("DiffuseDarkening")) {
@@ -221,6 +222,8 @@ Ref<StandardMaterial3D> make_standard_material(const bf3::render::MaterialSlot &
 		m->set_feature(BaseMaterial3D::FEATURE_NORMAL_MAPPING, true);
 		m->set_texture(BaseMaterial3D::TEXTURE_NORMAL, normal);
 	}
+	// STAND-IN: roughness 0.6 without SmoothnessRegular, its 0.05 floor and metallic 0. Settle: the shader's programs.
+	// INFERRED: roughness is 1 - SmoothnessRegular.x. Settle: how the shader's programs use SmoothnessRegular.
 	float roughness = 0.6f;
 	if (const std::array<float, 4> *smooth = p_slot.vector("SmoothnessRegular")) {
 		roughness = std::clamp(1.0f - (*smooth)[0], 0.05f, 1.0f);
@@ -241,6 +244,8 @@ void apply_look_blend(const Ref<StandardMaterial3D> &p_m, const render::LookMate
 		p_m->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
 	}
 	if (p_look.blend == render::LookBlend::AlphaTest) {
+		// STAND-IN: Godot's default alpha-scissor threshold 0.5 for an alpha-tested look. Settle: the alpha reference
+		// the shader's programs test against.
 		p_m->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
 		return;
 	}
@@ -256,6 +261,7 @@ void apply_look_blend(const Ref<StandardMaterial3D> &p_m, const render::LookMate
 		} else {
 			p_m->set_albedo(Color(1.0f, 1.0f, 1.0f, render::kLookGlassOpacity));
 		}
+		// STAND-IN: glass roughness 0.1. Settle: the glass shader's programs.
 		p_m->set_roughness(0.1f);
 		return;
 	}

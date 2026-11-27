@@ -50,6 +50,8 @@ struct OracleRow {
 	size_t tiles;
 	uint64_t sum;
 };
+// STAND-IN: the oracle totals come from an outside reference listing, not a bf3dump measurement of the install.
+// Settle: measure both rows with bf3dump.
 constexpr OracleRow kOracle[] = {
 	{ "MP_Subway", "TeamDeathMatch0", 2122, 1136699, 196608, 72733, 34, 181, 0x082eac1e5df0ae1cull },
 	{ "XP3_Alborz", "ConquestLarge0", 519, 36215517, 33554432, 56015, 0, 16384, 0x78096d54cf5022f0ull },

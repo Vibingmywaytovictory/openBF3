@@ -41,6 +41,7 @@ namespace {
 constexpr const char *kLevel = "Win32/Levels/MP_Subway/MP_Subway";
 constexpr const char *kScoreboard32 = "ui/flow/screen/scoreboards/scoreboardtwoteamshud32screen";
 constexpr const char *kPopupGeneric = "ui/flow/screen/popups/popupgeneric";
+// SOURCE: bf3dump text: 0x2ad6638e reads Options and 0xbed6cb61 reads Save settings? (the two below).
 constexpr uint32_t kOptionsTitleHash = 0x2ad6638eu;
 constexpr uint32_t kSaveSettingsHash = 0xbed6cb61u;
 constexpr int32_t kRowsPerTeam = 32;

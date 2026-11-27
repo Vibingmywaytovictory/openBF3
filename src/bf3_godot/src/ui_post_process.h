@@ -22,7 +22,10 @@ namespace bf3::godot_side {
 
 inline constexpr int32_t kUiGradeLayer = 0;
 inline constexpr int32_t kUiGlitchLayer = 100;
+// INFERRED: the cursor draws above the glitch layer, as the 18.57 footage never glitches it. Settle: retail footage of
+// a glitch with the cursor over a glitched band.
 inline constexpr int32_t kUiCursorLayer = 101;
+// WHY: both layers draw neutrally for the first frames after load, so their pipelines exist before the first trigger.
 inline constexpr uint32_t kUiPostProcessWarmFrames = 2;
 
 godot::Vector3 vec3_of(const std::array<float, 3> &p_v);

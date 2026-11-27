@@ -23,6 +23,8 @@ struct ActionKey {
 	Key key;
 };
 
+// STAND-IN: keys for a session without GameSettings, which rebinds the others from the install; F6, E and Q (free
+// camera) have no input concept and are openBF3's own. Settle: an install concept for the free camera.
 constexpr ActionKey kActions[] = {
 	{ InputAction::Forward, "bf3_forward", KEY_W },
 	{ InputAction::Back, "bf3_back", KEY_S },
@@ -355,6 +357,8 @@ struct WeaponActionKey {
 	MouseButton button;
 };
 
+// STAND-IN: keys for a session without GameSettings, which rebinds the others from the install; K (kit) and T (team)
+// have no input concept and are openBF3's own. Settle: the spawn screen's kit and team selection.
 constexpr WeaponActionKey kWeaponActions[] = {
 	{ InputMapper::WeaponAction::Fire, "bf3_fire", KEY_NONE, MOUSE_BUTTON_LEFT },
 	{ InputMapper::WeaponAction::Ads, "bf3_ads", KEY_NONE, MOUSE_BUTTON_RIGHT },
@@ -369,6 +373,8 @@ constexpr WeaponActionKey kWeaponActions[] = {
 };
 static_assert(sizeof(kWeaponActions) / sizeof(kWeaponActions[0]) == InputMapper::kWeaponActionCount);
 
+// STAND-IN: the wheel's slot order and the gadget key's cycle over slots 4, 5 and 2. Settle: a note on BF3's weapon
+// cycle and gadget key order.
 constexpr uint8_t kWheelSlots[] = { 0, 1, 2, 4, 5, 6, 7 };
 constexpr uint8_t kGadgetCycle[] = { 4, 5, 2 };
 
@@ -616,6 +622,8 @@ void InputMapper::script_press(WeaponAction p_action) {
 			}
 			break;
 		case WeaponAction::Knife:
+			// STAND-IN: the melee key selects the knife slot; no quick melee from another weapon is run.
+			// Settle: the data's melee switching rule.
 			select_weapon(7);
 			break;
 		case WeaponAction::FireMode:
@@ -740,6 +748,8 @@ struct TdmActionKey {
 	Key key2;
 };
 
+// STAND-IN: keys for a session without GameSettings; the kit keys 1 to 4 and Q (spot) have no input concept and are
+// never rebound. Settle: the install's spawn screen and ConceptCommMenu1 bindings.
 constexpr TdmActionKey kTdmActions[] = {
 	{ InputMapper::TdmAction::Gadget, "bf3_gadget", KEY_3, KEY_NONE },
 	{ InputMapper::TdmAction::Scoreboard, "bf3_scoreboard", KEY_TAB, KEY_NONE },

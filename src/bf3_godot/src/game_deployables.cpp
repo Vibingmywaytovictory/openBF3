@@ -124,6 +124,8 @@ void GameDeployables::step(const host::PresentationFrame &p_frame) {
 			node->set_mesh(mesh->second);
 			shown.def = d.def;
 		}
+		// STAND-IN: drawn unrotated at the sent position, as the wire carries no orientation. Settle: a note on how a
+		// resting deployable is oriented on the ground.
 		node->set_position(Vector3(d.position[0], d.position[1], d.position[2]));
 	}
 	for (auto it = shown_.begin(); it != shown_.end();) {

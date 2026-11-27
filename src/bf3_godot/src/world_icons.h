@@ -12,6 +12,8 @@ class Camera3D;
 
 namespace bf3::godot_side {
 
+// SOURCE: UICapturepointtagCompData (ui/uicomponents/uicapturepointtagcomp, bf3dump) IconSize, ScaleDistance,
+// MaxScaleMod, FadeDistance, FadeEndDistance, MaxFarFade, VerticalOffset and PixelOffset.y: the eight defaults below.
 struct WorldIconStyle {
 	float icon_size = 30.0f;
 	float scale_distance = 500.0f;
@@ -19,10 +21,13 @@ struct WorldIconStyle {
 	float fade_distance = 200.0f;
 	float fade_end_distance = 800.0f;
 	float max_far_fade = 0.5f;
+	// INFERRED: VerticalOffset is metres above the capture point's origin. Settle: retail footage of a flag tag's height.
 	float lift = 5.5f;
 	float pixel_offset_y = -28.0f;
 };
 
+// STAND-IN: Godot-drawn flag icons, made only outside a game session, where the game draws NativeTags' Flag tags.
+// Settle: those sessions opening the retail tag movie.
 class Bf3WorldIcons : public godot::Control {
 	GDCLASS(Bf3WorldIcons, godot::Control)
 

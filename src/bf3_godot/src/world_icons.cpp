@@ -57,6 +57,8 @@ void Bf3WorldIcons::_draw() {
 		const Vector2 c = camera_->unproject_position(p) + Vector2(0.0f, style_.pixel_offset_y);
 		const float d = eye.distance_to(p);
 
+		// INFERRED: scale 1 at the camera to 1 - MaxScaleMod from ScaleDistance, alpha 1 to FadeDistance down to MaxFarFade
+		// at FadeEndDistance, linear between, read from the field names. Settle: retail footage of a tag at several ranges.
 		const float ts = std::clamp(d / std::max(1.0f, style_.scale_distance), 0.0f, 1.0f);
 		const float scale = 1.0f - style_.max_scale_mod * ts;
 		const float span = std::max(1.0f, style_.fade_end_distance - style_.fade_distance);
@@ -78,6 +80,7 @@ void Bf3WorldIcons::_draw() {
 			char buf[32];
 			std::snprintf(buf, sizeof(buf), "%dm", int(std::lround(d)));
 			String text = ic.label.is_empty() ? String(buf) : ic.label + String(" ") + String(buf);
+			// STAND-IN: the label is Godot's fallback font at 11 px with a 1 px shadow. Settle: the tag movie's text fields.
 			const int font_size = 11;
 			const Vector2 ts2 = font->get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size);
 			const Vector2 at(c.x - ts2.x * 0.5f, c.y + h * 0.5f + float(font_size) + 1.0f);

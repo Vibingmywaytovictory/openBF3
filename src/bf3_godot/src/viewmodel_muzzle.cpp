@@ -26,6 +26,8 @@ ViewmodelMuzzle viewmodel_muzzle_transform(const Bf3Viewmodel &p_viewmodel, cons
 		return out;
 	}
 	const Transform3D rig = skeleton->get_global_transform();
+	// INFERRED: FireEffects1p offsets are relative to the weapon skeleton's Wep_Root joint, in Frostbite weapon axes.
+	// Settle: a note on the 1p muzzle effect frame.
 	const int32_t root = p_viewmodel.current_item() != nullptr ? int32_t(skeleton->find_bone("Wep_Root")) : -1;
 	if (root >= 0 && size_t(root) < model.size()) {
 		out.valid = true;
@@ -40,6 +42,8 @@ ViewmodelMuzzle viewmodel_muzzle_transform(const Bf3Viewmodel &p_viewmodel, cons
 	if (cj < 0 || size_t(cj) >= model.size()) {
 		return out;
 	}
+	// INFERRED: the CameraJoint frame looks down +Z and a Godot camera down -Z, so it turns 180 degrees about Y.
+	// Settle: a research or note fact on the CameraJoint's view axis.
 	const Transform3D turn(Basis(Vector3(0, 1, 0), real_t(Math::PI)), Vector3());
 	const Transform3D camera = rig * to_godot(model[size_t(cj)]) * turn;
 	out.valid = true;
@@ -87,6 +91,7 @@ fx::MuzzleSample muzzle_sample(const ViewmodelMuzzle &p_muzzle, uint8_t p_slot, 
 	Transform3D w = p_muzzle.muzzle;
 	if (p_muzzle.source == ViewmodelMuzzleSource::CameraStandIn) {
 
+		// WHY: the camera frame's -Z is the barrel; the weapon frame the effect expects has the barrel on +Z.
 		w.basis = Basis(-w.basis.get_column(0), w.basis.get_column(1), -w.basis.get_column(2));
 	}
 	w.orthonormalize();

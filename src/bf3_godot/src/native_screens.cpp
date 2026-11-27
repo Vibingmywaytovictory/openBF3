@@ -813,6 +813,8 @@ std::string Bf3UiScreens::view_owner(const Entry &p_entry) {
 	return p_entry.partition + "#" + std::to_string(p_entry.order);
 }
 
+// WHY: while an adopted HUD movie holds the focus, a concept goes to the other shown screens from the top, as
+// tablistenerscreen's InputListener (FocusIndex 0, focused at initialize) takes Tab.
 Bf3UiScreens::Entry *Bf3UiScreens::background_listener(const Entry *p_target, int32_t p_concept, bool p_pressed) {
 	if (p_target != nullptr && (p_target->modal || !p_target->adopted)) {
 		return nullptr;
@@ -902,6 +904,8 @@ bool Bf3UiScreens::mouse_move(Vector2 p_viewport) {
 	return any;
 }
 
+// WHY: a press goes to the topmost screen with a mouse target under it and the release to that same screen, as
+// Flash delivers press, release and releaseOutside on its one stage.
 bool Bf3UiScreens::mouse_button(Vector2 p_viewport, int32_t p_button, bool p_pressed) {
 	++stats_.mouse;
 	Entry *target = nullptr;

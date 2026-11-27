@@ -64,6 +64,7 @@ void EorFlash::cover(Node *p_parent) {
 	rs->canvas_item_add_rect(white_item_, Rect2(Vector2(), size), Color(1, 1, 1, 1));
 }
 
+// WHY: the alpha is set on every child each frame, so a screen opened while the UI is faded fades too.
 void EorFlash::fade_ui(CanvasLayer *p_ui, float p_alpha) {
 	if (p_ui == nullptr) {
 		return;
@@ -113,6 +114,7 @@ void EorFlash::frame(Node *p_parent, CanvasLayer *p_ui, const core::gameplay::Eo
 		stats_.peak_ui_faded = std::max(stats_.peak_ui_faded, ui_faded);
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
+	// WHY: a hidden CanvasLayer hides only its node children, so its raw canvas items are hidden with it.
 	white_layer_->set_visible(visibility > 0.0f);
 	rs->canvas_item_set_visible(white_item_, visibility > 0.0f);
 	white_material_->set_shader_parameter("visibility", visibility);

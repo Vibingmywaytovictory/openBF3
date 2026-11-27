@@ -114,6 +114,8 @@ public:
 			return;
 		}
 		if (const InputEventKey *k = Object::cast_to<InputEventKey>(p_event.ptr())) {
+			// STAND-IN: Enter, keypad Enter and Space send Activate to the kick popup, which has no UI flow or bindings.
+			// Settle: the PC UI bindings' keys for Activate.
 			if (k->is_pressed() && !k->is_echo() &&
 					(k->get_keycode() == KEY_ENTER || k->get_keycode() == KEY_KP_ENTER ||
 							k->get_keycode() == KEY_SPACE)) {
@@ -335,6 +337,7 @@ host::PrepareJob Bf3MatchHost::prepare_job() const {
 			return report.error();
 		}
 		outcome.cold = report->meshes.converted > 0 || report->weapons.converted > 0;
+		// WHY: the Windows heap otherwise keeps the prepare's freed pages committed into the next level.
 		host::release_free_heap_memory();
 		return outcome;
 	};

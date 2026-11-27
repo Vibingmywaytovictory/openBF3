@@ -67,6 +67,8 @@ float max_length(const core::gameplay::ChaseCameraDef &p_def) {
 
 }
 
+// SOURCE: notes R2-C5 E2-E3 and R3-C5 B (pivot on the 1p eye frame, TargetOffset x and z only with a horizontal
+// forward, the turn toward the right axis, the camera behind the turned forward raised by WantedAngleDeg).
 ChaseFrame chase_frame(const core::gameplay::ChaseCameraDef &p_def, const ChaseTarget &p_target) {
 	ChaseFrame c;
 	const Vec3 f{ std::sin(p_target.yaw_rad) * std::cos(p_target.pitch_rad), std::sin(p_target.pitch_rad),
@@ -86,6 +88,8 @@ ChaseFrame chase_frame(const core::gameplay::ChaseCameraDef &p_def, const ChaseT
 		fh = add(mul(r, std::sin(a)), mul(fh, std::cos(a)));
 		r = turned_r;
 	}
+	// STAND-IN: no MaxViewRotationAngleDeg input turn and no KeepTargetPitch change of the angle.
+	// Settle: the input window and the KeepTargetPitch formula R2-C5 leaves open.
 	const float wanted = p_def.wanted_angle_deg * kDegToRad;
 	c.direction = normalized(
 			add(mul(fh, -std::cos(wanted)), mul(Vec3{ 0.0f, 1.0f, 0.0f }, std::sin(wanted))), Vec3{ 0, 0, -1 });
@@ -96,6 +100,7 @@ ChaseFrame chase_frame(const core::gameplay::ChaseCameraDef &p_def, const ChaseT
 
 ChaseCamera::ChaseCamera(const core::gameplay::ChaseCameraDef &p_def) : def_(p_def) {}
 
+// SOURCE: notes R2-C5 E4 and E7 (the pill starts fully extended, the history is the wanted point, V = 0).
 void ChaseCamera::activate(const ChaseTarget &p_target, const sim::CollisionWorld *p_world) {
 	const ChaseFrame c = chase_frame(def_, p_target);
 	radius_ = std::max(0.0f, def_.pill_maximum_collision_radius);
@@ -108,6 +113,8 @@ void ChaseCamera::activate(const ChaseTarget &p_target, const sim::CollisionWorl
 	velocity_ = Vec3{};
 }
 
+// SOURCE: notes R2-C5 E4 (growth speed up by PillExpandSizeSpeedAcceleration a second, to PillMaximumCollisionRadius
+// and WantedDistance - 2 x that radius; with HasCollision a sweep shrinks it to the Pill minimums).
 void ChaseCamera::pill(const ChaseFrame &p_frame, double p_dt, const sim::CollisionWorld *p_world) {
 	const float longest = max_length(def_);
 	const float widest = std::max(0.0f, def_.pill_maximum_collision_radius);
@@ -117,10 +124,13 @@ void ChaseCamera::pill(const ChaseFrame &p_frame, double p_dt, const sim::Collis
 		if (!def_.has_collision || p_world == nullptr) {
 			return;
 		}
+		// STAND-IN: two sphere sweeps, the radius dropped straight to its minimum and the growth reset on a hit, for the
+		// notes' pill shrink over up to 21 passes. Settle: a note on the per-pass shrink step.
 		for (int pass = 0; pass < 2; ++pass) {
 			const Vec3 from = add(p_frame.pivot, mul(p_frame.direction, radius_));
 			const Vec3 delta = mul(p_frame.direction, length_);
 			sim::StaticHit hit;
+			// INFERRED: the pill collides with what projectiles hit. Settle: a note on the chase camera's collision filter.
 			const bool blocked = radius_ > 0.0f
 					? p_world->sweep_capsule(sim::Vec3{ from.x, from.y - radius_, from.z }, radius_, 2.0f * radius_,
 							  sim::Vec3{ delta.x, delta.y, delta.z }, sim::query_mask::kProjectile, &hit)
@@ -152,6 +162,9 @@ void ChaseCamera::pill(const ChaseFrame &p_frame, double p_dt, const sim::Collis
 	wanted_ = add(p_frame.pivot, mul(p_frame.direction, radius_ + length_));
 }
 
+// SOURCE: notes R2-C5 E5 (spring per target axis by ToWantedPositionScale, away force over |P - pivot|^4,
+// VelocityDrag, MaxVelocity, InheritTargetVelocity, SnapDistance).
+// STAND-IN: no ForceFieldRadius contact push and no CollisionRadius hit. Settle: a contact query in CollisionWorld.
 void ChaseCamera::dynamics(const ChaseFrame &p_frame, const ChaseTarget &p_target) {
 	const float h = 1.0f / update_rate(def_);
 	const Vec3 up = normalized(cross(p_frame.forward, p_frame.right), Vec3{ 0, 1, 0 });
@@ -183,6 +196,8 @@ void ChaseCamera::dynamics(const ChaseFrame &p_frame, const ChaseTarget &p_targe
 	}
 }
 
+// SOURCE: notes R2-C5 E6 and its checker (eye lerped by the leftover time x max(UpdateRate, 10); look point
+// LookDistanceScale / |eye - pivot|^2 plus LookDistanceInFrontOfTarget along the forward).
 fx::Transform ChaseCamera::view(const ChaseFrame &p_frame) const {
 	const float t = std::clamp(float(accumulated_) * update_rate(def_), 0.0f, 1.0f);
 	const Vec3 eye = lerp(previous_, position_, t);
@@ -192,6 +207,7 @@ fx::Transform ChaseCamera::view(const ChaseFrame &p_frame) const {
 	if (rel2 > 1e-8f) {
 		look = add(look, mul(p_frame.forward, def_.look_distance_scale / rel2));
 	}
+	// STAND-IN: the up axis is world Y; ShouldRollWithTarget is not read. Settle: read it and roll with the target.
 	return look_from(eye, normalized(sub(look, eye), p_frame.forward));
 }
 
@@ -211,6 +227,7 @@ fx::Transform ChaseCamera::step(double p_dt, const ChaseTarget &p_target, const 
 DeathCameraParams death_camera_params(const core::gameplay::DeathTimeline &p_death,
 		const core::gameplay::SoldierCameras *p_cameras, const core::gameplay::PlayerCameraDef *p_killer_camera) {
 	DeathCameraParams p;
+	// SOURCE: notes R2-C5 B (the kill card and the killer view both start KillerCameraTimer after the death).
 	p.killer_camera_s = p_death.kill_card_s;
 	if (p_killer_camera == nullptr) {
 		return p;
@@ -218,6 +235,8 @@ DeathCameraParams death_camera_params(const core::gameplay::DeathTimeline &p_dea
 	p.fade_out_s = p_killer_camera->fade_out_s;
 	p.fade_in_s = p_killer_camera->fade_in_s;
 	p.release_if_target_lost = p_killer_camera->release_if_target_lost;
+	// STAND-IN: only the killer soldier's camera; a killer in a vehicle does not give the driver entry's 3p camera.
+	// Settle: build the vehicle target of notes R2-C5 C3.
 	const core::gameplay::SoldierCameraDef *c = p_cameras != nullptr ? p_cameras->target_of(*p_killer_camera) : nullptr;
 	if (c != nullptr && c->kind == core::gameplay::SoldierCameraKind::Chase) {
 		p.has_chase = true;
@@ -280,6 +299,7 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const ChaseTarget *p_killer
 		++stats_.bad_inputs;
 	}
 	if (!usable) {
+		// INFERRED: a lost target without ReleaseControlIfTargetLost holds the last view. Settle: a note on that case.
 		if (taken_ && params_.release_if_target_lost) {
 			++stats_.released_lost;
 			end();
@@ -312,6 +332,8 @@ DeathCameraView Bf3DeathCamera::step(double p_now_s, const ChaseTarget *p_killer
 	return v;
 }
 
+// SOURCE: notes R2-C5 D (OnTakeControl fades to black over its FadeTime, that fade's OnDone fades back in).
+// INFERRED: the fade in starts the moment the fade out ends, as R2-C5 infers OnDone. Settle: a note on FadeEntity.
 float Bf3DeathCamera::black_at(double p_now_s) const {
 	const double since = p_now_s - taken_s_;
 	if (since < double(params_.fade_out_s)) {

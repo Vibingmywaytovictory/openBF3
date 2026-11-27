@@ -54,6 +54,8 @@ namespace bf3::godot_side {
 
 namespace {
 
+// STAND-IN: the size (256 px at 1080), 150 m range and 14-unit margin of the minimap control drawn outside a game
+// session, where no HUD movie places it. Settle: draw the hudmpscreen minimap outside a session too.
 constexpr float kDefaultSidePer1080 = 256.0f;
 constexpr float kRangeMetres = 150.0f;
 constexpr float kMarginUnits = 14.0f;
@@ -122,6 +124,8 @@ core::Result<ui::L8Image> load_value_texture(const core::LevelMount &p_mount, co
 	out.width = mips.front().width;
 	out.height = mips.front().height;
 	out.texels.resize(texels.size());
+	// INFERRED: a fade or hatch texture's value is its alpha when any texel has one, else the mean of r, g and b.
+	// Settle: the minimap shader's program or a note on how it samples FadeTexture and CombatAreaMultiplyTexture.
 	for (size_t i = 0; i < texels.size(); ++i) {
 		const float v = alpha ? texels[i][3] : (texels[i][0] + texels[i][1] + texels[i][2]) / 3.0f;
 		out.texels[i] = uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));

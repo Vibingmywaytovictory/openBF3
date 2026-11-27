@@ -117,6 +117,7 @@ bf3::core::Status NativeFlow::tick(const bf3::host::UiGameState &p_state, double
 	}
 	clock_ += std::isfinite(p_seconds) && p_seconds > 0.0 ? p_seconds : 0.0;
 	uint32_t due = 0;
+	// INFERRED: the client UI flow updates once per sim tick. Settle: a note on the UI graph's update rate.
 	while (clock_ >= double(bf3::sim::kTickSeconds) && due < kNativeFlowMaxCatchUpTicks) {
 		clock_ -= double(bf3::sim::kTickSeconds);
 		++due;

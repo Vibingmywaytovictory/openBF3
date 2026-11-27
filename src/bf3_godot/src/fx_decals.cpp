@@ -162,14 +162,19 @@ void FxDecalPool::place(const fx::DecalCue &p_cue) {
 	Transform3D x = to_godot_transform(p_cue.transform);
 	x.basis.orthonormalize();
 	x.basis = x.basis * Basis(Vector3(0, 1, 0), real_t(pl.rotation));
+	// WHY: an impact cue's +Y is the surface normal, the axis a Godot Decal projects along.
 	const Vector3 normal = x.basis.get_column(1);
 	x.origin += normal * real_t(std::max(t->normal_offset, 0.0f));
 	Decal *d = slot->node;
 	d->set_global_transform(x);
 	d->set_size(Vector3(pl.size, kDecalDepth, pl.size));
+	// STAND-IN: the whole texture is drawn; the template's TileCountX/Y and TileIndexX/Y are read but not applied.
+	// Settle: crop to the template's tile, or show every impact template is one tile.
 	d->set_texture(Decal::TEXTURE_ALBEDO, tex->second);
 	d->set_albedo_mix(1.0f);
 	d->set_modulate(Color(1, 1, 1, 1));
+	// STAND-IN: ClipAngle as Godot's normal fade 0.5 cos(ClipAngle) + 0.5, and 0.3 upper and lower fades.
+	// Settle: BF3's decal clip rule for surfaces turned from the normal.
 	const float clip = std::clamp(t->clip_angle, 0.0f, 89.0f) * 3.14159265f / 180.0f;
 	d->set_normal_fade(0.5f * std::cos(clip) + 0.5f);
 	d->set_upper_fade(0.3f);

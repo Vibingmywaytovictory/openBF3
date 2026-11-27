@@ -17,6 +17,8 @@ float presented_eye_height(const bf3::host::PresentationFrame &p_frame, double p
 
 class FpCamera {
 public:
+	// STAND-IN: 70 deg is the FOV when no settings give one (notes R4-C3 D names 55 deg as BF3's default camera FOV).
+	// Settle: the install's FieldOfView option default.
 	static constexpr float kFovDegrees = 70.0f;
 
 	void attach(godot::Node *p_parent);

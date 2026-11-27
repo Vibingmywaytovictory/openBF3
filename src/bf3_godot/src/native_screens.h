@@ -42,6 +42,8 @@ inline constexpr uint32_t kUiScreensIdleViewItems = 12000;
 inline constexpr size_t kUiScreensMaxLog = 4096;
 inline constexpr size_t kUiScreensMaxErrors = 64;
 inline constexpr int32_t kUiScreensFirstOwnOrder = 4;
+// STAND-IN: a wheel notch scrolls 3 lines, the Windows default, not read from the install. Settle: a note on the
+// delta the engine passes to the movie's onMouseWheel.
 inline constexpr float kUiWheelLinesPerNotch = 3.0f;
 
 enum class UiScreenPhase : uint8_t {

@@ -15,6 +15,8 @@ struct DeathTimeline;
 
 namespace bf3::godot_side {
 
+// SOURCE: notes R2-C5 E constants (10 Hz minimum UpdateRate, 0.5 s accumulator cap, 1/60 s pill step, 1e-4 m pill
+// length floor), the 4 constants below.
 inline constexpr float kChaseMinUpdateRate = 10.0f;
 inline constexpr float kChaseMaxAccumulated = 0.5f;
 inline constexpr float kChasePillStep = 1.0f / 60.0f;
@@ -65,6 +67,8 @@ private:
 };
 
 struct DeathCameraParams {
+	// SOURCE: notes R2-C5 B (MP_001 TDM KillerCameraTimer 1.0 s).
+	// STAND-IN: the TDM time for every mode when the death timeline gives none. Settle: the mode's own KillerCameraTimer.
 	float killer_camera_s = 1.0f;
 	float fade_out_s = 0.0f;
 	float fade_in_s = 0.0f;
