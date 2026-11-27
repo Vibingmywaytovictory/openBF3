@@ -884,6 +884,17 @@ core::Status apply_behaviour_weights(const AiConfig &p_config, BehaviourTuning &
 							[&](const VehicleBehaviour &p_b) {
 								return p_b.vehicle == vehicle && p_b.behaviour == int(i);
 							});
+			const auto binding = std::find_if(p_config.vehicle_behaviours.begin(), p_config.vehicle_behaviours.end(),
+					[&](const VehicleBehaviour &p_b) {
+						return p_b.vehicle == (vehicle < 0 ? infantry : vehicle) && p_b.behaviour == int(i);
+					});
+			const std::vector<float> *row =
+					binding != p_config.vehicle_behaviours.end() ? modifier_set(p_config, binding->modifiers) : nullptr;
+			BehaviourRow &into = tuning.binding_rows[k][i];
+			into.fill(1.0f);
+			if (row != nullptr) {
+				std::copy_n(row->begin(), std::min(row->size(), into.size()), into.begin());
+			}
 			tuning.class_weights[k][i] = !binds ? 0.0f
 					: own != nullptr			? p_config.settings.basic_bot_weights[i] * own[i]
 												: out.weight;

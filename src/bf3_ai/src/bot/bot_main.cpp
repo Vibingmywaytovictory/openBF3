@@ -166,7 +166,8 @@ int BotMain::decision_making(double) {
 	for (size_t i = 0; i < behaviour_count_; ++i) {
 		modifiers[i] = behaviour_urgencies_[i];
 		if (!plan_invalid_ && last != -1) {
-			modifiers[i] *= memory_.modify_behaviour_urgency(*behaviours_[i], now);
+			modifiers[i] *= memory_.modify_behaviour_urgency(*behaviours_[i], now) *
+					tuning_.binding_rows[size_t(equipment_)][size_t(last)][i];
 		}
 		behaviours_[i]->calculate_urgency(this, modifiers[i]);
 	}

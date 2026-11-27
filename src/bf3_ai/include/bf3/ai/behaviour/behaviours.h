@@ -47,9 +47,22 @@ struct BehaviourCurve {
 	bool operator==(const BehaviourCurve &) const = default;
 };
 
+using BehaviourRow = std::array<float, kBotBehaviourCount>;
+
+constexpr std::array<std::array<BehaviourRow, kBotBehaviourCount>, kEquipmentClassCount> unit_binding_rows() {
+	std::array<std::array<BehaviourRow, kBotBehaviourCount>, kEquipmentClassCount> out{};
+	for (auto &k : out) {
+		for (BehaviourRow &row : k) {
+			row.fill(1.0f);
+		}
+	}
+	return out;
+}
+
 struct BehaviourTuning {
 	std::array<BehaviourCurve, kBotBehaviourCount> curves{};
-	std::array<std::array<float, kBotBehaviourCount>, kEquipmentClassCount> class_weights{};
+	std::array<BehaviourRow, kEquipmentClassCount> class_weights{};
+	std::array<std::array<BehaviourRow, kBotBehaviourCount>, kEquipmentClassCount> binding_rows = unit_binding_rows();
 	bool change = false;
 	float squad_far_m = 15.0f;
 	float squad_arrive_m = 3.0f;
