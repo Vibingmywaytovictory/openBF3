@@ -5,7 +5,7 @@ import sys
 CODE_EXT = ('.cpp', '.h', '.gdshader', '.gdshaderinc')
 CODE_DIRS = ('src', 'tests', 'tools', 'bf3-opensource/shaders')
 CMAKE_DIRS = ('src', 'tests', 'tools')
-CFG_DIRS = ()
+CFG_DIRS = ('bf3-opensource/config',)
 MD_ALLOW_DIRS = ('docs/design', 'docs/history', 'research')
 MD_ALLOW_FILES = ('README.md', 'CLAUDE.md', 'docs/architecture.md', 'docs/testing.md')
 MD_ALLOW_GLOB = re.compile(r'^tools/[^/]+/README\.md$')

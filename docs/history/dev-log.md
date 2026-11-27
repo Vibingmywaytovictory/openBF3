@@ -3678,3 +3678,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Comments, bf3_net: 2 INFERRED, 3 SOURCE, 5 STAND-IN, 3 WHY on 7 files; Comment lines only: no code line is added, removed or changed.
 * Comments, bf3_host: 63 INFERRED, 35 SOURCE, 105 STAND-IN, 8 WHY on 73 files; Comment lines only: no code line is added, removed or changed.
 * Comments, bf3_godot: 62 INFERRED, 20 SOURCE, 91 STAND-IN, 31 WHY on 82 files; Comment lines only: no code line is added, removed or changed.
+* Comments, bf3-opensource/config: 7 INFERRED, 20 SOURCE, 50 STAND-IN, 8 WHY on 8 files; The config files' prose comments are rewritten in the tagged form and hygiene.rules now checks bf3-opensource/config/*.cfg; no key line changed.
