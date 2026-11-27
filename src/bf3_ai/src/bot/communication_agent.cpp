@@ -3,6 +3,8 @@
 
 namespace bf3::ai {
 
+// STAND-IN: only the call for a medic is voiced, modifier 1 and bb.call_s for its send period and time to live; the pin
+// reads each type's settings through its voice (AIRadioMessages.ai). Settle: radio settings from BF3 data.
 bool CallRadioVoices::settings(int p_type, RadioMessageSettings &r_settings) const {
 	if (p_type != kRadioCallForMedic) {
 		return false;
@@ -43,6 +45,8 @@ void CommunicationAgent::update(double p_now, int p_player, int p_side) {
 	}
 }
 
+// STAND-IN: the pin's sendCommunicationAgentMessages (the health-check call for a medic, the horn shut-off) runs
+// before the queue; here the behaviours queue the call. Settle: follow pollForRadioMessage @c47317b.
 void CommunicationAgent::poll_for_radio_message(double p_now, int p_player, int p_side) {
 	RadioMessage message;
 	while (peek_radio_message(message) && !wait_with_sending_message(message, p_now)) {

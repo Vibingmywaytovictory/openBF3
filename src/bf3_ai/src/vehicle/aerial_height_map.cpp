@@ -34,6 +34,8 @@ float AerialHeightMap::ground_height(const Vec3 &p_position) const {
 	return ground_height(p_position.x, p_position.z);
 }
 
+// STAND-IN: the cell index is floored and a cell outside the grid reads kMissingGroundHeight; the pin truncates and
+// indexes unchecked. Settle: the pin's result for a point outside the grid.
 float AerialHeightMap::ground_height(float p_x, float p_z) const {
 	if (heights_.empty()) {
 		return kMissingGroundHeight;
@@ -59,7 +61,8 @@ void AerialHeightMap::create_height_map(
 	}
 }
 
-// STAND-IN: a cell keeps the ceiling of its highest sample over an even sample grid. Settle: BF2's per-cell height rule.
+// STAND-IN: the ceiling of the highest sample over an edge-to-edge grid; the pin probes the sub-cell centres, takes the
+// higher of each probe and the water level and truncates. Settle: follow computeHeightAt @c47317b.
 uint16_t AerialHeightMap::compute_height_at(
 		const AerialHeightSource &p_source, int p_cell_x, int p_cell_z, int p_samples_per_axis) const {
 	const int samples = std::max(p_samples_per_axis, 1);

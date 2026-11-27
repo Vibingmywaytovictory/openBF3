@@ -17,6 +17,8 @@ inline constexpr float kPlacedBackOffMetres = 30.0f;
 inline constexpr float kPlacedClearMetres = 9.0f;
 inline constexpr float kPlacedDetonateDelayS = 0.7f;
 
+// STAND-IN: BBMedicAssist cut to its health test, score and curve; its call boosts (x1.5, x3), 100 urgency for a human
+// caller within 50 m and 0.7071 ground test are left out. Settle: follow OpenBF2 BBMedicAssist.cpp @c47317b.
 bool needs_assist(float p_health, bool p_human);
 float assist_score(float p_strength, float p_health, float p_distance);
 float assist_urgency(float p_score, bool p_human);

@@ -13,6 +13,7 @@ namespace {
 
 // STAND-IN: the cell index divides by the grid's extent where BF2's divides by its max corner, so a grid with a negative
 // min corner indexes right. Settle: index a BF2 level with a negative minimum corner both ways.
+// WHY: the pin converts to int before clamping; clamping first keeps a far query corner from wrapping to cell 0.
 int cell_index(float p_offset, int p_dim, float p_extent) {
 	if (!(p_extent > 0.0f) || std::isnan(p_offset)) {
 		return 0;

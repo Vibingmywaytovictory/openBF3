@@ -178,6 +178,8 @@ float fire_strength(const ChangeBot &p_bot, std::span<const ChangeVehicle> p_veh
 			return best * 4.0f;
 		}
 	}
+	// STAND-IN: the pin adds the strongest incoming fire to the threat and gives 0 where closeAndShouldAvoidVehicles
+	// holds; neither is ported. Settle: follow calculateFireStrength @c47317b once incoming fire is tracked.
 	float best = 0.0f;
 	float running = 0.0f;
 	for (size_t i = 0; i < kChangeStrengthCount; ++i) {

@@ -183,6 +183,8 @@ public:
 
 class IPIMobile : public InformationPlugIn {
 public:
+	// STAND-IN: a 64-bit nav polygon and a map index stand in for BF2's 32-bit polygon and island.
+	// Settle: follow OpenBF2 Code/BF2/AI/AIDLL/AI/AIKnowledge/IPIMobile.h @c47317b once the nav mesh gives islands.
 	struct ValidPos {
 		uint64_t polygon = ~uint64_t(0);
 		uint32_t map = kNoHandle;

@@ -136,6 +136,8 @@ void CommunicationHub::filter_and_receive_ai_radio_message(
 		return;
 	}
 	AiGame *const game = services_.game;
+	// STAND-IN: the pin's message types 0 and 1 also set a human sender's vehicle allowed-by-bots flag; host vehicles
+	// carry no AI object. Settle: follow filterAndReceiveAIRadioMessage @c47317b once they do.
 	const bool human_sender = game != nullptr && game->is_valid_player_id(p_sender) && !game->player_is_ai(p_sender);
 	if (p_settings.type == kRadioRequestPickup && human_sender && services_.information != nullptr) {
 		Transform camera;

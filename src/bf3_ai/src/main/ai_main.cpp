@@ -55,6 +55,8 @@ bool AIMain::action() {
 		lod_->update_bots();
 	}
 	const double now = services_.timer != nullptr ? services_.timer->update_time() : deadline;
+	// STAND-IN: the pin's action also updates bot projectiles and the mine manager and damages severely damaged
+	// vehicles; openBF3 has none of the three. Settle: follow AIMain::action @c47317b once they exist.
 	bot_manager_->action(deadline - now);
 	return true;
 }

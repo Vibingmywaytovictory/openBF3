@@ -17,6 +17,8 @@ SquadOrder squad_order_of(CommanderOrder p_order) {
 	return SquadOrder::None;
 }
 
+// STAND-IN: the commander seat, requests and messages below do nothing and no side has artillery; openBF3 has no
+// commander assets. Settle: build them if a mode needs a commander.
 void SquadCommanderGame::apply_for_commander(int, int) {}
 
 void SquadCommanderGame::resign_commander(int) {}

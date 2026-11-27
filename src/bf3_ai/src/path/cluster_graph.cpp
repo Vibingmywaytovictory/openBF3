@@ -112,8 +112,8 @@ float ClusterGraph::portal_cost(uint32_t p_cluster, uint32_t p_portal) const {
 	return portal_costs_[size_t(clusters_[p_cluster].first_portal) + p_portal];
 }
 
-// STAND-IN: a Dijkstra over portal costs times the entered cluster's material cost; BF2's cluster search is not ported.
-// Settle: port BF2's cluster path search.
+// STAND-IN: a Dijkstra over portal costs times the entered cluster's material cost; the pin's is an A* over per-cost-type
+// portal-to-portal costs with a straight-line heuristic. Settle: follow ClusterNodeManager.cpp @c47317b.
 float ClusterGraph::shortest_path(uint32_t p_from, uint32_t p_to, const MaterialManager &p_materials,
 		ClusterNodeManager &r_nodes, std::vector<uint32_t> &r_path) const {
 	r_path.clear();

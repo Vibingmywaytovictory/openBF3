@@ -81,8 +81,8 @@ void SquadFormation::select_formation() {
 	formation_ = Formation::Line;
 }
 
-// STAND-IN: the forward vector, slot positions, closest slots, member wait, trailing, member removal and leader handover
-// are openBF3's own bodies. Settle: compare with the pinned SquadFormation bodies.
+// STAND-IN: the anchor's horizontal speed above FormationTuning's moving speed sets the forward vector, where the pin
+// takes its 3D speed once its square is above 0.25. Settle: follow updateFormationForwardVector @c47317b.
 void SquadFormation::update_formation_forward_vector() {
 	const SquadMember *const anchor = member_at(0);
 	if (anchor == nullptr) {
@@ -125,6 +125,8 @@ bool SquadFormation::trailing() const {
 	return std::any_of(slots_.begin(), slots_.end(), [](const Slot &p_slot) { return p_slot.trail_index != -1; });
 }
 
+// STAND-IN: openBF3's own trailing mode; the pin has none and gives a slot a trail position only where its slot point is
+// invalid or on water. Settle: follow getSlotWorldPos @c47317b.
 void SquadFormation::update_trailing_mode() {
 	if (!tuning_.trail_while_moving) {
 		return;
@@ -261,6 +263,8 @@ void SquadFormation::update_formation() {
 	}
 }
 
+// STAND-IN: waits for any member beyond its formation distance, up to max_wait_s; the pin waits 10 to 20 s (random) per
+// human member farther from the goto than the squad, arrival within (150, 1500). Settle: follow updateWaitForSquadMembers.
 void SquadFormation::update_wait_for_squad_members(sim::Tick p_tick) {
 	Vec3 squad_position{};
 	coordinator_->squad_position(squad_position);
@@ -387,6 +391,8 @@ void SquadFormation::update_closest_slots() {
 	}
 }
 
+// STAND-IN: the slot nearest this slot's member; the pin takes the member nearest this slot's world position.
+// Settle: follow getClosestSlotIndex @c47317b.
 int SquadFormation::closest_slot_index(int p_slot) const {
 	const SquadMember *const member = member_at(p_slot);
 	Vec3 position{};
@@ -537,6 +543,8 @@ Vec3 SquadFormation::slot_position(int p_slot) const {
 		base.z + right_z * slot.offset.x + forward_.y * slot.offset.z };
 }
 
+// STAND-IN: offsets chained from the reference slot, a set trail target first; the pin rotates from the squad position
+// (the leader's without one) and trails only off an invalid or water point. Settle: follow getSlotWorldPos @c47317b.
 bool SquadFormation::slot_world_position(int p_member_index, Vec3 &r_out) const {
 	const int slot = slot_of_member(p_member_index);
 	if (slot == -1) {

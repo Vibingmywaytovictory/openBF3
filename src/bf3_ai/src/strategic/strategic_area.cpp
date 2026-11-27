@@ -73,6 +73,8 @@ void AIStrategicArea::post_load_init() {
 		}
 		init();
 	}
+	// STAND-IN: the pin then finds and sides the control point of a ControlPoint-flagged area that names none; openBF3
+	// sets no type flags. Settle: follow AIStrategicArea::postLoadInit @c47317b once areas carry type flags.
 	init_order_positions();
 }
 
@@ -93,6 +95,8 @@ void AIStrategicArea::init_order_positions() {
 		uint32_t polygon = 0xFFFFFFFFu;
 		uint32_t island = 0xFFFFFFFFu;
 		Vec3 on = data.offset;
+		// STAND-IN: the offset moves to the nav point found; the pin queries the polygon and keeps its offset.
+		// Settle: follow initOrderPoses @c47317b if order positions must stay off the navmesh.
 		if (services_.game != nullptr && services_.game->polygon(data.offset, int(map), polygon, island, on)) {
 			data.offset = on;
 		}
@@ -368,8 +372,8 @@ bool AIStrategicArea::is_inside(const Vec2 &p_point) const {
 	return centre_.x <= p_point.x && p_point.x <= maximum.x && centre_.y <= p_point.y && p_point.y <= maximum.y;
 }
 
-// STAND-IN: the take-over counter and takeable check ask the StrategicGame for any area with a control point, where BF2
-// asks only areas flagged ControlPoint; openBF3 sets no type flags. Settle: set the type flags from the level.
+// STAND-IN: the take-over counter asks the StrategicGame for any area with a control point, where BF2 asks only areas
+// flagged ControlPoint; openBF3 sets no type flags. Settle: set the type flags from the level.
 float AIStrategicArea::control_point_take_over_counter() const {
 	if (control_point_ != kNoControlPoint && services_.game != nullptr) {
 		return services_.game->control_point_take_over_counter(control_point_);
@@ -377,6 +381,8 @@ float AIStrategicArea::control_point_take_over_counter() const {
 	return 1.0f;
 }
 
+// INFERRED: the game's takeable flag stands for the active flag the pin's isAreaTakeable reads from getControlPointInfo.
+// Settle: what BF2's control point active flag means against BF3 objective data.
 bool AIStrategicArea::is_area_takeable() const {
 	return control_point_ != kNoControlPoint && services_.game != nullptr &&
 			services_.game->control_point_takeable(control_point_);
@@ -405,6 +411,8 @@ void AIStrategicArea::update(int p_side, const Sai &p_sai, bool &r_changed) {
 	resource_need_[s] = 0;
 	std::vector<uint32_t> handles;
 	const AIInformationGrid *grid = services_.grids[s];
+	// INFERRED: one query of the side's grid stands for the pin's four (side 0 and own side, unit and non-unit grids).
+	// Settle: follow AIStrategicArea::update @c47317b once the grids are split that way.
 	if (grid != nullptr) {
 		grid->information_within_rectangle(handles, centre_, upper, nullptr);
 	}

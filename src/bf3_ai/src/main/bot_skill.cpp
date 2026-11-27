@@ -27,12 +27,18 @@ float ai_deviation_deg(const WeaponTemplate &p_template, float p_skill, double p
 	return float((((1.0 - t) + 1.0) * 0.5) * (1.0 - double(p_skill)) * double(p_template.deviation) * double(p_scale));
 }
 
+// INFERRED: the template is found by the weapon's name the caller gives (the host's variant), where the pin takes the
+// weapon's AI template. Settle: a BF3 data link from a weapon to an AI template, if any.
+// STAND-IN: always a soldier with no human-vehicle target and scale 1 (the pin's 3 against air). Settle: follow
+// EntryTrigger::execute @c47317b once bots fire at vehicles and aircraft through it.
 float weapon_deviation_deg(const WeaponTemplateMap &p_templates, std::string_view p_weapon,
 		const TriggerWeapon &p_trigger, float p_bot_skill, double p_seconds_since) {
 	return ai_deviation_deg(find_weapon_template(p_templates, p_weapon),
 			trigger_skill(p_bot_skill, p_trigger, true, false), p_seconds_since, 1.0f);
 }
 
+// STAND-IN: the pin waits only for a weapon whose max range is above 10 m; the range test is left out. Settle: follow
+// BBPFireInfantery's delay @c47317b once the caller passes the weapon's max range.
 float fire_delay_s(float p_bot_skill, float p_unit_draw) {
 	return (1.0f - p_bot_skill) * (p_unit_draw + 1.5f);
 }

@@ -259,6 +259,8 @@ bool StrategyManager::create_area_condition(
 	return true;
 }
 
+// STAND-IN: the Hunt and Spread strategies and the StrategyDecisions bodies below are openBF3's own, standing in for BF2's
+// Strategies.ai and the SAI's own distribution. Settle: authored strategies for BF3 modes run through SAI.cpp @c47317b.
 StrategyDecisions::StrategyDecisions(StrategyManager &r_manager, SquadManager &r_squads,
 		AIStrategicObjectManager &r_objects, const StrategyHeat *p_heat, const StrategyTuning &p_tuning) :
 		manager_(r_manager), squads_(r_squads), heat_(p_heat), tuning_(p_tuning) {

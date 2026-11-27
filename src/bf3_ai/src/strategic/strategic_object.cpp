@@ -281,6 +281,8 @@ bool AIStrategicObjectManager::create(const std::string &p_name, const Vec2 &p_t
 	return true;
 }
 
+// STAND-IN: a self-neighbour is refused, no layer is compared and neither area becomes the other's neighbouring object,
+// where the pin's addTwoWayNeighbour compares layers and adds both. Settle: follow AIStrategicObjectManager.cpp @c47317b.
 bool AIStrategicObjectManager::add_two_way_neighbour(const std::string &p_a, const std::string &p_b) {
 	AIStrategicArea *a = strategic_area(p_a);
 	AIStrategicArea *b = strategic_area(p_b);

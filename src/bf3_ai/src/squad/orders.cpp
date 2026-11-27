@@ -47,13 +47,13 @@ bool BotSquad::join_squad(int p_squad) {
 	return joined;
 }
 
-// STAND-IN: isSquadLeader, issuing, receiving, accepting and declining orders (as order weights) and SquadOrders below are
-// openBF3's own. Settle: port BF2's BotSquad order bodies once its squad radio and orders are built.
 bool BotSquad::is_squad_leader() const {
 	const SquadPlayer *const player = world_->player(bot_->player_id());
 	return player != nullptr && squads_ != nullptr && squad_id_ != 0 && squads_->is_squad_leader(squad_id_, *player);
 }
 
+// STAND-IN: issuing, receiving, accepting and declining orders as order weights, and SquadOrders below, are openBF3's
+// own; the pin requests a mission and accepts it in acceptMission. Settle: follow BotSquad and SquadCoordinator @c47317b.
 bool BotSquad::able() const {
 	const SquadPlayer *const player = world_->player(bot_->player_id());
 	return player != nullptr && player->is_alive() && !player->is_man_down();
@@ -188,8 +188,8 @@ BotSquad *SquadOrders::bot_squad(int p_player_id) const {
 	return p_player_id >= 0 && size_t(p_player_id) < bots_.size() ? bots_[size_t(p_player_id)] : nullptr;
 }
 
-// STAND-IN: a mission completes when the leader is within bb.mission_arrive_m and the members are, or the wait ran out.
-// Settle: BF2's mission completion rule.
+// STAND-IN: a mission completes when the leader is within bb.mission_arrive_m and the members are, or the wait ran out,
+// where the pin has no arrival end and ends missions through unAssignSquad. Settle: follow SquadCoordinator.cpp @c47317b.
 bool SquadOrders::arrived(const SquadCoordinator &p_squad, sim::Tick p_tick, sim::Tick &r_since) const {
 	const SquadMember *const leader = p_squad.squad_leader();
 	Vec3 at{};

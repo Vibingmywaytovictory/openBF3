@@ -195,6 +195,8 @@ void Sai::remove(BotInfo &r_info) {
 	free_bots_.erase(id);
 }
 
+// STAND-IN: the pin also sets a dead bot's spawn target to none and gives the bot the SAI's death and spawn callbacks.
+// Settle: follow SAI::addBot @c47317b once the callbacks reach the SAI.
 void Sai::add_bot(Bot *p_bot) {
 	if (p_bot == nullptr) {
 		return;
@@ -205,7 +207,8 @@ void Sai::add_bot(Bot *p_bot) {
 	added_.push_back(p_bot);
 }
 
-// STAND-IN: removing a bot also removes its squad member, openBF3's own. Settle: BF2's caller of removeSquadMember.
+// STAND-IN: removing a bot also removes its squad member, which the pin's removeBot does not. Settle: BF2's caller of
+// removeSquadMember.
 void Sai::remove_bot(Bot *p_bot) {
 	if (p_bot == nullptr) {
 		return;
@@ -242,6 +245,8 @@ void Sai::handle_dead_bot(int p_bot_id) {
 	set_as_dead(*info);
 }
 
+// STAND-IN: the closest object by position alone; the pin's also takes the equipment type and vehicle number and resets
+// the bridges on the first spawn. Settle: follow SAI::setBotIsAlive @c47317b once vehicle groups and bridges exist.
 void Sai::set_bot_is_alive(int p_bot_id) {
 	BotInfo *info = p_bot_id >= 0 && size_t(p_bot_id) < bots_.size() ? bots_[size_t(p_bot_id)].get() : nullptr;
 	if (info == nullptr || info->bot->is_dead()) {
@@ -465,6 +470,8 @@ bool Sai::player_requests_artillery(int p_player_id, const Vec3 &p_position) {
 		deny(SaiDenial::ArtilleryUnavailable, p_player_id, now);
 	} else if (now > artillery_ready_) {
 		artillery_ready_ = now + 60.0f;
+		// STAND-IN: the pin then warns the squads (SquadManager::incomingArtillery); the squad port has no artillery.
+		// Settle: follow playerRequestsArtillery @c47317b once it has.
 		commander.fire_artillery(side_, p_player_id, { p_position.x, p_position.z });
 	} else {
 		deny(SaiDenial::Artillery, p_player_id, now);
@@ -630,8 +637,8 @@ bool Sai::is_player_commander(int p_side) const {
 	return p_side == side_ && player_commander_;
 }
 
-// STAND-IN: the owned-control-point checks below are openBF3's own. Settle: compare with the pinned SAI.cpp's
-// haveAnyOwnedCps and haveAnyOwnedAndTakeableCps.
+// STAND-IN: these ask the area's control point and takeable flag; the pin's haveAnyOwnedCps takes any owned object and
+// its takeable checks ask the game if a point is active, ownAll true with none. Settle: follow SAI.cpp @c47317b.
 bool Sai::have_any_owned_control_points(int p_side) const {
 	if (services_.objects == nullptr) {
 		return false;
@@ -762,6 +769,8 @@ void Sai::update(double p_budget) {
 				return;
 			}
 			[[fallthrough]];
+		// STAND-IN: without SaiDecisions the stage does nothing; the pin's updateBotPositions moves bots to a neighbouring area
+		// of more gravity and retains those whose waypoints ended. Settle: follow SAI::updateBotPositions @c47317b.
 		case SaiStage::BotPositions:
 			if (services_.decisions != nullptr) {
 				services_.decisions->update_bot_positions(*this);
@@ -819,7 +828,7 @@ void Sai::update(double p_budget) {
 				return;
 			}
 			[[fallthrough]];
-		// STAND-IN: the artillery check, teleports and the spawn-group search are left out. Settle: port them with artillery.
+		// STAND-IN: checkCommanderUseArtillery and distributeArtillery are left out. Settle: port them with artillery.
 		case SaiStage::Artillery:
 			stage_ = SaiStage::Done;
 			++completed_;
@@ -994,6 +1003,8 @@ void Sai::prepare_update() {
 			}
 		}
 	}
+	// STAND-IN: the pin's prepareUpdate also moves teleporting bots and runs BotSpawner::findSuitableSpawnGroup for each
+	// dead bot when respawn is allowed; the host draws spawns. Settle: follow SAI::prepareUpdate @c47317b.
 	for (auto it = dead_bots_.begin(); it != dead_bots_.end();) {
 		if (it->first < 0 || size_t(it->first) >= bots_.size() || bots_[size_t(it->first)] == nullptr) {
 			it = dead_bots_.erase(it);

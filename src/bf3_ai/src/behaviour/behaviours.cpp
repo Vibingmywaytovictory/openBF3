@@ -173,7 +173,7 @@ void BotBehaviour::reset(Bot *) {
 }
 
 // STAND-IN: urgency is the situation times the modifier, a stand-in for each BF2 behaviour's own calculateUrgency.
-// Settle: port the per-behaviour calculateUrgency bodies.
+// Settle: follow the calculateUrgency bodies of AIBotBehaviour/BB*.cpp @c47317b.
 float BotBehaviour::calculate_urgency(Bot *, float p_modifier) {
 	situation_ = refused_tick_ == body_.tick() ? 0.0f : situation();
 	const float u = situation_ > 0.0f ? situation_ * p_modifier : 0.0f;
@@ -397,6 +397,8 @@ bool BBIdle::plan(BotPlan &r_script, bool) {
 	return true;
 }
 
+// STAND-IN: a heal target urges a flat 1 where the pin's BBMedicAssist scores its targets; only the repair path takes
+// the body's urgency (assist_urgency, a cut of the pin's). Settle: follow BBMedicAssist::calculateUrgency @c47317b.
 float BBMedicAssist::situation() {
 	const InfantrySenses &s = body_.senses();
 	repair_ = !s.heal_target && s.repair_target;

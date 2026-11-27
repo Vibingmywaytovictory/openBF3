@@ -1,4 +1,4 @@
-// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotNavigation.cpp @c47317b (reset and progress)
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBot/BotNavigation.cpp @c47317b (reset and clearProgress)
 #include "bf3/ai/nav/bot_navigation.h"
 
 #include "bf3/ai/squad/squad_world.h"
@@ -148,12 +148,15 @@ void BotNavigation::update(const BotNavigationWorld &p_world, const Vec3 &p_posi
 	check_progress(p_position, p_now);
 }
 
-// STAND-IN: arrival also needs the height within twice the arrive distance. Settle: BF2's arrival test.
+// STAND-IN: the goal within the arrive distance and twice it in height; the pin's test is the current point within
+// 0.5 m (1 m or more off foot), 3 m in height. Settle: follow checkArrivedAtPoint @c47317b.
 bool BotNavigation::check_arrived_at_point(const Vec3 &p_position, float p_distance) const {
 	return horizontal_sq(p_position, goal_) < p_distance * p_distance &&
 			std::fabs(p_position.y - goal_.y) < 2.0f * p_distance;
 }
 
+// STAND-IN: within off_path_m of the corridor; the pin looks for the bot's last valid polygon among the path's points.
+// Settle: follow stillOnPath @c47317b over Detour polygons.
 bool BotNavigation::still_on_path(const Vec3 &p_position) const {
 	if (state_ != BotNavigationState::Following || corridor_.empty()) {
 		return state_ == BotNavigationState::PolygonSearch;
@@ -167,6 +170,8 @@ void BotNavigation::clear_progress(const Vec3 &p_position, sim::Tick p_now) {
 	stuck_ = false;
 }
 
+// STAND-IN: one window for every bot; the pin's is 2 m in 10 s on foot, 4 m in 20 s otherwise, held while throttle,
+// sprint and yaw stay below 0.1. Settle: follow checkProgress @c47317b.
 void BotNavigation::check_progress(const Vec3 &p_position, sim::Tick p_now) {
 	if (distance_sq(p_position, progress_position_) >= params_.progress_m * params_.progress_m) {
 		clear_progress(p_position, p_now);

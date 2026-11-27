@@ -178,6 +178,8 @@ void BotManager::action_execute_plan(double p_slice) {
 			AiGame *const game = services_.game;
 			const AiObject *const vehicle = game != nullptr ? game->player_vehicle(bot->player_id()) : nullptr;
 			if (vehicle != nullptr && vehicle->primary_object() != nullptr) {
+				// STAND-IN: the pin also marks the vehicle not allowed by bots; host vehicles carry no AI object.
+				// Settle: follow actionExecutePlan @c47317b once they do.
 				bot->set_bot_stuck(true);
 			}
 			const bool on_foot = game != nullptr && game->player_default_vehicle(bot->player_id()) == vehicle;
@@ -202,6 +204,8 @@ void BotManager::action_execute_plan(double p_slice) {
 		const double start = now();
 		const bool in_budget = deadline > start;
 		if (in_budget) {
+			// STAND-IN: the pin then presses throttle and look-up for a bot on a ladder; openBF3's soldier has no ladder.
+			// Settle: follow actionExecutePlan @c47317b if ladders are built.
 			bot->plan_execution(0.0);
 			info->plan_execution_run_time += now() - start;
 			++info->plan_execution_updates;
@@ -534,6 +538,8 @@ bool BotManager::exit_add_bot(int p_player_id) {
 	return false;
 }
 
+// STAND-IN: the pin also moves the player into p_object, sets the vehicle's side and gives the bot a WPEmpty waypoint
+// list; the host seats and sides its soldiers and no bot takes waypoints. Settle: follow BotManager::addBot @c47317b.
 bool BotManager::add_bot(int p_player_id, int p_side, const float *p_personality, AiObject *p_object) {
 	if (services_.settings == nullptr || int(infos_.size()) >= services_.settings->max_bots || p_player_id < 0 ||
 			bot_from_player_id(p_player_id) != nullptr) {
@@ -675,6 +681,8 @@ void BotManager::report_changed_equipment(const Bot &p_bot) {
 	}
 }
 
+// STAND-IN: the pin first switches on the vehicle's physics; openBF3 has no physics LOD. Settle: follow
+// setBotChangedVehicle @c47317b if one is built.
 void BotManager::set_bot_changed_vehicle(int p_player_id, const AiObject *) {
 	Bot *const changed = bot_from_player_id(p_player_id);
 	if (changed == nullptr || changed->in_transition_phase() || changed->is_dead()) {

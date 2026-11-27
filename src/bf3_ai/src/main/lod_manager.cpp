@@ -152,6 +152,8 @@ bool AILODManager::update_bot(Bot &r_bot) {
 			distance /= stats.lod_distance;
 		}
 		if (distance < full_threshold) {
+			// STAND-IN: the pin also switches on a bot's physics when it enters Full; openBF3 has no physics LOD.
+			// Settle: follow AILODManager::updateBot @c47317b if a physics LOD is built.
 			r_bot.set_lod_level(BotLodLevel::Full);
 			break;
 		}

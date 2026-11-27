@@ -35,6 +35,8 @@ inline constexpr size_t kInfantryBehaviourCount = 10;
 inline constexpr size_t kBotBehaviourCount = 11;
 std::string_view infantry_behaviour_kind(InfantryBehaviour p_behaviour);
 
+// STAND-IN: three fixed equipment classes, where BF2's are the vehicles its AI files name for setVehicleMods.
+// Settle: follow OpenBF2 Code/BF2/AI/AIDLL/AI/Main/AIConsole.cpp @c47317b once BF3 vehicle kinds are named.
 enum class EquipmentClass : uint8_t { Infantry, Tank, Car };
 inline constexpr size_t kEquipmentClassCount = 3;
 inline constexpr std::array<std::string_view, kEquipmentClassCount> kEquipmentClassNames = { "Infantry", "Tank",
@@ -251,6 +253,8 @@ protected:
 	float situation() override;
 };
 
+// STAND-IN: BBResupply (support's ammo bag) is a separate behaviour, where BF2's BBMedicAssist also scores the support
+// kit's ammo targets by ammo ratio and distance. Settle: follow OpenBF2 AIBotBehaviour/BBMedicAssist.cpp @c47317b.
 class BBResupply final : public BotBehaviour {
 public:
 	BBResupply(const UrgeCurve &p_curve, InfantryBody &r_body) :

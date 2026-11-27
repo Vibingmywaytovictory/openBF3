@@ -271,6 +271,8 @@ core::Status new_area(AiConfig &r_config, StrategicAreaDef p_area) {
 }
 
 const Command kCommands[] = {
+	// STAND-IN: max bots is read within -1..64, the server's player rows; BF2's console takes any int. Settle: the
+	// server's player limit if it grows.
 	{ "aiSettings.setMaxNBots", 1, 1,
 			[](Args a, AiConfig &c) -> core::Status { return read_int(a[0], -1, 64, c.settings.max_bots); } },
 	{ "aiSettings.maxBotsIncludeHumans", 1, 1,
@@ -484,6 +486,8 @@ const Command kCommands[] = {
 				if (other == nullptr) {
 					return no_area(a[0]);
 				}
+				// STAND-IN: a self-neighbour is refused, and the area is not made the other's neighbouring object, which the
+				// pin's addNeighbour does. Settle: follow AIStrategicObjectManager::addNeighbour @c47317b.
 				if (other == area) {
 					return core::make_error("'" + core::shown_text(a[0]) + "' cannot neighbour itself");
 				}

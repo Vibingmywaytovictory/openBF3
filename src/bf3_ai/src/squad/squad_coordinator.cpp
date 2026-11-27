@@ -24,6 +24,8 @@ SquadCoordinator::SquadCoordinator(const SquadServices &p_services, int p_side, 
 	reset_need_order_message_timer(services_.world != nullptr ? services_.world->game_tick() : 0);
 }
 
+// STAND-IN: the pin's updateSquadManeuver and updateIncomingMessages are left out. Settle: follow
+// SquadCoordinator::update @c47317b once squad maneuvers and the squad radio are ported.
 void SquadCoordinator::update(sim::Tick p_tick) {
 	now_ = p_tick;
 	const SquadStrategy *const strategy = services_.strategy;
@@ -81,6 +83,8 @@ void SquadCoordinator::update_squad_position() {
 	}
 }
 
+// STAND-IN: a record keeps the shooter's position only; the pin's shotsFired also clears every path when a record
+// starts or its direction turns (dot below 0.1). Settle: follow shotsFired(int, const Vec3 &) @c47317b.
 void SquadCoordinator::shots_fired(int p_player_id) {
 	int index = 0;
 	const SquadMember *const member = squad_member(p_player_id, index);
@@ -134,6 +138,8 @@ void SquadCoordinator::update_repair_request(sim::Tick p_tick) {
 	}
 }
 
+// STAND-IN: the leader does not queue the pin's radio message 14 with the request. Settle: follow
+// updateNeedOrdersMessage @c47317b.
 void SquadCoordinator::update_need_orders_message(sim::Tick p_tick) {
 	const SquadStrategy *const strategy = services_.strategy;
 	if (strategy != nullptr && strategy->is_player_commander(side_ + 1) && !is_squad_taking_flag() &&
@@ -256,6 +262,8 @@ void SquadCoordinator::add_squad_member(SquadPlayer &r_player) {
 	added.update_member_pos();
 }
 
+// STAND-IN: openBF3's own slot reindexing and leader fix-up around updateSquadLeader; the pin only re-elects through
+// updateSquadLeader and calls reassignSlots. Settle: follow removeSquadMember and destroySquadMember @c47317b.
 bool SquadCoordinator::remove_squad_member(int p_player_id) {
 	int index = 0;
 	if (squad_member(p_player_id, index) == nullptr) {
@@ -283,6 +291,8 @@ bool SquadCoordinator::remove_squad_member(int p_player_id) {
 	return true;
 }
 
+// STAND-IN: a new human leader of a squad of more than one does not unassign the squad without a player commander, as
+// the pin's does. Settle: follow updateSquadLeader @c47317b.
 void SquadCoordinator::update_squad_leader() {
 	const int old_leader = leader_index_;
 	bool found = false;

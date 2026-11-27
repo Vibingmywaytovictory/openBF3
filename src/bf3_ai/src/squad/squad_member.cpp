@@ -34,6 +34,8 @@ void SquadMember::set_have_path(bool p_have_path) {
 	needs_path_ = !p_have_path;
 }
 
+// STAND-IN: the pin's update also drops the path below waypoint urgency 0.5 or 4 m off it unmoved, runs from artillery,
+// switches an idle soldier to slot 2 and accepts the mission. Settle: follow AIBot/SquadMember.cpp update @c47317b.
 void SquadMember::update(sim::Tick p_tick) {
 	update_member_pos();
 	if (p_tick > path_check_tick_ + kPathCheckTicks) {
@@ -91,6 +93,8 @@ bool SquadMember::is_taking_flag() const {
 	return player_->is_alive() && !player_->is_man_down() && distance_sq(at, point) < radius * radius + 5.0f;
 }
 
+// STAND-IN: the pin also wants a soldier with unit and mobile information and leaves the formation within the formation
+// distance of the accepted area's position. Settle: follow AIBot/SquadMember.cpp isAllowedInFormation @c47317b.
 bool SquadMember::is_allowed_in_formation() const {
 	if (!player_->is_alive() || player_->is_man_down()) {
 		return false;
@@ -99,8 +103,8 @@ bool SquadMember::is_allowed_in_formation() const {
 	return vehicle != nullptr && vehicle == player_->soldier();
 }
 
-// STAND-IN: position and movement come from the player's current vehicle and FormationTuning's moving speed. Settle: BF2's
-// SquadMember position update.
+// STAND-IN: the current vehicle's position, moved = horizontal speed above FormationTuning's moving speed; the pin takes
+// the primary object's position, moved = over 0.1 m since the last update. Settle: follow updateMemberPos @c47317b.
 void SquadMember::update_member_pos() {
 	const AiObject *const vehicle = player_->current_vehicle();
 	position_valid_ = false;

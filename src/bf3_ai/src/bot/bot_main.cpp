@@ -178,6 +178,8 @@ int BotMain::decision_making(double) {
 			modifiers[i] *= memory_.modify_behaviour_urgency(*behaviours_[i], now) *
 					tuning_.binding_rows[size_t(equipment_)][size_t(last)][i];
 		}
+		// STAND-IN: every behaviour is recalculated, so a 0 weight gives urgency 0; the pin recalculates only an urgency above
+		// 0 and keeps the last one otherwise. Settle: follow decisionMaking @c47317b once weights never switch one off.
 		behaviours_[i]->calculate_urgency(this, modifiers[i]);
 	}
 	bool merge = plan_invalid_ || merger_->has_changed(this, kQuotientLow, kQuotientHigh);

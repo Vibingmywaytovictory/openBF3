@@ -11,6 +11,8 @@ SquadManager::SquadManager(const SquadServices &p_services) : services_(p_servic
 	}
 }
 
+// STAND-IN: the pin's updateArtilleryStatus and updateCommanderMessages are left out. Settle: follow
+// SquadManager::update @c47317b once commander messages and artillery are ported.
 void SquadManager::update(sim::Tick p_tick) {
 	side_cursor_ = side_cursor_ == 0;
 	if (coordinators_[0].empty()) {
@@ -50,6 +52,8 @@ void SquadManager::update_human_players(sim::Tick p_tick) {
 		bool valid = true;
 		const AiObject *const vehicle = player->current_vehicle();
 		if (player->is_alive() && !player->is_man_down() && vehicle != nullptr) {
+			// STAND-IN: one navmesh test for every object; the pin asks pathfinding by vehicle number and equipment type, and
+			// only for an object with mobile information. Settle: follow updateHumanPlayers once vehicles have nav classes.
 			valid = services_.world->is_valid_position(vehicle->position());
 		}
 		set_player_on_valid_position(*player, valid, p_tick);
@@ -75,8 +79,8 @@ void SquadManager::join(SquadCoordinator &r_squad, SquadPlayer &r_player) {
 	r_squad.update_squad_leader();
 }
 
-// STAND-IN: the third-member split and member removal are openBF3's own bodies; removal sends the game exitSquad.
-// Settle: compare with the pinned SquadManager bodies.
+// STAND-IN: the pin's split at 3 members, without its gpm_coop split at the squad size - 1 and with exitSquad sent
+// before the member leaves its coordinator. Settle: follow SquadManager::addSquadMember @c47317b.
 void SquadManager::add_squad_member(int p_player_id, int p_side) {
 	if (services_.world == nullptr || p_side < 1 || p_side > 2) {
 		return;
@@ -114,6 +118,8 @@ void SquadManager::add_squad_member(int p_player_id, int p_side) {
 	join(*selected, *player);
 }
 
+// INFERRED: exitSquad goes before the coordinator's removal (the pin sends it after) so the leader handover reads the
+// game's roster without the player. Settle: follow removeSquadMember @c47317b if the order matters to the game.
 bool SquadManager::remove_squad_member(int p_player_id, int p_side) {
 	SquadCoordinator *const squad = squad_from_player(p_player_id, p_side);
 	if (squad == nullptr) {

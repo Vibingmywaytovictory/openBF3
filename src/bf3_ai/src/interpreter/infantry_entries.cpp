@@ -50,6 +50,8 @@ bool EntrySoldierPose::execute(BAPStatement &r_statement, PlanBot &r_bot, bool &
 	return true;
 }
 
+// STAND-IN: the pin's weapon-select, zoom-while-moving, pose-transition and firing-pose checks are left out; the host
+// body applies its own. Settle: follow EntryTrigger::execute @c47317b once the body takes PlayerInput.
 bool EntryTrigger::execute(BAPStatement &r_statement, PlanBot &r_bot, bool &r_ok, bool &r_finished) const {
 	BAPATrigger &trigger = static_cast<BAPATrigger &>(r_statement);
 	InfantryBody *const body = r_bot.infantry();

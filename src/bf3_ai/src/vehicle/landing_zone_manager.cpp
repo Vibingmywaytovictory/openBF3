@@ -11,8 +11,8 @@ void AILandingZoneManager::reset() {
 	active_zone_name_ = kNoActiveLandingZone;
 }
 
-// STAND-IN: the create, find, activate and reset bodies are openBF3's own; a zone has no corners, beach or approach.
-// Settle: port BF2's createLandingZone (corner-based) with air AI.
+// STAND-IN: a zone is a position and direction and a taken name is refused; the pin's has two corners, a height and a
+// beach side and becomes the active zone. Settle: follow AILandingZoneManager.cpp @c47317b with the air AI.
 AILandingZone *AILandingZoneManager::create_landing_zone(
 		const std::string &p_name, const Vec3 &p_position, int p_direction) {
 	if (zones_by_name_.count(p_name) != 0) {
@@ -33,6 +33,8 @@ AILandingZone *AILandingZoneManager::landing_zone(std::string_view p_name) const
 	return found != zones_by_name_.end() ? found->second : nullptr;
 }
 
+// STAND-IN: an unknown name keeps the active zone, where the pin's activeZone(name) clears it. Settle: follow
+// AILandingZoneManager::activeZone @c47317b.
 bool AILandingZoneManager::set_active_zone(std::string_view p_name) {
 	if (landing_zone(p_name) == nullptr) {
 		return false;

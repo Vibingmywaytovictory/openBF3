@@ -46,6 +46,10 @@ float unsigned_angle(const Vec2 &p_from, const Vec2 &p_to) {
 
 }
 
+// SOURCE: OpenBF2 Code/BF2/Math/Vec3.cpp @c47317b (getSignedDiffAngleToDirWithNormal: negative where the target lies
+// against the normal).
+// STAND-IN: atan2 of the cross and dot products, where the pin folds pi/2 - acos(to . normal); a target straight behind
+// gives pi here and 0 there. Settle: follow getSignedDiffAngleToDirWithNormal @c47317b.
 float car_signed_angle(const Vec2 &p_from, const Vec2 &p_normal, const Vec2 &p_to) {
 	const float angle = unsigned_angle(p_from, p_to);
 	return dot2(p_normal, p_to) < 0.0f ? -angle : angle;

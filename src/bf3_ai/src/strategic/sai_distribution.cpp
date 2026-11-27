@@ -145,6 +145,8 @@ void Sai::distribute_resources() {
 		} else {
 			at->set_as_present_unit(*it, side_);
 		}
+		// STAND-IN: the pin's object->retainBot is left out (it needs the bots' orders); only the order time and last
+		// ordered object are set. Settle: follow SAI::distributeResources @c47317b once bot orders are ported.
 		if (at->index() != info->last_ordered) {
 			info->order_time = game_time(services_.timer);
 			info->last_ordered = at->index();

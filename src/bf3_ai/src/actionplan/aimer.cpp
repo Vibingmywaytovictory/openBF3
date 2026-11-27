@@ -406,6 +406,8 @@ bool Aimer::nearest_impact_point(const Vec3 &p_direction, Vec3 &r_out, double &r
 }
 
 // SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotActionPlan/BAPAAimAtObject.cpp @c47317b (the core of getAimVec).
+// STAND-IN: the caller gives the aim point, with no correctAim or offset, where the pin aims at the sensed point on the
+// target's transform. Settle: follow BAPAAimAtObject::getAimVec @c47317b once the sensing agent is ported.
 bool aim_vector(Aimer &r_aimer, const Vec3 &p_origin, const Vec3 &p_target, const Vec3 &p_target_velocity,
 		const Vec3 &p_own_velocity, float p_accuracy, float p_drag, float p_speed, float p_gravity, double p_time,
 		Vec3 &r_direction) {

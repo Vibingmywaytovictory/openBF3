@@ -42,6 +42,8 @@ private:
 	ObjectGoal object_ = ObjectGoal::Target;
 };
 
+// STAND-IN: the pose, trigger and sense actions below carry the host's request, where BF2's carry a SoldierPose with
+// conditions, an input and no focus. Settle: follow OpenBF2 AIBotActionPlan/BAPASoldierPose, BAPATrigger @c47317b.
 class BAPASoldierPose final : public BAPAction {
 public:
 	BAPASoldierPose(PoseRequest p_pose, int p_pattern_id) :

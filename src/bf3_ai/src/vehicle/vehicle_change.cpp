@@ -103,6 +103,8 @@ ChangeChoice choose_change(const ChangeBot &p_bot, std::span<const ChangeVehicle
 	bool get_out = false;
 	if (!on_foot) {
 		candidate = change_unit_urgency(p_bot, p_vehicles, ChangeTarget{}, false) * 0.2f;
+		// STAND-IN: the pin's get-out also wins under artillery, a radio request or closeAndShouldAvoidVehicles at a steep
+		// order position; only stuck and a zero current are here. Settle: follow BBChange::calculateUrgency @c47317b.
 		if (p_bot.stuck || 0.001f > current) {
 			candidate = kGetOutUrgency;
 		}
