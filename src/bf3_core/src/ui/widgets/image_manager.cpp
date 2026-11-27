@@ -86,6 +86,8 @@ void ImageManagerWidget::load_image(HudWidgetHost &r_host) {
 		dequeue(r_host);
 		return;
 	}
+	// STAND-IN: the scene's image source, loaded from advance(), stands in for the engine's
+	// UITextureStreamingComponent; the AS2's missing-texture LoadError3 ends as LoadError2. Settle: a note on that component.
 	if (r_host.self().scene()->image_source() == nullptr) {
 		handle_call("LoadError1");
 		dequeue(r_host);

@@ -123,6 +123,8 @@ std::string Sha1::to_string() const {
 	return hex_lower(bytes.data(), bytes.size());
 }
 
+// SOURCE: research/PORTING-RESEARCH.md 3.3 (mesh bone hash: hashQuick of the lowercased name, h = 5381; h = h*33 ^ c).
+// INFERRED: chunkMeta h32 is this hash of the owning asset's name. Settle: a research/ note on chunkMeta h32.
 uint32_t asset_name_hash(std::string_view p_name) {
 	uint32_t hash = 5381;
 	for (char c : p_name) {

@@ -10,6 +10,8 @@
 #include <string_view>
 #include <vector>
 
+// INFERRED: the layout offsets, magics and sizes in this file are read off the retail install and held by the install
+// tests (core.install); research/ does not state them. Settle: a research/ note on the DbObject format.
 namespace bf3::core {
 
 enum class DbType : uint8_t {

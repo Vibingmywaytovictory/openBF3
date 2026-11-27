@@ -81,6 +81,7 @@ ResError ResError::unsupported(const char *p_what, uint32_t p_value) {
 	return e;
 }
 
+// SOURCE: research/PORTING-RESEARCH.md 3.3 (hashQuick: h = 5381; h = h*33 ^ c).
 uint32_t hash_quick(std::string_view p_text) {
 	uint32_t h = 5381;
 	for (char c : p_text) {

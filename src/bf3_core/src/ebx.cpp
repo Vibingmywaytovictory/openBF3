@@ -10,6 +10,8 @@
 #include <type_traits>
 #include <unordered_map>
 
+// INFERRED: the layout offsets, magics and sizes in this file are read off the retail install and held by the install
+// tests (core.install); research/ does not state them. Settle: a research/ note on the EBX partition format.
 namespace bf3::core {
 
 using namespace ebx_code;
@@ -187,6 +189,8 @@ bool char_boundary(std::span<const uint8_t> p_text, size_t p_at) {
 
 }
 
+// SOURCE: research/topics/02-soldier-kits-modes.md 0 (field ids are djb2-xor of the field name: h=5381; h=(h*33)^b).
+// INFERRED: EBX type and field descriptors carry this hash of their names. Settle: a research/ note on EBX descriptors.
 uint32_t ebx_name_hash(std::string_view p_name) {
 	uint32_t hash = 5381;
 	for (char c : p_name) {
@@ -715,6 +719,8 @@ Status EbxPartition::build_lookups() {
 				}
 			}
 
+			// INFERRED: a name repeated in one type resolves to its first descriptor; a type's own field hides a same-named
+			// base field, which stays the first-declared one for id lookups. Settle: a research/ note on EBX field descriptors.
 			std::sort(own.begin(), own.end(), [](const Lookup &a, const Lookup &b) { return a.hash != b.hash ? a.hash < b.hash : a.field < b.field; });
 			own.erase(std::unique(own.begin(), own.end(), [](const Lookup &a, const Lookup &b) { return a.hash == b.hash; }), own.end());
 			merged.clear();

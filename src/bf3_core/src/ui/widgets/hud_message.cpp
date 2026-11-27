@@ -191,6 +191,8 @@ struct UiTint {
 // INFERRED: the engine's UI colour table behind Util.ColorTinting is the kill row name sprite's frames: slot 0 squad,
 // 1 friendly, 3 enemy, 2 none; the footage's kill log colours match. Settle: a note on the engine's UI colour slots.
 constexpr std::array<std::string_view, 4> kUiColourSlotNameFrames{ "squad", "friendly", "", "enemy" };
+// SOURCE: Util.ColorTinting.tint2Texts' filters: drop shadow blur 8, strength 1.7, angle 90, distance 1; knockout
+// glow blur 2, strength 1 (the 6 constants below).
 constexpr float kTintShadowBlur = 8.0f;
 constexpr float kTintShadowStrength = 1.7f;
 constexpr double kTintShadowAngleDegrees = 90.0;
@@ -536,6 +538,8 @@ public:
 		}
 	}
 
+	// STAND-IN: the AS2's ADD, UPDATE, REMOVE and REMOVED_MESSAGE events (with the row's type) are not fired.
+	// Settle: a screen graph that listens for them.
 	void move_row(const std::string &) override { refresh_pos(-1.0); }
 	void remove_row(const std::string &) override {}
 
@@ -552,6 +556,7 @@ public:
 
 private:
 	static constexpr std::string_view kHolder = "messageHolder";
+	// SOURCE: HudMessage.sendTeamKillInfo: Id 99999, the SID, TEAM_KILL_WAIT_TIME 5000 ms and y -240.
 	static constexpr std::string_view kTeamKillId = "99999";
 	static constexpr std::string_view kTeamKillSid = "ID_H_ALERT_FAILED_FRIENDLY_FIRE";
 	static constexpr double kTeamKillWaitSeconds = 5.0;

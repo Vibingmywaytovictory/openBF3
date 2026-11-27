@@ -6,6 +6,8 @@
 
 #include <cstring>
 
+// INFERRED: the layout offsets, magics and sizes in this file are read off the retail install and held by the install
+// tests (core.install); research/ does not state them. Settle: a research/ note on the bundle manifest formats.
 namespace bf3::core {
 
 using detail::Record;
@@ -138,6 +140,8 @@ Result<BundleManifest> parse_cas_manifest(std::span<const uint8_t> p_element) {
 		}
 		e.name = std::string(*name);
 		e.sha1 = *sha1;
+		// INFERRED: an ebx or res entry without originalSize is not framed (original size = stored size), here and for res
+		// below. Settle: a research/ note on CAS bundle entries.
 		e.original_size = original->value_or(e.stored_size);
 		out.ebx.push_back(std::move(e));
 	}
@@ -211,6 +215,8 @@ Result<BundleManifest> parse_cas_manifest(std::span<const uint8_t> p_element) {
 		if (start->has_value()) {
 			ChunkRange r;
 			r.start = **start;
+			// INFERRED: a ranged chunk without rangeEnd runs to its stored size, one without logicalOffset starts at 0.
+			// Settle: a research/ note on CAS chunk ranges.
 			Result<std::optional<uint32_t>> end_v = entry->opt_u32("rangeEnd");
 			if (!end_v) {
 				return end_v.error();
@@ -392,6 +398,8 @@ Result<BundleManifest> parse_binary_manifest(std::span<const uint8_t> p_head, ui
 		e.id = Guid::from_big_endian_fields(h + record);
 		e.sha1 = Sha1::from_bytes(h + sha1s_at + (static_cast<size_t>(named) + index) * 20);
 		e.stored_size = uint64_t(range.end - range.start);
+		// INFERRED: a binary chunk record with a non-zero range start or logical offset carries only its chunk's tail.
+		// Settle: a research/ note on binary bundle chunk records.
 		const bool ranged = range.start != 0 || range.logical_offset != 0;
 		if (ranged) {
 			e.range = range;

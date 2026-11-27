@@ -39,6 +39,8 @@ public:
 			r_host.clip("changeItemBtn").goto_and_stop(platform);
 			r_host.clip("btnSlotLeft.icon").goto_and_stop("IDB_Ltrigger2");
 			r_host.clip("btnSlotRight.icon").goto_and_stop("IDB_Rtrigger2");
+			// STAND-IN: always IDB_Rdown, which the AS2 shows only when the enter button is circle (IDB_Rright
+			// otherwise). Settle: follow the AS2 when consoles are built.
 			r_host.clip("changeItemBtn.icon").goto_and_stop("IDB_Rdown");
 		}
 		const As2Clip deploy_as = r_host.clip("deployAs");
@@ -65,6 +67,8 @@ public:
 				return;
 			}
 			on_kit_changed(int32_t(k));
+			// STAND-IN: the held Kits are re-applied after a kit change; the AS2 only changes the kit and shows the new
+			// kit's items when Kits next arrives. Settle: a note on when the kit component resends Kits.
 			if (kits_.defined()) {
 				update_kits(r_host, kits_);
 			}
@@ -125,6 +129,8 @@ public:
 					step_kit(1);
 				}
 				break;
+			// STAND-IN: off win32, Tab opens the grid and Deactivate only closes it, where the AS2 opens it on Deactivate
+			// (without the scoreboard) and Tab only closes it. Settle: follow the AS2 when consoles are built.
 			case int32_t(UiInputConcept::Tab):
 				if (!win32_) {
 					if (changing_) {
@@ -157,6 +163,8 @@ public:
 
 	void slot_clicked(int32_t p_slot) override {
 		if (changing_ && current_slot_ == p_slot) {
+			// STAND-IN: the AS2 then re-shows the change-item text while the mouse is still over the slot (mouseHit),
+			// which is not ported. Settle: port the mouse hit test.
 			hide_grid();
 			return;
 		}
@@ -171,12 +179,15 @@ public:
 			return;
 		}
 		on_kit_changed(int32_t(k));
+		// STAND-IN: the held Kits are re-applied, where the AS2's onKitButtonPressed only changes the kit. Settle: a
+		// note on when the kit component resends Kits.
 		if (kits_.defined()) {
 			update_kits(*host_, kits_);
 		}
 	}
 
 private:
+	// SOURCE: the KitBar AS2's literals: the 10 px text gap and the progress bar's colour 7920639 and glow 47871.
 	static constexpr float kTextGap = 10.0f;
 	static constexpr uint32_t kProgressColor = 7920639u;
 	static constexpr uint32_t kProgressGlowColor = 47871u;
@@ -191,12 +202,15 @@ private:
 	}
 
 	void setup_platform_specific_items(HudWidgetHost &r_host) {
+		// STAND-IN: the AS2's console layout shifts (kit buttons +35, background +70, slot row -40) are not ported.
+		// Settle: port them when consoles are built.
 		if (!win32_) {
 			return;
 		}
 		r_host.clip("consoleLeftBtn").set_visible(false);
 		r_host.clip("consoleRightBtn").set_visible(false);
 		for (int32_t i = 0; i < kSlotCount; ++i) {
+			// WHY: the AS2 never initializes the slot buttons, but this port's Button takes the mouse only once initialized.
 			if (HudButton *b = hud_initialized_button(r_host, r_host.clip("slotButton_" + std::to_string(i)))) {
 				HudButtonCallbacks c;
 				c.over = [this, i](const std::string &) { on_slot_mouse_over(i); };
@@ -355,6 +369,8 @@ private:
 
 	void step_kit(int32_t p_step) {
 		const char *arrow = p_step < 0 ? "consoleLeftBtn" : "consoleRightBtn";
+		// STAND-IN: the AS2's 0.1 s tween that deselects the console arrows again is not ported. Settle: port it with
+		// the Tweener.
 		if (HudButton *b = button_at(arrow)) {
 			b->set_selected(true);
 		}

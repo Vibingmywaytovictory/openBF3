@@ -16,6 +16,8 @@
 #include <utility>
 #include <vector>
 
+// INFERRED: the EBX field type codes in this file are read off the retail install and held by the install tests
+// (core.install); research/ does not state them. Settle: a research/ note on the EBX partition format.
 namespace bf3::core {
 
 uint32_t ebx_name_hash(std::string_view p_name);

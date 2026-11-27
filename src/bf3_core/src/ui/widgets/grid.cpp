@@ -98,6 +98,7 @@ protected:
 
 class KitCellClass final : public GridCell {
 public:
+	// SOURCE: KitCell's m_targetWidth 113 and m_targetHeight 47.
 	static constexpr float kTargetWidth = 113.0f;
 	static constexpr float kTargetHeight = 47.0f;
 
@@ -224,6 +225,8 @@ public:
 		anim_time_ = param_number(p_init, "p_animTime", 1.0);
 		alpha_min_ = float(param_number(p_init, "p_itemPickerAlphaMin", 0.0));
 		alpha_max_ = float(param_number(p_init, "p_itemPickerAlphaMax", 100.0));
+		// STAND-IN: p_dynamicLoading, p_activeCellState, p_isStaticGrid, p_useTooltip and p_alignCenter are not read
+		// (row loading, the activated cell, tooltips, centring). Settle: a grid using them.
 		if (item_picker_) {
 			const As2Clip self = r_host.self();
 			self.set_y(self.y() - 2.0f);
@@ -246,6 +249,8 @@ public:
 					items.child(n).set_visible(false);
 				}
 			} else {
+				// STAND-IN: the AS2's console header layout (button frames, icons, centring) is not ported.
+				// Settle: port it when consoles are built.
 				items.child("gridHeaderTextPC").set_visible(false);
 			}
 		}
@@ -334,6 +339,7 @@ public:
 
 private:
 	static constexpr uint32_t kAnimationDone = 1;
+	// SOURCE: Grid.adjustHeight tweens the backplate to the shown height + 32.
 	static constexpr float kBackplateHeaderHeight = 32.0f;
 
 	static double param_number(const HudWidgetInit &p_init, std::string_view p_name, double p_default) {
@@ -395,6 +401,8 @@ private:
 			}
 			mc.set_x(float(int32_t(i) % columns_) * cell_w);
 			mc.set_y(std::floor(float(i) / float(columns_)) * row_height_);
+			// STAND-IN: a cell reports its place, where the AS2's CellData.index is the item's place in GridItems before
+			// the IsExcluded items are dropped. Settle: pass items_[i].index as the AS2 does.
 			c->set_data(items_[i].data, int32_t(i));
 			c->set_state_function(
 					[this](std::string_view p_state, int32_t p_index) { cell_mouse_state(p_state, p_index); });
@@ -497,6 +505,8 @@ private:
 		grid_clips().set_y(float(grid_start_ + (s->size() - s->target_size()) * (p_percentage * 0.01)));
 	}
 
+	// STAND-IN: the AS2 selects nothing while the old index is -1 and wraps a negative index to the last cell, where
+	// this deselects, and DogTagCell grids fire the cell's ItemIndex as HIGHLIGHTED. Settle: follow the AS2.
 	void set_selected_index(int32_t p_value) {
 		const int32_t old = selected_;
 		const int32_t count = int32_t(items_.size());
@@ -602,12 +612,16 @@ private:
 		const float height = closing_ ? 0.0f : std::min(grid_height_, current_height_);
 		float y = grid_height_ - height;
 		const float plate_y = y;
+		// SOURCE: the AS2 reads the scroll bar's pageJumpPerc here, whose getter in Widget.Bar.ScrollBar returns its
+		// m_percentage.
 		if (const ScrollBarClass *s = scrollbar(); s != nullptr && !closing_) {
 			y += std::min(0.0f, grid_height_ - current_height_) * float(s->percentage() / 100.0);
 		}
 		const double seconds = row_height_ > 0.0f
 				? std::min(anim_time_, anim_time_ * std::abs(double(plate.y() - y)) / double(row_height_))
 				: 0.0;
+		// STAND-IN: the cells take the backplate's alpha; the AS2 tweens them to 100 when opening, not to
+		// p_itemPickerAlphaMax. Settle: follow the AS2.
 		const float alpha = closing_ ? alpha_min_ : alpha_max_;
 		animating_ = true;
 		if (!(seconds > 0.0)) {

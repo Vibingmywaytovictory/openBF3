@@ -28,6 +28,8 @@ constexpr int32_t kSelected = 6;
 constexpr int32_t kGeneralInfo = 7;
 constexpr int32_t kActivate = 8;
 constexpr int32_t kSelectorChanged = 9;
+// SOURCE: KitView.SLOT_PADDING 2, the slots' bg_selected alphas 60 and 20, their bar colours 7920639 and 47871, the
+// scroll bar 16 px in from the right and m_viewType KitView_1 (the constants below but kSlotCount).
 constexpr double kSlotPadding = 2.0;
 constexpr int32_t kSlotCount = 5;
 constexpr float kFocusedAlpha = 60.0f;
@@ -39,6 +41,8 @@ constexpr std::string_view kDefaultViewType = "KitView_1";
 
 class KitViewClass;
 
+// INFERRED: a slot's _height counts only its visible children, which spaces the slots 111 px apart as the 18.57
+// footage shows. Settle: whether Flash's _height counts hidden children.
 float shown_height(const As2Clip &p_clip) {
 	const SwfSceneNode *n = p_clip.node();
 	if (n == nullptr || p_clip.scene() == nullptr) {
@@ -245,6 +249,8 @@ public:
 			return false;
 		}
 		const int32_t n = int32_t(slots_.size());
+		// STAND-IN: "up" and "down" are always sent; the AS2 sends 0 instead while the view is hidden. Settle: follow
+		// the AS2.
 		if (c == UiInputConcept::NavigateUp) {
 			if (index_ > 0) {
 				select_slot(index_ - 1, false);
@@ -477,6 +483,7 @@ void KitSlotClass::initialize_slot(
 	const bool win32 = hud_platform_win32(host_->client());
 	const As2Clip b1 = clip("button1");
 	const As2Clip b2 = clip("button2");
+	// WHY: the AS2 never initializes these buttons, but this port's Button takes the mouse only once initialized.
 	if (HudButton *b = b1.exists() ? hud_initialized_button(*host_, b1) : nullptr) {
 		b1.set_visible(p_label1 != "");
 		b->update_button_text(p_label1);
@@ -553,6 +560,8 @@ void KitSlotClass::mouse_over() {
 	}
 }
 
+// STAND-IN: the AS2 keeps the slot lit while the mouse is still over mouseArea (mouseHit, as on moving onto a
+// button); not ported. Settle: port the mouse hit test.
 void KitSlotClass::mouse_out() {
 	over_ = false;
 	clip("bg_selected").set_alpha(focused_ ? kFocusedAlpha : 0.0f);
@@ -895,6 +904,8 @@ As2Value item_info(const HudClientState &p_client, const HudItem &p_item) {
 	info.set("Ammo", As2Value::of(icon->ammo));
 	info.set("RateOfFire", As2Value::of(icon->rate_of_fire));
 	info.set("Range", As2Value::of(localised_sid(p_client, icon->range_sid)));
+	// INFERRED: an item with ammo is a weapon and shows stats; FireModes are its fire logics' names, taken as the
+	// fireMode clips' frame labels. Settle: the INTEL box movie's fireMode frame labels.
 	As2Value modes = As2Value::array();
 	for (uint32_t l = 0; l < 8; ++l) {
 		if ((icon->fire_modes >> l) & 1u) {
@@ -982,6 +993,8 @@ std::optional<As2Value> customize_kit_setup(const HudModel &p_model, const HudCl
 	}
 	for (size_t i = 0; i < kCustomizeItemSetupKeys.size(); ++i) {
 		if (p_key == kCustomizeItemSetupKeys[i]) {
+			// INFERRED: the selectors up to the first gadget carry ServiceStars. Settle: which KitView types show a stars
+			// header.
 			const bool stars = i <= size_t(kCustomizeGadget1Item);
 			return selector(
 					selector_items(p_model, p_client, c.kit_grid_data[i], c.kit_grid_selected[i], stars, i == 0),

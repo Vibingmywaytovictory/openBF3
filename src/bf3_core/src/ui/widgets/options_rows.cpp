@@ -13,6 +13,8 @@ constexpr std::string_view kSettingsCategory = "uisettingscomp";
 // INFERRED: the uisettingscomp key of the key bindings list, named by the list that binds it as the key hash is unknown.
 // Settle: a note on UISettingsComp's DataKeys.
 constexpr int32_t kKeyBindingsListKey = 922801620;
+// SOURCE: TextSelectorRow's SCROLL_STEPS (2 * 30), its 3 s interval callbacks and its stateChanged colours and alpha
+// 60; KeyBindingRow's four Label fields (the 6 constants below).
 constexpr double kSelectorScrollSteps = 2.0 * 30.0;
 constexpr double kSelectorScrollWaitSeconds = 3.0;
 constexpr uint32_t kSelectorActiveColor = 0xFFFFFFu;
@@ -104,6 +106,8 @@ public:
 			}
 		}
 		const As2Value &width = p_data.field("SelectorWidth");
+		// STAND-IN: the selector text is refreshed only inside this branch, where the AS2 refreshes it after the width
+		// check in every case. Settle: follow the AS2.
 		if (width.defined() && !std::isnan(width.to_number()) && width.to_number() != 0.0) {
 			selector_width_ = width.to_number();
 			set_width(host_->clip("hit").width());
@@ -307,6 +311,8 @@ private:
 		}
 	}
 
+	// STAND-IN: the row's own interval and enter-frame stand in for the registerTimeIntervalCallback and
+	// registerEnterFrameCallback ListLogic hands it, and scrolling always waits 3 s first. Settle: port those callbacks.
 	void start_scrolling_text() {
 		const As2Clip label = selector_label();
 		step_size_ = (label.width() - selector_width_) / kSelectorScrollSteps;
@@ -363,6 +369,7 @@ public:
 			data.set("From", As2Value::of(0));
 			data.set("To", As2Value::of(1));
 			data.set("StepSize", As2Value::of(0.1));
+			// STAND-IN: 0 where the AS2 sets a random Value in the range. Settle: whether any retail row comes without From.
 			data.set("Value", As2Value::of(0.0));
 		}
 		RowBaseClass::set_data(data);
@@ -652,6 +659,8 @@ private:
 			label.set_x(field.x());
 			label.set_y(field.y());
 			if (HudListLabel *l = controller_at<HudListLabel>(r_host, label)) {
+				// STAND-IN: only the field's size is passed on; the AS2 also passes its align as textAlign. Settle: pass the
+				// align once the scene reads a field's TextFormat align.
 				if (const std::optional<float> size = field.text_size()) {
 					l->set_text_size(*size);
 				}

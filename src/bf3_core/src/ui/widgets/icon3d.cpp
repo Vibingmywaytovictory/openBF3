@@ -2,8 +2,8 @@
 
 #include "bf3/core/ui/hud_icons.h"
 
-// SOURCE: the AS2 classes Widget.Icon3D.* (Icon3D, Icon3DManager and the TeamSupport, Alerts, Mapmarker, Capturepoint
-// and Interaction tags and managers) of actionscriptlibrary, ported here; the tags come from HudClientState::world_tags.
+// SOURCE: the AS2 classes Widget.Icon3D.* (Icon3D, Icon3DManager, the TeamSupport, Alerts, Mapmarker and Capturepoint
+// tags and managers, InteractionManager) of actionscriptlibrary, ported here; tags come from HudClientState::world_tags.
 namespace bf3::core::ui {
 
 namespace {
@@ -44,6 +44,8 @@ public:
 		} else if (p_key == "Snap") {
 			update_snap_data(r_host, p_value);
 		} else if (p_key == "Icons") {
+			// STAND-IN: the world-tag feed sends Icons as one icon id, wrapped here into the array the AS2's
+			// updateIconsData takes (a capture tag's second entry is its order icon). Settle: feed Icons as an array.
 			As2Value icons = As2Value::array();
 			icons.push(p_value);
 			update_icons(r_host, icons);
@@ -328,6 +330,7 @@ private:
 		p_clip.child(p_bg).set_text(p_value);
 	}
 
+	// SOURCE: Capturepointtag.updateProgressData's places: distance y 27 or 20, label y 45 or 38, controlIcon x 46 or 34.
 	void update_progress(HudWidgetHost &r_host, double p_value) {
 		progress_ = as2_round(p_value);
 		const As2Clip ring = r_host.clip("prgRad").child("progress");
@@ -421,6 +424,7 @@ public:
 	explicit Icon3DManagerClass(Spec p_spec) :
 			spec_(p_spec) {}
 
+	// WHY: Icon3DManager.updateAlignment aligns to Stage.visibleRect, not to the safe rect.
 	bool aligns_in_safe_rect() const override { return false; }
 
 	void attach_node(HudWidgetHost &, const HudWidgetNode &p_node) override {
@@ -539,6 +543,8 @@ private:
 	std::map<uint32_t, Live> live_;
 };
 
+// STAND-IN: only the constructor's show is ported; the inherited Icon3DManager initialize (WidgetPathKey) and the
+// InteractionTag class are not. Settle: port them with interaction tags.
 class InteractionManagerClass final : public HudWidgetController {
 public:
 	void construct(HudWidgetHost &r_host) override { r_host.self().set_visible(true); }
@@ -549,6 +555,8 @@ public:
 void register_hud_widgets_icon3d(HudWidgetRegistry &r_registry) {
 	r_registry.add("Widget.Icon3D.TeamSupport.SupportIconManager", [] { return std::make_unique<Icon3DManagerClass>(Icon3DManagerClass::Spec{ HudTagComponent::TeamSupport, "TeamSupportIcon", "TeamSupportIcon" }); });
 	r_registry.add("Widget.Icon3D.TeamSupport.SupportIconTag", [] { return std::make_unique<SupportIconTagClass>(); });
+	// STAND-IN: no template is hidden for the alerts, where AlertManager.onClipLoad hides its Alert child. Settle: the
+	// alert movie's Alert instance.
 	r_registry.add("Widget.Icon3D.Alerts.AlertManager", [] { return std::make_unique<Icon3DManagerClass>(Icon3DManagerClass::Spec{ HudTagComponent::Alert, {}, "Alert" }); });
 	r_registry.add("Widget.Icon3D.Alerts.Alerttag", [] { return std::make_unique<AlerttagClass>(); });
 	r_registry.add("Widget.Icon3D.Interaction.InteractionManager", [] { return std::make_unique<InteractionManagerClass>(); });

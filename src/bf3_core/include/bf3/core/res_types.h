@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string>
 
+// INFERRED: the res type ids in this file are read off the retail install, most of them held by the install tests
+// (core.res.install, core.ui.swf); research/ does not state them. Settle: a research/ note on res type ids.
 namespace bf3::core {
 
 namespace res_type {

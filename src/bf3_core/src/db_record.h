@@ -118,6 +118,7 @@ public:
 
 	Result<bool> flag(const char *p_field) const {
 		const DbRef f = field(p_field);
+		// INFERRED: an absent DbObject flag (toc cas, bundle base and delta) reads false. Settle: a research/ note on toc flags.
 		if (!f.valid()) {
 			return false;
 		}

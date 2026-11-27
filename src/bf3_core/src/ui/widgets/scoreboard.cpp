@@ -7,6 +7,7 @@ namespace bf3::core::ui {
 
 namespace {
 
+// SOURCE: ScoreBoardRow.setTextColor's white text glow 7586815 and setReadyState's SID.
 constexpr uint32_t kRowTextGlow = 0x73C3FFu;
 constexpr uint32_t kWhite = 0xFFFFFFu;
 constexpr std::string_view kReadySid = "ID_M_SCOREBOARD_READY";
@@ -120,6 +121,8 @@ private:
 		p_label.set_filters({ as2_glow_filter(black ? 0u : kRowTextGlow, 1.0, 8.0f, 8.0f, black ? 0.75f : 1.0f, 1) });
 	}
 
+	// INFERRED: the AS2's Label.width writes here and in its width setter are left out, as Label is a text field and
+	// has no width property. Settle: the row movie's Label character type.
 	void set_ready_state(const As2Value &p_state) const {
 		const As2Clip ready = host_->clip("ReadyLabel");
 		if (p_state.defined() && p_state.truthy()) {
@@ -182,6 +185,7 @@ constexpr std::array<HeaderKey, 7> kHeaderKeys{ {
 		{ 1733092213, HeaderField::GameMode, HeaderSide::Friendly },
 } };
 
+// SOURCE: ScoreboardHeader's MODE_* and FRIENDLY/SQUAD/ENEMY_BG_COL and _GLOW_COL fields and its RELEASE event.
 constexpr std::string_view kModeFriendly = "friendly";
 constexpr std::string_view kModeSquad = "squad";
 constexpr uint32_t kFriendlyColour = 7586815u;

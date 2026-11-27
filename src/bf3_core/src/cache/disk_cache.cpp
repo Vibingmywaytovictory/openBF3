@@ -22,6 +22,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// SOURCE: research/topics/gap-r1-load-cache-memory-rotation.md 6.4 (one append-only journal, index.log).
 constexpr wchar_t kJournalName[] = L"index.log";
 constexpr wchar_t kLockName[] = L"lock";
 constexpr uint64_t kJournalMaxBytes = uint64_t(1) << 30;

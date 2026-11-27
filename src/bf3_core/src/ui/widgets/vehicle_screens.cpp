@@ -104,6 +104,8 @@ public:
 		r_host.self().set_visible(true);
 	}
 
+	// STAND-IN: the AS2's *RotationAccess and ReactiveArmor*EnabledAccess direct-access handlers are not ported, so the
+	// armour clips stay hidden. Settle: port them with reactive armour unlocks.
 	void update(HudWidgetHost &, std::string_view p_key, const As2Value &p_value) override {
 		if (p_key == "VehicleRotation") {
 			body_rotation_ = p_value.to_number();
@@ -138,6 +140,7 @@ private:
 
 class VehicleHudWarningsClass final : public VehicleWidget {
 public:
+	// SOURCE: VehicleHudWarnings' RED_COLOR, US_COLOR and RU_COLOR.
 	static constexpr uint32_t kRedColor = 16711680u;
 	static constexpr uint32_t kUsColor = 10288464u;
 	static constexpr uint32_t kRuColor = 16737792u;
@@ -403,6 +406,7 @@ private:
 	bool reloading_ = false;
 	bool heated_ = false;
 	double radio_altitude_ = 0.0;
+	// SOURCE: VehicleHudWarnings' StaticWarnLevel default 50.
 	double warn_level_ = 50.0;
 };
 
@@ -541,6 +545,7 @@ private:
 
 class VehicleWeaponNameClass final : public VehicleWidget {
 public:
+	// SOURCE: VehicleWeaponName's TF_DISTANCE 10 between the two fields and text size 12 for tanks, jets and helicopters.
 	static constexpr float kTfDistance = 10.0f;
 	static constexpr float kTextSize = 12.0f;
 
@@ -565,6 +570,7 @@ public:
 		r_host.self().set_visible(true);
 	}
 
+	// STAND-IN: the AS2's WeaponNameAccess handler is not ported. Settle: port it with a screen that binds it.
 	void update(HudWidgetHost &r_host, std::string_view p_key, const As2Value &p_value) override {
 		if (p_key == "WeaponName") {
 			update_weapon_name(r_host, p_value);
@@ -851,6 +857,7 @@ constexpr std::string_view kCrosshairFirstFrameHidden[] = { "hitIndicator", "Zoo
 // runs them, so the AS2 shows only the selected one.
 class VehicleCrosshairClass final : public VehicleWidget {
 public:
+	// SOURCE: VehicleCrosshair.SHOOT_BLINK_TIME.
 	static constexpr double kShootBlinkSeconds = 1.0;
 
 	void construct(HudWidgetHost &r_host) override {
@@ -878,6 +885,7 @@ public:
 		r_host.self().set_visible(true);
 	}
 
+	// STAND-IN: the AS2's BumpXAccess and BumpYAccess handlers are not ported. Settle: port them with crosshair bump data.
 	void update(HudWidgetHost &r_host, std::string_view p_key, const As2Value &p_value) override {
 		if (p_key == "WeaponName") {
 			if (crosshair_kind(p_value.to_string()) != nullptr) {

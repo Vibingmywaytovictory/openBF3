@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+// INFERRED: the layout offsets, magics and sizes in this file are read off the retail install and held by the install
+// tests (core.install); research/ does not state them. Settle: a research/ note on the bundle manifest formats.
 namespace bf3::core {
 
 constexpr uint32_t kBinaryManifestMagic = 0x970D1C13u;
@@ -68,6 +70,7 @@ struct ChunkEntry {
 	bool tail_only = false;
 	std::optional<ChunkMeta> meta;
 	Payload payload;
+	// INFERRED: a chunk is block-framed when bit 0 of its id's last byte is set. Settle: a research/ note on chunk ids.
 	bool is_framed() const { return (id.bytes[15] & 1) != 0; }
 };
 

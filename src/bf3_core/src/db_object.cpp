@@ -4,6 +4,8 @@
 
 #include <cstring>
 
+// INFERRED: the layout offsets, magics and sizes in this file are read off the retail install and held by the install
+// tests (core.install); research/ does not state them. Settle: a research/ note on the DbObject format.
 namespace bf3::core {
 
 namespace {
@@ -304,6 +306,7 @@ DbRef DbRef::get(std::string_view p_key) const {
 		return {};
 	}
 	for (DbRef c = first_child(); c.valid(); c = c.next()) {
+		// INFERRED: DbObject keys match ignoring ASCII case, the first match wins. Settle: a research/ note on DbObject keys.
 		if (iequals_ascii(c.name(), p_key)) {
 			return c;
 		}

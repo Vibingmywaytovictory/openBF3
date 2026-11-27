@@ -15,6 +15,8 @@ namespace bf3::core::ui {
 
 namespace {
 
+// SOURCE: the KillCam AS2's literals: the 10 px gaps, the score holder's right edge 1154, the weapon 55 px past the
+// stars, Suicide 2 as killed by the admin, and the two SIDs (the 6 constants below).
 constexpr float kKillCamGap = 10.0f;
 constexpr double kKillCamScoreRight = 1154.0;
 constexpr float kKillCamWeaponAfterStars = 55.0f;

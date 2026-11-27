@@ -11,6 +11,8 @@ namespace bf3::core::ui {
 
 namespace {
 
+// SOURCE: the three row classes' AS2 literals: plus gap 12, insets 10 and 30, icon gap 2, inner icon frames 3 and 2,
+// Voip off frame 2, label colours white, 0, 8429618 and 7586815, and " / 4" (the constants down to kSquadsPerRow).
 constexpr float kPlusGap = 12.0f;
 constexpr float kNoValueInset = 10.0f;
 constexpr float kIconGap = 2.0f;
@@ -554,6 +556,8 @@ std::optional<As2Value> hud_squad_button_item(
 			p_model.local_player < p_model.squad_leaders.size() && p_model.squad_leaders[p_model.local_player];
 	std::string_view label;
 	bool visible = false;
+	// INFERRED: JOIN shows for a selected open squad other than the own, KICK for a squad leader on another member.
+	// Settle: a note on the squad screen's buttons.
 	if (p_source.key == kSquadJoinButtonKey) {
 		const int32_t selected = hud_selected_squad(p_model, p_client);
 		const HudSquadList &list = p_model.squad.available_squads;
@@ -607,6 +611,7 @@ std::optional<int32_t> hud_squad_list_selection(const HudDataSource &p_query, co
 	}
 	const HudSquadList &list = p_model.squad.available_squads;
 	const int32_t own = own_squad(p_model);
+	// INFERRED: the squad list opens on the own squad, else on the first. Settle: footage of the squad screen opened.
 	for (size_t i = 0; i < std::min<size_t>(list.count, list.squads.size()); ++i) {
 		if (list.squads[i].squad == own) {
 			return int32_t(i);

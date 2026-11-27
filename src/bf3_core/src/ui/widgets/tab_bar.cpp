@@ -16,6 +16,7 @@ constexpr int32_t kHighlight = 2;
 constexpr int32_t kUnhighlight = 3;
 constexpr int32_t kShow = 4;
 constexpr int32_t kHide = 5;
+// SOURCE: TabBar.positionShoulderIcons puts both icons at half of 34.
 constexpr float kShoulderIconRowHeight = 34.0f;
 constexpr std::string_view kEndOfRoundCategory = "ui/uicomponents/uiendofroundcomp";
 // INFERRED: the EOR TabBar's EORTabsSetup key and the CUSTOMIZE sub-tab setup key (2 below), paired by name as the key

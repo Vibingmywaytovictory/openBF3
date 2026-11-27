@@ -4,6 +4,8 @@
 
 #include <cstring>
 
+// INFERRED: the layout offsets, magics and sizes in this file are read off the retail install and held by the install
+// tests (core.res, core.res.install, core.res.ragdoll); research/ does not state them. Settle: a research/ note on Havok.
 namespace bf3::core::res {
 
 using detail::align16;
@@ -501,6 +503,8 @@ ResError PackReader::fill_storage(uint32_t p_subpart, uint32_t p_mesh, Triangles
 	if (!array(p_mesh + 56, materials_at, material_count)) {
 		return r.error();
 	}
+	// INFERRED: per-triangle materials are kept only when there is one byte per triangle.
+	// Settle: a research/ note on Havok res.
 	if (material_count == triangle_count) {
 		if (!spend(4 * uint64_t(material_count), p_mesh)) {
 			return r.error();
@@ -848,6 +852,8 @@ ResError Packfile::root_shapes(std::vector<uint32_t> &r_roots) const {
 	}
 	bool found = false;
 	uint32_t container = 0;
+	// INFERRED: the first HavokPhysicsContainer among the root variants holds every root shape.
+	// Settle: a research/ note on Havok res.
 	for (uint32_t i = 0; i < count && !found && slot_in_data(*this, variants + 8, 12, i); i++) {
 		uint32_t object = 0;
 		if (pointer(variants + 12 * i + 8, object)) {
@@ -953,6 +959,8 @@ ResError HavokPhysicsData::parse(Bytes p_res, const ResMeta &p_res_meta, HavokPh
 	}
 	const uint64_t fixups32_len = r.u32(tail_at);
 	const Bytes fixups = r.slice(tail_at + 8, fixups32_len);
+	// INFERRED: the 32-bit packfile and the 64-bit one after it hold the same shapes; only the 32-bit one is read.
+	// Settle: a research/ note on Havok res.
 	const Bytes packfile = r.slice(packfile_at, packfile32_len);
 	if (!r.ok()) {
 		return r.error();
@@ -990,6 +998,7 @@ ResError HavokPhysicsData::shapes(std::vector<Shape> &r_shapes) const {
 ResError HavokPhysicsData::part_connections(std::vector<std::array<uint32_t, 2>> &r_pairs) const {
 	r_pairs.clear();
 	const PackObject *list = nullptr;
+	// INFERRED: the first hkdBreakableShapeConnectionList holds every part connection. Settle: a research/ note on Havok res.
 	for (const PackObject &object : packfile.objects) {
 		if (object.class_name == "hkdBreakableShapeConnectionList") {
 			list = &object;
@@ -1081,6 +1090,8 @@ ResError HavokPhysicsData::group_subparts(std::vector<SubpartTransform> &r_subpa
 			if (cls == nullptr) {
 				continue;
 			}
+			// INFERRED: the first extended mesh met breadth-first gives every group subpart transform.
+			// Settle: a research/ note on Havok res.
 			if (*cls == "hkpExtendedMeshShape" || *cls == "hkpStorageExtendedMeshShape") {
 				uint32_t data = 0, count = 0;
 				e = packfile.array(offset + 196, data, count);

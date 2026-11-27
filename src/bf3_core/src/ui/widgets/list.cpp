@@ -37,6 +37,8 @@ constexpr int32_t kInvalidSelection = 27;
 constexpr int32_t kSelectorChangedKeyValue = 23;
 constexpr int32_t kSelectorStepped = 24;
 
+// SOURCE: List.registerAccessData registers nothing for ListIndex 22; List's m_selectorRows, m_toggleRows and the
+// emptyRowNone row type (the 4 constants below).
 constexpr double kTiltListIndex = 22.0;
 constexpr std::string_view kSelectorRows =
 		"TestSelectionRow,TextSelectorRow,TextSelectorRow_28px,BarSelectorRow,LeaderBoardRow,"
@@ -232,6 +234,8 @@ public:
 		p_navigation_type_ = value("NavigationType");
 		clear_list_at_navigation_event_ = value("ClearListAtNavigationEvent").truthy();
 		use_scrollbar_ = value("UseScrollBar").truthy();
+		// STAND-IN: ScreenRotationEnabled is read but the AS2's screen tilt calls (registerArrayLengthToScreen,
+		// setScreenTiltPercentage on the parent) are not ported. Settle: port them with a tilting screen.
 		screen_rotation_enabled_ = value("ScreenRotationEnabled").truthy();
 		use_3d_selection_ = value("Use3DSelection").truthy();
 		fire_highlight_on_mouse_out_ = value("FireHighlightOnMouseOut").truthy();
@@ -674,6 +678,8 @@ private:
 		}
 	}
 
+	// STAND-IN: the AS2's KeepScrollOffset step after the data (scrolling the bar to keep the highlighted row in view)
+	// is not ported. Settle: port it with a list that sets KeepScrollOffset.
 	void setup_refresh_data(const HudData &p_data) {
 		const As2Value *highlighted = nullptr;
 		for (const HudDataEntry &e : p_data) {
@@ -1283,6 +1289,7 @@ void ListLogic::handle_row(std::optional<RowRequest> p_request) {
 		row_height_ = (r != nullptr ? r->height() : as2_round(clip.height())) + row_spacing_;
 		total_list_height_ = row_height_ * list_length_ - row_spacing_;
 		list_.list_height_handler(total_list_height_);
+		// WHY: ListLogic takes the row's topOffset, and no row class in actionscriptlibrary defines one.
 		top_offset_ = 0.0;
 		row_holder_.set_y(float(top_offset_));
 		only_do_once_ = false;

@@ -26,6 +26,8 @@ public:
 		r_host.self().set_visible(true);
 	}
 
+	// STAND-IN: the AS2's flag, attacker-ticket, IsAttacker, SDM kill and GM handlers are not ported, and PlayerTeam
+	// re-lays only tdm (the AS2 also sdm). Settle: port them with those modes.
 	void update(HudWidgetHost &r_host, std::string_view p_key, const As2Value &p_value) override {
 		if (p_key == "Team1TDMKills") {
 			team1_ = p_value;
@@ -74,6 +76,8 @@ public:
 		}
 	}
 
+	// STAND-IN: shown while the minimap is small and no menu is open, in place of the AS2's VisibleAccess handler
+	// (Register_SetVisible). Settle: a note on what drives UITicketCounterComp's VisibleAccess.
 	void drive(HudWidgetHost &r_host, const HudModel &p_model, const HudClientState &p_client) override {
 		r_host.self().set_visible(p_client.minimap_small && !p_model.user.is_in_menu);
 	}
@@ -137,6 +141,8 @@ private:
 	}
 
 	void setup_gamemodes(HudWidgetHost &r_host) {
+		// STAND-IN: only tdm and conquest are set up and laid out; the AS2's rush, sdm, ctf and gm setups (rush with
+		// one row) are not ported. Settle: port them with those modes.
 		if (mode_ != "tdm" && mode_ != "conquest") {
 			return;
 		}
@@ -155,6 +161,8 @@ private:
 		}
 	}
 
+	// SOURCE: bf3dump swf as2 ticketcounter: the row sprite's frame 1 and 2 scripts send meter, leftEdge, rightEdge
+	// and bg to frame 1 and 2.
 	static void row_frame_script(const As2Clip &p_row, int32_t p_frame) {
 		const As2Clip meter = p_row.child("meter");
 		for (const char *n : { "meter", "leftEdge", "rightEdge", "bg" }) {
@@ -202,6 +210,8 @@ private:
 		const As2Clip m = p_row.child("meter");
 		const double max = max_tickets_ ? max_tickets_->to_number() : std::nan("");
 		const double pct = std::max(std::min(100.0, as2_round(p_v.to_number() / max * 100.0)), 0.0);
+		// INFERRED: Flash Player drops a NaN _xscale write, which getTicketPercent gives before MaxTickets arrives.
+		// Settle: a Flash Player check of a NaN _xscale assignment.
 		if (!std::isnan(as2_round(p_v.to_number() / max * 100.0))) {
 			m.child("meter").set_xscale(float(pct));
 		}
@@ -212,6 +222,8 @@ private:
 		}
 	}
 
+	// SOURCE: the class's static fields MINIMAP_SIZE, NAMEFIELD_OFFSET, TICKETS_MIN/MAXRIGHTBOUND, BAR_NORMALWIDTH,
+	// BAR_RIGHTEND, MIN_PADDING, BAR_OVERLAP and TICKET_MARGIN (the 9 constants below).
 	static constexpr float kMinimapSize = 170.0f;
 	static constexpr float kNameFieldOffset = 8.0f;
 	static constexpr float kMinRightBound = 80.0f;

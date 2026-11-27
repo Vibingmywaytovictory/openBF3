@@ -5,7 +5,7 @@
 #include <limits>
 
 // SOURCE: the AS2 class Widget.List.ListLabel (bf3dump swf as2 actionscriptlibrary): its state colours, glows and
-// alphas (glow 7586815, strength 0.75, inactive alpha 60) and layout, ported here.
+// alphas (standard glow 7586815 at strength 1, inverted and inactive glow 0 at 0.75, inactive alpha 60), ported here.
 namespace bf3::core::ui {
 
 namespace {
@@ -194,6 +194,8 @@ private:
 			return;
 		}
 		txt.set_alpha(100.0f);
+		// STAND-IN: until textSize or textAlign is set the field keeps its own size and alignment, where the AS2's
+		// formats carry defaultTextSize 20 and defaultTextAlign left. Settle: apply them and compare a row with footage.
 		if (text_size_) {
 			txt.set_text_size(*text_size_);
 		}

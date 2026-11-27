@@ -29,6 +29,7 @@ constexpr int32_t kConceptNavigateLeft = 2;
 constexpr int32_t kConceptNavigateRight = 3;
 constexpr int32_t kConceptActivate = 6;
 
+// SOURCE: TextButton's text colour for ID_M_PREMIUM.
 constexpr uint32_t kPremiumText = 15302420;
 
 enum class ButtonState : uint8_t {
@@ -101,6 +102,7 @@ enum class ButtonKind : uint8_t {
 	TextIconAlignedRight,
 };
 
+// SOURCE: TextIconButtonAlignedRight.PADDING_RIGHT 26 and the text buttons' resizeOffset 20.
 constexpr float kAlignedRightPadding = 26.0f;
 constexpr float kTextResizeOffset = 20.0f;
 

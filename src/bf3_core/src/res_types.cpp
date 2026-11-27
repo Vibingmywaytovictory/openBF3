@@ -2,12 +2,15 @@
 
 #include <cstdio>
 
+// INFERRED: the res type ids below not marked SOURCE are read off the retail install; research/ does not state them.
+// Settle: a research/ note on res type ids.
 namespace bf3::core {
 
 std::string res_type_name(uint32_t p_type) {
 	switch (p_type) {
 		case 0xC6DBEE07u:
 			return "AnimatedPointCloud";
+		// SOURCE: research/probes/ant-animation-probe.md 2 (AnimTrackData 0xD070EED1, AssetBank 0x51A3C853 below).
 		case 0xD070EED1u:
 			return "AnimTrackData";
 		case 0x51A3C853u:
@@ -40,6 +43,7 @@ std::string res_type_name(uint32_t p_type) {
 			return "MeshSet";
 		case 0x30B4A553u:
 			return "OccluderMesh";
+		// SOURCE: research/probes/ant-animation-probe.md 2 (RagdollResource 0x319D8CD0).
 		case 0x319D8CD0u:
 			return "RagdollResource";
 		case 0x3568E2B7u:

@@ -52,6 +52,8 @@ std::vector<EbxInstance> EbxResolver::follow_all(const EbxStruct &p_object, std:
 
 bool EbxDb::insert(std::string_view p_name, std::unique_ptr<EbxPartition> p_partition) {
 	std::string key = to_lower_ascii(p_name);
+	// INFERRED: the first partition inserted under a name (in any case) or a GUID wins; later ones are refused.
+	// Settle: a research/ note on duplicate EBX partitions.
 	if (by_name_.contains(key) || by_guid_.contains(p_partition->guid())) {
 		return false;
 	}
@@ -98,6 +100,8 @@ std::vector<std::string> expand_superbundles(const Install &p_install, std::stri
 			for (const std::string &name : p_install.superbundle_names()) {
 				const std::string l = to_lower_ascii(name);
 				const bool level = l.rfind("win32/levels/mp_", 0) == 0 || l.rfind("win32/levels/xp", 0) == 0;
+				// INFERRED: the globals are these four; research/probes/ebx-data-probe.md 0 does not list the superbundles of its
+				// "MP/XP + global" run. Settle: a research/ note listing the @all-mp superbundles.
 				const bool global = l == "win32/globals" || l == "win32/weapons" || l == "win32/ui" || l == "win32/default_settings_win32";
 				if (level || global) {
 					out.push_back(name);
@@ -145,6 +149,8 @@ Result<std::unique_ptr<EbxLibrary>> EbxLibrary::open(std::shared_ptr<const Insta
 	for (uint32_t s = 0; s < lib->mounts_.size(); ++s) {
 		for (std::string &name : lib->mounts_[s].ebx_names()) {
 			std::string key = to_lower_ascii(name);
+			// INFERRED: a partition name listed by several superbundles is read from the first in the caller's order.
+			// Settle: a research/ note on EBX layering across superbundles.
 			const auto [it, fresh] = lib->slot_by_key_.try_emplace(key, static_cast<uint32_t>(lib->slots_.size()));
 			if (!fresh) {
 				continue;
@@ -200,6 +206,7 @@ void EbxLibrary::build_header_guid_index() const {
 		slot_by_guid_.reserve(slots_.size());
 		for (uint32_t i = 0; i < guids.size(); ++i) {
 			if (guids[i]) {
+				// INFERRED: two partitions with one GUID resolve to the first slot. Settle: a research/ note on duplicate EBX GUIDs.
 				slot_by_guid_.try_emplace(*guids[i], i);
 			}
 		}
@@ -235,6 +242,8 @@ EbxLibrary::LoadReport EbxLibrary::load_all() {
 			if (inserted[index]) {
 				continue;
 			}
+			// INFERRED: a partition that failed or lost on its GUID in an earlier superbundle is read again from a later
+			// one that lists it. Settle: a research/ note on EBX layering across superbundles.
 			if (slot.sb != s) {
 
 				if (slot.sb > s) {
@@ -262,6 +271,8 @@ EbxLibrary::LoadReport EbxLibrary::load_all() {
 				slot.dropped = true;
 				continue;
 			}
+			// INFERRED: of two partitions with one GUID the first inserted is kept and the later one dropped.
+			// Settle: a research/ note on duplicate EBX GUIDs.
 			const auto [it, fresh] = slot_by_guid_.try_emplace(slot.partition->guid(), index);
 			if (!fresh) {
 				++report.duplicate_guids;

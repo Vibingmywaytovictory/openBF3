@@ -102,11 +102,14 @@ bool is_valid_cache_kind(std::string_view p_kind) {
 	return true;
 }
 
+// SOURCE: research/topics/gap-r1-load-cache-memory-rotation.md 6.4 (layout v<fmt>/<kind>/<k[0:2]>/<key>).
 std::filesystem::path CacheKey::relative_path() const {
 	const std::string h = digest.hex();
 	return std::filesystem::path("v" + std::to_string(kCacheContainerVersion)) / kind / h.substr(0, 2) / (h + ".bin");
 }
 
+// SOURCE: research/topics/gap-r1-load-cache-memory-rotation.md 6.4 (key = source SHA1s + converter version + engine
+// commit, + Jolt version for shapes, + params for nav).
 std::optional<CacheKey> make_cache_key(const CacheKeyInputs &p_inputs) {
 	if (!is_valid_cache_kind(p_inputs.kind) || p_inputs.sources.size() > kCacheKeyMaxSources ||
 			p_inputs.engine.size() > kCacheKeyFieldMaxLength || p_inputs.jolt_version.size() > kCacheKeyFieldMaxLength ||
