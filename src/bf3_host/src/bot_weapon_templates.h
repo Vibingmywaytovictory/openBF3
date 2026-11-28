@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -62,6 +63,7 @@ struct SeatArms {
 };
 
 using VehicleSeatArms = std::vector<std::vector<SeatArms>>;
+using VehicleWeaponTemplates = std::vector<std::vector<std::optional<ai::WeaponTemplate>>>;
 
 struct CachedWeaponTemplates {
 	WeaponTemplates templates;
@@ -79,7 +81,12 @@ float rounds_per_second(const sim::weapons::WeaponSimDef &p_weapon);
 float weapon_reach(const sim::weapons::WeaponSimDef &p_weapon, bool p_gadget);
 ai::WeaponTemplate derive_weapon_template(
 		const TemplateSource &p_source, uint16_t p_def, const sim::weapons::WeaponSimDef &p_weapon);
+ai::WeaponTemplate derive_vehicle_weapon_template(
+		const TemplateSource &p_source, uint16_t p_def, const sim::weapons::WeaponSimDef &p_weapon);
 core::Result<WeaponTemplates> derive_weapon_templates(const GunplayLevel &p_gunplay, const LevelVehicles *p_vehicles);
+core::Result<VehicleWeaponTemplates> derive_vehicle_weapon_templates(
+		const GunplayLevel &p_gunplay, const LevelVehicles &p_vehicles);
+VehicleSeatArms seat_arms_of(const VehicleWeaponTemplates &p_weapons, const LevelVehicles &p_vehicles);
 core::Result<VehicleSeatArms> derive_seat_arms(const GunplayLevel &p_gunplay, const LevelVehicles &p_vehicles);
 std::string format_weapon_templates(const WeaponTemplates &p_templates);
 core::Result<WeaponTemplates> read_weapon_templates(std::string_view p_text, std::string_view p_name);
@@ -95,12 +102,14 @@ public:
 	const ai::WeaponTemplate &of(uint16_t p_def, uint8_t p_variant) const;
 	ai::CombatStrengthType vehicle_type(uint8_t p_property) const;
 	const SeatArms &seat(uint16_t p_kind, uint8_t p_seat) const;
+	const ai::WeaponTemplate *seat_weapon(uint16_t p_kind, size_t p_weapon) const;
 
 private:
 	WeaponTemplates owned_;
 	std::vector<std::vector<const ai::WeaponTemplate *>> defs_;
 	std::vector<std::pair<uint8_t, ai::CombatStrengthType>> vehicle_types_;
 	VehicleSeatArms seats_;
+	VehicleWeaponTemplates seat_weapons_;
 };
 
 bool fires_at(const GunplayLevel &p_gunplay, uint16_t p_def, const ai::WeaponTemplate &p_template, bool p_vehicle);

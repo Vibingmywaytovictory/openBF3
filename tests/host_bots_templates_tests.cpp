@@ -195,6 +195,33 @@ TEST_SUITE("host-bots-templates") {
 		core::Result<host::VehicleSeatArms> arms = host::derive_seat_arms(*level->shared->gunplay, vehicles);
 		REQUIRE_MESSAGE(arms.ok(), (arms.ok() ? std::string() : arms.error().message));
 		REQUIRE(arms->size() == vehicles.kinds.size());
+		core::Result<host::VehicleWeaponTemplates> weapons =
+				host::derive_vehicle_weapon_templates(*level->shared->gunplay, vehicles);
+		REQUIRE(weapons.ok());
+		REQUIRE(weapons->size() == vehicles.kinds.size());
+		for (size_t k = 0; k < vehicles.kinds.size(); ++k) {
+			const host::LevelVehicleKind &kind = vehicles.kinds[k];
+			for (size_t s = 0; s < kind.seats; ++s) {
+				const host::SeatArms &a = (*arms)[k][s];
+				float reach = 0.0f;
+				for (size_t w = 0; w < (*weapons)[k].size(); ++w) {
+					const std::optional<ai::WeaponTemplate> &t = (*weapons)[k][w];
+					if (!t || size_t(kind.armament->weapons[w].seat) != s ||
+							std::none_of(
+									t->strengths.begin(), t->strengths.end(), [](int32_t p_s) { return p_s > 0; })) {
+						continue;
+					}
+					CHECK(a.armed);
+					CHECK(t->max_range <= a.max_range);
+					CHECK(t->min_range >= a.min_range);
+					reach = std::max(reach, t->max_range);
+					for (size_t c = 0; c < ai::kCombatStrengthTypeCount; ++c) {
+						CHECK(float(t->strengths[c]) <= a.strengths[c]);
+					}
+				}
+				CHECK(reach == a.max_range);
+			}
+		}
 		const size_t infantry = size_t(ai::CombatStrengthType::Infantry);
 		const size_t heavy = size_t(ai::CombatStrengthType::HeavyArmour);
 		size_t jeeps = 0, tanks = 0;

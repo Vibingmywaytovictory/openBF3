@@ -229,15 +229,17 @@ float weapon_reach(const sw::WeaponSimDef &p_weapon, bool p_gadget) {
 	return reach;
 }
 
-ai::WeaponTemplate derive_weapon_template(
-		const TemplateSource &p_source, uint16_t p_def, const sw::WeaponSimDef &p_weapon) {
+namespace {
+
+ai::WeaponTemplate derive_template(const TemplateSource &p_source, uint16_t p_def, const sw::WeaponSimDef &p_weapon,
+		const sw::GadgetDef *p_gadget, ai::WeaponType p_type) {
 	ai::WeaponTemplate w;
 	const sw::ProjectileSimDef &p = p_weapon.projectile;
 	if (p.kind == core::gameplay::ProjectileKind::None) {
 		return w;
 	}
 	const GunplayLevel &level = *p_source.gunplay;
-	const sw::GadgetDef *gadget = gadget_def(level, p_def);
+	const sw::GadgetDef *gadget = p_gadget;
 	w.drag = p.drag;
 	w.exit_velocity = p.muzzle_speed;
 	w.is_thrown = p_weapon.mode_count > 0 && p_weapon.modes[0].logic == core::gameplay::FireLogic::HoldAndRelease;
@@ -249,7 +251,7 @@ ai::WeaponTemplate derive_weapon_template(
 		w.min_range = std::min(std::max(arming, p.explosion.radius), w.max_range);
 	}
 	const size_t infantry = size_t(ai::CombatStrengthType::Infantry);
-	const ai::WeaponType type = weapon_type_of(level, p_source.defib_def, p_def);
+	const ai::WeaponType type = p_type;
 	std::array<float, ai::kCombatStrengthTypeCount> per_minute{};
 	// STAND-IN: a defibrillator, medkit or ammo bag rates Infantry as revives, full heals or primary magazine refills
 	// per minute. Settle: BF2's shipped templates for its support kits.
@@ -272,6 +274,20 @@ ai::WeaponTemplate derive_weapon_template(
 		w.strengths[c] = int32_t(std::lround(per_minute[c]));
 	}
 	return w;
+}
+
+}
+
+ai::WeaponTemplate derive_weapon_template(
+		const TemplateSource &p_source, uint16_t p_def, const sw::WeaponSimDef &p_weapon) {
+	const GunplayLevel &level = *p_source.gunplay;
+	return derive_template(
+			p_source, p_def, p_weapon, gadget_def(level, p_def), weapon_type_of(level, p_source.defib_def, p_def));
+}
+
+ai::WeaponTemplate derive_vehicle_weapon_template(
+		const TemplateSource &p_source, uint16_t p_def, const sw::WeaponSimDef &p_weapon) {
+	return derive_template(p_source, p_def, p_weapon, nullptr, ai::WeaponType::Default);
 }
 
 core::Result<WeaponTemplates> derive_weapon_templates(const GunplayLevel &p_gunplay, const LevelVehicles *p_vehicles) {
@@ -297,19 +313,21 @@ core::Result<WeaponTemplates> derive_weapon_templates(const GunplayLevel &p_gunp
 	return out;
 }
 
-core::Result<VehicleSeatArms> derive_seat_arms(const GunplayLevel &p_gunplay, const LevelVehicles &p_vehicles) {
+core::Result<VehicleWeaponTemplates> derive_vehicle_weapon_templates(
+		const GunplayLevel &p_gunplay, const LevelVehicles &p_vehicles) {
+	VehicleWeaponTemplates out(p_vehicles.kinds.size());
+	for (size_t k = 0; k < p_vehicles.kinds.size(); ++k) {
+		const LevelVehicleKind &kind = p_vehicles.kinds[k];
+		out[k].resize(kind.armament != nullptr ? kind.armament->weapons.size() : 0);
+	}
 	core::Result<TemplateSource> made = template_source(p_gunplay, &p_vehicles);
 	if (!made) {
 		return made.error();
 	}
-	TemplateSource source = std::move(*made);
-	VehicleSeatArms out(p_vehicles.kinds.size());
 	if (p_vehicles.weapons.empty()) {
-		for (size_t k = 0; k < p_vehicles.kinds.size(); ++k) {
-			out[k].resize(p_vehicles.kinds[k].seats);
-		}
 		return out;
 	}
+	TemplateSource source = std::move(*made);
 	core::Result<std::shared_ptr<const sw::WeaponTable>> table =
 			make_vehicle_weapon_table(p_vehicles, p_gunplay.materials, sw::Mechanics{});
 	if (!table) {
@@ -320,50 +338,56 @@ core::Result<VehicleSeatArms> derive_seat_arms(const GunplayLevel &p_gunplay, co
 	source.vehicle_damage.configure(*source.table, p_vehicles.weapons);
 	for (size_t k = 0; k < p_vehicles.kinds.size(); ++k) {
 		const LevelVehicleKind &kind = p_vehicles.kinds[k];
-		std::vector<SeatArms> &seats = out[k];
-		seats.resize(kind.seats);
-		if (kind.armament == nullptr) {
-			continue;
-		}
-		const std::vector<sim::vehicles::ArmamentWeapon> &weapons = kind.armament->weapons;
-		for (size_t w = 0; w < weapons.size() && w < kind.weapon_defs.size(); ++w) {
+		for (size_t w = 0; w < out[k].size() && w < kind.weapon_defs.size(); ++w) {
 			const uint16_t def = kind.weapon_defs[w];
-			const size_t seat = size_t(weapons[w].seat);
-			if (def == kNoVehicleWeapon || def >= source.table->defs.size() || seat >= seats.size() ||
-					!sim::vehicles::weapon_in_stance(weapons[w], 0)) {
+			if (def == kNoVehicleWeapon || def >= source.table->defs.size() ||
+					!sim::vehicles::weapon_in_stance(kind.armament->weapons[w], 0)) {
 				continue;
 			}
 			const sw::WeaponSimDef &weapon = source.table->defs[def];
 			if (weapon.projectile.kind == core::gameplay::ProjectileKind::None || !(rounds_per_second(weapon) > 0.0f)) {
 				continue;
 			}
-			const float reach = weapon_reach(weapon, false);
-			std::array<float, ai::kCombatStrengthTypeCount> strengths{};
-			for (size_t c = 0; c < ai::kCombatStrengthTypeCount; ++c) {
-				strengths[c] = float(
-						std::lround(class_mean(source, ai::CombatStrengthType(c), kills_per_minute, def, weapon)));
-			}
-			if (std::all_of(strengths.begin(), strengths.end(), [](float p_s) { return p_s <= 0.0f; })) {
+			out[k][w] = derive_vehicle_weapon_template(source, def, weapon);
+		}
+	}
+	return out;
+}
+
+VehicleSeatArms seat_arms_of(const VehicleWeaponTemplates &p_weapons, const LevelVehicles &p_vehicles) {
+	VehicleSeatArms out(p_vehicles.kinds.size());
+	for (size_t k = 0; k < p_vehicles.kinds.size(); ++k) {
+		const LevelVehicleKind &kind = p_vehicles.kinds[k];
+		std::vector<SeatArms> &seats = out[k];
+		seats.resize(kind.seats);
+		for (size_t w = 0; k < p_weapons.size() && w < p_weapons[k].size(); ++w) {
+			const std::optional<ai::WeaponTemplate> &weapon = p_weapons[k][w];
+			const size_t seat = size_t(kind.armament->weapons[w].seat);
+			if (!weapon || seat >= seats.size() ||
+					std::all_of(
+							weapon->strengths.begin(), weapon->strengths.end(), [](int32_t p_s) { return p_s <= 0; })) {
 				continue;
 			}
 			// STAND-IN: a seat's arms take the best of its weapons in stance 0, as BF2's per-seat templates are not
 			// derived. Settle: per-seat templates.
 			SeatArms &arms = seats[seat];
-			const float arming = weapon.projectile.explosion.present
-					? std::min(std::max(float(sw::units_to_seconds(weapon.projectile.time_to_arm)) *
-											   weapon.projectile.muzzle_speed,
-									   weapon.projectile.explosion.radius),
-							  reach)
-					: 0.0f;
-			arms.min_range = arms.armed ? std::min(arms.min_range, arming) : arming;
-			arms.max_range = std::max(arms.max_range, reach);
+			arms.min_range = arms.armed ? std::min(arms.min_range, weapon->min_range) : weapon->min_range;
+			arms.max_range = std::max(arms.max_range, weapon->max_range);
 			arms.armed = true;
 			for (size_t c = 0; c < ai::kCombatStrengthTypeCount; ++c) {
-				arms.strengths[c] = std::max(arms.strengths[c], strengths[c]);
+				arms.strengths[c] = std::max(arms.strengths[c], float(weapon->strengths[c]));
 			}
 		}
 	}
 	return out;
+}
+
+core::Result<VehicleSeatArms> derive_seat_arms(const GunplayLevel &p_gunplay, const LevelVehicles &p_vehicles) {
+	core::Result<VehicleWeaponTemplates> weapons = derive_vehicle_weapon_templates(p_gunplay, p_vehicles);
+	if (!weapons) {
+		return weapons.error();
+	}
+	return seat_arms_of(*weapons, p_vehicles);
 }
 
 std::string format_weapon_templates(const WeaponTemplates &p_templates) {
@@ -475,11 +499,12 @@ core::Result<std::shared_ptr<const BotWeaponTemplates>> BotWeaponTemplates::crea
 		}
 	}
 	if (p_vehicles != nullptr && p_gunplay.materials != nullptr) {
-		core::Result<VehicleSeatArms> seats = derive_seat_arms(p_gunplay, *p_vehicles);
-		if (!seats) {
-			return seats.error();
+		core::Result<VehicleWeaponTemplates> weapons = derive_vehicle_weapon_templates(p_gunplay, *p_vehicles);
+		if (!weapons) {
+			return weapons.error();
 		}
-		out->seats_ = std::move(*seats);
+		out->seats_ = seat_arms_of(*weapons, *p_vehicles);
+		out->seat_weapons_ = std::move(*weapons);
 	}
 	return std::shared_ptr<const BotWeaponTemplates>(std::move(out));
 }
@@ -487,6 +512,14 @@ core::Result<std::shared_ptr<const BotWeaponTemplates>> BotWeaponTemplates::crea
 const SeatArms &BotWeaponTemplates::seat(uint16_t p_kind, uint8_t p_seat) const {
 	static const SeatArms kNone;
 	return p_kind < seats_.size() && p_seat < seats_[p_kind].size() ? seats_[p_kind][p_seat] : kNone;
+}
+
+const ai::WeaponTemplate *BotWeaponTemplates::seat_weapon(uint16_t p_kind, size_t p_weapon) const {
+	if (p_kind >= seat_weapons_.size() || p_weapon >= seat_weapons_[p_kind].size()) {
+		return nullptr;
+	}
+	const std::optional<ai::WeaponTemplate> &w = seat_weapons_[p_kind][p_weapon];
+	return w ? &*w : nullptr;
 }
 
 const ai::WeaponTemplate &BotWeaponTemplates::of(uint16_t p_def, uint8_t p_variant) const {
