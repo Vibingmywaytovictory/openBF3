@@ -42,6 +42,11 @@ std::string message(const core::Status &p_status) {
 	return p_status.ok() ? std::string() : p_status.error().message;
 }
 
+bool seat_bound(InfantryBehaviour p_behaviour) {
+	return p_behaviour == InfantryBehaviour::Change || p_behaviour == InfantryBehaviour::MoveTo ||
+			p_behaviour == InfantryBehaviour::FireInfantery || p_behaviour == InfantryBehaviour::Avoid ||
+			p_behaviour == InfantryBehaviour::Idle;
+}
 }
 
 TEST_SUITE("ai-script") {
@@ -79,10 +84,14 @@ TEST_SUITE("ai-script") {
 				want.curves[i] = { expected.basic_bot_weights[i] * expected.vehicle_mods[0][i], memory.values[0],
 					memory.values[1] };
 				for (size_t k = 0; k < kEquipmentClassCount; ++k) {
-					const bool bound = k == size_t(EquipmentClass::Infantry) ||
-							i == size_t(InfantryBehaviour::Change) || i == size_t(InfantryBehaviour::MoveTo);
+					const bool bound = k == size_t(EquipmentClass::Infantry) || seat_bound(InfantryBehaviour(i));
 					want.class_weights[k][i] = bound ? want.curves[i].weight : 0.0f;
 				}
+			}
+			const std::vector<float> &seat_change = config->behaviour_modifiers.at("SeatChange");
+			for (const EquipmentClass k : { EquipmentClass::Tank, EquipmentClass::Car }) {
+				std::copy(seat_change.begin(), seat_change.end(),
+						want.binding_rows[size_t(k)][size_t(InfantryBehaviour::Change)].begin());
 			}
 			CHECK(tuning == want);
 			CHECK(config->weapon_templates.empty());
@@ -91,7 +100,7 @@ TEST_SUITE("ai-script") {
 
 	TEST_CASE("a declared vehicle class weighs only the behaviours its setVehicleBehaviour lines bind, as BF2's "
 			  "AIConsole::setVehicleBehaviour registers a class's behaviours one by one: the shipped Car binds "
-			  "MoveTo and Change, a Tank given a Random binding weighs Random, MoveTo and Change") {
+			  "MoveTo, Change, FireInfantery, Avoid and Idle, a Tank given a Random binding weighs Random too") {
 		core::Result<AiConfig> config = load_level_ai_config(kShipped, "MP_007", kTwoAreas);
 		REQUIRE_MESSAGE(config.ok(), (config.ok() ? std::string() : config.error().message));
 		REQUIRE(config->settings.vehicle("Tank") >= 0);
@@ -103,8 +112,7 @@ TEST_SUITE("ai-script") {
 		const std::array<float, kBotBehaviourCount> &tank = tuning.class_weights[size_t(EquipmentClass::Tank)];
 		const std::array<float, kBotBehaviourCount> &car = tuning.class_weights[size_t(EquipmentClass::Car)];
 		for (size_t i = 0; i < kBotBehaviourCount; ++i) {
-			const bool own = InfantryBehaviour(i) == InfantryBehaviour::Change ||
-					InfantryBehaviour(i) == InfantryBehaviour::MoveTo;
+			const bool own = seat_bound(InfantryBehaviour(i));
 			const bool random = InfantryBehaviour(i) == InfantryBehaviour::Random;
 			CHECK(tank[i] == (random || own ? tuning.curves[i].weight : 0.0f));
 			CHECK(car[i] == (own ? tuning.curves[i].weight : 0.0f));

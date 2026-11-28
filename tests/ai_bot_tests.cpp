@@ -197,6 +197,24 @@ TEST_SUITE("ai-bot") {
 				c.bot.weighted_urgency(InfantryBehaviour::TakeCoverInfantry));
 	}
 
+	TEST_CASE("a seated Tank or Car bot with the shipped config fires its seat when its seat scores a target, aiming "
+			  "and pulling the seat's trigger, and under fire with no target it idles, as the seated Avoid scores 0") {
+		for (const EquipmentClass seat : { EquipmentClass::Tank, EquipmentClass::Car }) {
+			Rig r;
+			r.bot.update_bot(true, true);
+			CHECK(r.bot.set_equipment(seat));
+			r.body.s.seated = true;
+			r.body.seat = { 0.9f, 3 };
+			CHECK(r.decide() == InfantryBehaviour::FireInfantery);
+			CHECK(r.bot.activity() == InfantryActivity::Fight);
+			CHECK(r.body.calls == std::vector<std::string>{ "sense 7", "trigger 9" });
+			r.body.seat = {};
+			r.body.s.shot_at = true;
+			CHECK(r.decide() == InfantryBehaviour::Idle);
+			CHECK(r.body.calls == std::vector<std::string>{ "sense 4" });
+		}
+	}
+
 	TEST_CASE("support behaviours: a hurt bot under a squad move order keeps moving and calls for a medic on its way") {
 		Rig r;
 		r.bot.update_bot(true, true);

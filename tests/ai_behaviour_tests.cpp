@@ -651,16 +651,29 @@ TEST_SUITE("ai-behaviour") {
 		CHECK_FALSE(bf3::test::shipped_behaviour_tuning() == tuning);
 	}
 
-	TEST_CASE("the shipped behaviours each bind a modifier set of ones: the set a chosen behaviour applies to the "
-			  "others' urgencies weighs none of them") {
+	TEST_CASE("the shipped behaviours each bind a modifier set of ones but a seated Change, whose set drops MoveTo and "
+			  "FireInfantery: the host drives and fires no seat while the bot holds a change target") {
 		const AiConfig config = bf3::test::shipped_ai_config();
 		REQUIRE_FALSE(config.vehicle_behaviours.empty());
+		const int infantry = config.settings.vehicle("Infantry");
+		size_t seated_changes = 0;
 		for (const VehicleBehaviour &b : config.vehicle_behaviours) {
 			const auto set = config.behaviour_modifiers.find(b.modifiers);
 			REQUIRE(set != config.behaviour_modifiers.end());
 			CAPTURE(b.modifiers);
-			CHECK(std::all_of(set->second.begin(), set->second.end(), [](float p_m) { return p_m == 1.0f; }));
+			const bool seated_change = b.vehicle != infantry && b.behaviour == int(InfantryBehaviour::Change);
+			seated_changes += seated_change ? 1u : 0u;
+			for (size_t i = 0; i < set->second.size(); ++i) {
+				const bool dropped = seated_change &&
+						(i == size_t(InfantryBehaviour::MoveTo) || i == size_t(InfantryBehaviour::FireInfantery));
+				CHECK(set->second[i] == (dropped ? 0.0f : 1.0f));
+			}
 		}
+		CHECK(seated_changes == 2u);
+		const BehaviourTuning tuning = bf3::test::shipped_behaviour_tuning();
+		const BehaviourRow &tank = tuning.binding_rows[size_t(EquipmentClass::Tank)][size_t(InfantryBehaviour::Change)];
+		CHECK(tank[size_t(InfantryBehaviour::MoveTo)] == 0.0f);
+		CHECK(tank[size_t(InfantryBehaviour::Idle)] == 1.0f);
 	}
 
 	TEST_CASE("a seated bot's fire urgency is its seat's BBFire urgency and no infantry mode, and its Avoid scores "
