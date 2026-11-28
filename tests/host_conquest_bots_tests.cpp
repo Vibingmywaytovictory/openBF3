@@ -9,6 +9,7 @@
 #include "tdm_fixture.h"
 #include "tdm_strategy.h"
 #include "test_support.h"
+#include "vehicles/server_vehicles.h"
 
 #include <algorithm>
 #include <array>
@@ -79,6 +80,7 @@ struct ConquestRun {
 	uint32_t bot_spawns = 0, flag_spawns = 0, hq_spawns = 0, other_spawns = 0;
 	uint64_t squad_spawns = 0;
 	uint64_t runtime_faults = 0;
+	uint64_t seat_fire_ticks = 0, seat_shots = 0, seat_hits = 0;
 	std::vector<int> area_point;
 	std::vector<std::string> log;
 };
@@ -100,7 +102,11 @@ ConquestRun run_conquest(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	c.max_ticks = kRoundTicks;
 	c.after_round_ticks = 0;
 	c.hashes = false;
-	c.configure_bots = [](host::TdmBotConfig &r_bots) { r_bots.tuning_cfg = OPENBF3_BOT_TUNING_CFG; };
+	std::shared_ptr<host::TdmBotStats> stats;
+	c.configure_bots = [&](host::TdmBotConfig &r_bots) {
+		r_bots.tuning_cfg = OPENBF3_BOT_TUNING_CFG;
+		stats = r_bots.stats;
+	};
 	std::vector<uint8_t> last_holder;
 	std::vector<uint8_t> last_team;
 	std::vector<sim::Tick> held_since;
@@ -108,6 +114,10 @@ ConquestRun run_conquest(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	std::array<std::array<host::SquadOrderState, net::kMaxSquads + 1>, host::kSquadTeams + 1> last_order{};
 	std::array<uint32_t, 64> seen_life{};
 	c.on_tick = [&](sim::Tick p_tick, host::GameServer &r_server, tt::ScriptedPeer *) {
+		if (const host::ServerVehicles *vehicles = r_server.view().server_vehicles()) {
+			out.seat_shots = vehicles->gunnery().stats().shots;
+			out.seat_hits = vehicles->gunnery().stats().damage;
+		}
 		const host::TdmRules *rules = r_server.rules();
 		const sim::logic::ConquestNatives *cq = rules != nullptr ? rules->natives().conquest() : nullptr;
 		if (cq == nullptr) {
@@ -211,6 +221,7 @@ ConquestRun run_conquest(const tt::TdmLevel &p_level, uint64_t p_seed) {
 		out.runtime_faults = rules->stats().runtime_faults;
 	};
 	core::Result<tt::TdmRunResult> r = tt::run_tdm(p_level, c);
+	out.seat_fire_ticks = stats != nullptr ? stats->vehicle_fire_ticks.load() : 0;
 	if (!r) {
 		out.error = r.error().message;
 		return out;
@@ -238,6 +249,17 @@ void check_orders(const ConquestRun &p_run, uint64_t p_seed) {
 			uint64_t(kMaxDefendRepeatsPerMinute) * p_run.result.round_over_tick);
 }
 
+void check_seat_fire(const ConquestRun &p_run, uint64_t p_seed) {
+	std::printf(
+			"host.tdm.conquest_bots: seed %llu: seated bots held a seat's trigger %llu ticks; vehicle weapons fired "
+			"%llu shots and hit soldiers %llu times\n",
+			(unsigned long long)p_seed, (unsigned long long)p_run.seat_fire_ticks, (unsigned long long)p_run.seat_shots,
+			(unsigned long long)p_run.seat_hits);
+	CHECK(p_run.seat_fire_ticks > 0u);
+	CHECK(p_run.seat_shots > 0u);
+	CHECK(p_run.seat_hits > 0u);
+}
+
 void check_seed(uint64_t p_seed) {
 	tt::TdmLevel *level = load_conquest_bots_level_once();
 	if (level == nullptr) {
@@ -246,6 +268,7 @@ void check_seed(uint64_t p_seed) {
 	const ConquestRun run = run_conquest(*level, p_seed);
 	check_orders(run, p_seed);
 	CHECK((run.result.winner == 1 || run.result.winner == 2));
+	check_seat_fire(run, p_seed);
 }
 }
 
@@ -322,6 +345,7 @@ TEST_SUITE("host-tdm-conquest-bots") {
 		REQUIRE(level->shared->logic_natives->conquest != nullptr);
 		const ConquestRun run = run_conquest(*level, 1);
 		check_orders(run, 1);
+		check_seat_fire(run, 1);
 		REQUIRE_MESSAGE(run.error.empty(), run.error);
 		std::vector<int> paired;
 		for (size_t i = 0; i < level->bots->areas.size(); ++i) {

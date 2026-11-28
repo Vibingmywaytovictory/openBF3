@@ -3695,3 +3695,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Bot gunnery 4: the shipped AIBehaviours.ai binds FireInfantery, Avoid and Idle for Tank and Car (BF2's Tank and ArmedCar structure) and gives a seated Change the SeatChange set, which drops MoveTo and FireInfantery.
 * Bot gunnery 5: a seated bot scores its seat's weapons on what it sees (BotGunner), looks along its seat weapon, aims the turret through the seat command and pulls its trigger when BAPCConPrecision passes; host.bots.gunnery proves M1A2 gunner, Growler gun and M1A2 driver cannon shots and hits.
 * Bot gunnery 6: BotGunner's made-up inputs carry STAND-IN tags (loaded weapons, no area or attackers, the 0.5 m precision, the every-other-tick trigger); comment lines only.
+* Bot gunnery 7: host.tdm.conquest_bots checks that seated bots pull a seat's trigger and their vehicle weapons fire and hit in a full shipped-AI round (0 with 2730bdfa5's AIBehaviours.ai).
