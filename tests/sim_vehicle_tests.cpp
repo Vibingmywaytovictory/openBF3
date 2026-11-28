@@ -2463,4 +2463,85 @@ TEST_SUITE("sim-vehicle-handling") {
 			}
 		}
 	}
+
+	TEST_CASE("sim.vehicle.handling: R8-G1-vectors on flat ground: the M1A2 and the T-90 settle at R8-G1-topspeed's "
+			  "39.70 and 38.69 km/h at throttle 1, and the M1A2 pivots from rest at full steer as vectors B give, "
+			  "neither tank's stand-still brake engaging in the pivot") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		struct Want {
+			std::shared_ptr<const VehicleModel> model;
+			float top_kmh;
+			std::array<float, 4> rates;
+			float angle;
+		};
+		const Want tanks[] = { { h->m1a2, 39.70f, { 0.3368f, 0.5688f, 0.7059f, 0.7337f }, 2.430f },
+			{ h->t90, 38.69f, { 0.5604f, 0.7587f, 0.8243f, 0.8339f }, 2.955f } };
+		// STAND-IN: 0.5 % covers the closed form's level hull against the slope term of our hull's pitch at speed.
+		// Settle: a note on the tanks' attitude at speed, or a retail speed run.
+		constexpr float kTopTolerance = 0.005f;
+		// INFERRED: 2 % on the M1A2's model pivot, the notes' own spread (dropping the 0.05 /s damping moves the 4 s
+		// angle 1.6 %). Settle: a retail pivot run.
+		constexpr float kPivotTolerance = 0.02f;
+		const std::shared_ptr<const StaticWorldShapes> flat = ground_shapes(false);
+		for (const Want &want : tanks) {
+			const std::shared_ptr<const VehicleModel> &tank = want.model;
+			CAPTURE(tank->blueprint);
+			std::unique_ptr<VehicleWorld> run = world_at(flat, tank, placed(0, 0, -300));
+			settle(*run);
+			std::array<float, 4> speeds{};
+			for (uint32_t tick = 1; tick <= 15 * kSimHz; ++tick) {
+				step1(*run, command(127, 0, 0));
+				const Vec3 &v = run->state(0).body.linear_velocity;
+				for (const auto &[seconds, slot] :
+						{ std::pair{ 1u, 0u }, std::pair{ 2u, 1u }, std::pair{ 5u, 2u }, std::pair{ 15u, 3u } }) {
+					if (tick == seconds * kSimHz) {
+						speeds[slot] = std::hypot(v[0], v[2]) * vehicles::kKmhPerMs;
+					}
+				}
+			}
+			std::printf("sim.vehicle.handling: %s throttle 1 from rest: %.2f / %.2f / %.2f / %.2f km/h at 1 / 2 / 5 / "
+						"15 s (R8-G1-topspeed %.2f km/h)\n",
+					tank->blueprint.c_str(), double(speeds[0]), double(speeds[1]), double(speeds[2]), double(speeds[3]),
+					double(want.top_kmh));
+			CHECK(speeds[3] == doctest::Approx(want.top_kmh).epsilon(kTopTolerance));
+
+			std::unique_ptr<VehicleWorld> pivot = world_at(flat, tank, placed(0, 0, -300));
+			settle(*pivot);
+			float unwrapped = 0.0f, last = yaw_of(pivot->state(0));
+			std::array<float, 4> rates{};
+			uint32_t standing = 0;
+			for (uint32_t tick = 1; tick <= 4 * kSimHz; ++tick) {
+				step1(*pivot, command(0, 0, 127));
+				const VehicleState s = pivot->state(0);
+				const float yaw = yaw_of(s);
+				unwrapped += std::remainder(yaw - last, 2.0f * 3.14159265f);
+				last = yaw;
+				standing += s.driver.stand_still_ticks > 0 ? 1u : 0u;
+				for (const auto &[half_seconds, slot] :
+						{ std::pair{ 1u, 0u }, std::pair{ 2u, 1u }, std::pair{ 4u, 2u }, std::pair{ 8u, 3u } }) {
+					if (2 * tick == half_seconds * kSimHz) {
+						rates[slot] = std::fabs(s.body.angular_velocity[1]);
+					}
+				}
+			}
+			const float angle = std::fabs(unwrapped);
+			std::printf(
+					"sim.vehicle.handling: %s pivot from rest: yaw rate %.4f / %.4f / %.4f / %.4f rad/s at 0.5 / 1 / "
+					"2 / 4 s, %.3f rad at 4 s, %u ticks under the stand-still brake (R8-G1-vectors B: %.4f / %.4f "
+					"/ %.4f / %.4f, %.3f rad)\n",
+					tank->blueprint.c_str(), double(rates[0]), double(rates[1]), double(rates[2]), double(rates[3]),
+					double(angle), standing, double(want.rates[0]), double(want.rates[1]), double(want.rates[2]),
+					double(want.rates[3]), double(want.angle));
+			CHECK(standing == 0u);
+			if (tank == h->m1a2) {
+				for (size_t i = 0; i < rates.size(); ++i) {
+					CHECK(rates[i] == doctest::Approx(want.rates[i]).epsilon(kPivotTolerance));
+				}
+				CHECK(angle == doctest::Approx(want.angle).epsilon(kPivotTolerance));
+			}
+		}
+	}
 }
