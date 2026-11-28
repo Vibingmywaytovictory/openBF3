@@ -88,11 +88,6 @@ TEST_SUITE("ai-script") {
 					want.class_weights[k][i] = bound ? want.curves[i].weight : 0.0f;
 				}
 			}
-			const std::vector<float> &seat_change = config->behaviour_modifiers.at("SeatChange");
-			for (const EquipmentClass k : { EquipmentClass::Tank, EquipmentClass::Car }) {
-				std::copy(seat_change.begin(), seat_change.end(),
-						want.binding_rows[size_t(k)][size_t(InfantryBehaviour::Change)].begin());
-			}
 			CHECK(tuning == want);
 			CHECK(config->weapon_templates.empty());
 		}

@@ -39,19 +39,6 @@ aiSettings.setBehaviourModifier CallForMedic 1
 aiSettings.setBehaviourModifier Resupply 1
 aiSettings.setBehaviourModifier Change 1
 
-aiSettings.createBehaviourModifiers SeatChange
-aiSettings.setBehaviourModifier Revive 1
-aiSettings.setBehaviourModifier FireInfantery 0
-aiSettings.setBehaviourModifier TakeCoverInfantry 1
-aiSettings.setBehaviourModifier Avoid 1
-aiSettings.setBehaviourModifier MoveTo 0
-aiSettings.setBehaviourModifier Random 1
-aiSettings.setBehaviourModifier Idle 1
-aiSettings.setBehaviourModifier MedicAssist 1
-aiSettings.setBehaviourModifier CallForMedic 1
-aiSettings.setBehaviourModifier Resupply 1
-aiSettings.setBehaviourModifier Change 1
-
 aiSettings.setVehicleMods Infantry Default
 aiSettings.setVehicleMods Tank Default
 aiSettings.setVehicleMods Car Default
@@ -68,9 +55,9 @@ aiSettings.setVehicleBehaviour Infantry CallForMedic BBCallForMedic BBPCallForMe
 aiSettings.setVehicleBehaviour Infantry Resupply BBResupply BBPResupply 0 Memory Unit
 aiSettings.setVehicleBehaviour Infantry Change BBChange BBPChange 0 Memory Unit
 aiSettings.setVehicleBehaviour Tank MoveTo BBMoveTo BBPGotoWaypoint2d 0 Memory Unit
-aiSettings.setVehicleBehaviour Tank Change BBChange BBPChange 0 Memory SeatChange
+aiSettings.setVehicleBehaviour Tank Change BBChange BBPChange 0 Memory Unit
 aiSettings.setVehicleBehaviour Car MoveTo BBMoveTo BBPGotoWaypoint2d 0 Memory Unit
-aiSettings.setVehicleBehaviour Car Change BBChange BBPChange 0 Memory SeatChange
+aiSettings.setVehicleBehaviour Car Change BBChange BBPChange 0 Memory Unit
 aiSettings.setVehicleBehaviour Tank FireInfantery BBFireInfantery BBPFireInfantery 0 Memory Unit
 aiSettings.setVehicleBehaviour Tank Avoid BBAvoid BBPAvoidCollision2d 0 Memory Unit
 aiSettings.setVehicleBehaviour Tank Idle BBIdle BBPIdle2d 0 Memory Unit

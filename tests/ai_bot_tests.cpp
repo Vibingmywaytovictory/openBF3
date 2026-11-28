@@ -215,6 +215,34 @@ TEST_SUITE("ai-bot") {
 		}
 	}
 
+	TEST_CASE("an ordered bot that boards a Tank or Car through Change follows its squad order at the first seated "
+			  "decision, as the shipped seated Change applies the all-ones Unit set") {
+		for (const EquipmentClass seat : { EquipmentClass::Tank, EquipmentClass::Car }) {
+			Rig r;
+			r.bot.update_bot(true, true);
+			r.body.s = { .navigable = true };
+			r.body.change = { 50.0f, 9 };
+			r.bot.update_bot(true, false);
+			r.bot.see(sim::kTickSeconds);
+			r.bot.update_sensing(sim::kTickSeconds);
+			r.bot.decision_making(sim::kTickSeconds);
+			r.bot.plan_execution(sim::kTickSeconds);
+			CHECK(r.bot.behaviour() == InfantryBehaviour::Change);
+			r.body.change = {};
+			SquadGoal g;
+			g.kind = SquadGoalKind::SquadTarget;
+			g.position = { 3.0f * r.tuning.squad_far_m, 0.0f, 0.0f };
+			r.bot.set_squad_goal(g);
+			const StrategyTuning strategy;
+			r.bot.set_taking_orders(true);
+			REQUIRE(r.bot.receive_order(BotOrder(strategy.order.data(), uint8_t(InfantryBehaviour::MoveTo))));
+			CHECK(r.bot.set_equipment(seat));
+			r.body.s.seated = true;
+			CHECK(r.decide() == InfantryBehaviour::MoveTo);
+			CHECK(r.bot.weighted_urgency(InfantryBehaviour::MoveTo) > r.bot.weighted_urgency(InfantryBehaviour::Idle));
+		}
+	}
+
 	TEST_CASE("support behaviours: a hurt bot under a squad move order keeps moving and calls for a medic on its way") {
 		Rig r;
 		r.bot.update_bot(true, true);
