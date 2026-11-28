@@ -716,6 +716,54 @@ TEST_SUITE("anim-s3") {
 		CHECK(!load_crowd_clips(*d->source, *d->library, bad).ok());
 	}
 
+	TEST_CASE(
+			"s3 seated clip: Humvee_DriverPose binds once on the crowd rig, full body; its middle frame stretches the "
+			"legs out and holds the hips where a Humvee's driver entry sits from the vehicle origin") {
+		S3Data *d = s3_or_skip();
+		if (d == nullptr) {
+			return;
+		}
+		auto moves = load_crowd_move_clips(d->clips, *d->library);
+		REQUIRE_MESSAGE(moves.ok(), (moves.ok() ? "" : moves.error().message));
+		REQUIRE(moves->has(CrowdMoveClip::Seated));
+		const CrowdClipData &seated = moves->get(CrowdMoveClip::Seated);
+		const Skeleton &rig = d->clips.rig;
+		CHECK(seated.binding.rig == d->clips.get(CrowdClip::Idle).binding.rig);
+		CHECK(seated.mask.size() == rig.size());
+		CHECK(!seated.additive);
+		CHECK(seated.tracks.end_frame == 59);
+		const int32_t hips = rig.find("Hips");
+		REQUIRE(hips >= 0);
+		LocalPose pose;
+		bf3::core::ant::ClipPose scratch;
+		std::vector<Xform> model;
+		const CrowdClipData &idle = d->clips.get(CrowdClip::Idle);
+		sample_pose(rig, idle.clip, idle.tracks, 0.0f, pose, scratch);
+		model_pose(rig, pose, model);
+		const int32_t foot = rig.find(kCrowdLeftFoot);
+		REQUIRE(foot >= 0);
+		const auto reach = [&] {
+			const Vec3 h = model[size_t(hips)].t, f = model[size_t(foot)].t;
+			return std::array<float, 3>{ h.y, f.y, std::hypot(f.x - h.x, f.z - h.z) };
+		};
+		const std::array<float, 3> stand = reach();
+		REQUIRE(sample_pose(
+				rig, seated.clip, seated.tracks, kCrowdSeatedPhase * float(seated.tracks.end_frame), pose, scratch));
+		model_pose(rig, pose, model);
+		const std::array<float, 3> sit = reach();
+		MESSAGE("hips / left foot above the root, foot out from the hips: stand idle "
+				<< stand[0] << " / " << stand[1] << " / " << stand[2] << " m, Humvee_DriverPose middle frame " << sit[0]
+				<< " / " << sit[1] << " / " << sit[2] << " m");
+		CHECK(sit[2] > stand[2] + 0.2f);
+		CHECK(model[size_t(d->clips.root_joint)].t.y == 0.0f);
+		const std::optional<Vec3> at = crowd_seated_hips(rig, seated);
+		REQUIRE(at.has_value());
+		CHECK(at->x == doctest::Approx(0.702).epsilon(0.002));
+		CHECK(at->y == doctest::Approx(0.911).epsilon(0.002));
+		CHECK(at->z == doctest::Approx(0.284).epsilon(0.005));
+		CHECK(at->x == model[size_t(hips)].t.x);
+	}
+
 	TEST_CASE("s3 reload: weapon -> chooser index -> clip, the upper-body mask") {
 		S3Data *d = s3_or_skip();
 		if (d == nullptr) {
@@ -1392,6 +1440,76 @@ TEST_SUITE("anim-s3-unit") {
 			other.pose.rig = *Skeleton::make(std::move(bones));
 			CHECK(!CrowdEvaluator::make(w.c.set, other.set, w.teams_one, 1, config).ok());
 		}
+	}
+
+	TEST_CASE("M2a tp seated: a seated soldier holds the seated clip's middle frame whatever he moves, aims, fires or "
+			  "reloads; he holds no weapon, muzzle or foot plant; without the clip he stands") {
+		SynthWeapons w;
+		SynthStance st(w.c);
+		st.moves.clips[size_t(CrowdMoveClip::Seated)] =
+				synth_clip(w.c.set.rig, 10, { 1 }, Quat{}, { 1 }, Vec3{ 0, 0.4f, 0 }, Vec3{ 0, 0.6f, 0 });
+		st.moves.present[size_t(CrowdMoveClip::Seated)] = true;
+		CrowdConfig config;
+		config.temporal_lod = false;
+		const double dt = 1.0 / 60.0;
+		auto e = CrowdEvaluator::make(w.c.set, st.set, w.teams_one, 2, config);
+		REQUIRE_MESSAGE(e.ok(), (e.ok() ? "" : e.error().message));
+		CrowdEvaluator &ev = **e;
+		std::vector<CrowdSoldierInput> in(2);
+		for (CrowdSoldierInput &s : in) {
+			s.velocity = Vec3{ 3.0f, 0, 0 };
+			s.pitch = 0.5f;
+			s.weapon = 0;
+		}
+		in[0].seated = true;
+		std::vector<Xform> first;
+		for (int f = 0; f < 40; ++f) {
+			in[0].velocity.x = in[1].velocity.x = f % 2 == 0 ? 3.0f : -2.0f;
+			in[0].fire_seq = in[1].fire_seq = uint8_t(f / 4);
+			in[0].flags = in[1].flags = f == 3 ? crowd_flags::kReloadStart : uint8_t(0);
+			ev.set_inputs(in, dt);
+			ev.evaluate_all_here();
+			CHECK(hips_y(ev, 0) == doctest::Approx(0.5f).epsilon(1e-4));
+			CHECK(ev.weapon_of(0) == kNoCrowdWeapon);
+			Xform mz;
+			CHECK(!ev.muzzle_model(0, mz));
+			CHECK((ev.foot_plants(0) & kCrowdPlantsMeasured) == 0);
+			CHECK(ev.combat_stats().seated == 1);
+			if (f == 0) {
+				first.assign(ev.model(0).begin(), ev.model(0).end());
+			} else {
+				CHECK(models_equal(first, ev.model(0)));
+			}
+			CHECK(ev.weapon_of(1) == 0);
+		}
+		CHECK(ev.drawn(0));
+		CHECK(ev.combat_stats().weapon_palettes == 1);
+
+		{
+			CrowdConfig lod;
+			lod.temporal_lod = true;
+			auto far = CrowdEvaluator::make(w.c.set, st.set, w.teams_one, 1, lod);
+			REQUIRE(far.ok());
+			std::vector<CrowdSoldierInput> one(1);
+			one[0].camera_distance = 100000.0f;
+			for (const bool sit : { false, false, true, true, false }) {
+				one[0].seated = sit;
+				(*far)->set_inputs(one, dt);
+				(*far)->evaluate_all_here();
+				CHECK(hips_y(**far, 0) == doctest::Approx(sit ? 0.5f : 1.0f).epsilon(1e-4));
+			}
+		}
+
+		SynthStance standing(w.c);
+		auto d = CrowdEvaluator::make(w.c.set, standing.set, w.teams_one, 1, config);
+		REQUIRE(d.ok());
+		std::vector<CrowdSoldierInput> one(1);
+		one[0].seated = true;
+		(*d)->set_inputs(one, dt);
+		(*d)->evaluate_all_here();
+		CHECK(hips_y(**d, 0) == doctest::Approx(1.0f).epsilon(1e-4));
+		CHECK((*d)->weapon_of(0) == 0);
+		CHECK((*d)->combat_stats().seated == 0);
 	}
 }
 

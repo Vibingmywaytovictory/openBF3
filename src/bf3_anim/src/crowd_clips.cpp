@@ -588,6 +588,21 @@ core::Result<CrowdMoveClips> load_crowd_move_clips(const CrowdClipSet &p_set, co
 	return out;
 }
 
+std::optional<Vec3> crowd_seated_hips(const Skeleton &p_rig, const CrowdClipData &p_seated) {
+	const int32_t hips = p_rig.find(kCrowdHips);
+	if (hips < 0 || p_seated.binding.rig == nullptr || p_seated.mask.size() != p_rig.size()) {
+		return std::nullopt;
+	}
+	LocalPose pose;
+	core::ant::ClipPose scratch;
+	std::vector<Xform> model;
+	const Vec3 at = joint_model_position(
+			p_rig, p_seated, hips, kCrowdSeatedPhase * float(p_seated.tracks.end_frame), pose, scratch, model);
+	if (!std::isfinite(at.x) || !std::isfinite(at.y) || !std::isfinite(at.z)) {
+		return std::nullopt;
+	}
+	return at;
+}
 }
 
 namespace bf3::anim {

@@ -60,6 +60,8 @@ struct CrowdSoldierInput {
 
 	uint8_t vault = kNoVaultAnim;
 	float vault_seconds = 0.0f;
+
+	bool seated = false;
 };
 
 struct CrowdConfig {
@@ -223,6 +225,7 @@ struct CrowdCombatStats {
 	uint32_t throwing = 0;
 	uint32_t dying = 0;
 	uint32_t vaulting = 0;
+	uint32_t seated = 0;
 	uint32_t weapon_palettes = 0;
 	uint32_t muzzles = 0;
 

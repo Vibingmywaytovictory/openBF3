@@ -13,6 +13,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -103,6 +104,7 @@ enum class CrowdMoveClip : uint8_t {
 	DeathStand,
 	DeathCrouch,
 	DeathProne,
+	Seated,
 	Count
 };
 inline constexpr size_t kCrowdMoveClips = size_t(CrowdMoveClip::Count);
@@ -110,9 +112,12 @@ inline constexpr size_t kCrowdMoveClips = size_t(CrowdMoveClip::Count);
 // STAND-IN: the crouch and prone moves and the crouch fire are picked by fixed rifle controller names for every
 // weapon. Settle: route them through the 3P Ant graph by weapon type.
 struct CrowdMoveClipNames {
-	std::array<std::string, kCrowdMoveClips> controllers{ "Rifle_SneakFwd", "Rifle_SneakBwdLeft45", "Rifle_SneakBwdRight45", "Rifle_SneakLeft1",
-		"Rifle_SneakRight1", "Rifle_CrawlFwd", "Rifle_CrawlBwd", "Rifle_CrawlLeft", "Rifle_CrawlRight", "Rifle_CrouchFire", "Death_StandChest",
-		"Death_Crouch1", "Death_Prone1" };
+	// STAND-IN: every shown seat sits in Humvee_DriverPose, not the pose its entry's AntEntryId routes to.
+	// Settle: route the seated pose through the 3P Ant graph by the entry's AntEntryId.
+	std::array<std::string, kCrowdMoveClips> controllers{ "Rifle_SneakFwd", "Rifle_SneakBwdLeft45",
+		"Rifle_SneakBwdRight45", "Rifle_SneakLeft1", "Rifle_SneakRight1", "Rifle_CrawlFwd", "Rifle_CrawlBwd",
+		"Rifle_CrawlLeft", "Rifle_CrawlRight", "Rifle_CrouchFire", "Death_StandChest", "Death_Crouch1", "Death_Prone1",
+		"Humvee_DriverPose" };
 };
 
 inline constexpr size_t kCrowdMoveStances = 2;
@@ -131,6 +136,12 @@ struct CrowdMoveClips {
 
 core::Result<CrowdMoveClips> load_crowd_move_clips(const CrowdClipSet &p_set, const core::ant::AntLibrary &p_library, const CrowdMoveClipNames &p_names = {});
 
+// INFERRED: the seated clip's middle frame is its neutral pose (the head turns least there on Humvee_DriverPose).
+// Settle: the 3P graph's input that drives the seated clip's time.
+inline constexpr float kCrowdSeatedPhase = 0.5f;
+inline constexpr std::string_view kCrowdHips = "Hips";
+
+std::optional<Vec3> crowd_seated_hips(const Skeleton &p_rig, const CrowdClipData &p_seated);
 }
 
 #include "bf3/anim/move_group.h"
