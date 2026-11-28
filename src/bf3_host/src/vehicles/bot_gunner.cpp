@@ -1,7 +1,10 @@
 #include "bot_gunner.h"
 
 #include "../bot_weapon_templates.h"
+#include "../tdm_bot_body.h"
+#include "../tdm_bot_common.h"
 #include "../tdm_bot_shared.h"
+#include "bf3/ai/main/bot_skill.h"
 #include "bf3/core/math.h"
 #include "bf3/host/gunplay.h"
 #include "bf3/host/level_vehicles.h"
@@ -21,6 +24,11 @@ namespace sw = sim::weapons;
 namespace vec = core::vec;
 
 constexpr int kVehicleTargetId = 0x100;
+// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviourPattern/BBPFireInfantery.cpp @c47317b, the fire step's 10 m
+// delay range and 1 m splash precision; EntryTrigger.cpp @c47317b, the deviation scale of 3 against air.
+constexpr float kFireDelayRangeMetres = 10.0f;
+constexpr float kSplashSoldierPrecision = 1.0f;
+constexpr float kAirTargetDeviationScale = 3.0f;
 
 struct Seated {
 	const ServerVehicles *vehicles = nullptr;
@@ -77,6 +85,9 @@ void BotGunner::new_life() {
 	sense_ = {};
 	target_slot_ = -1;
 	weapon_ = -1;
+	target_vehicle_air_ = false;
+	fired_target_ = -1;
+	target_since_ = fire_at_ = last_command_ = 0;
 	aimer_slot_ = -1;
 }
 
@@ -86,6 +97,7 @@ ai::SeatFireSense BotGunner::evaluate(
 	sense_ = {};
 	target_slot_ = -1;
 	weapon_ = -1;
+	target_vehicle_air_ = false;
 	const std::optional<Seated> in = seated_in(p_shared, p_slot);
 	if (!in) {
 		return sense_;
@@ -179,11 +191,17 @@ ai::SeatFireSense BotGunner::evaluate(
 	sense_.target = targets_[size_t(choice.target)].id;
 	target_slot_ = target_slots_[size_t(choice.target)];
 	weapon_ = int(weapon_index_[size_t(choice.weapon)]);
+	const std::optional<VehicleSeat> theirs = vehicles.seat_of(uint8_t(target_slot_));
+	target_vehicle_air_ = theirs && size_t(theirs->vehicle) < scene.size() &&
+			scene[theirs->vehicle].kind == ai::ChangeUnitKind::Air && own.kind != ai::ChangeUnitKind::Naval &&
+			in->seat.seat != 0;
 	return sense_;
 }
 
-bool BotGunner::command(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, bool p_fire, sim::Command &r_cmd) {
-	const std::optional<Seated> in = seated_in(r_shared, p_slot);
+bool BotGunner::command(tdm_bot::BotBody &r_body, sim::Tick p_tick, bool p_fire, sim::Command &r_cmd) {
+	TdmShared &r_shared = *r_body.shared;
+	const uint8_t slot = r_body.slot;
+	const std::optional<Seated> in = seated_in(r_shared, slot);
 	const ServerView &view = *r_shared.host.view;
 	if (!in || target_slot_ < 0 || weapon_ < 0 || !view.alive(uint8_t(target_slot_))) {
 		return false;
@@ -206,6 +224,21 @@ bool BotGunner::command(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, b
 	const core::Transform frame = sim::vehicles::weapon_world(*in->model->armament, armament, hull, w);
 	const sim::Vec3 muzzle = sim::vehicles::weapon_muzzle(*in->model->armament, armament, hull, w);
 	const sw::ProjectileSimDef &p = table->defs[def].projectile;
+	const ai::WeaponTemplate *t = r_shared.weapons->seat_weapon(in->kind, w);
+	if (t == nullptr) {
+		return false;
+	}
+	// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviourPattern/BBPFireInfantery.cpp @c47317b: a fire plan that starts
+	// fresh waits fire_delay_s before its first shot with a weapon reaching past 10 m; BBFire's target sets its time.
+	if (sense_.target != fired_target_ || p_tick > last_command_ + 1u) {
+		const bool running = fired_target_ >= 0 && p_tick <= last_command_ + 1u;
+		fired_target_ = sense_.target;
+		target_since_ = p_tick;
+		fire_at_ = ai::fresh_fire_plan(running, r_body.skill) && t->max_range > kFireDelayRangeMetres
+				? p_tick + sim::seconds_to_ticks(ai::fire_delay_s(r_body.skill, tdm_bot::unit(r_body.rng)))
+				: p_tick;
+	}
+	last_command_ = p_tick;
 	const float range = vec::length(vec::sub(target, muzzle));
 	ai::Vec3 aim = vec::normalize_or(vec::sub(target, muzzle), frame.forward);
 	if (!p.instant_hit) {
@@ -221,19 +254,36 @@ bool BotGunner::command(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, b
 			aim = dir;
 		}
 	}
-	r_cmd.yaw = sim::quantize_yaw(std::atan2(aim[0], aim[2]));
-	r_cmd.pitch = sim::quantize_pitch(std::asin(std::clamp(aim[1], -1.0f, 1.0f)));
-	if (!p_fire) {
+	// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIPlanInterpreter/EntryTrigger.cpp @c47317b: a vehicle's fire takes the
+	// bot skill's deviation through setBotSkill, timed from when the target was set.
+	ai::TriggerWeapon trigger;
+	trigger.thrown = t->is_thrown;
+	trigger.explosion_radius = t->explosion_radius;
+	// INFERRED: every vehicle target is an occupied human vehicle, as the pin's bot lookup finds no bot for a vehicle.
+	// Settle: BF2's IBotManager::getBot on a vehicle's AI object.
+	const bool human_vehicle = !soldier;
+	// STAND-IN: the seat templates' deviation is the pin's WeaponTemplate default and no seat weapon counts as guided.
+	// Settle: a per-weapon deviation and guidance type from BF3's weapon data or retail footage.
+	const float sigma = ai::ai_deviation_deg(*t, ai::trigger_skill(r_body.skill, trigger, false, human_vehicle),
+								double(p_tick - target_since_) * sim::kTickSeconds,
+								target_vehicle_air_ ? kAirTargetDeviationScale : 1.0f) *
+			core::kDegToRadF;
+	const tdm_bot::AimError err = r_body.targeting.aim_error(p_tick, sigma, r_body.rng);
+	const float yaw = std::atan2(aim[0], aim[2]) + err.yaw;
+	const float pitch = std::asin(std::clamp(aim[1], -1.0f, 1.0f)) + err.pitch;
+	aim = { std::sin(yaw) * std::cos(pitch), std::sin(pitch), std::cos(yaw) * std::cos(pitch) };
+	r_cmd.yaw = sim::quantize_yaw(yaw);
+	r_cmd.pitch = sim::quantize_pitch(pitch);
+	if (!p_fire || p_tick < fire_at_) {
 		return true;
 	}
-	const ai::WeaponTemplate *t = r_shared.weapons->seat_weapon(in->kind, w);
-	const sim::Vec3 own = vehicles.seat_position(p_slot).value_or(muzzle);
+	const sim::Vec3 own = vehicles.seat_position(slot).value_or(muzzle);
 	const bool close_vehicle = !soldier && std::fabs(target[1] - own[1]) < ai::kPrecisionCloseHeight &&
 			vec::length(vec::sub(target, own)) < ai::kPrecisionCloseMetres;
-	// STAND-IN: the precision is the pin's WeaponTemplate default allowedDeviation (0.5 m), as BF3 data has none.
-	// Settle: a per-weapon precision from BF3's weapon data or retail footage.
-	if (t == nullptr ||
-			!ai::fire_precise(vec::normalize(frame.forward), aim, range, t->allowed_deviation, close_vehicle)) {
+	// STAND-IN: the precision is the pin's WeaponTemplate default allowedDeviation (0.5 m), as BF3 data has none, and
+	// BBPFireInfantery's 1 m for a vehicle's splash weapon at a soldier. Settle: a per-weapon precision from BF3 data.
+	const float precision = soldier && t->explosion_radius != 0.0f ? kSplashSoldierPrecision : t->allowed_deviation;
+	if (!ai::fire_precise(vec::normalize(frame.forward), aim, range, precision, close_vehicle)) {
 		return true;
 	}
 	// STAND-IN: a single-shot or burst seat weapon has its trigger let go every other tick, openBF3's own press rule.
@@ -246,5 +296,4 @@ bool BotGunner::command(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, b
 	}
 	return true;
 }
-
 }

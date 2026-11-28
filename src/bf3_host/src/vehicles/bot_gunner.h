@@ -16,6 +16,10 @@ namespace bf3::host {
 
 struct TdmShared;
 
+namespace tdm_bot {
+struct BotBody;
+}
+
 std::optional<sim::Vec3> seat_view(const TdmShared &p_shared, uint8_t p_slot);
 
 class BotGunner {
@@ -23,12 +27,17 @@ public:
 	void new_life();
 	ai::SeatFireSense evaluate(const TdmShared &p_shared, uint8_t p_slot, const sim::bots::Perception &p_perception);
 	const ai::SeatFireSense &sense() const { return sense_; }
-	bool command(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, bool p_fire, sim::Command &r_cmd);
+	bool command(tdm_bot::BotBody &r_body, sim::Tick p_tick, bool p_fire, sim::Command &r_cmd);
 
 private:
 	ai::SeatFireSense sense_;
 	int target_slot_ = -1;
 	int weapon_ = -1;
+	bool target_vehicle_air_ = false;
+	int fired_target_ = -1;
+	sim::Tick target_since_ = 0;
+	sim::Tick fire_at_ = 0;
+	sim::Tick last_command_ = 0;
 	ai::Aimer aimer_;
 	int aimer_slot_ = -1;
 	std::vector<ai::SeatFireWeapon> weapons_;

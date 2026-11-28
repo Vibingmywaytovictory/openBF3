@@ -454,7 +454,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 				}
 			}
 			if (!crew.target() && seat_aim) {
-				gunner.command(*body.shared, body.slot, p_tick, seat_fire_held, cmd);
+				gunner.command(body, p_tick, seat_fire_held, cmd);
 			}
 			return cmd;
 		}
