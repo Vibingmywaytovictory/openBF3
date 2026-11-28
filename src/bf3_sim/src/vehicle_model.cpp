@@ -280,8 +280,10 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	if (collision != nullptr) {
 		m->friction = collision->friction;
 		m->restitution = collision->restitution;
-		m->linear_damping = std::max(collision->linear_damping, 0.0f);
-		m->angular_damping = std::max(collision->angular_damping, 0.0f);
+		m->linear_damping =
+				collision->linear_damping >= 0.0f ? collision->linear_damping : vehicles::kBodyDefaultLinearDamping;
+		m->angular_damping =
+				collision->angular_damping >= 0.0f ? collision->angular_damping : vehicles::kBodyDefaultAngularDamping;
 	}
 	if (!finite(m->linear_damping) || m->linear_damping > 100.0f || !finite(m->angular_damping) ||
 			m->angular_damping > 100.0f) {

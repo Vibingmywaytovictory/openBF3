@@ -446,6 +446,8 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 	body.mFriction = m.friction;
 	body.mRestitution = m.restitution;
 	body.mLinearDamping = m.linear_damping;
+	// STAND-IN: Jolt's per-step damping law, w x (1 - c dt), stands in for the middleware's (R8-G1-inertia: not found).
+	// Settle: a note that decodes the middleware's damping step.
 	body.mAngularDamping = m.angular_damping;
 	body.mGravityFactor = m.gravity_factor;
 	body.mAllowSleeping = true;

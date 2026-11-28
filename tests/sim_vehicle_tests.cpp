@@ -1930,7 +1930,8 @@ TEST_SUITE("sim-vehicle-handling") {
 	}
 
 	TEST_CASE("sim.vehicle.handling: on flat ground the Growler's front wheels turn pi x 0.28 at full steer, its yaw "
-			  "spin decays by MotionDamping, the M1A2's and T-90's track wheels do not steer while their turn terms "
+			  "spin decays by MotionDamping and the body's 0.05 /s (the M1A2's by the latter alone), the M1A2's and "
+			  "T-90's track wheels do not steer while their turn terms "
 			  "pull their sides apart up to 800 x SteeringSensitivity with the hull below 1 rad/s, and each tank "
 			  "stays under the speed where TransmissionLoss and rolling resistance meet its drive") {
 		HandlingModels *h = handling_models();
@@ -1966,7 +1967,22 @@ TEST_SUITE("sim-vehicle-handling") {
 		const float yaw_rate = spin->state(0).body.angular_velocity[1];
 		std::printf(
 				"sim.vehicle.handling: Growler in the air, yaw 1 rad/s -> %.4f rad/s after 1 s\n", double(yaw_rate));
-		CHECK(yaw_rate == doctest::Approx(std::exp(-2.0f)).epsilon(1e-3));
+		CHECK(yaw_rate == doctest::Approx(std::exp(-2.0f - vehicles::kBodyDefaultAngularDamping)).epsilon(1e-3));
+
+		std::unique_ptr<VehicleWorld> tank_spin = world_at(flat, h->m1a2, placed(0, 40, -300));
+		VehicleState tank_airborne = tank_spin->state(0);
+		tank_airborne.body.angular_velocity = { 0.0f, 1.0f, 0.0f };
+		REQUIRE(tank_spin->restore_vehicle_state(0, tank_airborne, vehicle_restore::kBody, ContactCachePolicy::Keep)
+						.ok());
+		for (uint32_t t = 0; t < kSimHz; ++t) {
+			step1(*tank_spin, command(0, 0, 0));
+		}
+		const float tank_yaw_rate = tank_spin->state(0).body.angular_velocity[1];
+		std::printf("sim.vehicle.handling: M1A2 in the air, yaw 1 rad/s -> %.4f rad/s after 1 s (no MotionDamping; "
+					"the body's 0.05 /s)\n",
+				double(tank_yaw_rate));
+		CHECK(h->m1a2->angular_damping == vehicles::kBodyDefaultAngularDamping);
+		CHECK(tank_yaw_rate == doctest::Approx(std::exp(-vehicles::kBodyDefaultAngularDamping)).epsilon(1e-3));
 
 		for (const std::shared_ptr<const VehicleModel> &tank : { h->m1a2, h->t90 }) {
 			std::unique_ptr<VehicleWorld> pivot = world_at(flat, tank, placed(0, 0, -300));
@@ -2288,7 +2304,8 @@ TEST_SUITE("sim-vehicle-handling") {
 	}
 
 	TEST_CASE("sim.vehicle.handling: a manned idle LAV-AD, M1A2 and Growler hold on a 12 deg slope (the stand-still "
-			  "brake; the LAV-AD has no low-speed auto brake)") {
+			  "brake engages on the first tick, the rocking Growler's on flat ground on the second; the LAV-AD has "
+			  "no low-speed auto brake)") {
 		HandlingModels *h = handling_models();
 		if (h == nullptr) {
 			return;
@@ -2305,11 +2322,12 @@ TEST_SUITE("sim-vehicle-handling") {
 				VehicleCommand idle = command(0, 0, 0);
 				idle.flags = vehicle_flags::kDriven;
 				std::array<float, 2> planar{};
+				std::optional<uint32_t> engaged;
 				for (uint32_t t = 0; t < 5 * kSimHz; ++t) {
 					step1(*w, idle);
 					const VehicleState s = w->state(0);
-					if (t == 0) {
-						CHECK(s.driver.stand_still_ticks > 0);
+					if (!engaged && s.driver.stand_still_ticks > 0) {
+						engaged = t;
 					}
 					if (t + 1 == kSimHz || t + 1 == 5 * kSimHz) {
 						planar[t + 1 == kSimHz ? 0 : 1] =
@@ -2318,11 +2336,16 @@ TEST_SUITE("sim-vehicle-handling") {
 				}
 				const Vec3 to = w->state(0).body.origin;
 				const float moved = std::hypot(to[0] - at[0], to[2] - at[2]);
-				std::printf("sim.vehicle.handling: %s manned and idle 5 s on %s: moved %.4f m, horizontal speed %.5f / "
-							"%.5f m/s at 1 / 5 s\n",
-						model->blueprint.c_str(), sloped ? "the 12 deg slope" : "flat ground", double(moved),
-						double(planar[0]), double(planar[1]));
+				std::printf(
+						"sim.vehicle.handling: %s manned and idle 5 s on %s: stand-still from tick %d, moved %.4f m, "
+						"horizontal speed %.5f / %.5f m/s at 1 / 5 s\n",
+						model->blueprint.c_str(), sloped ? "the 12 deg slope" : "flat ground",
+						engaged ? int(*engaged) : -1, double(moved), double(planar[0]), double(planar[1]));
 				CHECK(model->stand_still_brake);
+				REQUIRE(engaged.has_value());
+				// WHY: the settled Growler still rocks on flat ground, and its first substep's yaw and pitch can trip
+				// R7-G1-standstill's angular-speed release term, so the rule may engage one tick later.
+				CHECK(*engaged <= (model == h->growler && !sloped ? 1u : 0u));
 				CHECK(moved < 0.1f);
 			}
 		}

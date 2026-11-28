@@ -10,6 +10,10 @@ struct Shape;
 
 namespace bf3::sim::vehicles {
 
+// SOURCE: notes R8-G1-inertia rule 1 (the middleware body's damping defaults, kept by a negative RigidBodyData value).
+inline constexpr float kBodyDefaultLinearDamping = 0.0f;
+inline constexpr float kBodyDefaultAngularDamping = 0.05f;
+
 struct ChassisVolume {
 	float volume = 0;
 	Vec3 centroid{};
