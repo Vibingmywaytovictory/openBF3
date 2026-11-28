@@ -8,6 +8,7 @@ godot_run(SKIP_WITHOUT_INSTALL TIMEOUT 300
         --level=MP_007 --mode=ConquestSmall0 --bots=16 --deploy-screen=0 --preround=0 --min-players=1 --bot-vehicles
         "--bot-vehicles-shots=${shots}" ${godot_cache_args})
 godot_require_pass("BOT VEHICLES ROW bots_seated PASS")
+godot_require_pass("BOT VEHICLES ROW bot_drawn_seated PASS")
 godot_require_pass("BOT VEHICLES ROW shot PASS")
 godot_require_pass("BOT VEHICLES ROW bot_driving PASS")
 godot_require_pass("BOT VEHICLES ROW drive_shot PASS")

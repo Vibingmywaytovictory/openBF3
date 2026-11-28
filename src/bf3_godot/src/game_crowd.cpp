@@ -110,6 +110,8 @@ struct Bf3GameCrowd::Impl {
 	bool have_pose = false;
 	anim::CrowdMoveClips moves;
 	bool have_moves = false;
+	std::optional<anim::Vec3> seated_hips;
+	int32_t hips_joint = -1;
 	anim::CrowdMoveGroupSet move_groups;
 	bool have_move_groups = false;
 	anim::CrowdDeathClips death_clips;
@@ -192,6 +194,7 @@ struct Bf3GameCrowd::Impl {
 		bool vault_held = false;
 		float vault_y = 0.0f;
 		uint8_t death_clip = anim::kNoCrowdDeathClip;
+		anim::Quat seat_rotation{};
 	};
 	std::array<Slot, kSlotsPerTeam> slots{};
 	std::array<uint8_t, kSlotsPerTeam> plants{};
@@ -581,13 +584,17 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 	}
 	const anim::Vec3 cam{ p_frame.camera.trans.x, p_frame.camera.trans.y, p_frame.camera.trans.z };
 	stats.unknown_weapons = 0;
-	for (size_t i = 0; i < p_frame.others.size(); ++i) {
-		const host::PresentedSoldier &o = p_frame.others[i];
-		if (o.slot >= kSlotsPerTeam) {
+	const size_t walking = p_frame.others.size();
+	for (size_t i = 0; i < walking + p_frame.seated.size(); ++i) {
+		const SeatedOther *seat = i >= walking ? &p_frame.seated[i - walking] : nullptr;
+		const host::PresentedSoldier &o = seat != nullptr ? seat->soldier : p_frame.others[i];
+		if (o.slot >= kSlotsPerTeam || (seat != nullptr && !seated_hips)) {
 			continue;
 		}
 		Slot &s = slots[o.slot];
-		const host::PresentedOtherWeapon *w = i < p_frame.other_weapons.size() && p_frame.other_weapons[i].valid ? &p_frame.other_weapons[i] : nullptr;
+		const host::PresentedOtherWeapon *w = seat != nullptr ? (seat->weapon.valid ? &seat->weapon : nullptr)
+				: i < p_frame.other_weapons.size() && p_frame.other_weapons[i].valid ? &p_frame.other_weapons[i]
+																					 : nullptr;
 		const uint8_t team = w != nullptr && w->team != 0 ? anim::crowd_team_of_wire(w->team) : (s.known ? s.team : uint8_t(0));
 		const bool same_life = s.known && s.generation == o.generation;
 		const float last_y = s.input.position.y;
@@ -652,6 +659,19 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 		} else {
 			s.vault_held = false;
 		}
+		if (seat != nullptr) {
+			in.seated = true;
+			in.velocity = anim::Vec3{};
+			in.pitch = 0.0f;
+			in.vault = anim::kNoVaultAnim;
+			s.seat_rotation = anim::Quat{ seat->rotation[0], seat->rotation[1], seat->rotation[2], seat->rotation[3] };
+			// SOURCE: bf3dump: Humvee_DriverPose's middle frame holds the hips at 0.70, 0.91, 0.28 m from its root, and
+			// HumveeArmored's driver entry sits at 0.69, 0.87, 0.26 m from the vehicle origin.
+			const anim::Vec3 hips = rotate(s.seat_rotation, *seated_hips);
+			// INFERRED: a seated clip is authored in its vehicle's frame, so its hips go on the entry's origin.
+			// Settle: a note on the 3P entry clips' frame.
+			in.position = anim::Vec3{ seat->position.x - hips.x, seat->position.y - hips.y, seat->position.z - hips.z };
+		}
 		s.input = in;
 		if ((o.flags & sim::soldier_flags::kAlive) != 0 && !s.dead) {
 			s.kit = row_kit(p_frame.frame, o.slot, s.kit);
@@ -692,9 +712,11 @@ void Bf3GameCrowd::Impl::build_inputs(const GameFrame &p_frame) {
 		if (!s.dead) {
 			kit_of[index] = s.kit;
 		}
-		const anim::Xform root{ yaw_quat(in.yaw), in.position };
+		const anim::Xform root{ in.seated ? s.seat_rotation : yaw_quat(in.yaw), in.position };
 		root_x[index] = root;
-		roots[index] = Transform3D(Basis(Vector3(0, 1, 0), in.yaw), Vector3(in.position.x, in.position.y, in.position.z));
+		const Vector3 at(in.position.x, in.position.y, in.position.z);
+		roots[index] = in.seated ? Transform3D(Basis(Quaternion(root.q.x, root.q.y, root.q.z, root.q.w)), at)
+								 : Transform3D(Basis(Vector3(0, 1, 0), in.yaw), at);
 	}
 	revive_roots();
 	cam_draw_corpses(dt, cam);
@@ -786,7 +808,9 @@ void Bf3GameCrowd::Impl::draw_weapons(const GameFrame &p_frame) {
 		}
 	}
 	stats.muzzles = uint32_t(muzzles.size());
-	stats.throwing = eval->combat_stats().throwing;
+	const anim::CrowdCombatStats combat = eval->combat_stats();
+	stats.throwing = combat.throwing;
+	stats.seated = combat.seated;
 }
 
 void Bf3GameCrowd::Impl::clear_draw() {
@@ -866,6 +890,13 @@ core::Status Bf3GameCrowd::load_body(const core::InstallReader &p_reader, core::
 			m.have_moves = true;
 			for (const std::string &n : m.moves.notes) {
 				m.body_notes.push_back("move clips: " + n);
+			}
+			if (m.moves.has(anim::CrowdMoveClip::Seated)) {
+				m.seated_hips = anim::crowd_seated_hips((*assets)->clips.rig, m.moves.get(anim::CrowdMoveClip::Seated));
+				m.hips_joint = (*assets)->clips.rig.find(anim::kCrowdHips);
+			}
+			if (!m.seated_hips) {
+				m.body_notes.push_back("seated clip: none (seated soldiers are not drawn)");
 			}
 		} else {
 			m.body_notes.push_back("move clips: " + moves.error().message);
@@ -1177,6 +1208,21 @@ bool Bf3GameCrowd::vault_of(uint8_t p_slot, uint8_t &r_kind, float &r_seconds) c
 		return false;
 	}
 	return m.eval->vault_of(uint32_t(m.slots[p_slot].team) * kSlotsPerTeam + p_slot, r_kind, r_seconds);
+}
+
+bool Bf3GameCrowd::seated_hips_at(uint8_t p_slot, sim::Vec3 &r_hips) const {
+	const Impl &m = *impl_;
+	if (!m.built || m.eval == nullptr || p_slot >= kSlotsPerTeam || !m.slots[p_slot].present) {
+		return false;
+	}
+	const Impl::Slot &s = m.slots[p_slot];
+	const uint32_t index = uint32_t(s.team) * kSlotsPerTeam + p_slot + uint32_t(s.lane) * kCamLaneOffset;
+	const std::span<const anim::Xform> model = m.eval->model(index);
+	if (!m.inputs[index].seated || !m.eval->drawn(index) || m.hips_joint < 0 || size_t(m.hips_joint) >= model.size()) {
+		return false;
+	}
+	r_hips = anim::xform_mul(m.root_x[index], model[size_t(m.hips_joint)]).t;
+	return true;
 }
 
 GameCrowdStats Bf3GameCrowd::stats() const {

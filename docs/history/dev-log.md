@@ -3697,3 +3697,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Bot gunnery 6: BotGunner's made-up inputs carry STAND-IN tags (loaded weapons, no area or attackers, the 0.5 m precision, the every-other-tick trigger); comment lines only.
 * Bot gunnery 7: host.tdm.conquest_bots checks that seated bots pull a seat's trigger and their vehicle weapons fire and hit in a full shipped-AI round (0 with 2730bdfa5's AIBehaviours.ai).
 * Bot gunnery 8: the 3p crowd poses a seated soldier in Humvee_DriverPose's middle frame (a stand-in for every shown entry), with no weapon, aim, fire, reload or foot plant, and re-poses him when he sits down or stands up even beyond the LOD range.
+* Bot gunnery 9: another soldier in an entry with ShowSoldierInEntry is drawn seated, his hips on the entry's frame on the presented hull, apart from the walking others; godot.bot_vehicles checks a seated bot is drawn there and shoots both sides of the vehicle.

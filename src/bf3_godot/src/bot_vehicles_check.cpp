@@ -9,6 +9,7 @@
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 namespace bf3::godot_side {
@@ -24,6 +25,11 @@ constexpr float kCameraBack = 9.0f;
 constexpr float kCameraUp = 4.0f;
 constexpr double kDriveTimeout = 90.0;
 constexpr float kMovedMetres = 4.0f;
+constexpr float kSeatHipsMetres = 0.001f;
+constexpr float kSideBack = 4.0f;
+constexpr float kSideUp = 1.0f;
+constexpr double kSideSeconds = 0.5;
+constexpr float kQuarterTurn = 1.5707964f;
 
 bool bot_slot(const host::PresentationFrame &p_frame, uint8_t p_slot) {
 	for (size_t i = 0; i < p_frame.player_count && i < p_frame.players.size(); ++i) {
@@ -46,12 +52,13 @@ void BotVehiclesCheck::row(const std::string &p_name, bool p_pass, const std::st
 }
 
 void BotVehiclesCheck::aim(Bf3LevelSession &r_session) const {
-	const float sy = std::sin(heading_), cy = std::cos(heading_);
-	const float pitch = -std::atan2(kCameraUp, kCameraBack);
-	r_session.mapper().script_view(heading_, pitch);
+	const float heading = heading_ + side_;
+	const float back = side_ != 0.0f ? kSideBack : kCameraBack, up = side_ != 0.0f ? kSideUp : kCameraUp;
+	const float sy = std::sin(heading), cy = std::cos(heading);
+	const float pitch = -std::atan2(up, back);
+	r_session.mapper().script_view(heading, pitch);
 	r_session.cameras().set_free(true);
-	r_session.cameras().place_free(
-			Vector3(at_[0] - sy * kCameraBack, at_[1] + kCameraUp, at_[2] - cy * kCameraBack), heading_, pitch);
+	r_session.cameras().place_free(Vector3(at_[0] - sy * back, at_[1] + up, at_[2] - cy * back), heading, pitch);
 }
 
 bool BotVehiclesCheck::follow(const host::PresentationFrame &p_frame) {
@@ -66,6 +73,20 @@ bool BotVehiclesCheck::follow(const host::PresentationFrame &p_frame) {
 		return true;
 	}
 	return false;
+}
+
+void BotVehiclesCheck::see_drawn(const host::PresentationFrame &p_frame, const BotVehiclesInputs &p_in) {
+	for (const SeatedSoldierRoot &r : last_roots_) {
+		sim::Vec3 at{};
+		if (!p_in.drawn_seated || !bot_slot(p_frame, r.slot) || !p_in.drawn_seated(r.slot, at)) {
+			continue;
+		}
+		++drawn_;
+		drawn_off_ = float(r.root.origin.distance_to(Vector3(at[0], at[1], at[2])));
+		worst_off_ = std::max(worst_off_, drawn_off_);
+		on_entry_ += drawn_off_ < kSeatHipsMetres ? 1u : 0u;
+	}
+	last_roots_.assign(p_in.seat_roots.begin(), p_in.seat_roots.end());
 }
 
 bool BotVehiclesCheck::step(Bf3LevelSession &r_session, const BotVehiclesInputs &p_in, double p_delta) {
@@ -109,6 +130,7 @@ bool BotVehiclesCheck::step(Bf3LevelSession &r_session, const BotVehiclesInputs 
 		case Phase::Frame:
 			follow(f);
 			aim(r_session);
+			see_drawn(f, p_in);
 			framed_ += p_delta;
 			if (framed_ < kFrameSeconds) {
 				return false;
@@ -116,13 +138,38 @@ bool BotVehiclesCheck::step(Bf3LevelSession &r_session, const BotVehiclesInputs 
 			row("bots_seated", true,
 					fmt("%u bots in %u vehicles after %.1f s; framed spawner %u at %.1f %.1f %.1f", seated_, vehicles_,
 							t_ - framed_, unsigned(spawner_), double(at_[0]), double(at_[1]), double(at_[2])));
+			row("bot_drawn_seated", on_entry_ > 0 && drawn_off_ >= 0.0f && drawn_off_ < kSeatHipsMetres,
+					fmt("%u of %u bot-frames seated with the hips on the entry; last %.4f m, worst %.4f m off",
+							on_entry_, drawn_, double(drawn_off_), double(worst_off_)));
 			if (!shots_.empty() && p_in.shot) {
 				row("shot", p_in.shot(shots_ + "/bots_in_vehicle.png"), shots_ + "/bots_in_vehicle.png");
 			}
+			side_ = kQuarterTurn;
+			framed_ = 0.0;
+			phase_ = Phase::Sides;
+			return false;
+		case Phase::Sides: {
+			follow(f);
+			aim(r_session);
+			framed_ += p_delta;
+			if (framed_ < kSideSeconds) {
+				return false;
+			}
+			const std::string name = side_ > 0.0f ? "/bot_seated_side_a.png" : "/bot_seated_side_b.png";
+			if (!shots_.empty() && p_in.shot) {
+				row("side_shot", p_in.shot(shots_ + name), shots_ + name);
+			}
+			framed_ = 0.0;
+			if (side_ > 0.0f) {
+				side_ = -kQuarterTurn;
+				return false;
+			}
+			side_ = 0.0f;
 			boarded_ = at_;
 			driving_ = 0.0;
 			phase_ = Phase::Drive;
 			return false;
+		}
 		case Phase::Drive: {
 			driving_ += p_delta;
 			const bool live = follow(f);

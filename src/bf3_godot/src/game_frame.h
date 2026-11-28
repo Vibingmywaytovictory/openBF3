@@ -8,6 +8,7 @@
 #include "bf3/host/level_load.h"
 #include "bf3/host/presentation_events.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -29,6 +30,13 @@ struct GameLoadInputs {
 	uint8_t own_team = 1;
 };
 
+struct SeatedOther {
+	host::PresentedSoldier soldier;
+	host::PresentedOtherWeapon weapon;
+	sim::Vec3 position{};
+	std::array<float, 4> rotation{ 0, 0, 0, 1 };
+};
+
 struct GameFrame {
 	const host::PresentationFrame *frame = nullptr;
 	host::PresentClock clock;
@@ -37,6 +45,7 @@ struct GameFrame {
 	std::span<const host::PresentEvent> events;
 	std::span<const host::PresentedSoldier> others;
 	std::span<const host::PresentedOtherWeapon> other_weapons;
+	std::span<const SeatedOther> seated;
 	std::span<const fx::MuzzleSample> muzzles;
 
 	fx::Transform camera;

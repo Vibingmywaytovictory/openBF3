@@ -67,6 +67,11 @@ struct OwnVehicleSeat {
 	std::vector<godot::Transform3D> turrets;
 };
 
+struct SeatedSoldierRoot {
+	uint8_t slot = 0;
+	godot::Transform3D root;
+};
+
 struct VehicleSeatView {
 	godot::Transform3D camera;
 	float fov_deg = 0.0f;
@@ -106,6 +111,7 @@ public:
 	bool built() const { return root_ != nullptr; }
 	void step(const host::PresentationFrame &p_frame, uint64_t p_now_ns, uint8_t p_own_slot, Bf3GameFx *p_fx);
 	std::optional<OwnVehicleSeat> own_seat() const { return own_; }
+	std::span<const SeatedSoldierRoot> seated_roots() const { return seated_; }
 	const host::LevelVehicles *level() const { return level_.get(); }
 	const GameVehiclesStats &stats() const { return stats_; }
 	std::optional<GameVehicleView> view(uint16_t p_spawner) const;
@@ -156,6 +162,7 @@ private:
 	std::vector<Husk> husks_;
 	host::VehicleWrecks wrecked_;
 	std::optional<OwnVehicleSeat> own_;
+	std::vector<SeatedSoldierRoot> seated_;
 	ChaseCamera chase_;
 	std::optional<std::array<uint32_t, 3>> chase_key_;
 	present::VehicleZoom zoom_;

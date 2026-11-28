@@ -257,6 +257,7 @@ bool GameVehicles::build(Node3D *p_parent, std::string *r_error) {
 void GameVehicles::step(
 		const host::PresentationFrame &p_frame, uint64_t p_now_ns, uint8_t p_own_slot, Bf3GameFx *p_fx) {
 	own_.reset();
+	seated_.clear();
 	if (root_ == nullptr || ObjectDB::get_instance(root_id_) == nullptr || level_ == nullptr) {
 		return;
 	}
@@ -300,6 +301,16 @@ void GameVehicles::step(
 					present::turret_offsets(*armament, std::span<const float>(angle.data(), angles))) {
 				turrets.push_back(godot_transform(o));
 			}
+		}
+		const host::LevelVehicleKind &seats = level_->kinds[kind];
+		for (size_t s = 0; s < v.seat_count && s < seats.seat_defs.size(); ++s) {
+			const core::gameplay::VehicleSeatDef &seat = seats.seat_defs[s];
+			const uint8_t slot = v.occupants[s];
+			if (slot == net::kNoVehicleOccupant || slot == p_own_slot || !seat.shows_soldier) {
+				continue;
+			}
+			// STAND-IN: an entry on a turret keeps its rest frame. Settle: carry the entry on its turret.
+			seated_.push_back(SeatedSoldierRoot{ slot, body * godot_transform(seat.transform) });
 		}
 		if (own_seat) {
 			const Vector3 forward = body.basis.get_column(2);

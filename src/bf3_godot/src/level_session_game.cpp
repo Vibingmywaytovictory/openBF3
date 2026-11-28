@@ -1113,9 +1113,24 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 	std::array<host::PresentedOtherWeapon, bf3::net::kMaxSlots> weapons{};
 	size_t walking = 0;
 	const std::span<const host::PresentedVehicle> vehicles(p_frame.vehicles.data(), p_frame.vehicle_count);
+	std::array<SeatedOther, bf3::net::kMaxSlots> seated{};
+	size_t seated_count = 0;
+	const std::span<const SeatedSoldierRoot> seat_roots =
+			r_game.vehicles != nullptr ? r_game.vehicles->seated_roots() : std::span<const SeatedSoldierRoot>{};
 	for (size_t i = 0; i < n; ++i) {
-		// STAND-IN: a seated soldier is not drawn, as no seated pose is built. Settle: the entry's seated animation.
+		// WHY: a seated soldier is drawn apart from the walking others, so no footstep, foley or muzzle reads him.
 		if (host::vehicle_seat_of(vehicles, soldiers[i].slot)) {
+			for (const SeatedSoldierRoot &r : seat_roots) {
+				if (r.slot != soldiers[i].slot || seated_count >= seated.size()) {
+					continue;
+				}
+				SeatedOther &o = seated[seated_count++];
+				o.soldier = soldiers[i];
+				o.weapon = i < p_other_count ? p_others[i] : host::PresentedOtherWeapon{};
+				o.position = { r.root.origin.x, r.root.origin.y, r.root.origin.z };
+				const Quaternion q = r.root.basis.get_rotation_quaternion();
+				o.rotation = { q.x, q.y, q.z, q.w };
+			}
 			continue;
 		}
 		if (i < p_other_count) {
@@ -1125,6 +1140,7 @@ void step_game_parts(Node3D &r_parent, GameState &r_game, const host::Presentati
 	}
 	mf.others = std::span<const host::PresentedSoldier>(soldiers.data(), walking);
 	mf.other_weapons = std::span<const host::PresentedOtherWeapon>(weapons.data(), std::min(walking, p_other_count));
+	mf.seated = std::span<const SeatedOther>(seated.data(), seated_count);
 	mf.free_camera = p_free_camera;
 	mf.own_alive = r_game.alive;
 	mf.own_slot = r_game.own_slot;
@@ -1710,6 +1726,12 @@ bool Bf3LevelSession::game_frame(double p_delta, uint64_t p_now_ns) {
 	if (g.bot_vehicles != nullptr && !g.finished) {
 		BotVehiclesInputs in;
 		in.shot = [this](const std::string &p_path) { return save_screenshot(p_path); };
+		in.drawn_seated = [&g](uint8_t p_slot, sim::Vec3 &r_at) {
+			return g.crowd != nullptr && g.crowd->seated_hips_at(p_slot, r_at);
+		};
+		if (g.vehicles != nullptr) {
+			in.seat_roots = g.vehicles->seated_roots();
+		}
 		if (g.bot_vehicles->step(*this, in, p_delta)) {
 			g.finished = true;
 			UtilityFunctions::print(
