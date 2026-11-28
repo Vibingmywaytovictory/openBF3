@@ -100,6 +100,8 @@ ai::SeatFireSense BotGunner::evaluate(
 		if (t == nullptr || size_t(arms[w].seat) != in->seat.seat) {
 			continue;
 		}
+		// STAND-IN: every seat weapon counts as loaded and none as the active one, as the mount's magazine is not read.
+		// Settle: feed the VehicleGunnery mount's magazine, reserve and selected weapon.
 		ai::SeatFireWeapon f;
 		f.strengths = t->strengths;
 		f.min_range = t->min_range;
@@ -123,6 +125,8 @@ ai::SeatFireSense BotGunner::evaluate(
 	// seat is a static weapon whose camera test applies. Settle: BF2's IPIMobile on a secondary seat object.
 	bot.mobile = in->seat.seat == 0;
 	bot.max_speed = bot.mobile ? own.max_speed : 0.0f;
+	// STAND-IN: the seat takes no ordered area and no attacker memory, so the area factor is 0.5 and the attack
+	// factor 1. Settle: feed the SAI's ordered area and the bot's recent attackers.
 	bot.current_target = previous;
 	targets_.clear();
 	target_slots_.clear();
@@ -226,11 +230,14 @@ bool BotGunner::command(TdmShared &r_shared, uint8_t p_slot, sim::Tick p_tick, b
 	const sim::Vec3 own = vehicles.seat_position(p_slot).value_or(muzzle);
 	const bool close_vehicle = !soldier && std::fabs(target[1] - own[1]) < ai::kPrecisionCloseHeight &&
 			vec::length(vec::sub(target, own)) < ai::kPrecisionCloseMetres;
+	// STAND-IN: the precision is the pin's WeaponTemplate default allowedDeviation (0.5 m), as BF3 data has none.
+	// Settle: a per-weapon precision from BF3's weapon data or retail footage.
 	if (t == nullptr ||
 			!ai::fire_precise(vec::normalize(frame.forward), aim, range, t->allowed_deviation, close_vehicle)) {
 		return true;
 	}
-	// WHY: a single-shot or burst seat weapon fires on the trigger's press, so the trigger is let go every other tick.
+	// STAND-IN: a single-shot or burst seat weapon has its trigger let go every other tick, openBF3's own press rule.
+	// Settle: BF2's Trigger and TriggerContinously entries for a single-shot weapon.
 	const bool automatic =
 			table->defs[def].mode_count > 0 && table->defs[def].modes[0].logic == core::gameplay::FireLogic::Automatic;
 	if (automatic || p_tick % 2u == 0u) {
