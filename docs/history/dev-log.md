@@ -3693,3 +3693,4 @@ Measured 2026-10-19 on `pt1/run`, on a shared machine, so the times are indicati
 * Bot gunnery 2: port BBFire::calculateUrgency's per-target seat score and BAPCConPrecision's fire test into ai/vehicle/seat_fire (bots row names them).
 * Bot gunnery 3: a seated bot's FireInfantery takes its seat's BBFire urgency and plans the seat aim and trigger; a seated Avoid scores 0, as the pin's BBAvoid scores only a soldier.
 * Bot gunnery 4: the shipped AIBehaviours.ai binds FireInfantery, Avoid and Idle for Tank and Car (BF2's Tank and ArmedCar structure) and gives a seated Change the SeatChange set, which drops MoveTo and FireInfantery.
+* Bot gunnery 5: a seated bot scores its seat's weapons on what it sees (BotGunner), looks along its seat weapon, aims the turret through the seat command and pulls its trigger when BAPCConPrecision passes; host.bots.gunnery proves M1A2 gunner, Growler gun and M1A2 driver cannon shots and hits.

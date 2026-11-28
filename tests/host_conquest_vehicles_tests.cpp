@@ -64,6 +64,9 @@ struct JeepRun {
 	sim::Tick first_exit = 0;
 	uint64_t get_outs = 0;
 	uint64_t class_switches = 0;
+	uint64_t fire_ticks = 0;
+	uint64_t seat_shots = 0;
+	uint64_t seat_hits = 0;
 	host::ServerVehicleStats vehicles;
 };
 
@@ -113,6 +116,8 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 			return;
 		}
 		out.vehicles = live->stats();
+		out.seat_shots = live->gunnery().stats().shots;
+		out.seat_hits = live->gunnery().stats().damage;
 		if (out.first_exit == 0 && stats->vehicle_get_outs.load() > 0) {
 			out.first_exit = p_tick;
 		}
@@ -163,6 +168,7 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	out.stuck_marks = stats->vehicle_stuck_marks.load();
 	out.get_outs = stats->vehicle_get_outs.load();
 	out.class_switches = stats->vehicle_class_switches.load();
+	out.fire_ticks = stats->vehicle_fire_ticks.load();
 	if (out.foot_decisions > 0) {
 		out.foot_stay = double(stats->vehicle_foot_stay_milli.load()) / 1000.0 / double(out.foot_decisions);
 	}
@@ -229,9 +235,12 @@ void check_jeeps(tt::TdmLevel *p_level, uint64_t p_seed) {
 	CHECK(run.get_outs > 0u);
 	const float sprint = sim::sprint_speed(level->shared->motor);
 	std::printf("host.tdm.conquest_vehicles: seed %llu: soldier sprint speed %.2f m/s; %llu decisions on foot, mean "
-				"staying-on-foot urgency %.3f; Change won %llu decisions; %llu equipment class switches\n",
+				"staying-on-foot urgency %.3f; Change won %llu decisions; %llu equipment class switches; %llu ticks a "
+				"seated "
+				"bot held a seat's trigger, %llu vehicle weapon shots, %llu soldier hits by them\n",
 			(unsigned long long)p_seed, double(sprint), (unsigned long long)run.foot_decisions, run.foot_stay,
-			(unsigned long long)run.change_won, (unsigned long long)run.class_switches);
+			(unsigned long long)run.change_won, (unsigned long long)run.class_switches,
+			(unsigned long long)run.fire_ticks, (unsigned long long)run.seat_shots, (unsigned long long)run.seat_hits);
 	CHECK(sprint > 0.0f);
 	CHECK(run.foot_decisions > 0u);
 	CHECK(run.foot_stay > 0.0);

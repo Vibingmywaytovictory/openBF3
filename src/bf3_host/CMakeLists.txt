@@ -60,6 +60,8 @@ target_sources(bf3_host PRIVATE
     src/vehicles/bot_crew.cpp
     src/vehicles/bot_driver.h
     src/vehicles/bot_driver.cpp
+    src/vehicles/bot_gunner.h
+    src/vehicles/bot_gunner.cpp
     include/bf3/host/presented_vehicle.h
     src/vehicles/client_vehicles.h
     src/vehicles/client_vehicles.cpp

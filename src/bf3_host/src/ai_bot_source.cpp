@@ -10,6 +10,8 @@
 #include "tdm_strategy.h"
 #include "vehicles/bot_crew.h"
 #include "vehicles/bot_driver.h"
+#include "vehicles/bot_gunner.h"
+#include "vehicles/server_vehicles.h"
 
 #include <optional>
 
@@ -55,6 +57,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 	BotIntent held;
 	BotCrew crew;
 	BotDriver driver;
+	BotGunner gunner;
+	bool seat_aim = false;
+	bool seat_fire_held = false;
 	std::optional<sim::Vec3> drive_goal;
 	TdmBotActivity planned = TdmBotActivity::Roam;
 	bool lost = false;
@@ -68,7 +73,13 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 	sim::Tick tick() const override { return now; }
 	ai::Vec3 position() const override { return state->position; }
 
-	void see() override { sighting = body.see(now, *state, view().states()); }
+	void see() override {
+		if (const std::optional<sim::Vec3> look = seat_view(*body.shared, body.slot)) {
+			body.view_yaw = yaw_of((*look)[0], (*look)[2]);
+			body.view_pitch = std::asin(std::clamp((*look)[1], -1.0f, 1.0f));
+		}
+		sighting = body.see(now, *state, view().states());
+	}
 
 	void release() {
 		held = body.begin_plan(planned);
@@ -130,7 +141,14 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		sensed.vehicle_visible = (!fr.visible || seated) && body.sense_vehicle(fr);
 		sensed.enemy_visible = fr.visible && !(seated && sensed.vehicle_visible);
 		sensed.repair_target = body.sense_repair(fr);
+		const ServerVehicles *vehicles = view().server_vehicles();
+		sensed.seated = vehicles != nullptr && vehicles->seated(body.slot);
+		if (sensed.seated) {
+			gunner.evaluate(sh, body.slot, body.awareness.perception());
+		}
 	}
+
+	ai::SeatFireSense seat_fire() override { return gunner.sense(); }
 
 	const ai::InfantrySenses &senses() const override { return sensed; }
 	float repair_urgency() const override { return body.vehicles.repair_urgency(); }
@@ -191,6 +209,8 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 		intent = body.begin_plan(planned);
 		lost = false;
 		drive_goal.reset();
+		seat_aim = false;
+		seat_fire_held = false;
 	}
 
 	bool move_to(ai::MoveGoal p_goal, const ai::Vec3 &p_point) override {
@@ -304,6 +324,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 			case ai::TriggerKind::Repair:
 				body.repair_trigger(f(), intent);
 				return true;
+			case ai::TriggerKind::SeatWeapon:
+				seat_fire_held = true;
+				return true;
 		}
 		return intent.trigger != Trigger::None;
 	}
@@ -332,6 +355,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 				break;
 			case ai::SenseFocus::Repair:
 				body.repair_aim(f(), intent);
+				break;
+			case ai::SenseFocus::SeatTarget:
+				seat_aim = true;
 				break;
 		}
 		return true;
@@ -362,6 +388,7 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 			body.new_life(p_tick, s);
 			crew.new_life(*body.shared, body.slot);
 			driver.new_life();
+			gunner.new_life();
 			drive_goal.reset();
 			sensed = ai::InfantrySenses{};
 			planned = TdmBotActivity::Roam;
@@ -425,6 +452,9 @@ struct AiBotSource::Impl final : ai::InfantryBody, BotSeat {
 					bot->set_bot_stuck(true);
 					ban_vehicle(*body.shared, body.slot);
 				}
+			}
+			if (!crew.target() && seat_aim) {
+				gunner.command(*body.shared, body.slot, p_tick, seat_fire_held, cmd);
 			}
 			return cmd;
 		}
