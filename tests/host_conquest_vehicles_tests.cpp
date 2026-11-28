@@ -67,6 +67,7 @@ struct JeepRun {
 	uint64_t fire_ticks = 0;
 	uint64_t seat_shots = 0;
 	uint64_t seat_hits = 0;
+	sim::Tick first_fire = 0;
 	host::ServerVehicleStats vehicles;
 };
 
@@ -74,7 +75,7 @@ sim::Tick take_limit() {
 	return sim::seconds_to_ticks(kTakeSeconds);
 }
 
-JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
+JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed, bool p_seat_fire) {
 	JeepRun out;
 	const host::LevelVehicles &vehicles = *p_level.shared->vehicles;
 	for (size_t i = 0; i < vehicles.spawners.size(); ++i) {
@@ -99,7 +100,9 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	c.rules.max_players = 32;
 	const sim::Tick take_end = sim::seconds_to_ticks(tt::latest_initial_delay(vehicles)) + take_limit() + sim::kSimHz;
 	c.max_ticks = take_end + sim::seconds_to_ticks(kExitSeconds);
-	c.until = [&](sim::Tick p_tick) { return p_tick >= take_end && stats->vehicle_get_outs.load() > 0; };
+	c.until = [&](sim::Tick p_tick) {
+		return p_tick >= take_end && stats->vehicle_get_outs.load() > 0 && (!p_seat_fire || out.seat_hits > 0);
+	};
 	c.after_round_ticks = 0;
 	c.hashes = false;
 	c.configure_bots = [&](host::TdmBotConfig &r_bots) {
@@ -120,6 +123,9 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed) {
 		out.seat_hits = live->gunnery().stats().damage;
 		if (out.first_exit == 0 && stats->vehicle_get_outs.load() > 0) {
 			out.first_exit = p_tick;
+		}
+		if (out.first_fire == 0 && stats->vehicle_fire_ticks.load() > 0) {
+			out.first_fire = p_tick;
 		}
 		for (JeepSeen &j : out.jeeps) {
 			const host::ServerVehicle &v = live->vehicles()[j.spawner];
@@ -219,13 +225,13 @@ JeepCount count_jeeps(const tt::TdmLevel &p_level, const JeepRun &p_run, uint64_
 	return n;
 }
 
-void check_jeeps(tt::TdmLevel *p_level, uint64_t p_seed) {
+void check_jeeps(tt::TdmLevel *p_level, uint64_t p_seed, bool p_seat_fire) {
 	tt::TdmLevel *level = p_level;
 	if (level == nullptr) {
 		return;
 	}
 	REQUIRE(level->shared->vehicles != nullptr);
-	const JeepRun run = run_jeeps(*level, p_seed);
+	const JeepRun run = run_jeeps(*level, p_seed, p_seat_fire);
 	CHECK_MESSAGE(run.error.empty(), run.error);
 	CHECK(run.in_round != 0u);
 	const JeepCount n = count_jeeps(*level, run, p_seed);
@@ -236,38 +242,47 @@ void check_jeeps(tt::TdmLevel *p_level, uint64_t p_seed) {
 	const float sprint = sim::sprint_speed(level->shared->motor);
 	std::printf("host.tdm.conquest_vehicles: seed %llu: soldier sprint speed %.2f m/s; %llu decisions on foot, mean "
 				"staying-on-foot urgency %.3f; Change won %llu decisions; %llu equipment class switches; %llu ticks a "
-				"seated "
-				"bot held a seat's trigger, %llu vehicle weapon shots, %llu soldier hits by them\n",
+				"seated bot held a seat's trigger (the first at tick %u), %llu vehicle weapon shots, %llu soldier "
+				"hits by them\n",
 			(unsigned long long)p_seed, double(sprint), (unsigned long long)run.foot_decisions, run.foot_stay,
 			(unsigned long long)run.change_won, (unsigned long long)run.class_switches,
-			(unsigned long long)run.fire_ticks, (unsigned long long)run.seat_shots, (unsigned long long)run.seat_hits);
+			(unsigned long long)run.fire_ticks, unsigned(run.first_fire), (unsigned long long)run.seat_shots,
+			(unsigned long long)run.seat_hits);
 	CHECK(sprint > 0.0f);
 	CHECK(run.foot_decisions > 0u);
 	CHECK(run.foot_stay > 0.0);
 	CHECK(run.foot_stay > 10.0 * double(sprint));
 	CHECK(run.change_won > 0u);
 	CHECK(run.class_switches > 0u);
+	if (p_seat_fire) {
+		CHECK(run.fire_ticks > 0u);
+		CHECK(run.seat_shots > 0u);
+		CHECK(run.seat_hits > 0u);
+	}
 }
 }
 
 TEST_SUITE("host-tdm-conquest-vehicles") {
-	TEST_CASE("conquest vehicles seed 1: bots take Caspian's jeeps through BBChange's choice") {
-		check_jeeps(tt::load_conquest_bots_level_once(), 1);
+	TEST_CASE("conquest vehicles seed 1: bots take Caspian's jeeps through BBChange's choice, and a seated bot "
+			  "fires its vehicle weapon and hits a soldier") {
+		check_jeeps(tt::load_conquest_bots_level_once(), 1, true);
 	}
-	TEST_CASE("conquest vehicles seed 2: bots take Caspian's jeeps through BBChange's choice") {
-		check_jeeps(tt::load_conquest_bots_level_once(), 2);
+	TEST_CASE("conquest vehicles seed 2: bots take Caspian's jeeps through BBChange's choice, and a seated bot "
+			  "fires its vehicle weapon and hits a soldier") {
+		check_jeeps(tt::load_conquest_bots_level_once(), 2, true);
 	}
-	TEST_CASE("conquest vehicles seed 3: bots take Caspian's jeeps through BBChange's choice") {
-		check_jeeps(tt::load_conquest_bots_level_once(), 3);
+	TEST_CASE("conquest vehicles seed 3: bots take Caspian's jeeps through BBChange's choice, and a seated bot "
+			  "fires its vehicle weapon and hits a soldier") {
+		check_jeeps(tt::load_conquest_bots_level_once(), 3, true);
 	}
 	TEST_CASE("conquest large vehicles seed 1: bots take Caspian Conquest Large's jeeps through BBChange's choice") {
-		check_jeeps(tt::load_conquest_large_bots_level_once(), 1);
+		check_jeeps(tt::load_conquest_large_bots_level_once(), 1, false);
 	}
 	TEST_CASE("conquest large vehicles seed 2: bots take Caspian Conquest Large's jeeps through BBChange's choice") {
-		check_jeeps(tt::load_conquest_large_bots_level_once(), 2);
+		check_jeeps(tt::load_conquest_large_bots_level_once(), 2, false);
 	}
 	TEST_CASE("conquest large vehicles seed 3: bots take Caspian Conquest Large's jeeps through BBChange's choice") {
-		check_jeeps(tt::load_conquest_large_bots_level_once(), 3);
+		check_jeeps(tt::load_conquest_large_bots_level_once(), 3, false);
 	}
 }
 
