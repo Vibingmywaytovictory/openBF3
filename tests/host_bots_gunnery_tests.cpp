@@ -13,6 +13,7 @@
 #include "ai_shipped_config.h"
 #include "tdm_bot_shared.h"
 #include "tdm_fixture.h"
+#include "vehicle_weapon_hits.h"
 #include "vehicles/server_vehicles.h"
 
 #include <cmath>
@@ -109,6 +110,7 @@ GunneryRun run_gunnery(const tt::TdmLevel &p_level, const std::function<bool(con
 	bool placed = false;
 	bool boarding = false;
 	uint64_t shots0 = 0, hits0 = 0;
+	auto seat_hits = std::make_shared<bf3::test::VehicleWeaponHits>();
 	tt::TdmRunConfig c;
 	c.seed = p_seed;
 	c.bots = 0;
@@ -129,6 +131,7 @@ GunneryRun run_gunnery(const tt::TdmLevel &p_level, const std::function<bool(con
 		auto shared = std::make_shared<host::SharedLevel>(*r_cfg.level);
 		shared->vehicles = vehicles;
 		r_cfg.level = shared;
+		r_cfg.gunplay.observer = seat_hits;
 	};
 	c.until = [&](sim::Tick) { return out.shots > 0 && out.hits > 0; };
 	c.on_tick = [&](sim::Tick p_tick, host::GameServer &r_server, tt::ScriptedPeer *) {
@@ -218,11 +221,11 @@ GunneryRun run_gunnery(const tt::TdmLevel &p_level, const std::function<bool(con
 		const host::VehicleGunneryStats &g = live->gunnery().stats();
 		if (gunner->seated_ticks == 1) {
 			shots0 = g.shots;
-			hits0 = g.damage;
+			hits0 = seat_hits->hits();
 		}
 		if (gunner->seated_ticks > 0) {
 			out.shots = g.shots - shots0;
-			out.hits = g.damage - hits0;
+			out.hits = seat_hits->hits() - hits0;
 		}
 
 		out.seated_ticks = gunner->seated_ticks;

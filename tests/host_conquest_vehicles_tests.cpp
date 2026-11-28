@@ -14,6 +14,7 @@
 #include "gunplay_fixture.h"
 #include "tdm_fixture.h"
 #include "test_support.h"
+#include "vehicle_weapon_hits.h"
 #include "vehicles/bot_crew.h"
 #include "vehicles/server_vehicles.h"
 
@@ -89,7 +90,9 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed, bool p_seat_fire
 		}
 	}
 	auto stats = std::make_shared<host::TdmBotStats>();
+	auto seat_hits = std::make_shared<bf3::test::VehicleWeaponHits>();
 	tt::TdmRunConfig c;
+	c.configure_server = [&](host::GameServerConfig &r_cfg) { r_cfg.gunplay.observer = seat_hits; };
 	c.seed = p_seed;
 	c.bots = 32;
 	c.peer = false;
@@ -120,7 +123,7 @@ JeepRun run_jeeps(const tt::TdmLevel &p_level, uint64_t p_seed, bool p_seat_fire
 		}
 		out.vehicles = live->stats();
 		out.seat_shots = live->gunnery().stats().shots;
-		out.seat_hits = live->gunnery().stats().damage;
+		out.seat_hits = seat_hits->hits();
 		if (out.first_exit == 0 && stats->vehicle_get_outs.load() > 0) {
 			out.first_exit = p_tick;
 		}

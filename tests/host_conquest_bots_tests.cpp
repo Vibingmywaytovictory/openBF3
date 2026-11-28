@@ -9,6 +9,7 @@
 #include "tdm_fixture.h"
 #include "tdm_strategy.h"
 #include "test_support.h"
+#include "vehicle_weapon_hits.h"
 #include "vehicles/server_vehicles.h"
 
 #include <algorithm>
@@ -103,6 +104,8 @@ ConquestRun run_conquest(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	c.after_round_ticks = 0;
 	c.hashes = false;
 	std::shared_ptr<host::TdmBotStats> stats;
+	auto seat_hits = std::make_shared<bf3::test::VehicleWeaponHits>();
+	c.configure_server = [&](host::GameServerConfig &r_cfg) { r_cfg.gunplay.observer = seat_hits; };
 	c.configure_bots = [&](host::TdmBotConfig &r_bots) {
 		r_bots.tuning_cfg = OPENBF3_BOT_TUNING_CFG;
 		stats = r_bots.stats;
@@ -116,7 +119,7 @@ ConquestRun run_conquest(const tt::TdmLevel &p_level, uint64_t p_seed) {
 	c.on_tick = [&](sim::Tick p_tick, host::GameServer &r_server, tt::ScriptedPeer *) {
 		if (const host::ServerVehicles *vehicles = r_server.view().server_vehicles()) {
 			out.seat_shots = vehicles->gunnery().stats().shots;
-			out.seat_hits = vehicles->gunnery().stats().damage;
+			out.seat_hits = seat_hits->hits();
 		}
 		const host::TdmRules *rules = r_server.rules();
 		const sim::logic::ConquestNatives *cq = rules != nullptr ? rules->natives().conquest() : nullptr;
