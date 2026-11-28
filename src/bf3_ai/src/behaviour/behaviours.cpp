@@ -199,6 +199,13 @@ bool BBRevive::plan(BotPlan &r_script, bool) {
 
 float BBFireInfantery::situation() {
 	const InfantrySenses &s = body_.senses();
+	// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviour/BBFire.cpp @c47317b, calculateUrgency: a vehicle seat's
+	// urgency is DS(2 x the best target's score), the host's choose_seat_fire.
+	if (s.seated) {
+		const float urgency = body_.seat_fire().urgency;
+		mode_ = urgency > 0.0f ? Mode::Seat : Mode::None;
+		return urgency;
+	}
 	if (s.grenade_running) {
 		mode_ = Mode::Throwing;
 		return kFireThrowing;
@@ -245,6 +252,11 @@ bool BBFireInfantery::plan(BotPlan &r_script, bool) {
 			r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::Vehicle));
 			r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::VehicleWeapon));
 			r_script.add(BAPStatementType::MoveToObject, object_args(ObjectGoal::Vehicle));
+			return true;
+		case Mode::Seat:
+			r_script.clear(InfantryActivity::Fight);
+			r_script.add(BAPStatementType::Sense, sense_args(SenseFocus::SeatTarget));
+			r_script.add(BAPStatementType::Trigger, trigger_args(TriggerKind::SeatWeapon));
 			return true;
 		case Mode::Blind:
 			r_script.clear(InfantryActivity::Fight);
@@ -318,6 +330,10 @@ bool BBTakeCoverInfantry::plan(BotPlan &r_script, bool) {
 
 float BBAvoid::situation() {
 	const InfantrySenses &s = body_.senses();
+	// SOURCE: OpenBF2 Code/BF2/AI/AIDLL/AI/AIBotBehaviour/BBAvoid.cpp @c47317b: calculateUrgency scores only a soldier.
+	if (s.seated) {
+		return 0.0f;
+	}
 	return s.shot_at && !s.enemy_visible ? 1.0f : 0.0f;
 }
 

@@ -38,6 +38,7 @@ struct InfantrySenses {
 	bool call_medic = false;
 	bool vehicle_visible = false;
 	bool repair_target = false;
+	bool seated = false;
 
 	bool operator==(const InfantrySenses &) const = default;
 };
@@ -47,11 +48,27 @@ struct ChangeSense {
 	int target = 0;
 };
 
+struct SeatFireSense {
+	float urgency = 0.0f;
+	int target = -1;
+};
+
 enum class MoveGoal : uint8_t { Roam, Hunt, Cover, Squad, Medkit };
 enum class ObjectGoal : uint8_t { Target, Corpse, Patient, SupplyMate, Vehicle, Repair, Equipment };
 enum class PoseRequest : uint8_t { Crouch, NearCorpse };
-enum class TriggerKind : uint8_t { Aimed, Blind, Grenade, Defib, Medkit, AmmoBag, CallMedic, VehicleWeapon, Repair };
-enum class SenseFocus : uint8_t { Target, BlindPoint, Threat, ShotOrigin, Around, Vehicle, Repair };
+enum class TriggerKind : uint8_t {
+	Aimed,
+	Blind,
+	Grenade,
+	Defib,
+	Medkit,
+	AmmoBag,
+	CallMedic,
+	VehicleWeapon,
+	Repair,
+	SeatWeapon
+};
+enum class SenseFocus : uint8_t { Target, BlindPoint, Threat, ShotOrigin, Around, Vehicle, Repair, SeatTarget };
 
 // WHY: BotSenses, SensingAgent, SensedObject and CoverDetection are not ported; the host's perception answers here.
 class InfantryBody {
@@ -64,6 +81,7 @@ public:
 	virtual void update_sensing() = 0;
 	virtual const InfantrySenses &senses() const = 0;
 	virtual ChangeSense change_sense() { return {}; }
+	virtual SeatFireSense seat_fire() { return {}; }
 	virtual float repair_urgency() const { return 1.0f; }
 
 	virtual bool can_throw_grenade() const = 0;

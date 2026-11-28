@@ -10,6 +10,7 @@
 #include "bf3/ai/bot/bot_memory.h"
 #include "bf3/ai/bot/communication_agent.h"
 #include "bf3/ai/bot/waypoints.h"
+#include "bf3/ai/interpreter/bot_plan.h"
 #include "bf3/ai/squad/squad_world.h"
 #include "bf3/ai/vehicle/vehicle_change.h"
 
@@ -660,6 +661,33 @@ TEST_SUITE("ai-behaviour") {
 			CAPTURE(b.modifiers);
 			CHECK(std::all_of(set->second.begin(), set->second.end(), [](float p_m) { return p_m == 1.0f; }));
 		}
+	}
+
+	TEST_CASE("a seated bot's fire urgency is its seat's BBFire urgency and no infantry mode, and its Avoid scores "
+			  "nothing, as the pin's BBAvoid scores only a soldier") {
+		const UCLinear unit(0.0f, 1.0f);
+		FakeBody body;
+		body.s.seated = true;
+		body.s.enemy_visible = true;
+		body.s.shot_at = true;
+		body.throw_possible = true;
+		BBFireInfantery fire(unit, body);
+		fire.reset(nullptr);
+		CHECK(fire.calculate_urgency(nullptr, 7.0f) == 0.0f);
+		CHECK(fire.mode() == BBFireInfantery::Mode::None);
+		body.seat = { 0.75f, 3 };
+		CHECK(fire.calculate_urgency(nullptr, 7.0f) == doctest::Approx(5.25f));
+		CHECK(fire.mode() == BBFireInfantery::Mode::Seat);
+		BotPlan plan(body);
+		CHECK(fire.plan(plan, false));
+		CHECK(plan.activity() == InfantryActivity::Fight);
+		CHECK(body.throws == 0);
+		BBAvoid avoid(unit, body);
+		avoid.reset(nullptr);
+		CHECK(avoid.calculate_urgency(nullptr, 1.0f) == 0.0f);
+		body.s.seated = false;
+		body.s.enemy_visible = false;
+		CHECK(avoid.calculate_urgency(nullptr, 1.0f) == 1.0f);
 	}
 
 	TEST_CASE("the shipped Change weight is the Fire weight times BBFireInfantery's peak urgency over BBChange's "
