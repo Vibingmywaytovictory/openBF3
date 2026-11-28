@@ -4,7 +4,9 @@
 #include "bf3/ai/behaviour/curves.h"
 #include "bf3/ai/bot/bot_main.h"
 #include "bf3/ai/main/ai_script.h"
+#include "bf3/ai/main/ai_settings.h"
 #include "bf3/ai/vehicle/car_control.h"
+#include "bf3/ai/vehicle/seat_fire.h"
 #include "bf3/ai/vehicle/vehicle_change.h"
 
 #include "ai_infantry_fakes.h"
@@ -665,5 +667,108 @@ TEST_SUITE("ai-vehicle") {
 		CHECK(d.largest(1.5, {}, { 0.0f, 1.0f }, 5.0f, path) == doctest::Approx(1.5707964f));
 		CHECK(d.largest(1.7, {}, { 0.0f, 1.0f }, 5.0f, straight) == doctest::Approx(1.5707964f));
 		CHECK(d.largest(2.0, {}, { 0.0f, 1.0f }, 5.0f, straight) == doctest::Approx(0.0f));
+	}
+	TEST_CASE("BBFire's seat score: a gunner seat fires at the seen enemy inside its turret's view and range, the "
+			  "range factor 1 - d / (1.2 max range) times the weapon's strength against the target's type, and DS(2 x "
+			  "score) is the urgency") {
+		ai::SeatFireWeapon gun;
+		gun.strengths[size_t(ai::CombatStrengthType::Infantry)] = 30;
+		gun.strengths[size_t(ai::CombatStrengthType::HeavyArmour)] = 2;
+		gun.max_range = 400.0f;
+		const ai::SeatFireWeapon weapons[] = { gun };
+		ai::SeatFireBot bot;
+		bot.strength_type = ai::kChangeLightArmourStrength;
+		bot.battle[size_t(ai::CombatStrengthType::Infantry)] = 3.0f;
+		ai::SeatFireTarget soldier;
+		soldier.id = 7;
+		soldier.position = { 100.0f, 0.0f, 0.0f };
+		soldier.health = 1.0f;
+		soldier.part_count = 1;
+		soldier.parts[0].battle[size_t(ai::CombatStrengthType::LightArmour)] = 4.0f;
+		soldier.parts[0].strength = 1.0f;
+		const ai::SeatFireTarget targets[] = { soldier };
+		const ai::SeatFireChoice c = ai::choose_seat_fire(bot, weapons, targets);
+		REQUIRE(c.target == 0);
+		CHECK(c.weapon == 0);
+		CHECK(c.distance == doctest::Approx(100.0f));
+		const float part = (4.0f + 1.0f + 3.0f) * ai::AiSettings::kArmourClassValues[0] * 0.5f;
+		const float score = (1.0f - 100.0f / 480.0f) * 30.0f * 0.5f * part * (400.0f * 0.1f / 100.0f);
+		CHECK(c.score == doctest::Approx(score));
+		CHECK(c.urgency == doctest::Approx(ai::DecliningSlopeCurve::calculate(2.0f * score)));
+
+		ai::SeatFireTarget hidden = soldier;
+		hidden.in_view = false;
+		const ai::SeatFireTarget hidden_targets[] = { hidden };
+		CHECK(ai::choose_seat_fire(bot, weapons, hidden_targets).target == -1);
+		ai::SeatFireTarget far = soldier;
+		far.position = { 401.0f, 0.0f, 0.0f };
+		const ai::SeatFireTarget far_targets[] = { far };
+		CHECK(ai::choose_seat_fire(bot, weapons, far_targets).target == -1);
+		ai::SeatFireTarget dead = soldier;
+		dead.health = 0.0f;
+		const ai::SeatFireTarget dead_targets[] = { dead };
+		CHECK(ai::choose_seat_fire(bot, weapons, dead_targets).urgency == 0.0f);
+		ai::SeatFireWeapon empty = gun;
+		empty.ammo = 0;
+		const ai::SeatFireWeapon empty_weapons[] = { empty };
+		CHECK(ai::choose_seat_fire(bot, empty_weapons, targets).target == -1);
+	}
+
+	TEST_CASE("BBFire's seat score: a tank cannon strong against HeavyArmour takes the enemy tank over a soldier, a "
+			  "driver reaches a target beyond its range it can drive to in 5 s at the out-of-range approach factor, "
+			  "and the current target is kept while it scores more than 1 / 1.2 of the best") {
+		ai::SeatFireWeapon cannon;
+		cannon.strengths[size_t(ai::CombatStrengthType::Infantry)] = 4;
+		cannon.strengths[size_t(ai::CombatStrengthType::HeavyArmour)] = 20;
+		cannon.max_range = 300.0f;
+		cannon.min_range = 10.0f;
+		const ai::SeatFireWeapon weapons[] = { cannon };
+		ai::SeatFireBot bot;
+		bot.strength_type = int(ai::CombatStrengthType::HeavyArmour);
+		bot.mobile = true;
+		bot.max_speed = 10.0f;
+		ai::SeatFireTarget soldier;
+		soldier.id = 1;
+		soldier.position = { 0.0f, 0.0f, 100.0f };
+		soldier.health = 1.0f;
+		soldier.part_count = 1;
+		soldier.parts[0].strength = 1.0f;
+		ai::SeatFireTarget tank;
+		tank.id = 2;
+		tank.soldier = false;
+		tank.strength_type = int(ai::CombatStrengthType::HeavyArmour);
+		tank.position = { 0.0f, 0.0f, 120.0f };
+		tank.health = 1.0f;
+		tank.part_count = 2;
+		tank.parts[0].battle[size_t(ai::CombatStrengthType::HeavyArmour)] = 5.0f;
+		tank.parts[0].strength = 4.0f;
+		tank.parts[1].strength = 4.0f;
+		const ai::SeatFireTarget both[] = { soldier, tank };
+		const ai::SeatFireChoice c = ai::choose_seat_fire(bot, weapons, both);
+		CHECK(c.target == 1);
+
+		ai::SeatFireTarget fleeing = soldier;
+		fleeing.position = { 0.0f, 0.0f, 340.0f };
+		fleeing.max_speed = 7.0f;
+		const ai::SeatFireTarget near_targets[] = { soldier };
+		const ai::SeatFireTarget out_targets[] = { fleeing };
+		const ai::SeatFireChoice in_range = ai::choose_seat_fire(bot, weapons, near_targets);
+		const ai::SeatFireChoice out_of_range = ai::choose_seat_fire(bot, weapons, out_targets);
+		REQUIRE(out_of_range.target == 0);
+		CHECK(out_of_range.score < in_range.score);
+		ai::SeatFireTarget too_far = fleeing;
+		too_far.position = { 0.0f, 0.0f, 351.0f };
+		const ai::SeatFireTarget too_far_targets[] = { too_far };
+		CHECK(ai::choose_seat_fire(bot, weapons, too_far_targets).target == -1);
+
+		ai::SeatFireTarget closer = soldier;
+		closer.id = 3;
+		closer.position = { 0.0f, 0.0f, 95.0f };
+		const ai::SeatFireTarget pair[] = { soldier, closer };
+		CHECK(ai::choose_seat_fire(bot, weapons, pair).target == 1);
+		bot.current_target = 1;
+		const ai::SeatFireChoice kept = ai::choose_seat_fire(bot, weapons, pair);
+		CHECK(kept.target == 0);
+		CHECK(kept.kept);
 	}
 }

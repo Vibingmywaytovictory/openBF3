@@ -78,6 +78,8 @@ target_sources(bf3_ai PRIVATE
     src/vehicle/vehicle_change.cpp
     include/bf3/ai/vehicle/car_control.h
     src/vehicle/car_control.cpp
+    include/bf3/ai/vehicle/seat_fire.h
+    src/vehicle/seat_fire.cpp
 )
 
 target_sources(bf3_ai PRIVATE
