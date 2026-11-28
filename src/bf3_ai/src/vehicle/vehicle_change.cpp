@@ -93,7 +93,7 @@ ChangeChoice choose_change(const ChangeBot &p_bot, std::span<const ChangeVehicle
 			} else {
 				candidate = change_unit_urgency(p_bot, p_vehicles, seat, true) * driver;
 			}
-			if (p_bot.idle_taking_flag && !carrier->seat[0].armed) {
+			if (carrier->kind != ChangeUnitKind::Air && p_bot.idle_taking_flag && !carrier->seat[0].armed) {
 				candidate *= 5.0f;
 			}
 			consider(best, seat, candidate);

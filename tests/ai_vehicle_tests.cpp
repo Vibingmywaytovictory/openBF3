@@ -176,7 +176,8 @@ TEST_SUITE("ai-vehicle") {
 	}
 
 	TEST_CASE("an idle flag-taking squad member weighs the seats of an unarmed vehicle it sits in x5, its own "
-			  "seat's current urgency unscaled, as BBChange's seat loop does with SquadMember::isTakingFlag") {
+			  "seat's current urgency unscaled, and an air vehicle's not, as BBChange's seat loop does with "
+			  "SquadMember::isTakingFlag") {
 		std::vector<ai::ChangeVehicle> vehicles{ jeep(0.0f) };
 		vehicles[0].seat[0].occupant = 9;
 		vehicles[0].seat[0].occupant_bot = true;
@@ -195,6 +196,13 @@ TEST_SUITE("ai-vehicle") {
 		CHECK(taking.best == doctest::Approx(5.0f * plain.best));
 		vehicles[0].seat[0].armed = true;
 		CHECK(ai::choose_change(bot, vehicles).best == doctest::Approx(plain.best));
+		vehicles[0].seat[0].armed = false;
+		vehicles[0].kind = ai::ChangeUnitKind::Air;
+		bot.idle_taking_flag = false;
+		const ai::ChangeChoice air = ai::choose_change(bot, vehicles);
+		REQUIRE(air.best > 0.0f);
+		bot.idle_taking_flag = true;
+		CHECK(ai::choose_change(bot, vehicles).best == doctest::Approx(air.best));
 	}
 
 	TEST_CASE("a manned jeep offers its free seats by its driver's order, against staying on foot") {
