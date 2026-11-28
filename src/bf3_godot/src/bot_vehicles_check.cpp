@@ -30,6 +30,7 @@ constexpr float kSideBack = 4.0f;
 constexpr float kSideUp = 1.0f;
 constexpr double kSideSeconds = 0.5;
 constexpr float kQuarterTurn = 1.5707964f;
+constexpr double kCrewTimeout = 120.0;
 
 bool bot_slot(const host::PresentationFrame &p_frame, uint8_t p_slot) {
 	for (size_t i = 0; i < p_frame.player_count && i < p_frame.players.size(); ++i) {
@@ -75,10 +76,11 @@ bool BotVehiclesCheck::follow(const host::PresentationFrame &p_frame) {
 	return false;
 }
 
-void BotVehiclesCheck::see_drawn(const host::PresentationFrame &p_frame, const BotVehiclesInputs &p_in) {
+void BotVehiclesCheck::see_drawn(const host::PresentationFrame &p_frame, const BotVehiclesInputs &p_in, int p_only) {
 	for (const SeatedSoldierRoot &r : last_roots_) {
 		sim::Vec3 at{};
-		if (!p_in.drawn_seated || !bot_slot(p_frame, r.slot) || !p_in.drawn_seated(r.slot, at)) {
+		if ((p_only >= 0 && r.slot != p_only) || !p_in.drawn_seated || !bot_slot(p_frame, r.slot) ||
+				!p_in.drawn_seated(r.slot, at)) {
 			continue;
 		}
 		++drawn_;
@@ -87,6 +89,25 @@ void BotVehiclesCheck::see_drawn(const host::PresentationFrame &p_frame, const B
 		on_entry_ += drawn_off_ < kSeatHipsMetres ? 1u : 0u;
 	}
 	last_roots_.assign(p_in.seat_roots.begin(), p_in.seat_roots.end());
+}
+
+bool BotVehiclesCheck::find_crew(const host::PresentationFrame &p_frame, const BotVehiclesInputs &p_in) {
+	for (size_t i = 0; i < p_frame.vehicle_count && i < p_frame.vehicles.size(); ++i) {
+		const host::PresentedVehicle &v = p_frame.vehicles[i];
+		for (size_t k = 1; k < v.seat_count && k < v.occupants.size(); ++k) {
+			const uint8_t slot = v.occupants[k];
+			if (slot == net::kNoVehicleOccupant || !bot_slot(p_frame, slot) ||
+					std::none_of(p_in.seat_roots.begin(), p_in.seat_roots.end(),
+							[&](const SeatedSoldierRoot &p_r) { return p_r.slot == slot; })) {
+				continue;
+			}
+			crew_slot_ = slot;
+			crew_seat_ = k;
+			spawner_ = v.spawner;
+			return true;
+		}
+	}
+	return false;
 }
 
 bool BotVehiclesCheck::step(Bf3LevelSession &r_session, const BotVehiclesInputs &p_in, double p_delta) {
@@ -182,8 +203,9 @@ bool BotVehiclesCheck::step(Bf3LevelSession &r_session, const BotVehiclesInputs 
 				if (!shots_.empty() && p_in.shot) {
 					row("drive_shot", p_in.shot(shots_ + "/bot_driving.png"), shots_ + "/bot_driving.png");
 				}
-				phase_ = Phase::Done;
-				return true;
+				phase_ = Phase::Crew;
+				crew_wait_ = 0.0;
+				return false;
 			}
 			if (!live || driving_ > kDriveTimeout) {
 				row("bot_driving", false,
@@ -193,6 +215,61 @@ bool BotVehiclesCheck::step(Bf3LevelSession &r_session, const BotVehiclesInputs 
 				return true;
 			}
 			return false;
+		}
+		case Phase::Crew: {
+			crew_wait_ += p_delta;
+			if (crew_slot_ < 0) {
+				if (find_crew(f, p_in)) {
+					follow(f);
+					framed_ = 0.0;
+					drawn_ = 0;
+					on_entry_ = 0;
+					drawn_off_ = -1.0f;
+					worst_off_ = 0.0f;
+					side_ = kQuarterTurn;
+					last_roots_.assign(p_in.seat_roots.begin(), p_in.seat_roots.end());
+				} else if (crew_wait_ > kCrewTimeout) {
+					row("bot_drawn_crew", false,
+							fmt("no bot sat in a shown gunner or passenger entry within %.0f s", kCrewTimeout));
+					phase_ = Phase::Done;
+					return true;
+				}
+				return false;
+			}
+			const bool live = follow(f);
+			aim(r_session);
+			see_drawn(f, p_in, crew_slot_);
+			framed_ += p_delta;
+			if (live && framed_ < kFrameSeconds) {
+				return false;
+			}
+			row("bot_drawn_crew", live && on_entry_ > 0 && drawn_off_ >= 0.0f && drawn_off_ < kSeatHipsMetres,
+					fmt("slot %d in seat %zu of spawner %u: %u of %u bot-frames seated with the hips on the entry; "
+						"last %.4f m, worst %.4f m off",
+							crew_slot_, crew_seat_, unsigned(spawner_), on_entry_, drawn_, double(drawn_off_),
+							double(worst_off_)));
+			framed_ = 0.0;
+			phase_ = Phase::CrewSides;
+			return false;
+		}
+		case Phase::CrewSides: {
+			follow(f);
+			aim(r_session);
+			framed_ += p_delta;
+			if (framed_ < kSideSeconds) {
+				return false;
+			}
+			const std::string name = side_ > 0.0f ? "/bot_crew_side_a.png" : "/bot_crew_side_b.png";
+			if (!shots_.empty() && p_in.shot) {
+				row("crew_shot", p_in.shot(shots_ + name), shots_ + name);
+			}
+			framed_ = 0.0;
+			if (side_ > 0.0f) {
+				side_ = -kQuarterTurn;
+				return false;
+			}
+			phase_ = Phase::Done;
+			return true;
 		}
 		case Phase::Done:
 			return true;
