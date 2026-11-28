@@ -14,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <optional>
+#include <string>
 #include <utility>
 
 namespace bf3::host {
@@ -310,7 +311,44 @@ core::Result<WeaponTemplates> derive_weapon_templates(const GunplayLevel &p_gunp
 			}
 		}
 	}
+	if (p_vehicles != nullptr && p_gunplay.materials != nullptr) {
+		core::Result<VehicleWeaponTemplates> seats = derive_vehicle_weapon_templates(p_gunplay, *p_vehicles);
+		if (!seats) {
+			return seats.error();
+		}
+		for (size_t k = 0; k < seats->size(); ++k) {
+			for (size_t w = 0; w < (*seats)[k].size(); ++w) {
+				if ((*seats)[k][w]) {
+					out.emplace(vehicle_weapon_template_name(p_vehicles->kinds[k].blueprint, w), *(*seats)[k][w]);
+				}
+			}
+		}
+	}
 	return out;
+}
+
+std::string vehicle_weapon_template_name(std::string_view p_blueprint, size_t p_weapon) {
+	return "vehicle:" + std::string(p_blueprint) + ":" + std::to_string(p_weapon);
+}
+
+std::optional<VehicleWeaponTemplates> named_vehicle_weapon_templates(
+		const WeaponTemplates &p_templates, const LevelVehicles &p_vehicles) {
+	VehicleWeaponTemplates out(p_vehicles.kinds.size());
+	bool named = false;
+	for (size_t k = 0; k < p_vehicles.kinds.size(); ++k) {
+		const LevelVehicleKind &kind = p_vehicles.kinds[k];
+		out[k].resize(kind.armament != nullptr ? kind.armament->weapons.size() : 0);
+		for (size_t w = 0; w < out[k].size(); ++w) {
+			const auto found = p_templates.find(vehicle_weapon_template_name(kind.blueprint, w));
+			if (found != p_templates.end()) {
+				out[k][w] = found->second;
+				named = true;
+			}
+		}
+	}
+	// WHY: a map that names no vehicle weapon was not made by derive_weapon_templates (a hand-written or empty
+	// config), so the caller derives the seat weapons itself.
+	return named ? std::optional<VehicleWeaponTemplates>(std::move(out)) : std::nullopt;
 }
 
 core::Result<VehicleWeaponTemplates> derive_vehicle_weapon_templates(
@@ -499,7 +537,9 @@ core::Result<std::shared_ptr<const BotWeaponTemplates>> BotWeaponTemplates::crea
 		}
 	}
 	if (p_vehicles != nullptr && p_gunplay.materials != nullptr) {
-		core::Result<VehicleWeaponTemplates> weapons = derive_vehicle_weapon_templates(p_gunplay, *p_vehicles);
+		std::optional<VehicleWeaponTemplates> named = named_vehicle_weapon_templates(p_templates, *p_vehicles);
+		core::Result<VehicleWeaponTemplates> weapons = named ? core::Result<VehicleWeaponTemplates>(std::move(*named))
+															 : derive_vehicle_weapon_templates(p_gunplay, *p_vehicles);
 		if (!weapons) {
 			return weapons.error();
 		}

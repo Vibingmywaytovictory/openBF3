@@ -436,6 +436,57 @@ TEST_SUITE("host-bots-templates") {
 		}
 	}
 
+	TEST_CASE("weapon templates: MP_007 ConquestSmall0: the cached templates hold each vehicle seat weapon's own "
+			  "template under its vehicle and weapon, and the bots' seat weapons are read from them") {
+		tt::TdmLevel *level = tt::load_conquest_bots_level_once();
+		if (level == nullptr) {
+			return;
+		}
+		const host::GunplayLevel &gl = *level->shared->gunplay;
+		const host::LevelVehicles &vehicles = *level->shared->vehicles;
+		const host::WeaponTemplates &loaded = level->bots->ai_weapons;
+		core::Result<host::VehicleWeaponTemplates> derived = host::derive_vehicle_weapon_templates(gl, vehicles);
+		REQUIRE(derived.ok());
+		core::Result<std::shared_ptr<const sim::weapons::WeaponTable>> table =
+				host::make_match_table(gl, sim::weapons::Mechanics{}, false, false);
+		REQUIRE(table.ok());
+		core::Result<std::shared_ptr<const host::BotWeaponTemplates>> cached =
+				host::BotWeaponTemplates::create(**table, gl, loaded, &vehicles);
+		REQUIRE(cached.ok());
+		host::WeaponTemplates tampered = loaded;
+		size_t named = 0;
+		for (size_t k = 0; k < derived->size(); ++k) {
+			for (size_t w = 0; w < (*derived)[k].size(); ++w) {
+				const std::string name = host::vehicle_weapon_template_name(vehicles.kinds[k].blueprint, w);
+				CAPTURE(name);
+				const auto found = loaded.find(name);
+				const std::optional<ai::WeaponTemplate> &want = (*derived)[k][w];
+				CHECK((found != loaded.end()) == want.has_value());
+				if (!want || found == loaded.end()) {
+					CHECK((*cached)->seat_weapon(uint16_t(k), w) == nullptr);
+					continue;
+				}
+				++named;
+				CHECK(found->second == *want);
+				REQUIRE((*cached)->seat_weapon(uint16_t(k), w) != nullptr);
+				CHECK(*(*cached)->seat_weapon(uint16_t(k), w) == *want);
+				tampered[name].max_range = want->max_range + 1.0f;
+			}
+		}
+		CHECK(named > 0u);
+		core::Result<std::shared_ptr<const host::BotWeaponTemplates>> read =
+				host::BotWeaponTemplates::create(**table, gl, tampered, &vehicles);
+		REQUIRE(read.ok());
+		for (size_t k = 0; k < derived->size(); ++k) {
+			for (size_t w = 0; w < (*derived)[k].size(); ++w) {
+				if ((*derived)[k][w]) {
+					REQUIRE((*read)->seat_weapon(uint16_t(k), w) != nullptr);
+					CHECK((*read)->seat_weapon(uint16_t(k), w)->max_range == (*derived)[k][w]->max_range + 1.0f);
+				}
+			}
+		}
+	}
+
 	TEST_CASE("weapon templates: MP_007 ConquestSmall0: a bot fires at a vehicle only what it can fire (a gun, a "
 			  "launcher, the C4) and at a soldier a gun or launcher; a thrown grenade or another pack is left out, "
 			  "so an engineer 25 m from a jeep takes the RPG-7, not the grenade the templates rate higher") {

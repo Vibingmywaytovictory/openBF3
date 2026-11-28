@@ -29,7 +29,7 @@ struct LevelVehicles;
 struct LevelVehicleKind;
 
 inline constexpr const char *kAiWeaponsCacheKind = "ai-weapons";
-inline constexpr uint32_t kAiWeaponsConverterVersion = 2;
+inline constexpr uint32_t kAiWeaponsConverterVersion = 3;
 // STAND-IN: a weaponTemplate strength is the targets of a class the weapon destroys per minute, derived from BF3's
 // weapon data as BF3 ships no templates. Settle: compare with BF2's shipped templates' scale.
 inline constexpr float kStrengthSeconds = 60.0f;
@@ -86,6 +86,9 @@ ai::WeaponTemplate derive_vehicle_weapon_template(
 core::Result<WeaponTemplates> derive_weapon_templates(const GunplayLevel &p_gunplay, const LevelVehicles *p_vehicles);
 core::Result<VehicleWeaponTemplates> derive_vehicle_weapon_templates(
 		const GunplayLevel &p_gunplay, const LevelVehicles &p_vehicles);
+std::string vehicle_weapon_template_name(std::string_view p_blueprint, size_t p_weapon);
+std::optional<VehicleWeaponTemplates> named_vehicle_weapon_templates(
+		const WeaponTemplates &p_templates, const LevelVehicles &p_vehicles);
 VehicleSeatArms seat_arms_of(const VehicleWeaponTemplates &p_weapons, const LevelVehicles &p_vehicles);
 core::Result<VehicleSeatArms> derive_seat_arms(const GunplayLevel &p_gunplay, const LevelVehicles &p_vehicles);
 std::string format_weapon_templates(const WeaponTemplates &p_templates);
