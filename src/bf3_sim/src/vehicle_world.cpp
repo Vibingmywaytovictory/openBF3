@@ -423,13 +423,21 @@ core::Status VehicleWorld::add_vehicle(VehicleSlot p_slot, std::shared_ptr<const
 		return core::make_error(where + ": " + chassis.error().message);
 	}
 
-	// STAND-IN: the chassis inertia is Jolt's from the hull shape at the chassis mass, each axis times InertiaModifier
-	// (R6-G1-apply: not derivable from the data). Settle: a note or a retail measurement of the hull inertia.
-	JPH::MassProperties mass = (*chassis)->GetMassProperties();
-	mass.ScaleToMass(m.mass);
-	const JPH::Mat44 scale = JPH::Mat44::sScale(
-			JPH::Vec3(std::sqrt(m.inertia_modifier[0]), std::sqrt(m.inertia_modifier[1]), std::sqrt(m.inertia_modifier[2])));
-	mass.mInertia = scale * mass.mInertia * scale;
+	JPH::MassProperties mass;
+	if (m.chassis_inertia) {
+		// INFERRED: the inertia stays as computed when the centre of mass moves to CenterOfMass (R8-G1-inertia rule 5).
+		// Settle: a note that decodes the middleware's centre-of-mass setter.
+		mass.mMass = m.mass;
+		mass.mInertia = JPH::Mat44::sScale(to_jolt(*m.chassis_inertia));
+	} else {
+		// STAND-IN: without a root R8-G1-inertia covers (a fixture, or other shape types) the inertia is Jolt's hull
+		// inertia at the chassis mass, each axis times InertiaModifier. Settle: a note on those shapes' volume rule.
+		mass = (*chassis)->GetMassProperties();
+		mass.ScaleToMass(m.mass);
+		const JPH::Mat44 scale = JPH::Mat44::sScale(JPH::Vec3(
+				std::sqrt(m.inertia_modifier[0]), std::sqrt(m.inertia_modifier[1]), std::sqrt(m.inertia_modifier[2])));
+		mass.mInertia = scale * mass.mInertia * scale;
+	}
 
 	JPH::BodyCreationSettings body(chassis->GetPtr(), JPH::RVec3(to_jolt(p_placement.position)), rotation,
 			JPH::EMotionType::Dynamic, kVehicleLayer);

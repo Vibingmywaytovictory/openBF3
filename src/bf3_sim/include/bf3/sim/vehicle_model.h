@@ -3,6 +3,7 @@
 #include "bf3/core/result.h"
 #include "bf3/sim/sim_types.h"
 #include "bf3/sim/vehicle_types.h"
+#include "bf3/sim/vehicles/chassis_mass.h"
 #include "bf3/sim/vehicles/chassis_rules.h"
 #include "bf3/sim/vehicles/land_rules.h"
 #include "bf3/sim/vehicles/tyre_rules.h"
@@ -11,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -140,6 +142,8 @@ struct VehicleModel {
 	float gravity_factor = 1;
 	Vec3 center_of_mass{};
 	Vec3 inertia_modifier{ 1, 1, 1 };
+	std::optional<vehicles::ChassisVolume> chassis_volume;
+	std::optional<Vec3> chassis_inertia;
 	Vec3 center_of_mass_handling_offset{};
 	// STAND-IN: friction 0.5 and restitution 0.4 where no RBTypeCollision body gives them.
 	// Settle: bf3dump for a vehicle blueprint without one.
@@ -179,7 +183,8 @@ struct ChassisPieceSource {
 };
 
 core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core::gameplay::VehicleDriveDef &p_def,
-		std::span<const ChassisPieceSource> p_chassis, const VehicleTuning &p_tuning);
+		std::span<const ChassisPieceSource> p_chassis, const VehicleTuning &p_tuning,
+		const std::optional<vehicles::ChassisVolume> &p_volume = std::nullopt);
 
 core::Result<std::shared_ptr<const VehicleModel>> load_vehicle_model(const core::EbxResolver &p_db, const core::LevelMount &p_mount,
 		std::string_view p_blueprint, const VehicleTuning &p_tuning, core::gameplay::WorkBudget *p_budget = nullptr);

@@ -2378,4 +2378,66 @@ TEST_SUITE("sim-vehicle-handling") {
 			CHECK(moved < 0.1f);
 		}
 	}
+
+	TEST_CASE("sim.vehicle.handling: the M1A2's and the T-90's chassis bodies carry R8-G1-inertia's diagonal inertia "
+			  "(13198, 41695, 9030) and (25170, 21741, 7966) kg m^2, no product terms") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		const std::pair<std::shared_ptr<const VehicleModel>, Vec3> tanks[] = { { h->m1a2, { 13198, 41695, 9030 } },
+			{ h->t90, { 25170, 21741, 7966 } } };
+		for (const auto &[model, want] : tanks) {
+			CAPTURE(model->blueprint);
+			std::unique_ptr<VehicleWorld> w = world_at(ground_shapes(false), model, placed(0, 0, -300));
+			JPH::BodyLockRead lock(w->impl().system->GetBodyLockInterface(), w->impl().vehicles[0].body);
+			REQUIRE(lock.Succeeded());
+			const JPH::Mat44 inverse = lock.GetBody().GetMotionProperties()->GetLocalSpaceInverseInertia();
+			const JPH::Mat44 inertia = inverse.Inversed3x3();
+			std::printf("sim.vehicle.handling: %s chassis inertia (%.0f, %.0f, %.0f) kg m^2, products (%.1f, %.1f, "
+						"%.1f), R8-G1-inertia (%.0f, %.0f, %.0f)\n",
+					model->blueprint.c_str(), double(inertia(0, 0)), double(inertia(1, 1)), double(inertia(2, 2)),
+					double(inertia(0, 1)), double(inertia(0, 2)), double(inertia(1, 2)), double(want[0]),
+					double(want[1]), double(want[2]));
+			for (int i = 0; i < 3; ++i) {
+				CHECK(inertia(i, i) == doctest::Approx(want[size_t(i)]).epsilon(1e-3));
+				for (int j = 0; j < 3; ++j) {
+					if (i != j) {
+						CHECK(std::fabs(inertia(i, j)) < 1e-3f * want[size_t(i)]);
+					}
+				}
+			}
+		}
+	}
+
+	TEST_CASE("sim.vehicle.handling: the M1A2's and the T-90's collision roots read as R8-G1-inertia's boxes and "
+			  "cylinders: volume, centroid and unit-mass diagonal with the convex radius") {
+		HandlingModels *h = handling_models();
+		if (h == nullptr) {
+			return;
+		}
+		struct Want {
+			std::shared_ptr<const VehicleModel> model;
+			float volume;
+			Vec3 centroid;
+			Vec3 diagonal;
+		};
+		const Want tanks[] = { { h->m1a2, 52.90f, { -0.017f, 1.261f, -0.343f }, { 19846, 24031, 6496 } },
+			{ h->t90, 36.00f, { -0.011f, 1.128f, -0.338f }, { 17359, 21741, 6128 } } };
+		for (const Want &t : tanks) {
+			CAPTURE(t.model->blueprint);
+			REQUIRE(t.model->chassis_volume.has_value());
+			const vehicles::ChassisVolume &v = *t.model->chassis_volume;
+			std::printf("sim.vehicle.handling: %s collision root: volume %.3f m^3, centroid (%.4f, %.4f, %.4f), "
+						"diagonal at %.0f kg (%.0f, %.0f, %.0f)\n",
+					t.model->blueprint.c_str(), double(v.volume), double(v.centroid[0]), double(v.centroid[1]),
+					double(v.centroid[2]), double(t.model->mass), double(v.unit_inertia[0] * t.model->mass),
+					double(v.unit_inertia[1] * t.model->mass), double(v.unit_inertia[2] * t.model->mass));
+			CHECK(v.volume == doctest::Approx(t.volume).epsilon(1e-3));
+			for (size_t i = 0; i < 3; ++i) {
+				CHECK(std::fabs(v.centroid[i] - t.centroid[i]) < 1.5e-3f);
+				CHECK(v.unit_inertia[i] * t.model->mass == doctest::Approx(t.diagonal[i]).epsilon(1e-3));
+			}
+		}
+	}
 }

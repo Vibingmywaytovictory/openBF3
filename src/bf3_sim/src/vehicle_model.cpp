@@ -52,6 +52,14 @@ uint64_t digest_of(const VehicleModel &p_m) {
 	d.add(p_m.gravity_factor);
 	d.add(p_m.center_of_mass);
 	d.add(p_m.inertia_modifier);
+	d.add(p_m.chassis_volume.has_value());
+	if (p_m.chassis_volume) {
+		d.add(p_m.chassis_volume->volume);
+		d.add(p_m.chassis_volume->centroid);
+		d.add(p_m.chassis_volume->unit_inertia);
+	}
+	d.add(p_m.chassis_inertia.has_value());
+	d.add(p_m.chassis_inertia.value_or(Vec3{}));
 	d.add(p_m.center_of_mass_handling_offset);
 	d.add(p_m.friction);
 	d.add(p_m.restitution);
@@ -212,7 +220,8 @@ float vehicle_steer_sensitivity(const VehicleModel &p_model, float p_speed) {
 }
 
 core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core::gameplay::VehicleDriveDef &p_def,
-		std::span<const ChassisPieceSource> p_chassis, const VehicleTuning &p_tuning) {
+		std::span<const ChassisPieceSource> p_chassis, const VehicleTuning &p_tuning,
+		const std::optional<vehicles::ChassisVolume> &p_volume) {
 	const std::string where = "vehicle model " + p_def.blueprint;
 	const auto fail = [&](const std::string &p_what) { return core::make_error(where + ": " + p_what); };
 	auto m = std::make_shared<VehicleModel>();
@@ -254,6 +263,18 @@ core::Result<std::shared_ptr<const VehicleModel>> build_vehicle_model(const core
 	for (const float f : m->inertia_modifier) {
 		if (!(f > 0.01f && f < 100.0f)) {
 			return fail("inertia modifier outside 0.01..100");
+		}
+	}
+	if (p_volume) {
+		m->chassis_volume = p_volume;
+		const Vec3 body_modifier = collision != nullptr
+				? Vec3{ collision->inertia_modifier[0], collision->inertia_modifier[1], collision->inertia_modifier[2] }
+				: Vec3{ 1, 1, 1 };
+		m->chassis_inertia = vehicles::chassis_inertia(*p_volume, m->mass, body_modifier, m->inertia_modifier);
+		for (const float f : *m->chassis_inertia) {
+			if (!(f > 0.0f && f < 1e9f)) {
+				return fail("chassis inertia outside 0..1e9 kg m^2");
+			}
 		}
 	}
 	if (collision != nullptr) {
@@ -629,7 +650,7 @@ core::Result<std::shared_ptr<const VehicleModel>> load_vehicle_model(const core:
 		}
 		sources.push_back({ std::span<const Vec3>(points[i]), pieces[i].radius * scale });
 	}
-	return build_vehicle_model(*def, sources, p_tuning);
+	return build_vehicle_model(*def, sources, p_tuning, vehicles::havok_chassis_volume(havok->shapes[chassis]));
 }
 
 }

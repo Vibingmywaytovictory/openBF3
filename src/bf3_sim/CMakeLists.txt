@@ -97,6 +97,8 @@ target_sources(bf3_sim PRIVATE
     include/bf3/sim/vehicles/vehicle_weapon_rules.h
     src/vehicles/turret_rules.cpp
     src/vehicles/tracked_rules.cpp
+    include/bf3/sim/vehicles/chassis_mass.h
+    src/vehicles/chassis_mass.cpp
     include/bf3/sim/vehicles/chassis_rules.h
     src/vehicles/chassis_rules.cpp
     include/bf3/sim/vehicles/tyre_rules.h
